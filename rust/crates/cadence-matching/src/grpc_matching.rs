@@ -1037,38 +1037,49 @@ impl Matching {
     where
         F: std::future::Future<Output = ()> + Send,
     {
-        let Some(membership) = &self.membership else {
-            return Ok(());
-        };
-        let mut changes = membership.subscribe();
-        tokio::pin!(shutdown);
-        loop {
-            let queues = match &self.queues {
-                Some(queues) => queues.unload_non_owned(matching_now()).await,
-                None => Ok(()),
+        // Go runMembershipChangeLoop recovers a panic, logs it and ends the loop without an
+        // error, so the shutdown join sees success.
+        crate::matching_panic::capture::<(), Status>("membership change loop", async move {
+            let Some(membership) = &self.membership else {
+                return Ok(());
             };
-            // Do not let a SQL cleanup failure prevent semaphore cleanup.
-            for manager in self.semaphores.all_managers() {
-                match membership.owns(&manager.identifier().ring_key()) {
-                    Ok(false) => {
-                        manager.stop();
-                        self.semaphores.unregister(&manager);
-                    }
-                    Ok(true) => {}
-                    Err(error) => {
-                        eprintln!("Matching semaphore membership lookup failed: {error}");
-                        break;
+            let mut changes = membership.subscribe();
+            tokio::pin!(shutdown);
+            loop {
+                let queues = match &self.queues {
+                    Some(queues) => queues.unload_non_owned(matching_now()).await,
+                    None => Ok(()),
+                };
+                // Do not let a SQL cleanup failure prevent semaphore cleanup.
+                for manager in self.semaphores.all_managers() {
+                    match membership.owns(&manager.identifier().ring_key()) {
+                        Ok(false) => {
+                            // Go `unloadSemaphoreManager` still removes a bucket whose Stop panics. The
+                            // panic is reported, not propagated, so the other buckets still stop.
+                            let stopped = crate::matching_panic::capture_sync("semaphore manager stop", || manager.stop());
+                            self.semaphores.unregister(&manager);
+                            if let Err(message) = stopped {
+                                eprintln!("Matching semaphore unload failed: {message}");
+                            }
+                        }
+                        Ok(true) => {}
+                        Err(error) => {
+                            eprintln!("Matching semaphore membership lookup failed: {error}");
+                            break;
+                        }
                     }
                 }
+                if let Err(error) = queues {
+                    eprintln!("Matching membership cleanup failed: {error}");
+                }
+                tokio::select! {
+                    _ = &mut shutdown => return Ok(()),
+                    result = changes.changed() => if result.is_err() { return Ok(()); },
+                }
             }
-            if let Err(error) = queues {
-                eprintln!("Matching membership cleanup failed: {error}");
-            }
-            tokio::select! {
-                _ = &mut shutdown => return Ok(()),
-                result = changes.changed() => if result.is_err() { return Ok(()); },
-            }
-        }
+        })
+        .await
+        .unwrap_or(Ok(()))
     }
     fn poll_rate(
         &self,
@@ -1648,1426 +1659,1487 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
-        self.metrics.matching_request(
-            "PollForDecisionTask",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
-            request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
-            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
-            async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&request.get_ref().domain_id), None)?;
-        let incoming_deadline = crate::matching_sync::request_deadline(&request);
-        if incoming_deadline.is_none() {
-            self.throttled_logger.error("PollForDecisionTask", "Context timeout not set for long poll API.");
-            return Err(Status::invalid_argument("Context timeout is not set."));
-        }
-        let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-        let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
-        payload.domain = self.domain_name(&r.domain_id)?;
-        check_poll_context(incoming_deadline)?;
-        if !r.forwarded_from.is_empty() {
-            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
-                domain: payload.domain.clone(),
-                task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
-                task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
-                task_type: "decision_task",
-                poller_isolation_group: r.isolation_group.clone(),
+        crate::matching_panic::capture::<Response<m::PollForDecisionTaskResponse>, Status>("poll_for_decision_task", async move {
+            self.metrics.matching_request(
+                "PollForDecisionTask",
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+                request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
+                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+                async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForDecisionTask, Some(&request.get_ref().domain_id), None)?;
+            let incoming_deadline = crate::matching_sync::request_deadline(&request);
+            if incoming_deadline.is_none() {
+                self.throttled_logger.error("PollForDecisionTask", "Context timeout not set for long poll API.");
+                return Err(Status::invalid_argument("Context timeout is not set."));
+            }
+            let r = request.get_ref().clone();
+            let mut payload = r
+                .request
+                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+            let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
+            payload.domain = self.domain_name(&r.domain_id)?;
+            check_poll_context(incoming_deadline)?;
+            if !r.forwarded_from.is_empty() {
+                self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                    domain: payload.domain.clone(),
+                    task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                    task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                    task_type: "decision_task",
+                    poller_isolation_group: r.isolation_group.clone(),
+                });
+            }
+            let task_list = payload
+                .task_list
+                .as_ref()
+                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
+                .name
+                .clone();
+            task_list_name(&task_list)?;
+            let guard = self.register_poll(PollKey {
+                domain: r.domain_id.clone(),
+                task_list,
+                task_type: 1,
+                poller: r.poller_id,
             });
-        }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
-        let guard = self.register_poll(PollKey {
-            domain: r.domain_id.clone(),
-            task_list,
-            task_type: 1,
-            poller: r.poller_id,
-        });
-        if self.queues.is_some() {
-            let queue = self
-                .durable_queue(
+            if self.queues.is_some() {
+                let queue = self
+                    .durable_queue(
+                        &r.domain_id,
+                        payload.task_list.as_ref().expect("validated task list"),
+                        0,
+                    )
+                    .await?;
+                self.emit_partition_runtime_metrics(
                     &r.domain_id,
                     payload.task_list.as_ref().expect("validated task list"),
                     0,
-                )
-                .await?;
-            self.emit_partition_runtime_metrics(
-                &r.domain_id,
-                payload.task_list.as_ref().expect("validated task list"),
-                0,
-                &queue,
-            )?;
-            let poll_started = std::time::Instant::now();
+                    &queue,
+                )?;
+                let poll_started = std::time::Instant::now();
+                let expiration =
+                    self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
+                if queue.stop_if_isolation_changed() {
+                    return Ok(Response::new(m::PollForDecisionTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(
+                            &r.domain_id,
+                            &guard.key.task_list,
+                            0,
+                            poll_started,
+                        )),
+                        ..Default::default()
+                    }));
+                }
+                let rate = self.poll_rate(
+                    &r.domain_id,
+                    &guard.key.task_list,
+                    payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                    0,
+                    None,
+                    &queue.limiter,
+                );
+                let lifecycle = crate::matching_dispatch::PollLifecycle {
+                    manager: queue.pollers.clone(),
+                    id: guard.key.poller.clone(),
+                    cancel: Some(guard.cancel.clone()),
+                    info: cadence_common::poller::Info {
+                        identity: payload.identity.clone(),
+                        rate_per_second: rate,
+                        isolation_group: r.isolation_group.clone(),
+                    },
+                    forwarded: !r.forwarded_from.is_empty(),
+                    metric_context: Some(crate::matching_metrics::PollMetricContext {
+                        domain: payload.domain.clone(),
+                        task_list: guard.key.task_list.clone(),
+                        task_list_kind: payload
+                            .task_list
+                            .as_ref()
+                            .map(|list| list.kind)
+                            .unwrap_or_default(),
+                        task_type: "decision_task",
+                        poller_isolation_group: r.isolation_group.clone(),
+                    }),
+                    metrics: self.metrics.clone(),
+                };
+                // Go's matcher serves `queryTaskC` on the same long poll as the
+                // decision backlog; a ready query is handed to this poller instead
+                // of waiting for a durable task. Racing is safe: dropping the
+                // dispatch future makes its worker rewrite any claimed task.
+                let active = self
+                    .frontend
+                    .state
+                    .domains
+                    .is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
+                    .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                let _standby_wait = (!active).then(|| lifecycle.begin());
+                let query_lifecycle = lifecycle.clone();
+                return tokio::select! {
+                    biased;
+                    query=queue.queries.next()=>{
+                        let _wait=query_lifecycle.begin();
+                        // Go treats a query delivered from queryTaskC as a
+                        // successful synchronous poll. It is a local match and
+                        // does not carry the task-isolation partition metadata.
+                        if let Some(context) = query_lifecycle.metric_context.as_ref() {
+                            query_lifecycle.metrics.poll_success(context, true);
+                            query_lifecycle.metrics.poll_match(context, false, false, None);
+                        }
+                        let execution=query.request.workflow_execution.clone().unwrap_or_default();
+                        let query_state = queue
+                            .dispatcher
+                            .query_mutable_state_with_deadline(&execution, incoming_deadline);
+                        let query_state = if let Some(deadline) = incoming_deadline {
+                            tokio::time::timeout_at(deadline, query_state)
+                                .await
+                                .unwrap_or_else(|_| Err(Status::deadline_exceeded("Matching poll deadline exceeded.")))
+                        } else {
+                            query_state.await
+                        };
+                        match query_state {
+                            Ok(state)=>{
+                                let mut response=crate::matching_query::query_response(query, &state);
+                                response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                                response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                                response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
+                                Ok(Response::new(response))
+                            }
+                            // Go fails the waiting query and returns an empty poll.
+                            Err(error)=>{
+                                let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
+                                Ok(Response::new(m::PollForDecisionTaskResponse { auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)), load_balancer_hints: queue.load_balancer_hints(matching_now()), partition_config: queue.partitions.get().map(partition_config_to_internal), ..Default::default() }))
+                            }
+                        }
+                    }
+                    result=async {
+                        if active {
+                            queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle).await
+                        } else {
+                            // Go standby getTask polls only queryTaskC, never the
+                            // durable backlog or forwarded workflow tasks.
+                            // The query poll is forwarded to the parent (PollForQuery).
+                            queue.dispatcher.forward_query_poll(payload, expiration, lifecycle).await
+                        }
+                    }=>
+                        result.map(|mut response| {
+                            response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                                response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                            response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
+                            Response::new(response)
+                        }),
+                    _=failover.changed()=>{
+                        if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
+                            registry.release_blocked_pollers_for_domain(domain);
+                        }
+                        Ok(Response::new(m::PollForDecisionTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                        load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                        partition_config: queue.partitions.get().map(partition_config_to_internal),
+                        ..Default::default()
+                        }))
+                    },
+                    // Go returns an empty poll response (nil error) when a poll is cancelled.
+                    _=guard.cancel.notified()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                        load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                        partition_config: queue.partitions.get().map(partition_config_to_internal),
+                        ..Default::default()
+                    })),
+                };
+            }
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
-            if queue.stop_if_isolation_changed() {
-                return Ok(Response::new(m::PollForDecisionTaskResponse {
-                    auto_config_hint: Some(self.auto_config_hint(
-                        &r.domain_id,
-                        &guard.key.task_list,
-                        0,
-                        poll_started,
-                    )),
-                    ..Default::default()
-                }));
-            }
-            let rate = self.poll_rate(
-                &r.domain_id,
-                &guard.key.task_list,
-                payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
-                0,
-                None,
-                &queue.limiter,
-            );
-            let lifecycle = crate::matching_dispatch::PollLifecycle {
-                manager: queue.pollers.clone(),
-                id: guard.key.poller.clone(),
-                cancel: Some(guard.cancel.clone()),
-                info: cadence_common::poller::Info {
-                    identity: payload.identity.clone(),
-                    rate_per_second: rate,
-                    isolation_group: r.isolation_group.clone(),
-                },
-                forwarded: !r.forwarded_from.is_empty(),
-                metric_context: Some(crate::matching_metrics::PollMetricContext {
-                    domain: payload.domain.clone(),
-                    task_list: guard.key.task_list.clone(),
-                    task_list_kind: payload
-                        .task_list
-                        .as_ref()
-                        .map(|list| list.kind)
-                        .unwrap_or_default(),
-                    task_type: "decision_task",
-                    poller_isolation_group: r.isolation_group.clone(),
-                }),
-                metrics: self.metrics.clone(),
-            };
-            // Go's matcher serves `queryTaskC` on the same long poll as the
-            // decision backlog; a ready query is handed to this poller instead
-            // of waiting for a durable task. Racing is safe: dropping the
-            // dispatch future makes its worker rewrite any claimed task.
-            let active = self
-                .frontend
-                .state
-                .domains
-                .is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
-                .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-            let _standby_wait = (!active).then(|| lifecycle.begin());
-            let query_lifecycle = lifecycle.clone();
-            return tokio::select! {
-                biased;
-                query=queue.queries.next()=>{
-                    let _wait=query_lifecycle.begin();
-                    // Go treats a query delivered from queryTaskC as a
-                    // successful synchronous poll. It is a local match and
-                    // does not carry the task-isolation partition metadata.
-                    if let Some(context) = query_lifecycle.metric_context.as_ref() {
-                        query_lifecycle.metrics.poll_success(context, true);
-                        query_lifecycle.metrics.poll_match(context, false, false, None);
-                    }
-                    let execution=query.request.workflow_execution.clone().unwrap_or_default();
-                    let query_state = queue
-                        .dispatcher
-                        .query_mutable_state_with_deadline(&execution, incoming_deadline);
-                    let query_state = if let Some(deadline) = incoming_deadline {
-                        tokio::time::timeout_at(deadline, query_state)
-                            .await
-                            .unwrap_or_else(|_| Err(Status::deadline_exceeded("Matching poll deadline exceeded.")))
-                    } else {
-                        query_state.await
-                    };
-                    match query_state {
-                        Ok(state)=>{
-                            let mut response=crate::matching_query::query_response(query, &state);
-                            response.load_balancer_hints=queue.load_balancer_hints(matching_now());
-                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
-                            response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
-                            Ok(Response::new(response))
-                        }
-                        // Go fails the waiting query and returns an empty poll.
-                        Err(error)=>{
-                            let _=queue.queries.complete(&query.task_id, crate::matching_query::QueryOutcome::Internal(error));
-                            Ok(Response::new(m::PollForDecisionTaskResponse { auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)), load_balancer_hints: queue.load_balancer_hints(matching_now()), partition_config: queue.partitions.get().map(partition_config_to_internal), ..Default::default() }))
-                        }
-                    }
-                }
-                result=async {
-                    if active {
-                        queue.dispatcher.poll_decision_with_poller(payload, expiration, lifecycle).await
-                    } else {
-                        // Go standby getTask polls only queryTaskC, never the
-                        // durable backlog or forwarded workflow tasks.
-                        // The query poll is forwarded to the parent (PollForQuery).
-                        queue.dispatcher.forward_query_poll(payload, expiration, lifecycle).await
-                    }
-                }=>
-                    result.map(|mut response| {
-                        response.load_balancer_hints=queue.load_balancer_hints(matching_now());
-                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
-                        response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
-                        Response::new(response)
-                    }),
-                _=failover.changed()=>{
-                    if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
-                        registry.release_blocked_pollers_for_domain(domain);
-                    }
-                    Ok(Response::new(m::PollForDecisionTaskResponse {
-                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
-                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
-                    partition_config: queue.partitions.get().map(partition_config_to_internal),
-                    ..Default::default()
-                    }))
-                },
+            let poll_started = std::time::Instant::now();
+            let v = tokio::select! {
+                result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
                 // Go returns an empty poll response (nil error) when a poll is cancelled.
-                _=guard.cancel.notified()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                _=guard.cancel.notified()=>return Ok(Response::new(m::PollForDecisionTaskResponse {
                     auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
-                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
-                    partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
                 })),
             };
-        }
-        let expiration =
-            self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
-        let poll_started = std::time::Instant::now();
-        let v = tokio::select! {
-            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_decision_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForDecisionTaskResponse::default() },
-            // Go returns an empty poll response (nil error) when a poll is cancelled.
-            _=guard.cancel.notified()=>return Ok(Response::new(m::PollForDecisionTaskResponse {
-                auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+            let sticky_execution_enabled = !v.task_token.is_empty()
+                && v.history
+                    .as_ref()
+                    .and_then(|history| history.events.first())
+                    .is_some_and(|event| event.event_id > 1);
+            // The embedded engine plays Matching's role, so it stamps the same
+            // auto-config hint Matching's matcher would (decision type either way).
+            let auto_config_hint = v.auto_config_hint.or_else(|| {
+                Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started))
+            });
+            Ok(Response::new(m::PollForDecisionTaskResponse {
+                sticky_execution_enabled,
+                task_token: v.task_token,
+                workflow_execution: v.workflow_execution,
+                workflow_type: v.workflow_type,
+                previous_started_event_id: v.previous_started_event_id,
+                started_event_id: v.started_event_id,
+                attempt: v
+                    .attempt
+                    .try_into()
+                    .map_err(|_| Status::internal("Decision attempt overflow."))?,
+                next_event_id: v.next_event_id,
+                backlog_count_hint: v.backlog_count_hint,
+                query: v.query,
+                workflow_execution_task_list: v.workflow_execution_task_list,
+                scheduled_time: v.scheduled_time,
+                started_time: v.started_time,
+                queries: v.queries,
+                total_history_bytes: v.total_history_bytes,
+                auto_config_hint,
                 ..Default::default()
-            })),
-        };
-        let sticky_execution_enabled = !v.task_token.is_empty()
-            && v.history
-                .as_ref()
-                .and_then(|history| history.events.first())
-                .is_some_and(|event| event.event_id > 1);
-        // The embedded engine plays Matching's role, so it stamps the same
-        // auto-config hint Matching's matcher would (decision type either way).
-        let auto_config_hint = v.auto_config_hint.or_else(|| {
-            Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started))
-        });
-        Ok(Response::new(m::PollForDecisionTaskResponse {
-            sticky_execution_enabled,
-            task_token: v.task_token,
-            workflow_execution: v.workflow_execution,
-            workflow_type: v.workflow_type,
-            previous_started_event_id: v.previous_started_event_id,
-            started_event_id: v.started_event_id,
-            attempt: v
-                .attempt
-                .try_into()
-                .map_err(|_| Status::internal("Decision attempt overflow."))?,
-            next_event_id: v.next_event_id,
-            backlog_count_hint: v.backlog_count_hint,
-            query: v.query,
-            workflow_execution_task_list: v.workflow_execution_task_list,
-            scheduled_time: v.scheduled_time,
-            started_time: v.started_time,
-            queries: v.queries,
-            total_history_bytes: v.total_history_bytes,
-            auto_config_hint,
-            ..Default::default()
-        }))
-            }).await
+            }))
+                }).await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn poll_for_activity_task(
         &self,
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
-        self.metrics.matching_request(
-            "PollForActivityTask",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
-            request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
-            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
-            async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&request.get_ref().domain_id), None)?;
-        let incoming_deadline = crate::matching_sync::request_deadline(&request);
-        if incoming_deadline.is_none() {
-            self.throttled_logger.error("PollForActivityTask", "Context timeout not set for long poll API.");
-            return Err(Status::invalid_argument("Context timeout is not set."));
-        }
-        let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-        let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
-        payload.domain = self.domain_name(&r.domain_id)?;
-        check_poll_context(incoming_deadline)?;
-        if !r.forwarded_from.is_empty() {
-            self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
-                domain: payload.domain.clone(),
-                task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
-                task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
-                task_type: "activity_task",
-                poller_isolation_group: r.isolation_group.clone(),
+        crate::matching_panic::capture::<Response<m::PollForActivityTaskResponse>, Status>("poll_for_activity_task", async move {
+            self.metrics.matching_request(
+                "PollForActivityTask",
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+                request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
+                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+                async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::PollForActivityTask, Some(&request.get_ref().domain_id), None)?;
+            let incoming_deadline = crate::matching_sync::request_deadline(&request);
+            if incoming_deadline.is_none() {
+                self.throttled_logger.error("PollForActivityTask", "Context timeout not set for long poll API.");
+                return Err(Status::invalid_argument("Context timeout is not set."));
+            }
+            let r = request.get_ref().clone();
+            let mut payload = r
+                .request
+                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+            let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
+            payload.domain = self.domain_name(&r.domain_id)?;
+            check_poll_context(incoming_deadline)?;
+            if !r.forwarded_from.is_empty() {
+                self.metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+                    domain: payload.domain.clone(),
+                    task_list: payload.task_list.as_ref().map(|task_list| task_list.name.clone()).unwrap_or_default(),
+                    task_list_kind: payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                    task_type: "activity_task",
+                    poller_isolation_group: r.isolation_group.clone(),
+                });
+            }
+            let task_list = payload
+                .task_list
+                .as_ref()
+                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
+                .name
+                .clone();
+            task_list_name(&task_list)?;
+            let guard = self.register_poll(PollKey {
+                domain: r.domain_id.clone(),
+                task_list,
+                task_type: 2,
+                poller: r.poller_id,
             });
-        }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
-        let guard = self.register_poll(PollKey {
-            domain: r.domain_id.clone(),
-            task_list,
-            task_type: 2,
-            poller: r.poller_id,
-        });
-        if self.queues.is_some() {
-            let queue = self
-                .durable_queue(
+            if self.queues.is_some() {
+                let queue = self
+                    .durable_queue(
+                        &r.domain_id,
+                        payload.task_list.as_ref().expect("validated task list"),
+                        1,
+                    )
+                    .await?;
+                self.emit_partition_runtime_metrics(
                     &r.domain_id,
                     payload.task_list.as_ref().expect("validated task list"),
                     1,
-                )
-                .await?;
-            self.emit_partition_runtime_metrics(
-                &r.domain_id,
-                payload.task_list.as_ref().expect("validated task list"),
-                1,
-                &queue,
-            )?;
-            let poll_started = std::time::Instant::now();
+                    &queue,
+                )?;
+                let poll_started = std::time::Instant::now();
+                let expiration =
+                    self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
+                if queue.stop_if_isolation_changed() {
+                    return Ok(Response::new(m::PollForActivityTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(
+                            &r.domain_id,
+                            &guard.key.task_list,
+                            0,
+                            poll_started,
+                        )),
+                        ..Default::default()
+                    }));
+                }
+                // Go `getTask`: the worker-reported rate is applied to the shared
+                // dispatch limiter before the poll is recorded; a missing or
+                // negative metadata rate keeps the configured default for poller
+                // history without resetting the shared limiter.
+                let max_dispatch = payload
+                    .task_list_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.max_tasks_per_second);
+                let rate = self.poll_rate(
+                    &r.domain_id,
+                    &guard.key.task_list,
+                    payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
+                    1,
+                    max_dispatch,
+                    &queue.limiter,
+                );
+                let lifecycle = crate::matching_dispatch::PollLifecycle {
+                    manager: queue.pollers.clone(),
+                    id: guard.key.poller.clone(),
+                    cancel: Some(guard.cancel.clone()),
+                    info: cadence_common::poller::Info {
+                        identity: payload.identity.clone(),
+                        rate_per_second: rate,
+                        isolation_group: r.isolation_group.clone(),
+                    },
+                    forwarded: !r.forwarded_from.is_empty(),
+                    metric_context: Some(crate::matching_metrics::PollMetricContext {
+                        domain: payload.domain.clone(),
+                        task_list: guard.key.task_list.clone(),
+                        task_list_kind: payload
+                            .task_list
+                            .as_ref()
+                            .map(|list| list.kind)
+                            .unwrap_or_default(),
+                        task_type: "activity_task",
+                        poller_isolation_group: r.isolation_group.clone(),
+                    }),
+                    metrics: self.metrics.clone(),
+                };
+                return tokio::select! {
+                    result=async {
+                        let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
+                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                        if active {
+                            queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle).await
+                        } else {
+                            let _wait = lifecycle.begin();
+                            tokio::time::sleep(expiration).await;
+                            Ok(m::PollForActivityTaskResponse::default())
+                        }
+                    }=>
+                        result.map(|mut response| {
+                            response.load_balancer_hints=queue.load_balancer_hints(matching_now());
+                                response.partition_config=queue.partitions.get().map(partition_config_to_internal);
+                            // Go's activity-delivered hint uses the manager's own
+                            // activity type; its empty-poll branch passes the
+                            // decision type even here.
+                            let task_type = if response.task_token.is_empty() { 0 } else { 1 };
+                            response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, task_type, poll_started));
+                            Response::new(response)
+                        }),
+                    _=async {
+                        if queue.queue.task_list_kind() == 0 {
+                            failover.changed().await
+                        } else {
+                            std::future::pending().await
+                        }
+                    }=>{
+                        if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
+                            registry.release_blocked_pollers_for_domain(domain);
+                        }
+                        Ok(Response::new(m::PollForActivityTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                        load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                        partition_config: queue.partitions.get().map(partition_config_to_internal),
+                        ..Default::default()
+                        }))
+                    },
+                    // Go returns an empty poll response (nil error) when a poll is cancelled.
+                    _=guard.cancel.notified()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                        auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+                        load_balancer_hints: queue.load_balancer_hints(matching_now()),
+                        partition_config: queue.partitions.get().map(partition_config_to_internal),
+                        ..Default::default()
+                    })),
+                };
+            }
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
-            if queue.stop_if_isolation_changed() {
-                return Ok(Response::new(m::PollForActivityTaskResponse {
-                    auto_config_hint: Some(self.auto_config_hint(
-                        &r.domain_id,
-                        &guard.key.task_list,
-                        0,
-                        poll_started,
-                    )),
-                    ..Default::default()
-                }));
-            }
-            // Go `getTask`: the worker-reported rate is applied to the shared
-            // dispatch limiter before the poll is recorded; a missing or
-            // negative metadata rate keeps the configured default for poller
-            // history without resetting the shared limiter.
-            let max_dispatch = payload
-                .task_list_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.max_tasks_per_second);
-            let rate = self.poll_rate(
-                &r.domain_id,
-                &guard.key.task_list,
-                payload.task_list.as_ref().map(|task_list| task_list.kind).unwrap_or_default(),
-                1,
-                max_dispatch,
-                &queue.limiter,
-            );
-            let lifecycle = crate::matching_dispatch::PollLifecycle {
-                manager: queue.pollers.clone(),
-                id: guard.key.poller.clone(),
-                cancel: Some(guard.cancel.clone()),
-                info: cadence_common::poller::Info {
-                    identity: payload.identity.clone(),
-                    rate_per_second: rate,
-                    isolation_group: r.isolation_group.clone(),
-                },
-                forwarded: !r.forwarded_from.is_empty(),
-                metric_context: Some(crate::matching_metrics::PollMetricContext {
-                    domain: payload.domain.clone(),
-                    task_list: guard.key.task_list.clone(),
-                    task_list_kind: payload
-                        .task_list
-                        .as_ref()
-                        .map(|list| list.kind)
-                        .unwrap_or_default(),
-                    task_type: "activity_task",
-                    poller_isolation_group: r.isolation_group.clone(),
-                }),
-                metrics: self.metrics.clone(),
-            };
-            return tokio::select! {
-                result=async {
-                    let active = self.frontend.state.domains.is_active_in(&r.domain_id, &self.frontend.state.current_cluster_name)
-                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-                    if active {
-                        queue.dispatcher.poll_activity_with_poller(payload, expiration, lifecycle).await
-                    } else {
-                        let _wait = lifecycle.begin();
-                        tokio::time::sleep(expiration).await;
-                        Ok(m::PollForActivityTaskResponse::default())
-                    }
-                }=>
-                    result.map(|mut response| {
-                        response.load_balancer_hints=queue.load_balancer_hints(matching_now());
-                            response.partition_config=queue.partitions.get().map(partition_config_to_internal);
-                        // Go's activity-delivered hint uses the manager's own
-                        // activity type; its empty-poll branch passes the
-                        // decision type even here.
-                        let task_type = if response.task_token.is_empty() { 0 } else { 1 };
-                        response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, task_type, poll_started));
-                        Response::new(response)
-                    }),
-                _=async {
-                    if queue.queue.task_list_kind() == 0 {
-                        failover.changed().await
-                    } else {
-                        std::future::pending().await
-                    }
-                }=>{
-                    if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
-                        registry.release_blocked_pollers_for_domain(domain);
-                    }
-                    Ok(Response::new(m::PollForActivityTaskResponse {
-                    auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
-                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
-                    partition_config: queue.partitions.get().map(partition_config_to_internal),
-                    ..Default::default()
-                    }))
-                },
+            let poll_started = std::time::Instant::now();
+            let v = tokio::select! {
+                result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
                 // Go returns an empty poll response (nil error) when a poll is cancelled.
-                _=guard.cancel.notified()=>Ok(Response::new(m::PollForActivityTaskResponse {
+                _=guard.cancel.notified()=>return Ok(Response::new(m::PollForActivityTaskResponse {
                     auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
-                    load_balancer_hints: queue.load_balancer_hints(matching_now()),
-                    partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
                 })),
             };
-        }
-        let expiration =
-            self.poll_timeout(&r.domain_id, &guard.key.task_list, 1, incoming_deadline);
-        let poll_started = std::time::Instant::now();
-        let v = tokio::select! {
-            result=tokio::time::timeout(expiration, p::worker_api_server::WorkerApi::poll_for_activity_task(&self.frontend,Request::new(payload)))=>match result { Ok(result)=>result?.into_inner(), Err(_)=>p::PollForActivityTaskResponse::default() },
-            // Go returns an empty poll response (nil error) when a poll is cancelled.
-            _=guard.cancel.notified()=>return Ok(Response::new(m::PollForActivityTaskResponse {
-                auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
+            // Matching stamps a delivered activity with its own type, but an empty
+            // poll with the decision type; the embedded engine mirrors that.
+            let auto_config_task_type = if v.task_token.is_empty() { 0 } else { 1 };
+            let auto_config_hint = v.auto_config_hint.or_else(|| {
+                Some(self.auto_config_hint(
+                    &r.domain_id,
+                    &guard.key.task_list,
+                    auto_config_task_type,
+                    poll_started,
+                ))
+            });
+            Ok(Response::new(m::PollForActivityTaskResponse {
+                task_token: v.task_token,
+                workflow_execution: v.workflow_execution,
+                activity_id: v.activity_id,
+                activity_type: v.activity_type,
+                input: v.input,
+                scheduled_time: v.scheduled_time,
+                started_time: v.started_time,
+                schedule_to_close_timeout: v.schedule_to_close_timeout,
+                start_to_close_timeout: v.start_to_close_timeout,
+                heartbeat_timeout: v.heartbeat_timeout,
+                attempt: v.attempt,
+                scheduled_time_of_this_attempt: v.scheduled_time_of_this_attempt,
+                heartbeat_details: v.heartbeat_details,
+                workflow_type: v.workflow_type,
+                workflow_domain: v.workflow_domain,
+                header: v.header,
+                auto_config_hint,
                 ..Default::default()
-            })),
-        };
-        // Matching stamps a delivered activity with its own type, but an empty
-        // poll with the decision type; the embedded engine mirrors that.
-        let auto_config_task_type = if v.task_token.is_empty() { 0 } else { 1 };
-        let auto_config_hint = v.auto_config_hint.or_else(|| {
-            Some(self.auto_config_hint(
-                &r.domain_id,
-                &guard.key.task_list,
-                auto_config_task_type,
-                poll_started,
-            ))
-        });
-        Ok(Response::new(m::PollForActivityTaskResponse {
-            task_token: v.task_token,
-            workflow_execution: v.workflow_execution,
-            activity_id: v.activity_id,
-            activity_type: v.activity_type,
-            input: v.input,
-            scheduled_time: v.scheduled_time,
-            started_time: v.started_time,
-            schedule_to_close_timeout: v.schedule_to_close_timeout,
-            start_to_close_timeout: v.start_to_close_timeout,
-            heartbeat_timeout: v.heartbeat_timeout,
-            attempt: v.attempt,
-            scheduled_time_of_this_attempt: v.scheduled_time_of_this_attempt,
-            heartbeat_details: v.heartbeat_details,
-            workflow_type: v.workflow_type,
-            workflow_domain: v.workflow_domain,
-            header: v.header,
-            auto_config_hint,
-            ..Default::default()
-        }))
-            }).await
+            }))
+                }).await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn add_decision_task(
         &self,
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "AddDecisionTask",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::AddDecisionTaskResponse>, Status>("add_decision_task", async move {
+            self.metrics
+                .matching_request(
+                    "AddDecisionTask",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
+                        .task_list
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddDecisionTask, Some(&request.get_ref().domain_id), None)?;
-                    let add_started = tokio::time::Instant::now();
-                    let parent_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.get_ref().clone();
-                    log_received_add_task("Received AddDecisionTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 0, r.schedule_id);
-                    task_list_name(
-                        r.task_list
-                            .as_ref()
-                            .map(|t| t.name.as_str())
-                            .unwrap_or_default(),
-                    )?;
-                    let domain = self.domain_name(&r.domain_id)?;
-                    if !r.forwarded_from.is_empty() {
-                        self.metrics.forwarded_per_task_list(
-                            &crate::matching_metrics::PollMetricContext {
-                                domain: domain.clone(),
-                                task_list: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.name.clone())
-                                    .unwrap_or_default(),
-                                task_list_kind: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.kind)
-                                    .unwrap_or_default(),
-                                task_type: "decision_task",
-                                poller_isolation_group: String::new(),
-                            },
-                        );
-                    }
-                    self.metrics.add_task_request(
-                        &domain,
-                        r.task_list
-                            .as_ref()
-                            .map(|task_list| task_list.name.as_str())
-                            .unwrap_or_default(),
-                        r.task_list
-                            .as_ref()
-                            .map(|task_list| task_list.kind)
-                            .unwrap_or_default(),
-                        !r.forwarded_from.is_empty(),
-                        "decision_task",
-                        matching_host_name(),
-                    );
-                    if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
-                        log_tasklist_counter("Emitting tasklist counter on decision task", &r.domain_id, r.task_list.as_ref());
-                    }
-                    if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
-                        let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
-                        let queue = self.durable_queue(&r.domain_id, list, 0).await?;
-                        if queue.stop_if_isolation_changed() {
-                            return Err(Status::internal("task list shutting down"));
-                        }
-                        self.check_write_partition(&r.domain_id, list, 0, &queue)?;
-                        check_sticky_poller(&queue, list)?;
-                        let data = cadence_persistence::matching_blob::TaskData {
-                            workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
-                            schedule_id: r.schedule_id,
-                            partition_config: if r.partition_config.is_empty() {
-                                None
-                            } else {
-                                Some(r.partition_config.into_iter().collect())
-                            },
-                            ..Default::default()
-                        }
-                        .at_creation(matching_now(), 0);
-                        let forwarded = !r.forwarded_from.is_empty();
-                        // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
-                        // liveness and reports arrival QPS, grouped by the task's isolation
-                        // group when it has one.
-                        if !forwarded {
-                            report_arrival(&queue, &data);
-                            self.metrics.task_list_gauge(
-                                crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddDecisionTask, Some(&request.get_ref().domain_id), None)?;
+                        let add_started = tokio::time::Instant::now();
+                        let parent_deadline = crate::matching_sync::request_deadline(&request);
+                        let r = request.get_ref().clone();
+                        log_received_add_task("Received AddDecisionTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 0, r.schedule_id);
+                        task_list_name(
+                            r.task_list
+                                .as_ref()
+                                .map(|t| t.name.as_str())
+                                .unwrap_or_default(),
+                        )?;
+                        let domain = self.domain_name(&r.domain_id)?;
+                        if !r.forwarded_from.is_empty() {
+                            self.metrics.forwarded_per_task_list(
                                 &crate::matching_metrics::PollMetricContext {
-                                    domain: domain.clone(), task_list: list.name.clone(),
-                                    task_list_kind: list.kind, task_type: "decision_task",
+                                    domain: domain.clone(),
+                                    task_list: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.name.clone())
+                                        .unwrap_or_default(),
+                                    task_list_kind: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.kind)
+                                        .unwrap_or_default(),
+                                    task_type: "decision_task",
                                     poller_isolation_group: String::new(),
-                                }, queue.qps.qps());
+                                },
+                            );
                         }
-                        // Go `trySyncMatch`: a non-forwarded add spends at most 200ms
-                        // keeping 1s of tailroom, while a forwarded add trusts the incoming
-                        // context as is.
-                        let deadline = if forwarded {
-                            parent_deadline.unwrap_or_else(|| {
-                                tokio::time::Instant::now() + std::time::Duration::from_millis(200)
-                            })
-                        } else {
-                            let remaining = parent_deadline.map(|deadline| {
-                                deadline.saturating_duration_since(tokio::time::Instant::now())
-                            });
-                            tokio::time::Instant::now()
-                                + crate::matching_sync::sync_match_budget(remaining)
-                        };
-                        let active = self
+                        self.metrics.add_task_request(
+                            &domain,
+                            r.task_list
+                                .as_ref()
+                                .map(|task_list| task_list.name.as_str())
+                                .unwrap_or_default(),
+                            r.task_list
+                                .as_ref()
+                                .map(|task_list| task_list.kind)
+                                .unwrap_or_default(),
+                            !r.forwarded_from.is_empty(),
+                            "decision_task",
+                            matching_host_name(),
+                        );
+                        if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
+                            log_tasklist_counter("Emitting tasklist counter on decision task", &r.domain_id, r.task_list.as_ref());
+                        }
+                        if self.queues.is_some() {
+                            let list = r
+                                .task_list
+                                .as_ref()
+                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let execution = r.workflow_execution.as_ref().ok_or_else(|| {
+                                Status::invalid_argument("WorkflowExecution is not set.")
+                            })?;
+                            let run = uuid::Uuid::parse_str(&execution.run_id)
+                                .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                            let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
+                            let queue = self.durable_queue(&r.domain_id, list, 0).await?;
+                            if queue.stop_if_isolation_changed() {
+                                return Err(Status::internal("task list shutting down"));
+                            }
+                            self.check_write_partition(&r.domain_id, list, 0, &queue)?;
+                            check_sticky_poller(&queue, list)?;
+                            let data = cadence_persistence::matching_blob::TaskData {
+                                workflow_id: execution.workflow_id.clone(),
+                                run_id: Some(run.as_bytes().to_vec()),
+                                schedule_id: r.schedule_id,
+                                partition_config: if r.partition_config.is_empty() {
+                                    None
+                                } else {
+                                    Some(r.partition_config.into_iter().collect())
+                                },
+                                ..Default::default()
+                            }
+                            .at_creation(matching_now(), 0);
+                            let forwarded = !r.forwarded_from.is_empty();
+                            // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
+                            // liveness and reports arrival QPS, grouped by the task's isolation
+                            // group when it has one.
+                            if !forwarded {
+                                report_arrival(&queue, &data);
+                                self.metrics.task_list_gauge(
+                                    crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                                    &crate::matching_metrics::PollMetricContext {
+                                        domain: domain.clone(), task_list: list.name.clone(),
+                                        task_list_kind: list.kind, task_type: "decision_task",
+                                        poller_isolation_group: String::new(),
+                                    }, queue.qps.qps());
+                            }
+                            // Go `trySyncMatch`: a non-forwarded add spends at most 200ms
+                            // keeping 1s of tailroom, while a forwarded add trusts the incoming
+                            // context as is.
+                            let deadline = if forwarded {
+                                parent_deadline.unwrap_or_else(|| {
+                                    tokio::time::Instant::now() + std::time::Duration::from_millis(200)
+                                })
+                            } else {
+                                let remaining = parent_deadline.map(|deadline| {
+                                    deadline.saturating_duration_since(tokio::time::Instant::now())
+                                });
+                                tokio::time::Instant::now()
+                                    + crate::matching_sync::sync_match_budget(remaining)
+                            };
+                            let active = self
+                                .frontend
+                                .state
+                                .domains
+                                .is_active_in(
+                                    &source.to_string(),
+                                    &self.frontend.state.current_cluster_name,
+                                )
+                                .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                            if active {
+                                let matched = self
+                                    .sync_match_chain(ForwardedAdd {
+                                        domain_id: &r.domain_id,
+                                        list,
+                                        task_type: 0,
+                                        data: &data,
+                                        source,
+                                        entry: &queue,
+                                        deadline,
+                                        forwarded,
+                                        backlog: r.source == 2,
+                                        task_source: r.source,
+                                        schedule_to_start_timeout: r.schedule_to_start_timeout,
+                                    })
+                                    .await?;
+                                if let Some(partition_config) = matched {
+                                    // Go records the handler-level latency only when AddTask sync matched.
+                                    self.metrics.handler_sync_match_latency(
+                                        "AddDecisionTask",
+                                        Some(domain.as_str()),
+                                        r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+                                        Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                            request.metadata(),
+                                            "grpc",
+                                        )),
+                                        add_started.elapsed(),
+                                    );
+                                    return Ok(Response::new(m::AddDecisionTaskResponse {
+                                        partition_config,
+                                    }));
+                                }
+                            }
+                            // Go `errRemoteSyncMatchFailed`: a forwarded add never persists;
+                            // the child partition keeps the task when sync matching fails.
+                            if forwarded {
+                                return Err(Self::remote_sync_failed());
+                            }
+                            queue
+                                .enqueue(
+                                    data,
+                                    source,
+                                    r.schedule_to_start_timeout
+                                        .map(|timeout| timeout.seconds as i32)
+                                        .unwrap_or_default(),
+                                )
+                                .await?;
+                            return Ok(Response::new(m::AddDecisionTaskResponse {
+                                partition_config: queue
+                                    .partitions
+                                    .get()
+                                    .map(partition_config_to_internal),
+                            }));
+                        }
+                        let execution = r.workflow_execution.unwrap_or_default();
+                        let store = self
                             .frontend
                             .state
-                            .domains
-                            .is_active_in(
-                                &source.to_string(),
-                                &self.frontend.state.current_cluster_name,
-                            )
-                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-                        if active {
-                            let matched = self
-                                .sync_match_chain(ForwardedAdd {
-                                    domain_id: &r.domain_id,
-                                    list,
-                                    task_type: 0,
-                                    data: &data,
-                                    source,
-                                    entry: &queue,
-                                    deadline,
-                                    forwarded,
-                                    backlog: r.source == 2,
-                                    task_source: r.source,
-                                    schedule_to_start_timeout: r.schedule_to_start_timeout,
-                                })
-                                .await?;
-                            if let Some(partition_config) = matched {
-                                // Go records the handler-level latency only when AddTask sync matched.
-                                self.metrics.handler_sync_match_latency(
-                                    "AddDecisionTask",
-                                    Some(domain.as_str()),
-                                    r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
-                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                                        request.metadata(),
-                                        "grpc",
-                                    )),
-                                    add_started.elapsed(),
-                                );
-                                return Ok(Response::new(m::AddDecisionTaskResponse {
-                                    partition_config,
-                                }));
+                            .execution_store(&domain)
+                            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+                        match store.requeue_decision_task(
+                            &domain,
+                            &execution.workflow_id,
+                            &execution.run_id,
+                            r.schedule_id,
+                        ) {
+                            Ok(()) => Ok(Response::new(m::AddDecisionTaskResponse {
+                                partition_config: None,
+                            })),
+                            Err(
+                                cadence_persistence::TaskError::InvalidToken(e)
+                                | cadence_persistence::TaskError::BadDecision(e),
+                            ) => Err(Status::invalid_argument(e.message)),
+                            Err(cadence_persistence::TaskError::NotFound(e)) => {
+                                Err(Status::not_found(e.message))
+                            }
+                            Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
+                                Err(Status::failed_precondition(e.message))
                             }
                         }
-                        // Go `errRemoteSyncMatchFailed`: a forwarded add never persists;
-                        // the child partition keeps the task when sync matching fails.
-                        if forwarded {
-                            return Err(Self::remote_sync_failed());
-                        }
-                        queue
-                            .enqueue(
-                                data,
-                                source,
-                                r.schedule_to_start_timeout
-                                    .map(|timeout| timeout.seconds as i32)
-                                    .unwrap_or_default(),
-                            )
-                            .await?;
-                        return Ok(Response::new(m::AddDecisionTaskResponse {
-                            partition_config: queue
-                                .partitions
-                                .get()
-                                .map(partition_config_to_internal),
-                        }));
-                    }
-                    let execution = r.workflow_execution.unwrap_or_default();
-                    let store = self
-                        .frontend
-                        .state
-                        .execution_store(&domain)
-                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
-                    match store.requeue_decision_task(
-                        &domain,
-                        &execution.workflow_id,
-                        &execution.run_id,
-                        r.schedule_id,
-                    ) {
-                        Ok(()) => Ok(Response::new(m::AddDecisionTaskResponse {
-                            partition_config: None,
-                        })),
-                        Err(
-                            cadence_persistence::TaskError::InvalidToken(e)
-                            | cadence_persistence::TaskError::BadDecision(e),
-                        ) => Err(Status::invalid_argument(e.message)),
-                        Err(cadence_persistence::TaskError::NotFound(e)) => {
-                            Err(Status::not_found(e.message))
-                        }
-                        Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
-                            Err(Status::failed_precondition(e.message))
-                        }
-                    }
-                },
-            )
-            .await
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn add_activity_task(
         &self,
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "AddActivityTask",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::AddActivityTaskResponse>, Status>("add_activity_task", async move {
+            self.metrics
+                .matching_request(
+                    "AddActivityTask",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
+                        .task_list
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddActivityTask, Some(&request.get_ref().domain_id), None)?;
-                    let add_started = tokio::time::Instant::now();
-                    let parent_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.get_ref().clone();
-                    log_received_add_task("Received AddActivityTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 1, r.schedule_id);
-                    task_list_name(
-                        r.task_list
-                            .as_ref()
-                            .map(|t| t.name.as_str())
-                            .unwrap_or_default(),
-                    )?;
-                    let domain = self.domain_name(&r.domain_id)?;
-                    if !r.forwarded_from.is_empty() {
-                        self.metrics.forwarded_per_task_list(
-                            &crate::matching_metrics::PollMetricContext {
-                                domain: domain.clone(),
-                                task_list: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.name.clone())
-                                    .unwrap_or_default(),
-                                task_list_kind: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.kind)
-                                    .unwrap_or_default(),
-                                task_type: "activity_task",
-                                poller_isolation_group: String::new(),
-                            },
-                        );
-                    }
-                    self.metrics.add_task_request(
-                        &domain,
-                        r.task_list
-                            .as_ref()
-                            .map(|task_list| task_list.name.as_str())
-                            .unwrap_or_default(),
-                        r.task_list
-                            .as_ref()
-                            .map(|task_list| task_list.kind)
-                            .unwrap_or_default(),
-                        !r.forwarded_from.is_empty(),
-                        "activity_task",
-                        matching_host_name(),
-                    );
-                    if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
-                        log_tasklist_counter("Emitting tasklist counter on activity task", &r.domain_id, r.task_list.as_ref());
-                    }
-                    if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
-                        self.domain_name(&r.source_domain_id)?;
-                        let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| {
-                            Status::invalid_argument("Source domain UUID is not valid.")
-                        })?;
-                        let queue = self.durable_queue(&r.domain_id, list, 1).await?;
-                        if queue.stop_if_isolation_changed() {
-                            return Err(Status::internal("task list shutting down"));
-                        }
-                        self.check_write_partition(&r.domain_id, list, 1, &queue)?;
-                        let data = cadence_persistence::matching_blob::TaskData {
-                            workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
-                            schedule_id: r.schedule_id,
-                            partition_config: if r.partition_config.is_empty() {
-                                None
-                            } else {
-                                Some(r.partition_config.into_iter().collect())
-                            },
-                            ..Default::default()
-                        }
-                        .at_creation(matching_now(), 0);
-                        let forwarded = !r.forwarded_from.is_empty();
-                        if !forwarded {
-                            report_arrival(&queue, &data);
-                            self.metrics.task_list_gauge(
-                                crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::AddActivityTask, Some(&request.get_ref().domain_id), None)?;
+                        let add_started = tokio::time::Instant::now();
+                        let parent_deadline = crate::matching_sync::request_deadline(&request);
+                        let r = request.get_ref().clone();
+                        log_received_add_task("Received AddActivityTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 1, r.schedule_id);
+                        task_list_name(
+                            r.task_list
+                                .as_ref()
+                                .map(|t| t.name.as_str())
+                                .unwrap_or_default(),
+                        )?;
+                        let domain = self.domain_name(&r.domain_id)?;
+                        if !r.forwarded_from.is_empty() {
+                            self.metrics.forwarded_per_task_list(
                                 &crate::matching_metrics::PollMetricContext {
-                                    domain: domain.clone(), task_list: list.name.clone(),
-                                    task_list_kind: list.kind, task_type: "activity_task",
+                                    domain: domain.clone(),
+                                    task_list: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.name.clone())
+                                        .unwrap_or_default(),
+                                    task_list_kind: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.kind)
+                                        .unwrap_or_default(),
+                                    task_type: "activity_task",
                                     poller_isolation_group: String::new(),
-                                }, queue.qps.qps());
+                                },
+                            );
                         }
-                        let deadline = if forwarded {
-                            parent_deadline.unwrap_or_else(|| {
-                                tokio::time::Instant::now() + std::time::Duration::from_millis(200)
-                            })
-                        } else {
-                            let remaining = parent_deadline.map(|deadline| {
-                                deadline.saturating_duration_since(tokio::time::Instant::now())
-                            });
-                            tokio::time::Instant::now()
-                                + crate::matching_sync::sync_match_budget(remaining)
-                        };
-                        let active = self
+                        self.metrics.add_task_request(
+                            &domain,
+                            r.task_list
+                                .as_ref()
+                                .map(|task_list| task_list.name.as_str())
+                                .unwrap_or_default(),
+                            r.task_list
+                                .as_ref()
+                                .map(|task_list| task_list.kind)
+                                .unwrap_or_default(),
+                            !r.forwarded_from.is_empty(),
+                            "activity_task",
+                            matching_host_name(),
+                        );
+                        if r.task_list.as_ref().map_or(0, |t| t.kind) <= 1 && r.forwarded_from.is_empty() {
+                            log_tasklist_counter("Emitting tasklist counter on activity task", &r.domain_id, r.task_list.as_ref());
+                        }
+                        if self.queues.is_some() {
+                            let list = r
+                                .task_list
+                                .as_ref()
+                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let execution = r.workflow_execution.as_ref().ok_or_else(|| {
+                                Status::invalid_argument("WorkflowExecution is not set.")
+                            })?;
+                            let run = uuid::Uuid::parse_str(&execution.run_id)
+                                .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                            self.domain_name(&r.source_domain_id)?;
+                            let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| {
+                                Status::invalid_argument("Source domain UUID is not valid.")
+                            })?;
+                            let queue = self.durable_queue(&r.domain_id, list, 1).await?;
+                            if queue.stop_if_isolation_changed() {
+                                return Err(Status::internal("task list shutting down"));
+                            }
+                            self.check_write_partition(&r.domain_id, list, 1, &queue)?;
+                            let data = cadence_persistence::matching_blob::TaskData {
+                                workflow_id: execution.workflow_id.clone(),
+                                run_id: Some(run.as_bytes().to_vec()),
+                                schedule_id: r.schedule_id,
+                                partition_config: if r.partition_config.is_empty() {
+                                    None
+                                } else {
+                                    Some(r.partition_config.into_iter().collect())
+                                },
+                                ..Default::default()
+                            }
+                            .at_creation(matching_now(), 0);
+                            let forwarded = !r.forwarded_from.is_empty();
+                            if !forwarded {
+                                report_arrival(&queue, &data);
+                                self.metrics.task_list_gauge(
+                                    crate::matching_metrics::ESTIMATED_ADD_TASK_QPS,
+                                    &crate::matching_metrics::PollMetricContext {
+                                        domain: domain.clone(), task_list: list.name.clone(),
+                                        task_list_kind: list.kind, task_type: "activity_task",
+                                        poller_isolation_group: String::new(),
+                                    }, queue.qps.qps());
+                            }
+                            let deadline = if forwarded {
+                                parent_deadline.unwrap_or_else(|| {
+                                    tokio::time::Instant::now() + std::time::Duration::from_millis(200)
+                                })
+                            } else {
+                                let remaining = parent_deadline.map(|deadline| {
+                                    deadline.saturating_duration_since(tokio::time::Instant::now())
+                                });
+                                tokio::time::Instant::now()
+                                    + crate::matching_sync::sync_match_budget(remaining)
+                            };
+                            let active = self
+                                .frontend
+                                .state
+                                .domains
+                                .is_active_in(
+                                    &source.to_string(),
+                                    &self.frontend.state.current_cluster_name,
+                                )
+                                .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                            if active {
+                                let matched = self
+                                    .sync_match_chain(ForwardedAdd {
+                                        domain_id: &r.domain_id,
+                                        list,
+                                        task_type: 1,
+                                        data: &data,
+                                        source,
+                                        entry: &queue,
+                                        deadline,
+                                        forwarded,
+                                        backlog: r.source == 2,
+                                        task_source: r.source,
+                                        schedule_to_start_timeout: r.schedule_to_start_timeout,
+                                    })
+                                    .await?;
+                                if let Some(partition_config) = matched {
+                                    // Go records the handler-level latency only when AddTask sync matched.
+                                    self.metrics.handler_sync_match_latency(
+                                        "AddActivityTask",
+                                        Some(domain.as_str()),
+                                        r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+                                        Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                            request.metadata(),
+                                            "grpc",
+                                        )),
+                                        add_started.elapsed(),
+                                    );
+                                    return Ok(Response::new(m::AddActivityTaskResponse {
+                                        partition_config,
+                                    }));
+                                }
+                            }
+                            if forwarded {
+                                return Err(Self::remote_sync_failed());
+                            }
+                            queue
+                                .enqueue(
+                                    data,
+                                    source,
+                                    r.schedule_to_start_timeout
+                                        .map(|timeout| timeout.seconds as i32)
+                                        .unwrap_or_default(),
+                                )
+                                .await?;
+                            return Ok(Response::new(m::AddActivityTaskResponse {
+                                partition_config: queue
+                                    .partitions
+                                    .get()
+                                    .map(partition_config_to_internal),
+                            }));
+                        }
+                        let execution = r.workflow_execution.unwrap_or_default();
+                        let store = self
                             .frontend
                             .state
-                            .domains
-                            .is_active_in(
-                                &source.to_string(),
-                                &self.frontend.state.current_cluster_name,
-                            )
-                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-                        if active {
-                            let matched = self
-                                .sync_match_chain(ForwardedAdd {
-                                    domain_id: &r.domain_id,
-                                    list,
-                                    task_type: 1,
-                                    data: &data,
-                                    source,
-                                    entry: &queue,
-                                    deadline,
-                                    forwarded,
-                                    backlog: r.source == 2,
-                                    task_source: r.source,
-                                    schedule_to_start_timeout: r.schedule_to_start_timeout,
-                                })
-                                .await?;
-                            if let Some(partition_config) = matched {
-                                // Go records the handler-level latency only when AddTask sync matched.
-                                self.metrics.handler_sync_match_latency(
-                                    "AddActivityTask",
-                                    Some(domain.as_str()),
-                                    r.task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
-                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                                        request.metadata(),
-                                        "grpc",
-                                    )),
-                                    add_started.elapsed(),
-                                );
-                                return Ok(Response::new(m::AddActivityTaskResponse {
-                                    partition_config,
-                                }));
+                            .execution_store(&domain)
+                            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+                        match store.requeue_activity_task(
+                            &domain,
+                            &execution.workflow_id,
+                            &execution.run_id,
+                            r.schedule_id,
+                        ) {
+                            Ok(()) => Ok(Response::new(m::AddActivityTaskResponse {
+                                partition_config: None,
+                            })),
+                            Err(
+                                cadence_persistence::TaskError::InvalidToken(e)
+                                | cadence_persistence::TaskError::BadDecision(e),
+                            ) => Err(Status::invalid_argument(e.message)),
+                            Err(cadence_persistence::TaskError::NotFound(e)) => {
+                                Err(Status::not_found(e.message))
+                            }
+                            Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
+                                Err(Status::failed_precondition(e.message))
                             }
                         }
-                        if forwarded {
-                            return Err(Self::remote_sync_failed());
-                        }
-                        queue
-                            .enqueue(
-                                data,
-                                source,
-                                r.schedule_to_start_timeout
-                                    .map(|timeout| timeout.seconds as i32)
-                                    .unwrap_or_default(),
-                            )
-                            .await?;
-                        return Ok(Response::new(m::AddActivityTaskResponse {
-                            partition_config: queue
-                                .partitions
-                                .get()
-                                .map(partition_config_to_internal),
-                        }));
-                    }
-                    let execution = r.workflow_execution.unwrap_or_default();
-                    let store = self
-                        .frontend
-                        .state
-                        .execution_store(&domain)
-                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
-                    match store.requeue_activity_task(
-                        &domain,
-                        &execution.workflow_id,
-                        &execution.run_id,
-                        r.schedule_id,
-                    ) {
-                        Ok(()) => Ok(Response::new(m::AddActivityTaskResponse {
-                            partition_config: None,
-                        })),
-                        Err(
-                            cadence_persistence::TaskError::InvalidToken(e)
-                            | cadence_persistence::TaskError::BadDecision(e),
-                        ) => Err(Status::invalid_argument(e.message)),
-                        Err(cadence_persistence::TaskError::NotFound(e)) => {
-                            Err(Status::not_found(e.message))
-                        }
-                        Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
-                            Err(Status::failed_precondition(e.message))
-                        }
-                    }
-                },
-            )
-            .await
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn query_workflow(
         &self,
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "QueryWorkflow",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>("query_workflow", async move {
+            self.metrics
+                .matching_request(
+                    "QueryWorkflow",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
+                        .task_list
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::QueryWorkflow, Some(&request.get_ref().domain_id), None)?;
-                    let incoming_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.get_ref().clone();
-                    let mut payload = r
-                        .request
-                        .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-                    payload.domain = self.domain_name(&r.domain_id)?;
-                    if !r.forwarded_from.is_empty() {
-                        self.metrics.forwarded_per_task_list(
-                            &crate::matching_metrics::PollMetricContext {
-                                domain: payload.domain.clone(),
-                                task_list: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.name.clone())
-                                    .unwrap_or_default(),
-                                task_list_kind: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.kind)
-                                    .unwrap_or_default(),
-                                task_type: "decision_task",
-                                poller_isolation_group: String::new(),
-                            },
-                        );
-                    }
-                    // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
-                    // strong-consistency gate only applies to the local durable path.
-                    let strong =
-                        payload.query_consistency_level == p::QueryConsistencyLevel::Strong as i32;
-                    if self.queues.is_some() {
-                        // Go `matcher.OfferQuery`: offer to a waiting local decision
-                        // poller, else forward up the partition chain with a forward-task
-                        // token (no rate limit, unlike `ForwardTask`). Sticky lists and the
-                        // root never forward and wait for a local poller until the deadline
-                        // (Go has no fail-fast here). Permits are held until the query
-                        // resolves, like Go releasing the token when `ForwardQueryTask` returns.
-                        let task_list = r
-                            .task_list
-                            .clone()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let name = task_list_name(&task_list.name)?;
-                        let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
-                        check_sticky_poller(&queue, &task_list)?;
-                        let task_id = uuid::Uuid::new_v4().to_string();
-                        let root = name.root().to_owned();
-                        let degree = {
-                            let config = self
-                                .frontend
-                                .state
-                                .admin
-                                .dynamic_config
-                                .lock()
-                                .expect("admin lock");
-                            cadence_persistence::dynamic_config::task_list_integer(
-                                config.property_values("matching.forwarderMaxChildrenPerNode"),
-                                domain_name_for(&self.frontend.state.domains, &r.domain_id)
-                                    .as_deref(),
-                                root.as_str(),
-                                0,
-                                20,
-                            )
-                            // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
-                            .max(1)
-                        };
-                        let deadline = incoming_deadline
-                            .unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
-                        let mut list = task_list.clone();
-                        // Go `resp.PartitionConfig = tlMgr.TaskListPartitionConfig()` on the
-                        // task list the caller asked for, not on the partition it forwards to.
-                        let partitions = queue.partitions.clone();
-                        let mut handle = queue;
-                        let mut permits = Vec::new();
-                        let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
-                        let mut force_local = false;
-                        loop {
-                            let query = crate::matching_query::PendingQuery {
-                                task_id: task_id.clone(),
-                                domain_id: r.domain_id.clone(),
-                                task_list: list.name.clone(),
-                                request: payload.clone(),
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::QueryWorkflow, Some(&request.get_ref().domain_id), None)?;
+                        let incoming_deadline = crate::matching_sync::request_deadline(&request);
+                        let r = request.get_ref().clone();
+                        let mut payload = r
+                            .request
+                            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+                        payload.domain = self.domain_name(&r.domain_id)?;
+                        if !r.forwarded_from.is_empty() {
+                            self.metrics.forwarded_per_task_list(
+                                &crate::matching_metrics::PollMetricContext {
+                                    domain: payload.domain.clone(),
+                                    task_list: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.name.clone())
+                                        .unwrap_or_default(),
+                                    task_list_kind: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|task_list| task_list.kind)
+                                        .unwrap_or_default(),
+                                    task_type: "decision_task",
+                                    poller_isolation_group: String::new(),
+                                },
+                            );
+                        }
+                        // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
+                        // strong-consistency gate only applies to the local durable path.
+                        let strong =
+                            payload.query_consistency_level == p::QueryConsistencyLevel::Strong as i32;
+                        if self.queues.is_some() {
+                            // Go `matcher.OfferQuery`: offer to a waiting local decision
+                            // poller, else forward up the partition chain with a forward-task
+                            // token (no rate limit, unlike `ForwardTask`). Sticky lists and the
+                            // root never forward and wait for a local poller until the deadline
+                            // (Go has no fail-fast here). Permits are held until the query
+                            // resolves, like Go releasing the token when `ForwardQueryTask` returns.
+                            let task_list = r
+                                .task_list
+                                .clone()
+                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let name = task_list_name(&task_list.name)?;
+                            let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+                            check_sticky_poller(&queue, &task_list)?;
+                            let task_id = uuid::Uuid::new_v4().to_string();
+                            let root = name.root().to_owned();
+                            let degree = {
+                                let config = self
+                                    .frontend
+                                    .state
+                                    .admin
+                                    .dynamic_config
+                                    .lock()
+                                    .expect("admin lock");
+                                cadence_persistence::dynamic_config::task_list_integer(
+                                    config.property_values("matching.forwarderMaxChildrenPerNode"),
+                                    domain_name_for(&self.frontend.state.domains, &r.domain_id)
+                                        .as_deref(),
+                                    root.as_str(),
+                                    0,
+                                    20,
+                                )
+                                // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
+                                .max(1)
                             };
-                            let receiver = handle.queries.register_waiter(&task_id);
-                            let _registration = handle.queries.registration(&task_id);
-                            let offered = if force_local {
-                                handle.queries.offer(query);
-                                true
-                            } else {
-                                handle.queries.try_offer(query)
-                            };
-                            if offered {
-                                let result = match tokio::time::timeout_at(deadline, receiver).await
-                                {
-                                    Ok(Ok(result)) => {
-                                        crate::matching_query::query_outcome(result, strong)
-                                            .map(|response| {
-                                                Response::new(m::QueryWorkflowResponse {
-                                                    partition_config: partitions
-                                                        .get()
-                                                        .map(partition_config_to_proto),
-                                                    ..response
-                                                })
-                                            })
-                                    }
-                                    Ok(Err(_)) => {
-                                        Err(Status::unavailable("Matching query channel closed."))
-                                    }
-                                    // Go ctx expiry in waitForQueryResult/OfferQuery is a raw
-                                    // ctx error, which handleErr maps to InternalServiceError.
-                                    Err(_) => Err(Status::internal("context deadline exceeded")),
+                            let deadline = incoming_deadline
+                                .unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
+                            let mut list = task_list.clone();
+                            // Go `resp.PartitionConfig = tlMgr.TaskListPartitionConfig()` on the
+                            // task list the caller asked for, not on the partition it forwards to.
+                            let partitions = queue.partitions.clone();
+                            let mut handle = queue;
+                            let mut permits = Vec::new();
+                            let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
+                            let mut force_local = false;
+                            loop {
+                                let query = crate::matching_query::PendingQuery {
+                                    task_id: task_id.clone(),
+                                    domain_id: r.domain_id.clone(),
+                                    task_list: list.name.clone(),
+                                    request: payload.clone(),
                                 };
-                                for (started, context) in in_process_forward_metrics {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return result;
-                            }
-                            // `_registration` withdraws the unoffered entry; Go's
-                            // unbuffered send likewise leaves nothing behind on failure.
-                            let current = TaskListName::parse(&list.name)
-                                .map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
-                            // Go has no forwarder for root or sticky lists, so OfferQuery
-                            // blocks on the unbuffered queryTaskC send until a poller takes
-                            // the query or the RPC context ends. Wait on this level instead.
-                            if list.kind == 2 || current.is_root() {
-                                force_local = true;
-                                continue;
-                            }
-                            if tokio::time::Instant::now() >= deadline {
-                                for (started, context) in in_process_forward_metrics.drain(..) {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return Err(Status::internal("context deadline exceeded"));
-                            }
-                            let parent = current.parent(degree);
-                            if parent.is_empty() {
-                                for (started, context) in in_process_forward_metrics.drain(..) {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return Err(Status::internal(
-                                    "cannot find parent task list for forwarding",
-                                ));
-                            }
-                            match handle.try_forward_query() {
-                                Some(permit) => {
-                                    permits.push(permit);
-                                    let forwarded_from = list.name.clone();
-                                    let forwarded_from_name = forwarded_from.clone();
-                                    let forward_context =
-                                        crate::matching_metrics::PollMetricContext {
-                                            domain: payload.domain.clone(),
-                                            task_list: forwarded_from.clone(),
-                                            task_list_kind: list.kind,
-                                            task_type: "decision_task",
-                                            poller_isolation_group: String::new(),
-                                        };
-                                    list.name = parent.clone();
-                                    if let Some(channel) =
-                                        self.remote_channel_for_task_list(&list.name).await?
+                                let receiver = handle.queries.register_waiter(&task_id);
+                                let _registration = handle.queries.registration(&task_id);
+                                let offered = if force_local {
+                                    handle.queries.offer(query);
+                                    true
+                                } else {
+                                    handle.queries.try_offer(query)
+                                };
+                                if offered {
+                                    let result = match tokio::time::timeout_at(deadline, receiver).await
                                     {
-                                        let mut request = Request::new(m::QueryWorkflowRequest {
-                                            domain_id: r.domain_id.clone(),
-                                            request: Some(payload.clone()),
-                                            task_list: Some(list.clone()),
-                                            forwarded_from,
-                                        });
-                                        request.set_timeout(
-                                            deadline.saturating_duration_since(
-                                                tokio::time::Instant::now(),
-                                            ),
-                                        );
-                                        let forward_started = tokio::time::Instant::now();
-                                        let result =
-                                            m::matching_api_client::MatchingApiClient::new(channel)
-                                                .query_workflow(request)
-                                                .await;
-                                        self.metrics.forward_query_latency(
-                                            &forward_context,
-                                            forward_started.elapsed(),
-                                        );
-                                        // Go forwarder.handleErr maps a parent ServiceBusy to
-                                        // ErrForwarderSlowDown: keep waiting for a local poller.
-                                        if result.as_ref().err().is_some_and(crate::matching_query::query_forward_slow_down) {
-                                            permits.pop();
-                                            force_local = true;
-                                            list.name = forwarded_from_name;
-                                            continue;
+                                        Ok(Ok(result)) => {
+                                            crate::matching_query::query_outcome(result, strong)
+                                                .map(|response| {
+                                                    Response::new(m::QueryWorkflowResponse {
+                                                        partition_config: partitions
+                                                            .get()
+                                                            .map(partition_config_to_proto),
+                                                        ..response
+                                                    })
+                                                })
                                         }
-                                        // Go overwrites the forwarded response's config with the local one.
-                                        return result.map(|mut response| {
-                                            response.get_mut().partition_config = partitions
-                                                .get()
-                                                .map(partition_config_to_proto);
-                                            response
-                                        });
-                                    }
-                                    in_process_forward_metrics.push((
-                                        tokio::time::Instant::now(),
-                                        crate::matching_metrics::PollMetricContext {
-                                            domain: payload.domain.clone(),
-                                            task_list: forwarded_from,
-                                            task_list_kind: list.kind,
-                                            task_type: "decision_task",
-                                            poller_isolation_group: String::new(),
-                                        },
-                                    ));
-                                    list.name = parent.clone();
-                                    handle = match self.durable_queue(&r.domain_id, &list, 0).await
-                                    {
-                                        Ok(handle) => handle,
-                                        Err(error) => {
-                                            for (started, context) in
-                                                in_process_forward_metrics.drain(..)
-                                            {
-                                                self.metrics.forward_query_latency(
-                                                    &context,
-                                                    started.elapsed(),
-                                                );
-                                            }
-                                            return Err(error);
+                                        Ok(Err(_)) => {
+                                            Err(Status::unavailable("Matching query channel closed."))
                                         }
+                                        // Go ctx expiry in waitForQueryResult/OfferQuery is a raw
+                                        // ctx error, which handleErr maps to InternalServiceError.
+                                        Err(_) => Err(Status::internal("context deadline exceeded")),
                                     };
+                                    for (started, context) in in_process_forward_metrics {
+                                        self.metrics
+                                            .forward_query_latency(&context, started.elapsed());
+                                    }
+                                    return result;
                                 }
-                                // Go blocks on the token while racing a local match; with
-                                // an exhausted pool wait on the current level instead.
-                                None => force_local = true,
+                                // `_registration` withdraws the unoffered entry; Go's
+                                // unbuffered send likewise leaves nothing behind on failure.
+                                let current = TaskListName::parse(&list.name)
+                                    .map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
+                                // Go has no forwarder for root or sticky lists, so OfferQuery
+                                // blocks on the unbuffered queryTaskC send until a poller takes
+                                // the query or the RPC context ends. Wait on this level instead.
+                                if list.kind == 2 || current.is_root() {
+                                    force_local = true;
+                                    continue;
+                                }
+                                if tokio::time::Instant::now() >= deadline {
+                                    for (started, context) in in_process_forward_metrics.drain(..) {
+                                        self.metrics
+                                            .forward_query_latency(&context, started.elapsed());
+                                    }
+                                    return Err(Status::internal("context deadline exceeded"));
+                                }
+                                let parent = current.parent(degree);
+                                if parent.is_empty() {
+                                    for (started, context) in in_process_forward_metrics.drain(..) {
+                                        self.metrics
+                                            .forward_query_latency(&context, started.elapsed());
+                                    }
+                                    return Err(Status::internal(
+                                        "cannot find parent task list for forwarding",
+                                    ));
+                                }
+                                match handle.try_forward_query() {
+                                    Some(permit) => {
+                                        permits.push(permit);
+                                        let forwarded_from = list.name.clone();
+                                        let forwarded_from_name = forwarded_from.clone();
+                                        let forward_context =
+                                            crate::matching_metrics::PollMetricContext {
+                                                domain: payload.domain.clone(),
+                                                task_list: forwarded_from.clone(),
+                                                task_list_kind: list.kind,
+                                                task_type: "decision_task",
+                                                poller_isolation_group: String::new(),
+                                            };
+                                        list.name = parent.clone();
+                                        if let Some(channel) =
+                                            self.remote_channel_for_task_list(&list.name).await?
+                                        {
+                                            let mut request = Request::new(m::QueryWorkflowRequest {
+                                                domain_id: r.domain_id.clone(),
+                                                request: Some(payload.clone()),
+                                                task_list: Some(list.clone()),
+                                                forwarded_from,
+                                            });
+                                            request.set_timeout(
+                                                deadline.saturating_duration_since(
+                                                    tokio::time::Instant::now(),
+                                                ),
+                                            );
+                                            let forward_started = tokio::time::Instant::now();
+                                            let result =
+                                                m::matching_api_client::MatchingApiClient::new(channel)
+                                                    .query_workflow(request)
+                                                    .await;
+                                            self.metrics.forward_query_latency(
+                                                &forward_context,
+                                                forward_started.elapsed(),
+                                            );
+                                            // Go forwarder.handleErr maps a parent ServiceBusy to
+                                            // ErrForwarderSlowDown: keep waiting for a local poller.
+                                            if result.as_ref().err().is_some_and(crate::matching_query::query_forward_slow_down) {
+                                                permits.pop();
+                                                force_local = true;
+                                                list.name = forwarded_from_name;
+                                                continue;
+                                            }
+                                            // Go overwrites the forwarded response's config with the local one.
+                                            return result.map(|mut response| {
+                                                response.get_mut().partition_config = partitions
+                                                    .get()
+                                                    .map(partition_config_to_proto);
+                                                response
+                                            });
+                                        }
+                                        in_process_forward_metrics.push((
+                                            tokio::time::Instant::now(),
+                                            crate::matching_metrics::PollMetricContext {
+                                                domain: payload.domain.clone(),
+                                                task_list: forwarded_from,
+                                                task_list_kind: list.kind,
+                                                task_type: "decision_task",
+                                                poller_isolation_group: String::new(),
+                                            },
+                                        ));
+                                        list.name = parent.clone();
+                                        handle = match self.durable_queue(&r.domain_id, &list, 0).await
+                                        {
+                                            Ok(handle) => handle,
+                                            Err(error) => {
+                                                for (started, context) in
+                                                    in_process_forward_metrics.drain(..)
+                                                {
+                                                    self.metrics.forward_query_latency(
+                                                        &context,
+                                                        started.elapsed(),
+                                                    );
+                                                }
+                                                return Err(error);
+                                            }
+                                        };
+                                    }
+                                    // Go blocks on the token while racing a local match; with
+                                    // an exhausted pool wait on the current level instead.
+                                    None => force_local = true,
+                                }
                             }
                         }
-                    }
-                    let v = p::workflow_api_server::WorkflowApi::query_workflow(
-                        &self.frontend,
-                        Request::new(payload),
-                    )
-                    .await?
-                    .into_inner();
-                    Ok(Response::new(m::QueryWorkflowResponse {
-                        query_result: v.query_result,
-                        query_rejected: v.query_rejected,
-                        partition_config: None,
-                    }))
-                },
-            )
-            .await
+                        let v = p::workflow_api_server::WorkflowApi::query_workflow(
+                            &self.frontend,
+                            Request::new(payload),
+                        )
+                        .await?
+                        .into_inner();
+                        Ok(Response::new(m::QueryWorkflowResponse {
+                            query_result: v.query_result,
+                            query_rejected: v.query_rejected,
+                            partition_config: None,
+                        }))
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn get_task_lists_by_domain(
         &self,
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "GetTaskListsByDomain",
-                Some(request.get_ref().domain.as_str()),
-                None,
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::GetTaskListsByDomainResponse>, Status>("get_task_lists_by_domain", async move {
+            self.metrics
+                .matching_request(
+                    "GetTaskListsByDomain",
+                    Some(request.get_ref().domain.as_str()),
+                    None,
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&request.get_ref().domain))?;
-                    let r = request.get_ref().clone();
-                    let domain = self
-                        .frontend
-                        .state
-                        .domains
-                        .domain_id(&r.domain)
-                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-                    if let Some(queues) = &self.queues {
-                        let domain = uuid::Uuid::parse_str(&domain)
-                            .map_err(|_| Status::internal("Invalid domain ID."))?;
-                        let all_kinds = {
-                            let config = self
-                                .frontend
-                                .state
-                                .admin
-                                .dynamic_config
-                                .lock()
-                                .expect("admin lock");
-                            cadence_persistence::dynamic_config::boolean(
-                                config.property_values("matching.matchingReturnAllTaskListKinds"),
-                                None,
-                                false,
-                            )
-                        };
-                        return Ok(Response::new(queues.describe_by_domain(
-                            domain,
-                            all_kinds,
-                            matching_now(),
-                        )));
-                    }
-                    // Go enumerates loaded Matching managers, not frontend workflow
-                    // state. Without a registry there are no loaded managers.
-                    Ok(Response::new(m::GetTaskListsByDomainResponse::default()))
-                },
-            )
-            .await
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&request.get_ref().domain))?;
+                        let r = request.get_ref().clone();
+                        let domain = self
+                            .frontend
+                            .state
+                            .domains
+                            .domain_id(&r.domain)
+                            .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                        if let Some(queues) = &self.queues {
+                            let domain = uuid::Uuid::parse_str(&domain)
+                                .map_err(|_| Status::internal("Invalid domain ID."))?;
+                            let all_kinds = {
+                                let config = self
+                                    .frontend
+                                    .state
+                                    .admin
+                                    .dynamic_config
+                                    .lock()
+                                    .expect("admin lock");
+                                cadence_persistence::dynamic_config::boolean(
+                                    config.property_values("matching.matchingReturnAllTaskListKinds"),
+                                    None,
+                                    false,
+                                )
+                            };
+                            return Ok(Response::new(queues.describe_by_domain(
+                                domain,
+                                all_kinds,
+                                matching_now(),
+                            )));
+                        }
+                        // Go enumerates loaded Matching managers, not frontend workflow
+                        // state. Without a registry there are no loaded managers.
+                        Ok(Response::new(m::GetTaskListsByDomainResponse::default()))
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn list_task_list_partitions(
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "ListTaskListPartitions",
-                Some(request.get_ref().domain.as_str()),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::ListTaskListPartitionsResponse>, Status>("list_task_list_partitions", async move {
+            self.metrics
+                .matching_request(
+                    "ListTaskListPartitions",
+                    Some(request.get_ref().domain.as_str()),
+                    request
+                        .get_ref()
+                        .task_list
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::ListTaskListPartitions, None, Some(&request.get_ref().domain))?;
-                    let r = request.get_ref().clone();
-                    let task_list = r.task_list.unwrap_or_default();
-                    // Go resolves `request.GetDomain()` through the domain cache; the
-                    // single-process store is keyed by name and yields the UUID.
-                    let domain_id = self
-                        .frontend
-                        .state
-                        .domains
-                        .domain_id(&r.domain)
-                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
-                    // Go Identifier returns an untyped error, wrapped by handleErr.
-                    let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
-                    // Go getAllPartitions returns root first, then numbered write
-                    // partitions, regardless of whether those managers are loaded.
-                    let activity_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 1)
-                        .await?;
-                    let decision_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 0)
-                        .await?;
-                    Ok(Response::new(m::ListTaskListPartitionsResponse {
-                        activity_task_list_partitions,
-                        decision_task_list_partitions,
-                    }))
-                },
-            )
-            .await
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::ListTaskListPartitions, None, Some(&request.get_ref().domain))?;
+                        let r = request.get_ref().clone();
+                        let task_list = r.task_list.unwrap_or_default();
+                        // Go resolves `request.GetDomain()` through the domain cache; the
+                        // single-process store is keyed by name and yields the UUID.
+                        let domain_id = self
+                            .frontend
+                            .state
+                            .domains
+                            .domain_id(&r.domain)
+                            .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+                        // Go Identifier returns an untyped error, wrapped by handleErr.
+                        let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
+                        // Go getAllPartitions returns root first, then numbered write
+                        // partitions, regardless of whether those managers are loaded.
+                        let activity_task_list_partitions = self
+                            .task_list_partition_metadata(&domain_id, &name, 1)
+                            .await?;
+                        let decision_task_list_partitions = self
+                            .task_list_partition_metadata(&domain_id, &name, 0)
+                            .await?;
+                        Ok(Response::new(m::ListTaskListPartitionsResponse {
+                            activity_task_list_partitions,
+                            decision_task_list_partitions,
+                        }))
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn acquire_semaphore(
         &self,
         request: Request<m::AcquireSemaphoreRequest>,
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "AcquireSemaphore",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                Some((request.get_ref().semaphore_name.as_str(), Some(0))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::AcquireSemaphoreResponse>, Status>("acquire_semaphore", async move {
+            self.metrics
+                .matching_request(
+                    "AcquireSemaphore",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    Some((request.get_ref().semaphore_name.as_str(), Some(0))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&request.get_ref().domain_id), None)?;
-                    let deadline = crate::matching_sync::request_deadline(&request);
-                    let result: Result<Response<m::AcquireSemaphoreResponse>, Status> = async {
-                    use crate::matching_semaphore::Identifier;
-                    use cadence_api::enums::SemaphoreAcquireOutcome;
-                    let r = request.get_ref().clone();
-                    // Owner parsing mirrors Go's `ParseRequestOwner`.
-                    let owner = cadence_common::semaphore::parse_owner(&r.owner_id)
-                        .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
-                    crate::matching_task_info_log::emit(
-                        &r.domain_id,
-                        "Received AcquireSemaphore",
-                        &[
-                            ("wf-id", owner.workflow_id),
-                            ("wf-run-id", owner.run_id),
-                            ("wf-domain-id", r.domain_id.clone()),
-                            ("wf-schedule-id", owner.hold_id.to_string()),
-                        ],
-                    );
-                    let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
-                        .map_err(semaphore_status)?;
-                    // Go's cached-manager fast path skips both domain admission
-                    // and Ring ownership; Start is still called on every request.
-                    let manager = if let Some(manager) = self.semaphores.by_identifier(&identifier) {
-                        manager.start().await.map_err(semaphore_status)?;
-                        manager
-                    } else {
-                        let domain_name = self.domain_name(&r.domain_id)?;
-                        let (enabled, idle_ttl) = {
-                            let overlay = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
-                            (
-                                cadence_persistence::dynamic_config::boolean(
-                                    overlay.property_values("system.enableDistributedSemaphore"),
-                                    Some(&domain_name), false,
-                                ),
-                                crate::matching_config::semaphore_idle_time(
-                                    overlay.property_values("matching.semaphoreIdleTime"), &domain_name,
-                                ),
-                            )
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::AcquireSemaphore, Some(&request.get_ref().domain_id), None)?;
+                        let deadline = crate::matching_sync::request_deadline(&request);
+                        let result: Result<Response<m::AcquireSemaphoreResponse>, Status> = async {
+                        use crate::matching_semaphore::Identifier;
+                        use cadence_api::enums::SemaphoreAcquireOutcome;
+                        let r = request.get_ref().clone();
+                        // Owner parsing mirrors Go's `ParseRequestOwner`.
+                        let owner = cadence_common::semaphore::parse_owner(&r.owner_id)
+                            .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
+                        crate::matching_task_info_log::emit(
+                            &r.domain_id,
+                            "Received AcquireSemaphore",
+                            &[
+                                ("wf-id", owner.workflow_id),
+                                ("wf-run-id", owner.run_id),
+                                ("wf-domain-id", r.domain_id.clone()),
+                                ("wf-schedule-id", owner.hold_id.to_string()),
+                            ],
+                        );
+                        let identifier = Identifier::new(&r.domain_id, &r.semaphore_name, r.bucket)
+                            .map_err(semaphore_status)?;
+                        // Go's cached-manager fast path skips both domain admission
+                        // and Ring ownership; Start is still called on every request.
+                        let manager = if let Some(manager) = self.semaphores.by_identifier(&identifier) {
+                            manager.start().await.map_err(semaphore_status)?;
+                            manager
+                        } else {
+                            let domain_name = self.domain_name(&r.domain_id)?;
+                            let (enabled, idle_ttl) = {
+                                let overlay = self.frontend.state.admin.dynamic_config.lock().expect("admin lock");
+                                (
+                                    cadence_persistence::dynamic_config::boolean(
+                                        overlay.property_values("system.enableDistributedSemaphore"),
+                                        Some(&domain_name), false,
+                                    ),
+                                    crate::matching_config::semaphore_idle_time(
+                                        overlay.property_values("matching.semaphoreIdleTime"), &domain_name,
+                                    ),
+                                )
+                            };
+                            if !enabled {
+                                return Err(Status::invalid_argument("distributed semaphore is not enabled for this domain"));
+                            }
+                            if let Some(membership) = &self.membership {
+                                membership.check_semaphore(&identifier)?;
+                            }
+                            self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
+                                .await.map_err(semaphore_status)?
                         };
-                        if !enabled {
-                            return Err(Status::invalid_argument("distributed semaphore is not enabled for this domain"));
+                        // Go's grant checks the caller's context before its first write, so an
+                        // expired caller returns without claiming a slot.
+                        if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+                            return Err(Status::internal("context deadline exceeded"));
                         }
-                        if let Some(membership) = &self.membership {
-                            membership.check_semaphore(&identifier)?;
+                        let result = manager.acquire(&r.owner_id, deadline).await.map_err(semaphore_status)?;
+                        let outcome = match result.outcome {
+                            SemaphoreAcquireOutcome::Acquired => 1,
+                            SemaphoreAcquireOutcome::NoSlot => 2,
+                            SemaphoreAcquireOutcome::Invalid => 0,
+                            _ => 0,
+                        };
+                        Ok(Response::new(m::AcquireSemaphoreResponse {
+                            outcome,
+                            token_id: result.token_id,
+                        }))
                         }
-                        self.semaphores.get_or_create_with_idle_ttl(identifier, idle_ttl)
-                            .await.map_err(semaphore_status)?
-                    };
-                    // Go's grant checks the caller's context before its first write, so an
-                    // expired caller returns without claiming a slot.
-                    if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
-                        return Err(Status::internal("context deadline exceeded"));
-                    }
-                    let result = manager.acquire(&r.owner_id, deadline).await.map_err(semaphore_status)?;
-                    let outcome = match result.outcome {
-                        SemaphoreAcquireOutcome::Acquired => 1,
-                        SemaphoreAcquireOutcome::NoSlot => 2,
-                        SemaphoreAcquireOutcome::Invalid => 0,
-                        _ => 0,
-                    };
-                    Ok(Response::new(m::AcquireSemaphoreResponse {
-                        outcome,
-                        token_id: result.token_id,
-                    }))
-                    }
-                    .await;
-                    // Go `AcquireSemaphore`: an error after the caller's deadline is
-                    // counted and returned as an InternalServiceError.
-                    match result {
-                        Err(_) if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) => {
-                            self.metrics.semaphore_context_timeout(
-                                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                                    .as_deref(),
-                                request.get_ref().semaphore_name.as_str(),
-                                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                                    request.metadata(),
-                                    "grpc",
-                                )),
-                            );
-                            Err(Status::internal("context deadline exceeded"))
+                        .await;
+                        // Go `AcquireSemaphore`: an error after the caller's deadline is
+                        // counted and returned as an InternalServiceError.
+                        match result {
+                            Err(_) if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) => {
+                                self.metrics.semaphore_context_timeout(
+                                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                                        .as_deref(),
+                                    request.get_ref().semaphore_name.as_str(),
+                                    Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                        request.metadata(),
+                                        "grpc",
+                                    )),
+                                );
+                                Err(Status::internal("context deadline exceeded"))
+                            }
+                            other => other,
                         }
-                        other => other,
-                    }
-                },
-            )
-            .await
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn update_task_list_partition_config(
         &self,
         request: Request<m::UpdateTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "UpdateTaskListPartitionConfig",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::UpdateTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
-                    let caller_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.get_ref().clone();
-                    let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
+        crate::matching_panic::capture::<Response<m::UpdateTaskListPartitionConfigResponse>, Status>("update_task_list_partition_config", async move {
+            self.metrics
+                .matching_request(
+                    "UpdateTaskListPartitionConfig",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
                         .task_list
-                        .clone()
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
-                    // Go rejects manual updates while the scaler owns the config, before
-                    // the kind checks.
-                    if let Some(scaler) = &self.scaler_config {
-                        let task_type = if r.task_list_type == 2 { 1 } else { 0 };
-                        if scaler(&r.domain_id, &task_list.name, task_type).enabled {
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
+                    ),
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::UpdateTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
+                        let caller_deadline = crate::matching_sync::request_deadline(&request);
+                        let r = request.get_ref().clone();
+                        let domain = self.domain_name(&r.domain_id)?;
+                        let task_list = r
+                            .task_list
+                            .clone()
+                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                        if task_list.name.is_empty() {
+                            return Err(Status::invalid_argument("TaskList is not set."));
+                        }
+                        // Go rejects manual updates while the scaler owns the config, before
+                        // the kind checks.
+                        if let Some(scaler) = &self.scaler_config {
+                            let task_type = if r.task_list_type == 2 { 1 } else { 0 };
+                            if scaler(&r.domain_id, &task_list.name, task_type).enabled {
+                                return Err(Status::invalid_argument(
+                                    "Manual update is not allowed because adaptive scaler is enabled.",
+                                ));
+                            }
+                        }
+                        // Go `ToTaskListKind` maps INVALID and unknown values to nil, which
+                        // `GetKind()` reads as Normal; only STICKY (2) and EPHEMERAL (3) reject.
+                        let kind_is_normal = !matches!(task_list.kind, 2 | 3);
+                        if !kind_is_normal {
                             return Err(Status::invalid_argument(
-                                "Manual update is not allowed because adaptive scaler is enabled.",
+                                "Only normal tasklist's partition config can be updated.",
                             ));
                         }
-                    }
-                    // Go `ToTaskListKind` maps INVALID and unknown values to nil, which
-                    // `GetKind()` reads as Normal; only STICKY (2) and EPHEMERAL (3) reject.
-                    let kind_is_normal = !matches!(task_list.kind, 2 | 3);
-                    if !kind_is_normal {
-                        return Err(Status::invalid_argument(
-                            "Only normal tasklist's partition config can be updated.",
-                        ));
-                    }
-                    let config = r.partition_config.ok_or_else(|| {
-                        Status::invalid_argument(
-                            "Task list partition config is not set in the request.",
-                        )
-                    })?;
-                    let name = task_list_name(&task_list.name)?;
-                    if !name.is_root() {
-                        return Err(Status::invalid_argument(
-                            "Only root partition's partition config can be updated.",
-                        ));
-                    }
-                    if let Some(registry) = &self.queues {
-                        let queue = self
-                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
-                            .await?;
-                        let update = registry
-                            .update_partition_config_with_deadline(
-                                cadence_persistence::matching_sqlite::TaskListKey {
-                                    domain_id: uuid::Uuid::parse_str(&r.domain_id)
-                                        .expect("validated domain"),
-                                    name: task_list.name.clone(),
-                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
-                                },
-                                queue,
-                                partition_config_from_proto(config),
-                                matching_now(),
-                                caller_deadline,
+                        let config = r.partition_config.ok_or_else(|| {
+                            Status::invalid_argument(
+                                "Task list partition config is not set in the request.",
                             )
-                            .await;
+                        })?;
+                        let name = task_list_name(&task_list.name)?;
+                        if !name.is_root() {
+                            return Err(Status::invalid_argument(
+                                "Only root partition's partition config can be updated.",
+                            ));
+                        }
+                        if let Some(registry) = &self.queues {
+                            let queue = self
+                                .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
+                                .await?;
+                            let update = registry
+                                .update_partition_config_with_deadline(
+                                    cadence_persistence::matching_sqlite::TaskListKey {
+                                        domain_id: uuid::Uuid::parse_str(&r.domain_id)
+                                            .expect("validated domain"),
+                                        name: task_list.name.clone(),
+                                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
+                                    },
+                                    queue,
+                                    partition_config_from_proto(config),
+                                    matching_now(),
+                                    caller_deadline,
+                                )
+                                .await;
+                            if update.is_err() {
+                                self.metrics.task_list_counter_event(
+                                    crate::matching_metrics::PARTITION_UPDATE_FAILED,
+                                    &crate::matching_metrics::PollMetricContext {
+                                        domain: domain.clone(),
+                                        task_list: task_list.name.clone(),
+                                        task_list_kind: task_list.kind,
+                                        task_type: if r.task_list_type == 2 {
+                                            "activity_task"
+                                        } else {
+                                            "decision_task"
+                                        },
+                                        poller_isolation_group: String::new(),
+                                    },
+                                );
+                            }
+                            update?;
+                            return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));
+                        }
+                        let store = self.frontend.state.executions.clone();
+                        let stored = partition_config_from_proto(config);
+                        let update = store.update_partition_config(
+                            &domain,
+                            &task_list.name,
+                            crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
+                            kind_is_normal,
+                            stored,
+                        );
                         if update.is_err() {
                             self.metrics.task_list_counter_event(
                                 crate::matching_metrics::PARTITION_UPDATE_FAILED,
@@ -3084,441 +3156,432 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 },
                             );
                         }
-                        update?;
-                        return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));
-                    }
-                    let store = self.frontend.state.executions.clone();
-                    let stored = partition_config_from_proto(config);
-                    let update = store.update_partition_config(
-                        &domain,
-                        &task_list.name,
-                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
-                        kind_is_normal,
-                        stored,
-                    );
-                    if update.is_err() {
-                        self.metrics.task_list_counter_event(
-                            crate::matching_metrics::PARTITION_UPDATE_FAILED,
-                            &crate::matching_metrics::PollMetricContext {
-                                domain: domain.clone(),
-                                task_list: task_list.name.clone(),
-                                task_list_kind: task_list.kind,
-                                task_type: if r.task_list_type == 2 {
-                                    "activity_task"
-                                } else {
-                                    "decision_task"
-                                },
-                                poller_isolation_group: String::new(),
-                            },
-                        );
-                    }
-                    match update {
-                        Ok(()) => Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {})),
-                        Err(
-                            cadence_persistence::TaskError::InvalidToken(e)
-                            | cadence_persistence::TaskError::BadDecision(e),
-                        ) => Err(Status::invalid_argument(e.message)),
-                        Err(cadence_persistence::TaskError::NotFound(e)) => {
-                            Err(Status::not_found(e.message))
+                        match update {
+                            Ok(()) => Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {})),
+                            Err(
+                                cadence_persistence::TaskError::InvalidToken(e)
+                                | cadence_persistence::TaskError::BadDecision(e),
+                            ) => Err(Status::invalid_argument(e.message)),
+                            Err(cadence_persistence::TaskError::NotFound(e)) => {
+                                Err(Status::not_found(e.message))
+                            }
+                            Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
+                                Err(Status::failed_precondition(e.message))
+                            }
                         }
-                        Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
-                            Err(Status::failed_precondition(e.message))
-                        }
-                    }
-                },
-            )
-            .await
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn refresh_task_list_partition_config(
         &self,
         request: Request<m::RefreshTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::RefreshTaskListPartitionConfigResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "RefreshTaskListPartitionConfig",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
-                    let r = request.get_ref().clone();
-                    let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
+        crate::matching_panic::capture::<Response<m::RefreshTaskListPartitionConfigResponse>, Status>("refresh_task_list_partition_config", async move {
+            self.metrics
+                .matching_request(
+                    "RefreshTaskListPartitionConfig",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
                         .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
-                    // Same Go `ToTaskListKind` mapping as UpdateTaskListPartitionConfig.
-                    if matches!(task_list.kind, 2 | 3) {
-                        return Err(Status::invalid_argument(
-                            "Only normal tasklist's partition config can be updated.",
-                        ));
-                    }
-                    let name = task_list_name(&task_list.name)?;
-                    if name.is_root() && r.partition_config.is_some() {
-                        return Err(Status::invalid_argument(
-                            "PartitionConfig must be nil for root partition.",
-                        ));
-                    }
-                    if let Some(registry) = &self.queues {
-                        let queue = self
-                            .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
-                            .await?;
-                        registry
-                            .refresh_partition_config(
-                                cadence_persistence::matching_sqlite::TaskListKey {
-                                    domain_id: uuid::Uuid::parse_str(&r.domain_id)
-                                        .expect("validated domain"),
-                                    name: task_list.name,
-                                    task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
-                                },
-                                queue,
-                                r.partition_config.map(partition_config_from_proto),
-                            )
-                            .await?;
-                        return Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {}));
-                    }
-                    let store = self.frontend.state.executions.clone();
-                    let pushed = r.partition_config.map(partition_config_from_proto);
-                    match store.refresh_partition_config_with(
-                        &domain,
-                        &task_list.name,
-                        crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
-                        pushed,
-                    ) {
-                        Ok(()) => Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {})),
-                        Err(
-                            cadence_persistence::TaskError::InvalidToken(e)
-                            | cadence_persistence::TaskError::BadDecision(e),
-                        ) => Err(Status::invalid_argument(e.message)),
-                        Err(cadence_persistence::TaskError::NotFound(e)) => {
-                            Err(Status::not_found(e.message))
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
+                    ),
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
+                        let r = request.get_ref().clone();
+                        let domain = self.domain_name(&r.domain_id)?;
+                        let task_list = r
+                            .task_list
+                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                        if task_list.name.is_empty() {
+                            return Err(Status::invalid_argument("TaskList is not set."));
                         }
-                        Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
-                            Err(Status::failed_precondition(e.message))
+                        // Same Go `ToTaskListKind` mapping as UpdateTaskListPartitionConfig.
+                        if matches!(task_list.kind, 2 | 3) {
+                            return Err(Status::invalid_argument(
+                                "Only normal tasklist's partition config can be updated.",
+                            ));
                         }
-                    }
-                },
-            )
-            .await
+                        let name = task_list_name(&task_list.name)?;
+                        if name.is_root() && r.partition_config.is_some() {
+                            return Err(Status::invalid_argument(
+                                "PartitionConfig must be nil for root partition.",
+                            ));
+                        }
+                        if let Some(registry) = &self.queues {
+                            let queue = self
+                                .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
+                                .await?;
+                            registry
+                                .refresh_partition_config(
+                                    cadence_persistence::matching_sqlite::TaskListKey {
+                                        domain_id: uuid::Uuid::parse_str(&r.domain_id)
+                                            .expect("validated domain"),
+                                        name: task_list.name,
+                                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type),
+                                    },
+                                    queue,
+                                    r.partition_config.map(partition_config_from_proto),
+                                )
+                                .await?;
+                            return Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {}));
+                        }
+                        let store = self.frontend.state.executions.clone();
+                        let pushed = r.partition_config.map(partition_config_from_proto);
+                        match store.refresh_partition_config_with(
+                            &domain,
+                            &task_list.name,
+                            crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
+                            pushed,
+                        ) {
+                            Ok(()) => Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {})),
+                            Err(
+                                cadence_persistence::TaskError::InvalidToken(e)
+                                | cadence_persistence::TaskError::BadDecision(e),
+                            ) => Err(Status::invalid_argument(e.message)),
+                            Err(cadence_persistence::TaskError::NotFound(e)) => {
+                                Err(Status::not_found(e.message))
+                            }
+                            Err(cadence_persistence::TaskError::AlreadyCompleted(e)) => {
+                                Err(Status::failed_precondition(e.message))
+                            }
+                        }
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn cancel_outstanding_poll(
         &self,
         request: Request<m::CancelOutstandingPollRequest>,
     ) -> Result<Response<m::CancelOutstandingPollResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "CancelOutstandingPoll",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&request.get_ref().domain_id), None)?;
-                    let r = request.get_ref().clone();
-                    self.domain_name(&r.domain_id)?;
-                    let list = r
+        crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>("cancel_outstanding_poll", async move {
+            self.metrics
+                .matching_request(
+                    "CancelOutstandingPoll",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
                         .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    let task_list = list.name.clone();
-                    task_list_name(&task_list)?;
-                    // Go getOrCreateTaskListManager: a non-owner gets an error and
-                    // an unloaded list is loaded before the cancel.
-                    if self.queues.is_some() {
-                        let queue = self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
-                        queue.pollers.lock().expect("poller history lock").cancel(&r.poller_id);
-                        return Ok(Response::new(m::CancelOutstandingPollResponse {}));
-                    }
-                    let key = PollKey {
-                        domain: r.domain_id,
-                        task_list,
-                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
-                        poller: r.poller_id,
-                    };
-                    let cancel = self
-                        .polls
-                        .lock()
-                        .expect("poll cancellation lock")
-                        .get(&key)
-                        .cloned();
-                    // Go CancelPoller returns nil whether or not a poll matched.
-                    if let Some(cancel) = cancel {
-                        cancel.notify_one();
-                    }
-                    Ok(Response::new(m::CancelOutstandingPollResponse {}))
-                },
-            )
-            .await
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
+                    ),
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&request.get_ref().domain_id), None)?;
+                        let r = request.get_ref().clone();
+                        self.domain_name(&r.domain_id)?;
+                        let list = r
+                            .task_list
+                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                        let task_list = list.name.clone();
+                        task_list_name(&task_list)?;
+                        // Go getOrCreateTaskListManager: a non-owner gets an error and
+                        // an unloaded list is loaded before the cancel.
+                        if self.queues.is_some() {
+                            let queue = self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
+                            queue.pollers.lock().expect("poller history lock").cancel(&r.poller_id);
+                            return Ok(Response::new(m::CancelOutstandingPollResponse {}));
+                        }
+                        let key = PollKey {
+                            domain: r.domain_id,
+                            task_list,
+                            task_type: crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
+                            poller: r.poller_id,
+                        };
+                        let cancel = self
+                            .polls
+                            .lock()
+                            .expect("poll cancellation lock")
+                            .get(&key)
+                            .cloned();
+                        // Go CancelPoller returns nil whether or not a poll matched.
+                        if let Some(cancel) = cancel {
+                            cancel.notify_one();
+                        }
+                        Ok(Response::new(m::CancelOutstandingPollResponse {}))
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn respond_query_task_completed(
         &self,
         request: Request<m::RespondQueryTaskCompletedRequest>,
     ) -> Result<Response<m::RespondQueryTaskCompletedResponse>, Status> {
-        self.metrics.matching_request(
-            "RespondQueryTaskCompleted",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
-            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
-            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
-            async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted, Some(&request.get_ref().domain_id), None)?;
-        use crate::grpc_convert as cv;
-        let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-        // The internal request carries the authoritative domain/task routing;
-        // the embedded worker token must agree with it, like Go's domain-cache
-        // lookup by UUID before delivering to the query channel.
-        let domain = self.domain_name(&r.domain_id)?;
-        if !r.task_id.is_empty() && !payload.task_token.is_empty() {
-            if let Ok(token) =
-                cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
-                    &payload.task_token,
-                )
-            {
-                if token.task_id != r.task_id || token.domain_id != r.domain_id {
-                    return Err(Status::invalid_argument(
-                        "TaskToken does not match request.",
-                    ));
+        crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>("respond_query_task_completed", async move {
+            self.metrics.matching_request(
+                "RespondQueryTaskCompleted",
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+                request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
+                Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
+                async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted, Some(&request.get_ref().domain_id), None)?;
+            use crate::grpc_convert as cv;
+            let r = request.get_ref().clone();
+            let mut payload = r
+                .request
+                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+            // The internal request carries the authoritative domain/task routing;
+            // the embedded worker token must agree with it, like Go's domain-cache
+            // lookup by UUID before delivering to the query channel.
+            let domain = self.domain_name(&r.domain_id)?;
+            if !r.task_id.is_empty() && !payload.task_token.is_empty() {
+                if let Ok(token) =
+                    cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+                        &payload.task_token,
+                    )
+                {
+                    if token.task_id != r.task_id || token.domain_id != r.domain_id {
+                        return Err(Status::invalid_argument(
+                            "TaskToken does not match request.",
+                        ));
+                    }
                 }
             }
-        }
-        if payload.task_token.is_empty() {
-            // A missing embedded token is rebuilt from the routing fields so
-            // direct matching callers do not need to mint query tokens.
-            let token = cadence_api::tasktoken::QueryTaskToken {
-                domain_id: r.domain_id.clone(),
-                workflow_id: String::new(),
-                run_id: String::new(),
-                task_list: r
-                    .task_list
-                    .as_ref()
-                    .map(|t| t.name.clone())
-                    .unwrap_or_default(),
-                task_id: r.task_id.clone(),
-            };
-            payload.task_token =
-                cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
-                    .map_err(|_| Status::internal("Failed to encode query task token."))?;
-        }
-        if self.queues.is_some() {
-            // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
-            // worker's result to the waiting `QueryWorkflow` call.
-            let task_list = r
-                .task_list
-                .clone()
-                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-            let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
-            let result = payload.result.clone().unwrap_or_default();
-            let answer = crate::matching_query::WorkerAnswer {
-                result,
-                worker_version_info: payload.worker_version_info.clone(),
-            };
-            let completed = queue.queries.complete(
-                &r.task_id,
-                crate::matching_query::QueryOutcome::Worker(answer),
-            );
-            if completed.is_err() {
-                self.metrics.task_list_counter_event(
-                    crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
-                    &crate::matching_metrics::PollMetricContext {
-                        domain: domain.clone(),
-                        task_list: task_list.name.clone(),
-                        task_list_kind: task_list.kind,
-                        task_type: "decision_task",
-                        poller_isolation_group: String::new(),
-                    },
-                );
+            if payload.task_token.is_empty() {
+                // A missing embedded token is rebuilt from the routing fields so
+                // direct matching callers do not need to mint query tokens.
+                let token = cadence_api::tasktoken::QueryTaskToken {
+                    domain_id: r.domain_id.clone(),
+                    workflow_id: String::new(),
+                    run_id: String::new(),
+                    task_list: r
+                        .task_list
+                        .as_ref()
+                        .map(|t| t.name.clone())
+                        .unwrap_or_default(),
+                    task_id: r.task_id.clone(),
+                };
+                payload.task_token =
+                    cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
+                        .map_err(|_| Status::internal("Failed to encode query task token."))?;
             }
-            completed?;
-            return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
-        }
-        let input = cv::query_completed(payload)?;
-        let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(
-            &self.frontend,
-            Request::new(cv::query_completed_out(input)),
-        )
-        .await?;
-        Ok(Response::new(m::RespondQueryTaskCompletedResponse {}))
-            }).await
+            if self.queues.is_some() {
+                // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
+                // worker's result to the waiting `QueryWorkflow` call.
+                let task_list = r
+                    .task_list
+                    .clone()
+                    .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+                let result = payload.result.clone().unwrap_or_default();
+                let answer = crate::matching_query::WorkerAnswer {
+                    result,
+                    worker_version_info: payload.worker_version_info.clone(),
+                };
+                let completed = queue.queries.complete(
+                    &r.task_id,
+                    crate::matching_query::QueryOutcome::Worker(answer),
+                );
+                if completed.is_err() {
+                    self.metrics.task_list_counter_event(
+                        crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
+                        &crate::matching_metrics::PollMetricContext {
+                            domain: domain.clone(),
+                            task_list: task_list.name.clone(),
+                            task_list_kind: task_list.kind,
+                            task_type: "decision_task",
+                            poller_isolation_group: String::new(),
+                        },
+                    );
+                }
+                completed?;
+                return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
+            }
+            let input = cv::query_completed(payload)?;
+            let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(
+                &self.frontend,
+                Request::new(cv::query_completed_out(input)),
+            )
+            .await?;
+            Ok(Response::new(m::RespondQueryTaskCompletedResponse {}))
+                }).await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn describe_task_list(
         &self,
         request: Request<m::DescribeTaskListRequest>,
     ) -> Result<Response<m::DescribeTaskListResponse>, Status> {
-        self.metrics
-            .matching_request(
-                "DescribeTaskList",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .request
-                    .as_ref()
-                    .and_then(|r| r.task_list.as_ref())
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
+        crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>("describe_task_list", async move {
+            self.metrics
+                .matching_request(
+                    "DescribeTaskList",
+                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        .as_deref(),
+                    request
+                        .get_ref()
+                        .request
+                        .as_ref()
+                        .and_then(|r| r.task_list.as_ref())
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
+                        ),
                     ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&request.get_ref().domain_id), None)?;
-                    let r = request.get_ref().clone();
-                    let mut payload = r.request.unwrap_or_default();
-                    let task_list = payload.task_list.clone();
-                    let task_list_type =
-                        crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
-                    payload.task_list_type = task_list_type;
-                    let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
-                    // Go validates the identifier before domain-cache/manager lookup;
-                    // untyped identifier errors become InternalServiceError.
-                    TaskListName::parse(&task_list_name).map_err(Status::internal)?;
-                    payload.domain = self.domain_name(&r.domain_id)?;
-                    if self.queues.is_some() {
-                        let queue = self
-                            .durable_queue(
-                                &r.domain_id,
-                                &task_list.clone().unwrap_or_default(),
-                                crate::matching_config::persistence_task_list_type(task_list_type),
-                            )
-                            .await?;
-                        let pollers = queue
-                            .pollers
-                            .lock()
-                            .expect("poller history lock")
-                            .list(matching_now())
-                            .into_iter()
-                            .map(|poller| p::PollerInfo {
-                                identity: poller.identity,
-                                rate_per_second: poller.rate_per_second,
-                                last_access_time: Some(prost_types::Timestamp {
-                                    seconds: poller.last_access_time.div_euclid(1_000_000_000),
-                                    nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
-                                }),
-                            })
-                            .collect();
-                        let task_list_status = if payload.include_task_list_status {
-                            let (
-                                read_level,
-                                ack_level,
-                                backlog_count_hint,
-                                start_id,
-                                end_id,
-                                empty,
-                            ) = queue.queue.status();
-                            // Go reads the configured group universe and the live poller
-                            // history window on every Describe, even with isolation off.
-                            let (groups, window) = {
-                                let config = self
-                                    .frontend
-                                    .state
-                                    .admin
-                                    .dynamic_config
-                                    .lock()
-                                    .expect("admin lock");
-                                (
-                                    cadence_persistence::dynamic_config::string_list(
-                                        config.property_values("system.allIsolationGroups"),
-                                    ),
-                                    cadence_persistence::dynamic_config::task_list_duration(
-                                        config
-                                            .property_values("matching.taskIsolationPollerWindow"),
-                                        Some(&payload.domain),
-                                        &task_list_name,
-                                        crate::matching_config::persistence_task_list_type(task_list_type),
-                                        2_000_000_000,
-                                    ),
+                    async {
+                self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&request.get_ref().domain_id), None)?;
+                        let r = request.get_ref().clone();
+                        let mut payload = r.request.unwrap_or_default();
+                        let task_list = payload.task_list.clone();
+                        let task_list_type =
+                            crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
+                        payload.task_list_type = task_list_type;
+                        let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
+                        // Go validates the identifier before domain-cache/manager lookup;
+                        // untyped identifier errors become InternalServiceError.
+                        TaskListName::parse(&task_list_name).map_err(Status::internal)?;
+                        payload.domain = self.domain_name(&r.domain_id)?;
+                        if self.queues.is_some() {
+                            let queue = self
+                                .durable_queue(
+                                    &r.domain_id,
+                                    &task_list.clone().unwrap_or_default(),
+                                    crate::matching_config::persistence_task_list_type(task_list_type),
                                 )
-                            };
-                            let now = matching_now();
-                            let counts = queue
+                                .await?;
+                            let pollers = queue
                                 .pollers
                                 .lock()
                                 .expect("poller history lock")
-                                .count_by_group(now, now.saturating_sub(window));
-                            let isolation_group_metrics = groups
+                                .list(matching_now())
                                 .into_iter()
-                                .map(|group| {
-                                    let metrics = p::IsolationGroupMetrics {
-                                        new_tasks_per_second: queue.qps.group_qps(&group),
-                                        poller_count: counts
-                                            .get(&group)
-                                            .copied()
-                                            .unwrap_or_default()
-                                            as i64,
-                                    };
-                                    (group, metrics)
+                                .map(|poller| p::PollerInfo {
+                                    identity: poller.identity,
+                                    rate_per_second: poller.rate_per_second,
+                                    last_access_time: Some(prost_types::Timestamp {
+                                        seconds: poller.last_access_time.div_euclid(1_000_000_000),
+                                        nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
+                                    }),
                                 })
                                 .collect();
-                            Some(p::TaskListStatus {
-                                read_level,
-                                ack_level,
-                                backlog_count_hint,
-                                task_id_block: Some(p::TaskIdBlock { start_id, end_id }),
-                                empty,
-                                rate_per_second: queue.limiter.limit(),
-                                new_tasks_per_second: queue.qps.qps(),
-                                isolation_group_metrics,
-                            })
-                        } else {
-                            None
-                        };
-                        let partition_config =
-                            queue.partitions.get().map(partition_config_to_proto);
-                        return Ok(Response::new(m::DescribeTaskListResponse {
-                            pollers,
-                            task_list_status,
-                            task_list: Some(p::TaskList {
-                                name: task_list_name.clone(),
-                                kind: i32::from(queue.queue.task_list_kind()) + 1,
-                                ..Default::default()
-                            }),
+                            let task_list_status = if payload.include_task_list_status {
+                                let (
+                                    read_level,
+                                    ack_level,
+                                    backlog_count_hint,
+                                    start_id,
+                                    end_id,
+                                    empty,
+                                ) = queue.queue.status();
+                                // Go reads the configured group universe and the live poller
+                                // history window on every Describe, even with isolation off.
+                                let (groups, window) = {
+                                    let config = self
+                                        .frontend
+                                        .state
+                                        .admin
+                                        .dynamic_config
+                                        .lock()
+                                        .expect("admin lock");
+                                    (
+                                        cadence_persistence::dynamic_config::string_list(
+                                            config.property_values("system.allIsolationGroups"),
+                                        ),
+                                        cadence_persistence::dynamic_config::task_list_duration(
+                                            config
+                                                .property_values("matching.taskIsolationPollerWindow"),
+                                            Some(&payload.domain),
+                                            &task_list_name,
+                                            crate::matching_config::persistence_task_list_type(task_list_type),
+                                            2_000_000_000,
+                                        ),
+                                    )
+                                };
+                                let now = matching_now();
+                                let counts = queue
+                                    .pollers
+                                    .lock()
+                                    .expect("poller history lock")
+                                    .count_by_group(now, now.saturating_sub(window));
+                                let isolation_group_metrics = groups
+                                    .into_iter()
+                                    .map(|group| {
+                                        let metrics = p::IsolationGroupMetrics {
+                                            new_tasks_per_second: queue.qps.group_qps(&group),
+                                            poller_count: counts
+                                                .get(&group)
+                                                .copied()
+                                                .unwrap_or_default()
+                                                as i64,
+                                        };
+                                        (group, metrics)
+                                    })
+                                    .collect();
+                                Some(p::TaskListStatus {
+                                    read_level,
+                                    ack_level,
+                                    backlog_count_hint,
+                                    task_id_block: Some(p::TaskIdBlock { start_id, end_id }),
+                                    empty,
+                                    rate_per_second: queue.limiter.limit(),
+                                    new_tasks_per_second: queue.qps.qps(),
+                                    isolation_group_metrics,
+                                })
+                            } else {
+                                None
+                            };
+                            let partition_config =
+                                queue.partitions.get().map(partition_config_to_proto);
+                            return Ok(Response::new(m::DescribeTaskListResponse {
+                                pollers,
+                                task_list_status,
+                                task_list: Some(p::TaskList {
+                                    name: task_list_name.clone(),
+                                    kind: i32::from(queue.queue.task_list_kind()) + 1,
+                                    ..Default::default()
+                                }),
+                                partition_config,
+                            }));
+                        }
+                        let v = p::workflow_api_server::WorkflowApi::describe_task_list(
+                            &self.frontend,
+                            Request::new(payload),
+                        )
+                        .await?
+                        .into_inner();
+                        let partition_config = self
+                            .frontend
+                            .state
+                            .executions
+                            .partition_config(&r.domain_id, &task_list_name, task_list_type)
+                            .map(partition_config_to_proto);
+                        Ok(Response::new(m::DescribeTaskListResponse {
+                            pollers: v.pollers,
+                            task_list_status: v.task_list_status,
+                            task_list,
                             partition_config,
-                        }));
-                    }
-                    let v = p::workflow_api_server::WorkflowApi::describe_task_list(
-                        &self.frontend,
-                        Request::new(payload),
-                    )
-                    .await?
-                    .into_inner();
-                    let partition_config = self
-                        .frontend
-                        .state
-                        .executions
-                        .partition_config(&r.domain_id, &task_list_name, task_list_type)
-                        .map(partition_config_to_proto);
-                    Ok(Response::new(m::DescribeTaskListResponse {
-                        pollers: v.pollers,
-                        task_list_status: v.task_list_status,
-                        task_list,
-                        partition_config,
-                    }))
-                },
-            )
-            .await
+                        }))
+                    },
+                )
+                .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
 }
 

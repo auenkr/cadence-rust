@@ -161,6 +161,16 @@ impl Manager {
         }
     }
 
+    /// Test hook: poison the index lock so the next `stop` panics, as a panic in another
+    /// holder of the lock would.
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = self.index.lock().expect("semaphore manager lock");
+            panic!("poisoning the semaphore manager lock");
+        }));
+    }
+
     pub fn identifier(&self) -> &Identifier {
         &self.id
     }
@@ -532,6 +542,15 @@ impl Registry {
             return Err(error);
         }
         Ok(manager)
+    }
+
+    /// Test hook: poison the registry lock so the next lookup panics.
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = self.managers.lock().expect("semaphore registry lock");
+            panic!("poisoning the semaphore registry lock");
+        }));
     }
 
     /// Go `Unregister`: only remove if the map still holds this manager.

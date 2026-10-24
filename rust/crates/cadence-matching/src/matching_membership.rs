@@ -106,6 +106,15 @@ impl Membership {
         }
         changed
     }
+    /// Test hook: poison the ring lock so the next ownership check panics.
+    #[cfg(test)]
+    pub(crate) fn poison_ring_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = self.ring.write().expect("Matching membership lock");
+            panic!("poisoning the membership ring lock");
+        }));
+    }
+
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changed.subscribe()
     }
