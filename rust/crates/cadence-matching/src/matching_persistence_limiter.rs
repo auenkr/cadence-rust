@@ -1045,7 +1045,7 @@ mod go_metered_emission_oracle_tests {
         limiter.with_metric_sink(migration);
         let wrapped = crate::matching_persistence::limit_task_store(
             Arc::new(OracleTaskStore(std::sync::atomic::AtomicUsize::new(0))),
-            Arc::new(limiter),
+            limiter,
         );
         let key = cadence_persistence::matching_task_store::TaskListKey {
             domain_id: uuid::Uuid::nil(),
