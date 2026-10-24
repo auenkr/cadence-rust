@@ -8,6 +8,7 @@ use crate::{
     AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, SemaphorePersistence,
     SemaphoreRow,
 };
+use crate::semaphores::{SemaphoreBucketPage, SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use scylla::{
@@ -329,13 +330,31 @@ impl SemaphorePersistence for CassandraSemaphorePersistence {
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
+        use scylla::{response::PagingState, statement::Statement};
         let domain_id = Self::domain_id(domain_id)?;
-        let result = self
+        let page_size = i32::try_from(page_size)
+            .ok()
+            .filter(|size| *size > 0)
+            .ok_or_else(|| AcquireError::Invalid(SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE.into()))?;
+        let mut statement = Statement::new(SELECT_BUCKET);
+        statement.set_page_size(page_size);
+        let paging_state = next_page_token
+            .map(|token| PagingState::new_from_raw_bytes(token.to_vec()))
+            .unwrap_or_else(PagingState::start);
+        let (result, paging_response) = self
             .session
-            .query_unpaged(SELECT_BUCKET, (domain_id, name, bucket))
+            .query_single_page(statement, (domain_id, name, bucket), paging_state)
             .await
             .map_err(Self::internal)?;
+        let next_page_token = match paging_response.into_paging_control_flow() {
+            std::ops::ControlFlow::Continue(state) => {
+                state.as_bytes_slice().map(|bytes| bytes.to_vec())
+            }
+            std::ops::ControlFlow::Break(()) => None,
+        };
         let rows = result.into_rows_result().map_err(Self::internal)?;
         let mut output = Vec::new();
         for row in rows
@@ -361,7 +380,10 @@ impl SemaphorePersistence for CassandraSemaphorePersistence {
                 _ => output.push(SemaphoreRow::Unknown),
             }
         }
-        Ok(output)
+        Ok(SemaphoreBucketPage {
+            rows: output,
+            next_page_token,
+        })
     }
 
     async fn get_semaphore_ownership_by_token(

@@ -11,8 +11,8 @@ use cadence_persistence::{
         TaskListKey, TaskListRecord,
     },
     semaphores::{
-        AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, SemaphorePersistence,
-        SemaphoreRow,
+        AcquireError, GrantOutcome, SemaphoreBucketPage, SemaphoreError, SemaphoreMetadata,
+        SemaphorePersistence,
     },
 };
 use std::sync::Arc;
@@ -426,10 +426,12 @@ impl SemaphorePersistence for RateLimitedSemaphoreStore {
         domain_id: &str,
         name: &str,
         bucket: i32,
-    ) -> Result<Vec<SemaphoreRow>, AcquireError> {
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPage, AcquireError> {
         self.permit_acquire("ScanSemaphoreBucket", domain_id)?;
         self.store
-            .scan_semaphore_bucket(domain_id, name, bucket)
+            .scan_semaphore_bucket(domain_id, name, bucket, page_size, next_page_token)
             .await
     }
     async fn get_semaphore_ownership_by_token(
