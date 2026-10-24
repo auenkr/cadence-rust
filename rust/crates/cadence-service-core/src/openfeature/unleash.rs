@@ -318,10 +318,8 @@ mod tests {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let provider = new_provider(Some(&yaml(
-                "url: http://127.0.0.1:1/api\nappName: cadence",
-            )))
-            .unwrap();
+            let provider =
+                new_provider(Some(&yaml("url: http://127.0.0.1:1/api\nappName: cadence"))).unwrap();
             provider.shutdown();
         });
     }
@@ -435,7 +433,10 @@ mod tests {
         .unwrap();
         assert!(repository.snapshot().get("bootstrapped").is_some());
         let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"), "{first}");
+        assert!(
+            first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"),
+            "{first}"
+        );
         release_first_response.send(()).unwrap();
         wait_for_feature(&repository, "refreshed");
         for expected in [

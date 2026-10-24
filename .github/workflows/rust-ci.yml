@@ -38,8 +38,9 @@ jobs:
       - name: Format
         working-directory: rust
         run: |
-          cargo fmt --all
-          git diff -- crates > format.patch
+          # Report existing workspace formatting debt without rewriting the tested source.
+          cargo fmt --all -- --check > format.log 2>&1
+        continue-on-error: true
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
@@ -84,4 +85,4 @@ jobs:
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
-            rust/format.patch
+            rust/format.log
