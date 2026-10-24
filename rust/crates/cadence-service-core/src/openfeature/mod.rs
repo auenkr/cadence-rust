@@ -2,12 +2,11 @@
 //! `common/dynamicconfig/openfeatureclient` and
 //! `common/dynamicconfig/openfeatureprovider`.
 //!
-//! Status: the client semantics, provider contract, process-wide registration
-//! and the unleash configuration step are ported. The unleash evaluation
-//! engine and the Matching reader wiring are not; see `unleash.rs` and the
-//! notes in `memory/evidence/matching-openfeature-20261024/`.
+//! The client semantics, provider contract, process-wide registration,
+//! Unleash evaluator, and Matching runtime reader adapter are implemented.
 
 pub mod client;
 pub mod provider;
 pub mod unleash;
 pub mod runtime;
+pub mod unleash_engine;

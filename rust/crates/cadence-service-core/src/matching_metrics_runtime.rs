@@ -6,6 +6,7 @@
 use crate::{
     config::MetricsConfig,
     matching_metrics::{MetricSink, NoopMetricSink},
+    matching_metrics_migration::{MigrationMetricSink, MigrationPolicy},
 };
 use std::{io, sync::Arc, time::Duration};
 
@@ -25,8 +26,10 @@ impl MatchingMetricsRuntime {
     pub fn new(
         config: &MetricsConfig,
         pprof: Option<&crate::config::PProfConfig>,
+        policy: MigrationPolicy,
     ) -> anyhow::Result<Self> {
         config.validate()?;
+        policy.validate()?;
         let mut root_tags = config.tags.clone();
         root_tags.insert("cadence_service".into(), "cadence-matching".into());
         let interval = Duration::from_nanos(if config.reporting_interval_nanos > 0 {
@@ -98,6 +101,7 @@ impl MatchingMetricsRuntime {
             Some(Exporter::Prometheus(sink)) => sink.clone(),
             None => Arc::new(NoopMetricSink),
         };
+        let sink: Arc<dyn MetricSink> = Arc::new(MigrationMetricSink::new(sink, policy));
         Ok(Self {
             sink,
             exporter,
@@ -135,7 +139,7 @@ mod tests {
     #[test]
     fn empty_statsd_host_uses_the_go_noop_scope() {
         let config: MetricsConfig = serde_yaml::from_str("statsd: {hostPort: ''}").unwrap();
-        let runtime = MatchingMetricsRuntime::new(&config, None).unwrap();
+        let runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         assert!(runtime.exporter.is_none());
     }
 
@@ -145,7 +149,7 @@ mod tests {
             "statsd: {hostPort: ''}\nprometheus: {listenAddress: '127.0.0.1:0'}",
         )
         .unwrap();
-        let runtime = MatchingMetricsRuntime::new(&config, None).unwrap();
+        let runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         assert!(matches!(&runtime.exporter, Some(Exporter::Prometheus(_))));
     }
 
@@ -153,7 +157,7 @@ mod tests {
     async fn prometheus_listener_is_owned_and_stopped_by_runtime() {
         let config: MetricsConfig =
             serde_yaml::from_str("prometheus: {listenAddress: '127.0.0.1:0'}").unwrap();
-        let mut runtime = MatchingMetricsRuntime::new(&config, None).unwrap();
+        let mut runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         runtime.start().await.unwrap();
         assert!(runtime.listener.is_some());
         runtime.shutdown().await.unwrap();

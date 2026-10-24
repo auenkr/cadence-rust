@@ -1,0 +1,15 @@
+test openfeature::unleash::tests::config_fields_decode_with_go_names ... ok
+test openfeature::unleash::tests::decode_error_propagates ... ok
+test openfeature::unleash::tests::missing_app_name_is_rejected ... ok
+test openfeature::unleash::tests::missing_bootstrap_file_is_rejected ... ok
+test openfeature::unleash::tests::missing_provider_block_reports_missing_url ... ok
+test openfeature::unleash::tests::missing_url_is_rejected ... ok
+test openfeature::unleash::tests::provider_construction_and_shutdown_are_safe_inside_tokio_runtime ... ok
+test openfeature::unleash::tests::polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors ... ok
+test openfeature::unleash::tests::valid_bootstrap_file_constructs_provider ... ok
+test openfeature::unleash::tests::valid_config_constructs_repository ... ok
+test openfeature::unleash::tests::shutdown_joins_an_in_flight_request_within_client_timeout ... ok
+test result: ok. 143 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

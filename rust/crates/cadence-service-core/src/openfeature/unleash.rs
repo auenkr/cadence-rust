@@ -1,29 +1,27 @@
 //! Unleash provider configuration and construction, mirroring Go
 //! `common/dynamicconfig/openfeatureprovider/unleash` (`init.go`, `unleash.go`).
 //!
-//! PARTIAL PORT. Config decoding, validation and the bootstrap-file read match
-//! Go's `newProvider`. Constructing a working provider is not yet possible:
-//! Go delegates polling, strategy evaluation, variants and payloads to
-//! `unleash-client-go` v4.5.0, and no Rust equivalent exists in this crate.
-//! `new_provider` therefore stops with [`NOT_PORTED_MESSAGE`] after the
-//! validation steps instead of returning a provider that approximates Go.
+//! Config decoding, bootstrap, repository polling and local evaluation are
+//! implemented against unleash-client-go v4.5.0 semantics.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, RwLock,
+};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use serde::Deserialize;
+use serde_json::Value;
 
 use super::provider::{Constructor, FeatureProvider};
+use super::provider::{ErrorCode, FlagValue, FlattenedContext, Resolution, ResolutionError};
+use super::unleash_engine::{self, Context as UnleashContext, FeatureResponse};
 use crate::config::de_go_duration;
 
 /// Plugin name, set as `dynamicconfig.openfeature.providerName`.
 pub const PROVIDER_NAME: &str = "unleash";
-
-/// Returned by [`new_provider`] once validation passes, until the evaluation
-/// engine is ported.
-pub const NOT_PORTED_MESSAGE: &str = "unleash provider evaluation is not ported to Rust yet: \
-    Go's unleash-client-go v4.5.0 polling, strategy and variant evaluation has no Rust \
-    equivalent (memory/evidence/matching-openfeature-20261024/notes.md)";
 
 /// Go `unleash.Config`, decoded from the `provider:` block. Durations are
 /// nanoseconds, as Go's `time.Duration`; zero means "client default".
@@ -41,9 +39,17 @@ pub struct UnleashConfig {
     pub project_name: String,
     #[serde(default, rename = "apiToken")]
     pub api_token: String,
-    #[serde(default, rename = "refreshInterval", deserialize_with = "de_go_duration")]
+    #[serde(
+        default,
+        rename = "refreshInterval",
+        deserialize_with = "de_go_duration"
+    )]
     pub refresh_interval_nanos: i64,
-    #[serde(default, rename = "metricsInterval", deserialize_with = "de_go_duration")]
+    #[serde(
+        default,
+        rename = "metricsInterval",
+        deserialize_with = "de_go_duration"
+    )]
     pub metrics_interval_nanos: i64,
     #[serde(default, rename = "bootstrapFile")]
     pub bootstrap_file: String,
@@ -62,7 +68,9 @@ fn decode(config: Option<&serde_yaml::Value>) -> anyhow::Result<UnleashConfig> {
 
 /// Go `newProvider`: decode, validate, read the bootstrap file, then build the
 /// client. The last step is the part not yet ported; see the module docs.
-pub fn new_provider(config: Option<&serde_yaml::Value>) -> anyhow::Result<Arc<dyn FeatureProvider>> {
+pub fn new_provider(
+    config: Option<&serde_yaml::Value>,
+) -> anyhow::Result<Arc<dyn FeatureProvider>> {
     let config = decode(config)?;
     if config.url.is_empty() {
         bail!("unleash provider config requires url");
@@ -70,15 +78,334 @@ pub fn new_provider(config: Option<&serde_yaml::Value>) -> anyhow::Result<Arc<dy
     if config.app_name.is_empty() {
         bail!("unleash provider config requires appName");
     }
-    if !config.bootstrap_file.is_empty() {
-        std::fs::read(&config.bootstrap_file).map_err(|error| {
+    let bootstrap = if !config.bootstrap_file.is_empty() {
+        let data = std::fs::read(&config.bootstrap_file).map_err(|error| {
             anyhow!(
                 "failed to read unleash bootstrap file {:?}: {error}",
                 config.bootstrap_file
             )
         })?;
+        Some(serde_json::from_slice::<Value>(&data).map_err(|error| {
+            anyhow!(
+                "failed to decode unleash bootstrap file {:?}: {error}",
+                config.bootstrap_file
+            )
+        })?)
+    } else {
+        None
+    };
+    let repository = UnleashRepository::new(config, bootstrap)?;
+    Ok(Arc::new(UnleashProvider {
+        repository,
+        ready: AtomicBool::new(false),
+    }))
+}
+
+/// Client-feature repository state. This ports storage and polling only;
+/// OpenFeature evaluation remains explicitly unported.
+pub struct UnleashRepository {
+    features: Arc<RwLock<Value>>,
+    static_context: UnleashContext,
+    stop: Arc<AtomicBool>,
+    poller: Mutex<Option<JoinHandle<()>>>,
+}
+impl UnleashRepository {
+    fn new(config: UnleashConfig, bootstrap: Option<Value>) -> anyhow::Result<Self> {
+        let features = Arc::new(RwLock::new(feature_map(
+            bootstrap.unwrap_or_else(|| serde_json::json!({"features": []})),
+        )));
+        let static_context = UnleashContext {
+            app_name: config.app_name.clone(),
+            environment: if config.environment.is_empty() {
+                "default".into()
+            } else {
+                config.environment.clone()
+            },
+            ..Default::default()
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let interval = if config.refresh_interval_nanos > 0 {
+            Duration::from_nanos(config.refresh_interval_nanos as u64)
+        } else {
+            Duration::from_secs(15)
+        };
+        // unleash-client-go appends a slash before resolving ./client/features.
+        let mut base = config.url.clone();
+        if !base.ends_with('/') {
+            base.push('/');
+        }
+        let url = reqwest::Url::parse(&base).map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        let mut endpoint = url
+            .join("./client/features")
+            .map_err(|e| anyhow!("invalid unleash url: {e}"))?;
+        // Go builds ./client/features?project=<name> as a reference string;
+        // preserve that URL escaping behavior instead of form-encoding spaces as '+'.
+        if !config.project_name.is_empty() {
+            endpoint.set_query(Some(&format!("project={}", config.project_name)));
+        }
+        let headers = vec![
+            ("UNLEASH-APPNAME", config.app_name.clone()),
+            ("UNLEASH-INSTANCEID", config.instance_id.clone()),
+            ("Unleash-Interval", interval.as_millis().to_string()),
+            ("User-Agent", config.app_name.clone()),
+            ("Unleash-Client-Spec", "4.3.1".into()),
+            ("Authorization", config.api_token.clone()),
+        ];
+        let state = features.clone();
+        let stop_flag = stop.clone();
+        let poller = std::thread::Builder::new()
+            .name("unleash-repository".into())
+            .spawn(move || {
+                // reqwest's blocking client must be created off any Tokio runtime
+                // thread. Its finite timeout also bounds shutdown during a fetch.
+                let Ok(client) = reqwest::blocking::Client::builder()
+                    .timeout(Duration::from_millis(500))
+                    .build()
+                else {
+                    return;
+                };
+                while !stop_flag.load(Ordering::Acquire) {
+                    let mut request = client.get(endpoint.clone());
+                    for (name, value) in &headers {
+                        if !value.is_empty() {
+                            request = request.header(*name, value);
+                        }
+                    }
+                    if let Ok(response) = request.send() {
+                        if response.status().is_success() {
+                            if let Ok(body) = response.json::<Value>() {
+                                *state.write().unwrap_or_else(|p| p.into_inner()) =
+                                    feature_map(body);
+                            }
+                        }
+                    }
+                    let until = std::time::Instant::now() + interval;
+                    while !stop_flag.load(Ordering::Acquire) && std::time::Instant::now() < until {
+                        std::thread::sleep(
+                            Duration::from_millis(10)
+                                .min(until.saturating_duration_since(std::time::Instant::now())),
+                        );
+                    }
+                }
+            })
+            .map_err(|e| anyhow!("failed to start unleash poller: {e}"))?;
+        Ok(Self {
+            features,
+            static_context,
+            stop,
+            poller: Mutex::new(Some(poller)),
+        })
     }
-    bail!(NOT_PORTED_MESSAGE)
+    pub fn snapshot(&self) -> Value {
+        self.features
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+    pub fn shutdown(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(task) = self.poller.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            let _ = task.join();
+        }
+    }
+}
+impl Drop for UnleashRepository {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+fn feature_map(body: Value) -> Value {
+    let mut map = serde_json::Map::new();
+    if let Some(features) = body.get("features").and_then(Value::as_array) {
+        for feature in features {
+            if let Some(name) = feature.get("name").and_then(Value::as_str) {
+                map.insert(name.to_string(), feature.clone());
+            }
+        }
+    }
+    map.insert(
+        "__segments".into(),
+        body.get("segments")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    );
+    Value::Object(map)
+}
+struct UnleashProvider {
+    repository: UnleashRepository,
+    ready: AtomicBool,
+}
+impl FeatureProvider for UnleashProvider {
+    fn init(&self) -> anyhow::Result<()> {
+        self.ready.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn shutdown(&self) {
+        self.ready.store(false, Ordering::Release);
+        self.repository.shutdown();
+    }
+    fn resolve(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution {
+        if !self.ready.load(Ordering::Acquire) {
+            return failure(default, ErrorCode::ProviderNotReady, "Provider not ready");
+        }
+        let context = match unleash_context(ctx) {
+            Ok(context) => context,
+            Err(error) => {
+                let code = if matches!(default, FlagValue::Bool(_)) {
+                    ErrorCode::InvalidContext
+                } else {
+                    ErrorCode::General
+                };
+                return failure(default, code, error);
+            }
+        };
+        let context = merge_context(self.repository.static_context.clone(), context);
+        let snapshot = match evaluation_snapshot(self.repository.snapshot()) {
+            Ok(snapshot) => snapshot,
+            Err(error) => return failure(default, ErrorCode::General, error.to_string()),
+        };
+        if matches!(default, FlagValue::Bool(_)) {
+            let fallback = match &default {
+                FlagValue::Bool(value) => *value,
+                _ => unreachable!(),
+            };
+            return Resolution {
+                value: FlagValue::Bool(
+                    if snapshot.features.iter().any(|feature| feature.name == flag) {
+                        unleash_engine::is_enabled(&snapshot, flag, &context)
+                    } else {
+                        fallback
+                    },
+                ),
+                error: None,
+            };
+        }
+        let variant = unleash_engine::get_variant(&snapshot, flag, &context, 0);
+        if !variant.feature_enabled || variant.name == "disabled" {
+            return Resolution {
+                value: default,
+                error: None,
+            };
+        }
+        let payload = variant.payload.value;
+        let fallback = default.clone();
+        match default {
+            FlagValue::String(_) => Resolution {
+                value: FlagValue::String(payload),
+                error: None,
+            },
+            FlagValue::Int(_) => match payload.parse::<i64>() {
+                Ok(value) => Resolution {
+                    value: FlagValue::Int(value),
+                    error: None,
+                },
+                Err(_) => failure(
+                    fallback,
+                    ErrorCode::TypeMismatch,
+                    format!("IntEvaluation type error for {flag}"),
+                ),
+            },
+            FlagValue::Float(_) => match payload.parse::<f64>() {
+                Ok(value) => Resolution {
+                    value: FlagValue::Float(value),
+                    error: None,
+                },
+                Err(_) => failure(
+                    fallback,
+                    ErrorCode::TypeMismatch,
+                    format!("FloatEvaluation type error for {flag}"),
+                ),
+            },
+            FlagValue::Object(_) => Resolution {
+                value: FlagValue::Object(Value::String(payload)),
+                error: None,
+            },
+            FlagValue::Bool(value) => Resolution {
+                value: FlagValue::Bool(value),
+                error: None,
+            },
+        }
+    }
+}
+
+fn failure(default: FlagValue, code: ErrorCode, message: impl Into<String>) -> Resolution {
+    Resolution {
+        value: default,
+        error: Some(ResolutionError {
+            code,
+            message: message.into(),
+        }),
+    }
+}
+
+fn evaluation_snapshot(snapshot: Value) -> anyhow::Result<FeatureResponse> {
+    let entries = snapshot
+        .as_object()
+        .ok_or_else(|| anyhow!("invalid unleash feature cache"))?;
+    let features = entries
+        .iter()
+        .filter(|(name, _)| name.as_str() != "__segments")
+        .map(|(_, feature)| serde_json::from_value(feature.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let segments = entries
+        .get("__segments")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    Ok(FeatureResponse {
+        features,
+        segments: serde_json::from_value(segments)?,
+    })
+}
+
+fn unleash_context(context: &FlattenedContext) -> Result<UnleashContext, String> {
+    let mut output = UnleashContext::default();
+    for (key, value) in context {
+        let text = match value {
+            Value::String(value) => value.clone(),
+            Value::Bool(value) => value.to_string(),
+            Value::Number(value) if value.is_i64() || value.is_u64() => value.to_string(),
+            Value::Number(value) => format!("{:.6}", value.as_f64().unwrap_or_default()),
+            _ => return Err(format!("key `{key}` can not be converted to string")),
+        };
+        match key.as_str() {
+            "AppName" => output.app_name = text,
+            "CurrentTime" => output.current_time = text,
+            "Environment" => output.environment = text,
+            "RemoteAddress" => output.remote_address = text,
+            "SessionId" => output.session_id = text,
+            "UserId" => output.user_id = text,
+            _ => {
+                output.properties.insert(key.clone(), text);
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn merge_context(mut base: UnleashContext, override_context: UnleashContext) -> UnleashContext {
+    if !override_context.user_id.is_empty() {
+        base.user_id = override_context.user_id;
+    }
+    if !override_context.session_id.is_empty() {
+        base.session_id = override_context.session_id;
+    }
+    if !override_context.remote_address.is_empty() {
+        base.remote_address = override_context.remote_address;
+    }
+    if !override_context.environment.is_empty() {
+        base.environment = override_context.environment;
+    }
+    if !override_context.app_name.is_empty() {
+        base.app_name = override_context.app_name;
+    }
+    if !override_context.current_time.is_empty() {
+        base.current_time = override_context.current_time;
+    }
+    if !override_context.properties.is_empty() {
+        base.properties = override_context.properties;
+    }
+    base
 }
 
 /// Go self-registers in `init()`. Rust has no import-time registration, so the
@@ -106,7 +433,9 @@ mod tests {
     #[test]
     fn decode_error_propagates() {
         let err = new_provider(Some(&yaml("just-a-string"))).unwrap_err();
-        assert!(err.to_string().contains("failed to decode unleash provider config"));
+        assert!(err
+            .to_string()
+            .contains("failed to decode unleash provider config"));
     }
 
     // Mirrors "missing url".
@@ -140,29 +469,136 @@ mod tests {
             "url: https://unleash.example.com/api\nappName: cadence\nbootstrapFile: {missing:?}"
         );
         let err = new_provider(Some(&yaml(&config))).unwrap_err();
-        assert!(err.to_string().contains("failed to read unleash bootstrap file"));
+        assert!(err
+            .to_string()
+            .contains("failed to read unleash bootstrap file"));
     }
 
-    // Validation passes for both configs below; the remaining Go assertion
-    // (a constructed provider) is the part that is not yet ported.
+    // A constructed provider starts polling asynchronously.
     #[test]
-    fn valid_config_reaches_the_unported_engine() {
-        let err = new_provider(Some(&yaml(
-            "url: https://unleash.example.com/api\nappName: cadence",
-        )))
-        .unwrap_err();
-        assert_eq!(err.to_string(), NOT_PORTED_MESSAGE);
+    fn valid_config_constructs_repository() {
+        let provider = new_provider(Some(&yaml("url: http://127.0.0.1:1/api\nappName: cadence")));
+        assert!(provider.is_ok());
     }
 
     #[test]
-    fn valid_bootstrap_file_reaches_the_unported_engine() {
+    fn provider_construction_and_shutdown_are_safe_inside_tokio_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let provider =
+                new_provider(Some(&yaml("url: http://127.0.0.1:1/api\nappName: cadence"))).unwrap();
+            provider.shutdown();
+        });
+    }
+
+    #[test]
+    fn valid_bootstrap_file_constructs_provider() {
         let path = temp_file("bootstrap", r#"{"version":1,"features":[]}"#);
         let config = format!(
             "url: https://unleash.example.com/api\nappName: cadence\nbootstrapFile: {path:?}"
         );
-        let err = new_provider(Some(&yaml(&config))).unwrap_err();
-        assert_eq!(err.to_string(), NOT_PORTED_MESSAGE);
+        let provider = new_provider(Some(&yaml(&config)));
+        assert!(provider.is_ok());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn typed_resolutions_use_cached_variant_payloads_and_default_fallbacks() {
+        use super::super::provider::{ErrorCode, FlagValue};
+        use std::collections::BTreeMap;
+
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: "http://127.0.0.1:1/api".into(),
+                app_name: "cadence-test".into(),
+                ..Default::default()
+            },
+            Some(serde_json::json!({"features":[
+                {"name":"number","enabled":true,"strategies":[{"name":"default"}],
+                 "variants":[{"name":"v1","weight":100,"payload":{"type":"string","value":"42"}}]},
+                {"name":"bad-number","enabled":true,"strategies":[{"name":"default"}],
+                 "variants":[{"name":"v1","weight":100,"payload":{"type":"string","value":"nope"}}]},
+                {"name":"off","enabled":false}
+            ]})),
+        )
+        .unwrap();
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
+        let mut context = BTreeMap::new();
+        context.insert("UserId".into(), Value::String("alice".into()));
+        let not_ready = provider.resolve("number", FlagValue::Int(7), &context);
+        assert_eq!(not_ready.value, FlagValue::Int(7));
+        assert_eq!(not_ready.error.unwrap().code, ErrorCode::ProviderNotReady);
+
+        provider.init().unwrap();
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Bool(false), &context)
+                .value,
+            FlagValue::Bool(true)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::String("fallback".into()), &context)
+                .value,
+            FlagValue::String("42".into())
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Int(7), &context)
+                .value,
+            FlagValue::Int(42)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Float(7.0), &context)
+                .value,
+            FlagValue::Float(42.0)
+        );
+        assert_eq!(
+            provider
+                .resolve("number", FlagValue::Object(Value::Null), &context)
+                .value,
+            FlagValue::Object(Value::String("42".into()))
+        );
+        let mismatch = provider.resolve("bad-number", FlagValue::Int(7), &context);
+        assert_eq!(mismatch.value, FlagValue::Int(7));
+        assert_eq!(mismatch.error.unwrap().code, ErrorCode::TypeMismatch);
+        assert_eq!(
+            provider.resolve("off", FlagValue::Int(7), &context).value,
+            FlagValue::Int(7)
+        );
+        provider.shutdown();
+    }
+
+    #[test]
+    fn bool_context_conversion_failure_matches_openfeature_invalid_context() {
+        use super::super::provider::{ErrorCode, FlagValue};
+        use std::collections::BTreeMap;
+        let provider = UnleashProvider {
+            repository: UnleashRepository::new(
+                UnleashConfig {
+                    url: "http://127.0.0.1:1/api".into(),
+                    app_name: "test".into(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap(),
+            ready: AtomicBool::new(false),
+        };
+        provider.init().unwrap();
+        let mut context = BTreeMap::new();
+        context.insert("bad".into(), Value::Array(vec![]));
+        let result = provider.resolve("flag", FlagValue::Bool(true), &context);
+        assert_eq!(result.value, FlagValue::Bool(true));
+        assert_eq!(result.error.unwrap().code, ErrorCode::InvalidContext);
+        provider.shutdown();
     }
 
     // Field names and duration decoding match init.go / Go's yaml.v3 for
@@ -183,5 +619,153 @@ mod tests {
         assert_eq!(config.refresh_interval_nanos, 30_000_000_000);
         assert_eq!(config.metrics_interval_nanos, 60_000_000_000);
         assert_eq!(config.bootstrap_file, "b");
+    }
+
+    fn local_server<F>(
+        mut respond: F,
+    ) -> (
+        String,
+        std::sync::mpsc::Receiver<String>,
+        std::thread::JoinHandle<()>,
+    )
+    where
+        F: FnMut(usize) -> (&'static str, &'static str) + Send + 'static,
+    {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            for index in 0..4 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut request = [0; 4096];
+                let size = stream.read(&mut request).unwrap_or(0);
+                tx.send(String::from_utf8_lossy(&request[..size]).into_owned())
+                    .unwrap();
+                let (status, body) = respond(index);
+                let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        (format!("http://{address}/api"), rx, handle)
+    }
+
+    fn wait_for_feature(repository: &UnleashRepository, name: &str) {
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < until {
+            if repository.snapshot().get(name).is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("feature {name} did not arrive");
+    }
+
+    #[test]
+    fn polling_bootstraps_refreshes_uses_go_url_and_headers_and_keeps_cache_on_errors() {
+        let (release_first_response, wait_for_release) = std::sync::mpsc::channel();
+        let (release_final_response, wait_for_final_release) = std::sync::mpsc::channel();
+        let (base, requests, server) = local_server(move |index| {
+            if index == 0 {
+                wait_for_release.recv().unwrap();
+            }
+            if index == 3 {
+                wait_for_final_release.recv().unwrap();
+            }
+            match index {
+                0 => (
+                    "200 OK",
+                    r#"{"features":[{"name":"refreshed","enabled":true}]}"#,
+                ),
+                1 => ("503 Service Unavailable", "{}"),
+                _ => ("200 OK", "not-json"),
+            }
+        });
+        let bootstrap = serde_json::json!({"features":[{"name":"bootstrapped","enabled":true}]});
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: base,
+                app_name: "cadence-test".into(),
+                instance_id: "instance-7".into(),
+                project_name: "project blue".into(),
+                api_token: "token-123".into(),
+                refresh_interval_nanos: 20_000_000,
+                ..Default::default()
+            },
+            Some(bootstrap),
+        )
+        .unwrap();
+        assert!(repository.snapshot().get("bootstrapped").is_some());
+        let first = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(
+            first.starts_with("GET /api/client/features?project=project%20blue HTTP/1.1"),
+            "{first}"
+        );
+        release_first_response.send(()).unwrap();
+        wait_for_feature(&repository, "refreshed");
+        for expected in [
+            "UNLEASH-APPNAME: cadence-test",
+            "UNLEASH-INSTANCEID: instance-7",
+            "Unleash-Interval: 20",
+            "Unleash-Client-Spec: 4.3.1",
+            "Authorization: token-123",
+            "User-Agent: cadence-test",
+        ] {
+            assert!(
+                first
+                    .to_ascii_lowercase()
+                    .contains(&expected.to_ascii_lowercase()),
+                "missing {expected} in {first}"
+            );
+        }
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(requests.recv_timeout(Duration::from_secs(1)).is_ok());
+        assert!(repository.snapshot().get("refreshed").is_some());
+        release_final_response.send(()).unwrap();
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
+        provider.shutdown();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn shutdown_joins_an_in_flight_request_within_client_timeout() {
+        use std::io::Read;
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer);
+            tx.send(()).unwrap();
+            // Keep the socket open; reqwest's configured deadline releases the poller.
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let repository = UnleashRepository::new(
+            UnleashConfig {
+                url: format!("http://{address}/api"),
+                app_name: "cadence".into(),
+                refresh_interval_nanos: 1_000_000,
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let started = std::time::Instant::now();
+        let provider = UnleashProvider {
+            repository,
+            ready: AtomicBool::new(false),
+        };
+        provider.shutdown();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        server.join().unwrap();
     }
 }

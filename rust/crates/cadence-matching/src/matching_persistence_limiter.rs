@@ -367,6 +367,19 @@ impl MatchingPersistenceLimiter {
             };
             rollup("persistence_requests_rollup", MetricKind::Counter, MetricValue::Count(1));
             rollup("persistence_latency_rollup", MetricKind::Timer, MetricValue::Duration(elapsed));
+            // Go scope.go emits the root histogram rollup when the migration
+            // policy enables it. The policy sink suppresses this by default.
+            sink.record(MetricEvent {
+                name: "persistence_latency_ns_rollup",
+                kind: MetricKind::Histogram,
+                value: MetricValue::Duration(elapsed),
+                tags: std::collections::BTreeMap::from([
+                    ("histogram_start".into(), "1ms".into()),
+                    ("histogram_end".into(), "17m28.576s".into()),
+                    ("histogram_scale".into(), "2".into()),
+                ]),
+                histogram: Some(HistogramSpec::GoDefault1ms100s),
+            });
             if let Some(class) = class {
                 let (_, per_domain_name, failure) = class.metric_names();
                 if let Some(name) = persistence_error_rollup_name(per_domain_name) {
@@ -849,8 +862,8 @@ mod metered_task_tests {
         assert_eq!(flags, ["false", "false", "true", "true"]);
     }
 
-    /// Go scope.go:55-125 with the zero MigrationConfig: per-domain calls also
-    /// emit root-scope rollups; the ns histogram rollup is suppressed.
+    /// Root rollup candidates include the histogram. The runtime migration sink
+    /// suppresses that histogram with the Go default and enables it by config.
     #[test]
     fn per_domain_task_calls_emit_go_rollups() {
         let limiter = MatchingPersistenceLimiter::new(
@@ -869,8 +882,8 @@ mod metered_task_tests {
         let names: Vec<_> = events.iter().filter(|e| e.name.ends_with("_rollup")).map(|e| e.name).collect();
         assert_eq!(
             names,
-            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_errors_condition_failed_rollup"]
+            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_latency_ns_rollup", "persistence_errors_condition_failed_rollup"]
         );
-        assert!(events.iter().filter(|e| e.name.ends_with("_rollup")).all(|e| e.tags.is_empty()));
+        assert!(events.iter().filter(|e| e.name.ends_with("_rollup") && e.kind != MetricKind::Histogram).all(|e| e.tags.is_empty()));
     }
 }
