@@ -10,6 +10,21 @@ use semver::Version;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::sync::OnceLock;
+
+static APPLICATION_HOSTNAME: OnceLock<String> = OnceLock::new();
+
+fn application_hostname() -> &'static str {
+    APPLICATION_HOSTNAME
+        .get_or_init(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|hostname| hostname.trim().to_lowercase())
+                .filter(|hostname| !hostname.is_empty())
+                .unwrap_or_else(|| "undefined".into())
+        })
+        .as_str()
+}
 
 fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
@@ -253,21 +268,9 @@ fn strategy_enabled(name: &str, p: &Map<String, Value>, c: &Context) -> bool {
             !string("userIds").is_empty()
                 && string("userIds").split(',').any(|x| x.trim() == c.user_id)
         }
-        "applicationHostname" => {
-            let hostname = std::env::var("HOSTNAME")
-                .ok()
-                .filter(|h| !h.is_empty())
-                .or_else(|| {
-                    std::fs::read_to_string("/etc/hostname")
-                        .ok()
-                        .map(|h| h.trim().to_owned())
-                })
-                .unwrap_or_else(|| "undefined".into())
-                .to_lowercase();
-            string("hostNames")
-                .split(',')
-                .any(|x| x.to_lowercase() == hostname)
-        }
+        "applicationHostname" => string("hostNames")
+            .split(',')
+            .any(|x| x.to_lowercase() == application_hostname()),
         "remoteAddress" => ip_match(&c.remote_address, string("IPs")),
         "gradualRolloutUserId" => p
             .get("groupId")
@@ -563,6 +566,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn application_hostname_strategy_uses_cached_os_hostname() {
+        let hostname = application_hostname();
+        let parameters = serde_json::json!({"hostNames": hostname});
+        assert!(strategy_enabled(
+            "applicationHostname",
+            parameters.as_object().unwrap(),
+            &Context::default()
+        ));
     }
     #[test]
     fn user_rollout_and_disabled_default() {
