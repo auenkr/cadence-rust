@@ -136,6 +136,9 @@ struct Index {
     held: HashMap<String, i32>,
 }
 
+/// Go `onStopFn`: called once from `stop` with the manager being stopped.
+type OnStop = Box<dyn Fn(&Manager) + Send + Sync>;
+
 /// One bucket's manager, mirroring Go's `semaphoreManagerImpl`.
 pub struct Manager {
     id: Identifier,
@@ -144,6 +147,9 @@ pub struct Manager {
     index: Mutex<Index>,
     /// Go `startupDoneCh`: set once the startup load ended (or the manager stopped).
     startup_done: tokio::sync::watch::Sender<bool>,
+    /// Go `onStopFn`: unregisters this manager. Set by the registry; `None` for a
+    /// manager built outside one.
+    on_stop: Option<OnStop>,
 }
 
 impl Manager {
@@ -158,7 +164,13 @@ impl Manager {
             liveness: Liveness::new(now_nanos(), idle_ttl_nanos.max(1)),
             index: Mutex::new(Index::default()),
             startup_done: tokio::sync::watch::channel(false).0,
+            on_stop: None,
         }
+    }
+
+    fn with_on_stop(mut self, on_stop: OnStop) -> Self {
+        self.on_stop = Some(on_stop);
+        self
     }
 
     pub fn identifier(&self) -> &Identifier {
@@ -217,6 +229,8 @@ impl Manager {
                         held.insert(owner_id, held_token);
                     }
                 }
+                // Go's load counts and steps over a row it cannot classify.
+                SemaphoreRow::Unknown => {}
             }
         }
         // A slot an owner row claims is not free, whatever its token row said.
@@ -243,9 +257,23 @@ impl Manager {
         Ok(())
     }
 
-    /// Go `Manager.Stop`: later acquires get `NotReady`.
+    /// Go `Manager.Stop`: later acquires get `NotReady`. Runs the teardown once,
+    /// so `on_stop` fires once and a repeat call changes nothing.
     pub fn stop(&self) {
-        self.index.lock().expect("semaphore manager lock").state = State::Stopped;
+        let first_stop = {
+            let mut index = self.index.lock().expect("semaphore manager lock");
+            let first_stop = index.state != State::Stopped;
+            index.state = State::Stopped;
+            first_stop
+        };
+        if !first_stop {
+            return;
+        }
+        // Unregistered before startup is released, so nothing is handed a manager
+        // that can no longer serve. The index lock is not held across the callback.
+        if let Some(on_stop) = &self.on_stop {
+            on_stop(self);
+        }
         self.startup_done.send_replace(true);
     }
 
@@ -470,6 +498,23 @@ fn remove_from_free_set(index: &mut Index, token_id: i32) {
     index.free_index.remove(&token_id);
 }
 
+/// Removes `id` only while the map still holds this exact manager, so a stopping
+/// manager cannot remove the replacement that took its place. Go `Unregister`.
+fn remove_current(
+    managers: &Mutex<HashMap<Identifier, Arc<Manager>>>,
+    manager: &Manager,
+    id: &Identifier,
+) -> bool {
+    let mut managers = managers.lock().expect("semaphore registry lock");
+    match managers.get(id) {
+        Some(current) if std::ptr::eq(Arc::as_ptr(current), manager) => {
+            managers.remove(id);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Go `semaphoreRegistryImpl`: one manager per bucket, whoever asks first.
 #[derive(Clone)]
 pub struct Registry {
@@ -510,7 +555,17 @@ impl Registry {
             existing.start().await?;
             return Ok(existing);
         }
-        let manager = Arc::new(Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)));
+        // Weak, so a manager stopped after the registry is gone does not keep the map alive.
+        let managers = Arc::downgrade(&self.managers);
+        let manager = Arc::new(
+            Manager::new(id.clone(), self.store.clone(), idle_ttl_nanos.max(1)).with_on_stop(
+                Box::new(move |stopping: &Manager| {
+                    if let Some(managers) = managers.upgrade() {
+                        remove_current(&managers, stopping, stopping.identifier());
+                    }
+                }),
+            ),
+        );
         // The registry lock is released before any await, so the guard never
         // crosses a suspension point.
         let existing = {
@@ -536,15 +591,7 @@ impl Registry {
 
     /// Go `Unregister`: only remove if the map still holds this manager.
     pub fn unregister(&self, manager: &Arc<Manager>) -> bool {
-        let mut managers = self.managers.lock().expect("semaphore registry lock");
-        let id = manager.identifier();
-        match managers.get(id) {
-            Some(current) if Arc::ptr_eq(current, manager) => {
-                managers.remove(id);
-                true
-            }
-            _ => false,
-        }
+        remove_current(&self.managers, manager, manager.identifier())
     }
 
     pub fn by_identifier(&self, id: &Identifier) -> Option<Arc<Manager>> {

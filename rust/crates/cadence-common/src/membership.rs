@@ -36,9 +36,14 @@ pub fn fingerprint32(bytes: &[u8]) -> u32 {
 }
 
 /// Go `dgryski/go-farm.Hash32`, used by the Ringpop hashring view identifier
-/// (`emitHashIdentifier`). Delegates to the Go-verified `farmhash::hash32`.
+/// (`emitHashIdentifier`). Go's 0–4 byte path is the same as `fingerprint32`
+/// (signed int8 bytes), while the upstream Rust crate uses unsigned bytes
+/// there. Longer inputs match the upstream crate.
 pub fn hash32(bytes: &[u8]) -> u32 {
-    farmhash::hash32(bytes)
+    if bytes.len() > 4 {
+        return farmhash::hash32(bytes);
+    }
+    fingerprint32(bytes)
 }
 
 /// Go `dgryski/go-farm.Fingerprint64`, used to select the shard-distributor
@@ -50,7 +55,31 @@ pub fn fingerprint64(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod fingerprint_tests {
-    use super::{fingerprint32, Host, Ring};
+    use super::{fingerprint32, hash32, Host, Ring};
+
+    // Expected values from Go `dgryski/go-farm` Hash32 (v0.0.0-20240924180020-
+    // 3414d57e47da), computed with a standalone Go program. Lengths 0–4 use
+    // signed bytes; 5 and 11 bytes cover the upstream-crate delegation path.
+    #[test]
+    fn go_hash32_matches_go_farm_vectors() {
+        for (bytes, expected) in [
+            (&[][..], 3_696_677_242),
+            (&[0x00][..], 3_232_311_124),
+            (&[0x7f][..], 3_259_183_209),
+            (&[0x80][..], 801_663_339),
+            (&[0xff][..], 495_582_926),
+            (&[0x61, 0x62][..], 1_098_068_221),
+            (&[0xef, 0xbf, 0xbd][..], 4_143_110_158),
+            (&[0x80, 0xff, 0xef, 0xbf][..], 740_356_336),
+            (&[0xef, 0xbf, 0xbd, 0x01][..], 110_792_607),
+            (&[0x80, 0x00, 0xff, 0x7f][..], 847_840_402),
+            (b"hello".as_slice(), 2_039_911_270),
+            (&[0x80, 0xff, 0xef, 0xbf, 0xbd][..], 2_633_776_259),
+            (b"hello world".as_slice(), 430_397_466),
+        ] {
+            assert_eq!(hash32(bytes), expected, "input={bytes:02x?}");
+        }
+    }
 
     #[test]
     fn go_fingerprint32_matches_signed_short_byte_vectors() {
