@@ -678,6 +678,108 @@ mod tests {
         received.finish(Ok(()));
         assert!(queued.await.unwrap());
     }
+    #[tokio::test]
+    async fn sync_match_handoff_matches_go_new_internal_task() {
+        // Go TestNewInternalTask (tasklist/task_test.go:36): the sync handoff keeps
+        // the forwarded bit and rewrites partition config the way newInternalTask
+        // does. Go's "async match" case has no sync handoff at all (its ResponseC is
+        // nil), so it has no analog in this sync-only matcher and is not asserted.
+        fn config(pairs: &[(&str, &str)]) -> Option<std::collections::BTreeMap<String, String>> {
+            Some(
+                pairs
+                    .iter()
+                    .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                    .collect(),
+            )
+        }
+        let cases = [
+            ("sync match", None, "", false, None),
+            ("forwarded from history", None, "", true, None),
+            (
+                "tasklist isolation",
+                config(&[("isolation-group", "a"), ("wf-id", "workflow")]),
+                "a",
+                false,
+                config(&[
+                    ("isolation-group", "a"),
+                    ("original-isolation-group", "a"),
+                    ("wf-id", "workflow"),
+                ]),
+            ),
+            (
+                "tasklist isolation - leaked",
+                config(&[("isolation-group", "a"), ("wf-id", "workflow")]),
+                "",
+                false,
+                config(&[
+                    ("isolation-group", ""),
+                    ("original-isolation-group", "a"),
+                    ("wf-id", "workflow"),
+                ]),
+            ),
+            (
+                "tasklist isolation - forwarded",
+                config(&[
+                    ("isolation-group", ""),
+                    ("original-isolation-group", "a"),
+                    ("wf-id", "workflow"),
+                ]),
+                "",
+                false,
+                config(&[
+                    ("isolation-group", ""),
+                    ("original-isolation-group", "a"),
+                    ("wf-id", "workflow"),
+                ]),
+            ),
+        ];
+        for (name, partition_config, group, forwarded, expected) in cases {
+            let (_stop, matcher) = fixture();
+            let data = TaskData {
+                workflow_id: "workflow".into(),
+                partition_config,
+                ..Default::default()
+            };
+            let producer = matcher.clone();
+            let offered_group = group.to_owned();
+            let add = tokio::spawn(async move {
+                producer
+                    .offer(
+                        data,
+                        &offered_group,
+                        SOURCE,
+                        forwarded,
+                        Duration::from_secs(1),
+                        Instant::now() + Duration::from_secs(2),
+                    )
+                    .await
+            });
+            let received = matcher.poll(group).await.expect(name);
+            assert_eq!(received.forwarded, forwarded, "{name}: forwarded bit");
+            assert_eq!(
+                received.task.data.partition_config, expected,
+                "{name}: partition config"
+            );
+            received.finish(Ok(()));
+            assert!(add.await.unwrap(), "{name}: handoff acknowledged");
+        }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn sync_match_invalid_isolation_group_poll_returns_no_task_at_deadline() {
+        // Go TestIsolationPollFailure (matcher_test.go:673): an unknown isolation
+        // group falls back to the default channel; with no default-group task the
+        // poll ends without a task when its context deadline passes. Go returns the
+        // timeout as an error, which the handler maps to an empty poll. The sync
+        // matcher has no deadline of its own, so the caller's deadline stands in
+        // for Go's context.
+        let (_stop, matcher) = fixture();
+        let poll =
+            tokio::time::timeout(Duration::from_secs(1), matcher.poll("invalid-group")).await;
+        assert!(
+            poll.is_err(),
+            "no default-group task may satisfy an invalid group poll"
+        );
+    }
     #[tokio::test(start_paused = true)]
     async fn sync_match_isolation_group_mismatch_does_not_match() {
         // Go TestIsolationSyncMatchFailure: a poller in group "b" never takes a

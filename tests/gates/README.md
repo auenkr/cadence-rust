@@ -120,6 +120,12 @@ Other scenarios:
   TChannel. Needs `--rust-services matching`; combine with `--mysql` for the same
   scenarios as the MySQL lane. Opt-in; default `grpc`. `results.json` records
   `matchingTransport`.
+- `--probe-auto-config-hint`: a decision poll and an activity poll through Go Frontend
+  both carry `autoConfigHint`, and `enableAutoConfig` is `false`. The harness overrides
+  `matching.enableClientAutoConfig` to `false` (development.yaml ships `true`) for this
+  run. Needs `--rust-services matching`; not combined with `--matching-configstore`.
+  Scenario `autoConfigHint` in `results.json`. Notes:
+  `memory/evidence/matching-auto-config-hint-20261024/notes.md`.
 
 Results:
 
