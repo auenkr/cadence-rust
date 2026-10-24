@@ -13,3 +13,14 @@ whether a persistence error occurred. Next investigation must inspect Go
 transfer scheduling and Rust AddDecisionTask ingestion/ownership, not weaken the
 queued-before-crash assertion. Full transient artifacts are downloaded under
 /tmp/matching-production-40083288791. No local Cargo command ran.
+
+Candidate fixture correction da8567767: --probe-list-partitions previously
+set matching.numTasklistWritePartitions=3 globally. Go History can route the
+crash workflow to a child while the crash checkpoint queries only root rows
+and later kills the root owner. Scope read/write=3 to dedicated listing fixture
+roots (probe-list-partitions-root, probe-list-partitions-child), preserving all
+partition listing and crash persistence assertions. The durable-restart probe
+still explicitly configures its own three-partition list. Python AST and Node
+syntax checks pass; no Cargo locally. Fresh PostgreSQL rerun:
+https://github.com/auenkr/cadence-rust/actions/runs/40083957441 (pending).
+This is a source-backed hypothesis until the rerun proves the checkpoint.
