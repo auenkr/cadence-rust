@@ -32,6 +32,24 @@ pub fn capture_sync<T>(operation: &'static str, call: impl FnOnce() -> T) -> Res
     catch_unwind(AssertUnwindSafe(call)).map_err(|payload| panic_message(operation, payload))
 }
 
+/// Prefix Go's `CapturePanic` gives every captured non-error panic.
+pub const CAPTURED_PANIC_PREFIX: &str = "panic object is not error: ";
+
+/// True for the plain Go error a captured panic becomes. Go's Thrift mapper passes a
+/// plain error through unchanged, so Thrift and TChannel send it as an unexpected
+/// system error, not a declared `InternalServiceError`. Other untyped statuses (for
+/// example the fault-injected `Unhandled` error) stay typed `InternalServiceError`.
+pub fn is_captured_panic(status: &tonic::Status) -> bool {
+    status.code() == tonic::Code::Unknown
+        && status.details().is_empty()
+        && is_captured_panic_message(status.message())
+}
+
+/// Same check on a message that already crossed the dispatch boundary as a string.
+pub fn is_captured_panic_message(message: &str) -> bool {
+    message.starts_with(CAPTURED_PANIC_PREFIX)
+}
+
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     let value = if let Some(text) = payload.downcast_ref::<&str>() {
         format!("{text:?}")

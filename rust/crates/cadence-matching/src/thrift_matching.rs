@@ -767,8 +767,43 @@ async fn dispatch_inner(
             None,
         )),
         Ok(None) => Ok((Struct::default(), None)),
+        // Go's captured panic is a plain error, not a declared exception: the transport
+        // reports it as an unexpected error (see `transport_failure`).
+        Err(status) if crate::matching_panic::is_captured_panic(&status) => {
+            Err(status.message().to_owned())
+        }
         Err(status) => Ok(application_error(method, status)),
     }
+}
+
+/// TChannel error code for a dispatch failure. Go's `handleErr` and `thrift.FromError`
+/// send a captured panic as `ErrCodeUnexpected` (0x05); other dispatch failures, such
+/// as an unknown procedure, are `ErrCodeBadRequest` (0x06).
+pub fn tchannel_error_code(message: &str) -> u8 {
+    if crate::matching_panic::is_captured_panic_message(message) {
+        0x05
+    } else {
+        0x06
+    }
+}
+
+/// HTTP response for a dispatch failure. A captured panic matches Go's yarpc HTTP
+/// inbound for a plain error: 500, `Rpc-Error-Code: unknown`, the message as text.
+fn transport_failure(message: String) -> axum::response::Response {
+    use axum::http::{header, HeaderValue, StatusCode};
+    use axum::response::IntoResponse;
+    if !crate::matching_panic::is_captured_panic_message(&message) {
+        return crate::yarpc::transport_error(StatusCode::INTERNAL_SERVER_ERROR, message);
+    }
+    let mut response = (StatusCode::INTERNAL_SERVER_ERROR, format!("{message}\n")).into_response();
+    let headers = response.headers_mut();
+    headers.insert("Rpc-Status", HeaderValue::from_static("error"));
+    headers.insert("Rpc-Error-Code", HeaderValue::from_static("unknown"));
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf8"),
+    );
+    response
 }
 
 /// YARPC HTTP registration, served at the Matching-only root and at /matching
@@ -862,7 +897,7 @@ async fn http_handler(
     .await
     {
         Ok(Ok((result, error))) => crate::yarpc::ok_reply("cadence-matching", result, error),
-        Ok(Err(error)) => crate::yarpc::transport_error(StatusCode::INTERNAL_SERVER_ERROR, error),
+        Ok(Err(error)) => transport_failure(error),
         Err(_) => crate::yarpc::transport_error(
             StatusCode::GATEWAY_TIMEOUT,
             "Matching request timed out".into(),
@@ -1054,6 +1089,43 @@ mod tests {
         assert!(matches!(details.get(5), Some(Value::List(v)) if v.is_empty()));
         assert!(details.get(2).is_some() && details.get(3).is_some() && details.get(4).is_some());
     }
+    #[test]
+    fn matching_thrift_captured_panic_is_not_a_declared_exception() {
+        // Go: CapturePanic returns a plain fmt error, which thrift.FromError passes through.
+        // The same untyped status from another source stays a typed InternalServiceError.
+        let method = cadence_thrift::service::find_method("MatchingService::AddActivityTask").unwrap();
+        let panic = Status::unknown(r#"panic object is not error: "boom""#);
+        assert!(crate::matching_panic::is_captured_panic(&panic));
+        let (_, error) = application_error(method, Status::unknown("fake unhandled error"));
+        assert_eq!(error.unwrap().0, "InternalServiceError");
+        assert!(!crate::matching_panic::is_captured_panic(&Status::unknown("fake unhandled error")));
+        assert!(!crate::matching_panic::is_captured_panic(&Status::internal(
+            r#"panic object is not error: "boom""#
+        )));
+    }
+
+    #[test]
+    fn matching_tchannel_dispatch_failures_use_go_error_codes() {
+        // Go TChannel: ErrCodeUnexpected (0x05) for a captured panic, ErrCodeBadRequest (0x06)
+        // for an unknown procedure.
+        assert_eq!(tchannel_error_code(r#"panic object is not error: "boom""#), 0x05);
+        assert_eq!(tchannel_error_code("Unknown Matching procedure X"), 0x06);
+    }
+
+    #[tokio::test]
+    async fn matching_http_captured_panic_matches_go_plain_error_response() {
+        // Go yarpc HTTP: plain error -> status 500, Rpc-Error-Code unknown, message plus newline.
+        use axum::response::IntoResponse;
+        let response = transport_failure(r#"panic object is not error: "boom""#.into());
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.headers().get("Rpc-Error-Code").unwrap(), "unknown");
+        assert_eq!(response.headers().get("Rpc-Status").unwrap(), "error");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), b"panic object is not error: \"boom\"\n");
+        let other = transport_failure("Unknown Matching procedure X".into()).into_response();
+        assert!(other.headers().get("Rpc-Error-Code").is_none());
+    }
+
     #[test]
     fn matching_thrift_uses_each_methods_exception_field_ids() {
         let decision = cadence_thrift::find_method("MatchingService::AddDecisionTask").unwrap();
