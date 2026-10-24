@@ -1076,6 +1076,8 @@ mod tests {
         }
         let first = first.unwrap();
         let register = register.unwrap();
+        assert!(first.starts_with("GET /api/client/features"), "{first}");
+        assert!(first.to_ascii_lowercase().contains("unleash-instanceid: instance-test"));
         assert!(
             register.starts_with("POST /api/client/register"),
             "{register}"
