@@ -799,9 +799,10 @@ impl QueueRegistry {
 
     /// Like Go's membership watcher, detach obsolete owners before doing I/O.
     /// Unknown placement leaves existing readers intact until membership recovers.
-    pub async fn unload_non_owned(&self, now: i64) -> Result<(), Status> {
+    /// Returns the task-list names Go's `getNonOwnedTasklistsLocked` would return.
+    pub async fn unload_non_owned(&self, now: i64) -> Result<Vec<String>, Status> {
         let Some(membership) = self.membership.clone() else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let registry = self.clone();
         owner_work(move |readers| {
@@ -828,14 +829,16 @@ impl QueueRegistry {
                 candidates
             };
             let mut failure = None;
+            let mut names = Vec::with_capacity(candidates.len());
             for (key, owner) in candidates {
+                names.push(key.1.clone());
                 if registry.detach(&key, &owner) {
                     if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
                     }
                 }
             }
-            failure.map_or(Ok(()), Err)
+            failure.map_or(Ok(names), Err)
         })
         .await
     }
