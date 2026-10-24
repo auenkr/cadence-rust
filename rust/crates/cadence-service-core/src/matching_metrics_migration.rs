@@ -377,17 +377,29 @@ mod sink_tests {
         assert_eq!(recording.events()[0].tags["histogram_scale"], "2");
 
         let mut policy = MigrationPolicy::default();
-        policy.histograms.default = "both".into();
-        policy.gauges.default = "both".into();
-        policy.counters.default = "both".into();
-        policy.histograms.names.insert("task_latency".into(), false);
+        policy.histograms.names.insert("task_latency".into(), true);
         policy.gauges.names.insert("cache_size_gauge".into(), true);
+        policy.counters.names.insert("replication_tasks_fetched_counter".into(), true);
         let recording = Arc::new(RecordingMetricSink::default());
         let sink = MigrationMetricSink::new(recording.clone(), policy);
         sink.record(event("task_latency", MetricKind::Histogram));
         sink.record(event("cache_size_gauge", MetricKind::Gauge));
         sink.record(event("replication_tasks_fetched_counter", MetricKind::Counter));
-        assert_eq!(recording.events().iter().map(|e| (e.name,e.kind)).collect::<Vec<_>>(), vec![("cache_size_gauge",MetricKind::Gauge),("replication_tasks_fetched_counter",MetricKind::Counter)]);
+        assert_eq!(recording.events().len(), 3);
+
+        let mut policy = MigrationPolicy::default();
+        policy.histograms.default = "both".into();
+        policy.gauges.default = "both".into();
+        policy.counters.default = "both".into();
+        policy.histograms.names.insert("task_latency".into(), false);
+        policy.gauges.names.insert("cache_size_gauge".into(), false);
+        policy.counters.names.insert("replication_tasks_fetched_counter".into(), false);
+        let recording = Arc::new(RecordingMetricSink::default());
+        let sink = MigrationMetricSink::new(recording.clone(), policy);
+        sink.record(event("task_latency", MetricKind::Histogram));
+        sink.record(event("cache_size_gauge", MetricKind::Gauge));
+        sink.record(event("replication_tasks_fetched_counter", MetricKind::Counter));
+        assert!(recording.events().is_empty());
     }
 
     #[test]
@@ -403,8 +415,15 @@ mod sink_tests {
         assert!(crate::config::Config::from_yaml("histograms: {default: ''}").is_err());
         assert!(crate::config::Config::from_yaml("gauge-migration: {default: ''}").is_err());
         assert!(crate::config::Config::from_yaml("counter-migration: {default: ''}").is_err());
-        let yaml = "gauge-migration: {names: {bogus_gauge: false}}";
-        assert!(crate::config::Config::from_yaml(yaml).is_err());
+        for yaml in [
+            "histograms: {names: {bogus_histogram: false}}",
+            "gauge-migration: {names: {bogus_gauge: false}}",
+            "counter-migration: {names: {bogus_counter: false}}",
+            "gauge-migration: {default: bogus}",
+            "counter-migration: {default: bogus}",
+        ] {
+            assert!(crate::config::Config::from_yaml(yaml).is_err(), "{yaml}");
+        }
     }
 }
 
