@@ -596,13 +596,26 @@ async function run() {
     const ringpopDeadline = Date.now() + 30000;
     let observedOwners = new Map();
     while (Date.now() < ringpopDeadline) {
-      const observations = await Promise.all(ownerProbeNames.map(async name => {
+      let observations;
+      try {
+      observations = await Promise.all(ownerProbeNames.map(async name => {
         const [primaryOwner, secondaryOwner] = await Promise.all([
           directPartitionOwner(primaryMembershipPeer, domain, name),
           directPartitionOwner(secondaryPeer, domain, name),
         ]);
         return [name, primaryOwner, secondaryOwner];
       }));
+      } catch (error) {
+        // Configstore startup can finish after the first node is discoverable.
+        // A not-yet-bound second listener is not a membership observation.
+        if (error.code !== grpc.status.UNAVAILABLE) throw error;
+        if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) {
+          throw new Error('secondary Rust Matching exited during membership convergence');
+        }
+        lastConvergenceError = String(error);
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
       observedOwners = new Map(observations.map(([name, primaryOwner, secondaryOwner]) => [name, { primaryOwner, secondaryOwner }]));
       const owners = new Set(observations.flatMap(([, primaryOwner, secondaryOwner]) => [primaryOwner, secondaryOwner]));
       if (observations.every(([, primaryOwner, secondaryOwner]) => primaryOwner === secondaryOwner)
