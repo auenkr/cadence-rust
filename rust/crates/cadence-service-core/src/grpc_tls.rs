@@ -361,7 +361,9 @@ impl ServerCertVerifier for SkipChainVerification {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider.signature_verification_algorithms.supported_schemes()
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -375,8 +377,8 @@ mod tests {
     use std::{net::SocketAddr, path::Path, time::Duration};
 
     use tonic_reflection::pb::v1::{
-        server_reflection_client::ServerReflectionClient, server_reflection_request::MessageRequest,
-        ServerReflectionRequest,
+        server_reflection_client::ServerReflectionClient,
+        server_reflection_request::MessageRequest, ServerReflectionRequest,
     };
 
     use super::*;
@@ -397,9 +399,13 @@ mod tests {
 
     /// Returns `(certificate PEM, private key PEM)` for `names`, signed by `ca`.
     fn issue(ca: &Ca, names: &[&str]) -> (String, String) {
-        let params =
-            rcgen::CertificateParams::new(names.iter().map(|name| name.to_string()).collect::<Vec<_>>())
-                .unwrap();
+        let params = rcgen::CertificateParams::new(
+            names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         let key = rcgen::KeyPair::generate().unwrap();
         let cert = params.signed_by(&key, &ca.cert, &ca.key).unwrap();
         (cert.pem(), key.serialize_pem())
@@ -419,9 +425,9 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = server_builder(tls).unwrap().add_service(reflection);
-        tokio::spawn(server.serve_with_incoming(
-            tokio_stream::wrappers::TcpListenerStream::new(listener),
-        ));
+        tokio::spawn(
+            server.serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
         addr
     }
 
@@ -439,7 +445,11 @@ mod tests {
                 .await
                 .map_err(|status| status.to_string())?
                 .into_inner();
-            match stream.message().await.map_err(|status| status.to_string())? {
+            match stream
+                .message()
+                .await
+                .map_err(|status| status.to_string())?
+            {
                 Some(_) => Ok(()),
                 None => Err("reflection stream closed".to_owned()),
             }
@@ -449,7 +459,12 @@ mod tests {
             .map_err(|_| "gRPC call timed out".to_owned())?
     }
 
-    fn server_config(dir: &Path, ca_file: &str, identity: &(String, String), client_auth: bool) -> TlsConfig {
+    fn server_config(
+        dir: &Path,
+        ca_file: &str,
+        identity: &(String, String),
+        client_auth: bool,
+    ) -> TlsConfig {
         TlsConfig {
             enabled: true,
             cert_file: write(dir, "server-cert.pem", &identity.0),
@@ -601,9 +616,14 @@ mod tests {
             .unwrap()
         };
 
-        assert_eq!(call(addr, Some(&client(Some(&client_identity)))).await, Ok(()));
+        assert_eq!(
+            call(addr, Some(&client(Some(&client_identity)))).await,
+            Ok(())
+        );
         assert!(call(addr, Some(&client(None))).await.is_err());
-        assert!(call(addr, Some(&client(Some(&rogue_identity)))).await.is_err());
+        assert!(call(addr, Some(&client(Some(&rogue_identity))))
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -672,9 +692,14 @@ mod tests {
         let server_identity = issue(&ca, &["localhost", "127.0.0.1"]);
         let ca_file = write(dir.path(), "ca.pem", &ca.cert.pem());
         let other_ca_file = write(dir.path(), "other-ca.pem", &other.cert.pem());
-        let server = server_tls(&server_config(dir.path(), &ca_file, &server_identity, false))
-            .unwrap()
-            .unwrap();
+        let server = server_tls(&server_config(
+            dir.path(),
+            &ca_file,
+            &server_identity,
+            false,
+        ))
+        .unwrap()
+        .unwrap();
         let addr = serve_reflection(Some(server)).await;
 
         let verified = |ca_file: &str, server_name: &str, enable_host_verification: bool| {
@@ -690,13 +715,27 @@ mod tests {
         };
 
         // The IP address is covered by the certificate's SAN.
-        assert_eq!(call(addr, Some(&verified(&ca_file, "", true))).await, Ok(()));
-        assert_eq!(call(addr, Some(&verified(&ca_file, "localhost", true))).await, Ok(()));
-        assert!(call(addr, Some(&verified(&ca_file, "wrong.example", true))).await.is_err());
-        assert!(call(addr, Some(&verified(&other_ca_file, "", true))).await.is_err());
+        assert_eq!(
+            call(addr, Some(&verified(&ca_file, "", true))).await,
+            Ok(())
+        );
+        assert_eq!(
+            call(addr, Some(&verified(&ca_file, "localhost", true))).await,
+            Ok(())
+        );
+        assert!(call(addr, Some(&verified(&ca_file, "wrong.example", true)))
+            .await
+            .is_err());
+        assert!(call(addr, Some(&verified(&other_ca_file, "", true)))
+            .await
+            .is_err());
         // Go's InsecureSkipVerify accepts the same server with an untrusted CA and wrong name.
         assert_eq!(
-            call(addr, Some(&verified(&other_ca_file, "wrong.example", false))).await,
+            call(
+                addr,
+                Some(&verified(&other_ca_file, "wrong.example", false))
+            )
+            .await,
             Ok(())
         );
     }
