@@ -457,9 +457,18 @@ mod tests {
 
     #[test]
     fn missing_server_identity_keeps_tls_enabled_without_a_certificate() {
-        let config = TlsConfig { enabled: true, ..Default::default() };
-        let server = server_tls_without_identity(&config).unwrap().unwrap();
-        assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
+        let dir = tempfile::tempdir().unwrap();
+        let invalid_ca = dir.path().join("invalid-ca.pem");
+        std::fs::write(&invalid_ca, b"not a PEM certificate").unwrap();
+        for config in [
+            TlsConfig { enabled: true, ..Default::default() },
+            TlsConfig { enabled: true, cert_file: "/ignored/cert.pem".into(), ..Default::default() },
+            TlsConfig { enabled: true, key_file: "/ignored/key.pem".into(), ..Default::default() },
+            TlsConfig { enabled: true, ca_file: invalid_ca.to_string_lossy().into_owned(), require_client_auth: true, ..Default::default() },
+        ] {
+            let server = server_tls_without_identity(&config).unwrap().unwrap();
+            assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
+        }
         let missing_ca = TlsConfig { enabled: true, ca_file: "/missing/cadence-ca.pem".into(), ..Default::default() };
         assert!(server_tls_without_identity(&missing_ca).is_err());
     }

@@ -12,6 +12,11 @@ use uuid::Uuid;
 #[tokio::test]
 async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_without_stopping() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tonic_reflection::pb::v1::{
+        server_reflection_client::ServerReflectionClient,
+        server_reflection_request::MessageRequest,
+        ServerReflectionRequest,
+    };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let tls = cadence_service_core::config::TlsConfig { enabled: true, ..Default::default() };
@@ -21,21 +26,30 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
         listener, matching, None, Some(config),
     ));
 
-    // A TLS record reaches the real acceptor, which rejects the handshake for
-    // lack of a server certificate; it is never forwarded as plaintext.
-    let mut tls_client = tokio::net::TcpStream::connect(addr).await.unwrap();
-    tls_client.write_all(&[22, 3, 1, 0, 0]).await.unwrap();
-    let mut response = [0; 8];
-    assert!(tokio::time::timeout(Duration::from_secs(2), tls_client.read(&mut response)).await.unwrap().unwrap() <= response.len());
+    // Real TLS ClientHellos reach the rustls acceptor, which rejects the
+    // handshake because it has no certificate to present.
+    let client_tls = cadence_service_core::grpc_tls::client_tls(&tls).unwrap().unwrap();
+    for _ in 0..3 {
+        let channel = cadence_service_core::grpc_tls::endpoint_channel(&addr.to_string(), Some(&client_tls)).unwrap();
+        let mut client = ServerReflectionClient::new(channel);
+        let request = ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::ListServices(String::new())),
+        };
+        assert!(tokio::time::timeout(Duration::from_secs(3), client.server_reflection_info(tokio_stream::once(request))).await.unwrap().is_err());
+    }
 
     let mut plain_client = tokio::net::TcpStream::connect(addr).await.unwrap();
     plain_client.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
-    assert!(tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response)).await.unwrap().unwrap() <= response.len());
+    let mut response = [0; 64];
+    assert_eq!(tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response)).await.unwrap().unwrap(), 0);
 
     // Another TCP connection is accepted after both failed handshakes.
     let _after_failures = tokio::net::TcpStream::connect(addr).await.unwrap();
     assert!(!server.is_finished());
     server.abort();
+    let _ = server.await;
+    assert!(tokio::net::TcpStream::connect(addr).await.is_err(), "listener remained open after its serving task was aborted");
 }
 
 #[tokio::test]
