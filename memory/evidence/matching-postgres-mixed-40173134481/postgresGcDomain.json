@@ -1,0 +1,168 @@
+{
+  "result": "passed",
+  "ackedList": "pg-gc-acked-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+  "pendingList": "pg-gc-pending-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+  "watermark": 1,
+  "taskGarbageCollection": {
+    "pendingTaskRows": 1,
+    "statements": [
+      "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a171fcd1c275b5a62b976d6a6e64f5') AND name='pg-gc-acked-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07' ORDER BY task_type",
+      "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a171fcd1c275b5a62b976d6a6e64f5') AND task_list_name='pg-gc-pending-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07'"
+    ],
+    "snapshots": [
+      {
+        "at": "2026-10-25T07:36:15.235Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:15.821Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:16.409Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:16.999Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:17.585Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:18.172Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:18.760Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:19.348Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": false,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 0,
+            "persistedRange": 1,
+            "liveRange": 1
+          }
+        }
+      },
+      {
+        "at": "2026-10-25T07:36:19.998Z",
+        "pendingTasks": 1,
+        "converged": true,
+        "acksCoverRemovedRows": true,
+        "queues": {
+          "pgDecision": {
+            "taskRows": 0,
+            "ackLevel": 1,
+            "persistedRange": 2,
+            "liveRange": 2
+          }
+        }
+      }
+    ],
+    "queues": {
+      "pgDecision": {
+        "taskList": "pg-gc-acked-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+        "taskType": 0,
+        "remainingTaskRows": 0,
+        "ackLevel": 1,
+        "observedMaxTaskId": 1,
+        "minAck": null,
+        "persistedRange": 2,
+        "liveBlock": {
+          "startId": 100001,
+          "endId": 200000
+        },
+        "dataEncoding": "thriftrw"
+      }
+    },
+    "rangeSize": 100000
+  },
+  "domainMetadata": {
+    "domain": "service-compat-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+    "domainId": "01a171fcd1c275b5a62b976d6a6e64f5",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 493,
+    "notificationVersions": [
+      5
+    ]
+  }
+}

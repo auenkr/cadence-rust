@@ -1,0 +1,1 @@
+tests/gates/run-postgres-lane.sh out/gate /tmp/cargo-target-final-40173134481/debug/cadence-matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --probe-pg-gc-domain --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint 

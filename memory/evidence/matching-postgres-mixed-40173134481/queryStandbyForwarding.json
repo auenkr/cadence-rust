@@ -1,0 +1,7 @@
+{
+  "result": "passed",
+  "rootPartition": "query-standby-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+  "childPartition": "/__cadence_sys/query-standby-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07/1",
+  "directChildAnswered": true,
+  "frontendAnswered": 6
+}

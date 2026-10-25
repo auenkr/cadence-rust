@@ -1,0 +1,39 @@
+{
+  "result": "passed",
+  "rootPartition": "durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+  "queuedBeforeRestart": [
+    {
+      "partition": "durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+      "activityId": "durable-0",
+      "rows": 1
+    },
+    {
+      "partition": "/__cadence_sys/durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07/1",
+      "activityId": "durable-1",
+      "rows": 1
+    },
+    {
+      "partition": "/__cadence_sys/durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07/2",
+      "activityId": "durable-2",
+      "rows": 1
+    }
+  ],
+  "restart": {
+    "killedPid": 9204,
+    "restartedPid": 9442
+  },
+  "drainedAfterRestart": [
+    {
+      "partition": "/__cadence_sys/durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07/1",
+      "activityId": "durable-1"
+    },
+    {
+      "partition": "/__cadence_sys/durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07/2",
+      "activityId": "durable-2"
+    },
+    {
+      "partition": "durable-restart-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07",
+      "activityId": "durable-0"
+    }
+  ]
+}

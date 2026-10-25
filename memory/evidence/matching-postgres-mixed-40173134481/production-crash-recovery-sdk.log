@@ -1,0 +1,7 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+{"level":"info","ts":"2026-10-25T07:36:07.909Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-25T07:36:07.909Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-25T07:36:07.953Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","TaskList":"production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","WorkerID":"9176@runnervmtai0g@production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07@a5cd9490-9242-479c-94fc-69fbd6f6a7ac"}
+{"level":"info","ts":"2026-10-25T07:36:07.956Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","TaskList":"production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","WorkerID":"9176@runnervmtai0g@production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07@a5cd9490-9242-479c-94fc-69fbd6f6a7ac"}
+{"level":"info","ts":"2026-10-25T07:36:08.015Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","TaskList":"production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07","WorkerID":"9176@runnervmtai0g@production-crash-d0b7ceda-6a57-41f9-adc1-ac2dd8f06a07@a5cd9490-9242-479c-94fc-69fbd6f6a7ac"}

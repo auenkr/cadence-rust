@@ -611,16 +611,31 @@ workspace rerun is needed here. The uncached final workspace run on production
 source `fade09c501e23212d4d86e64c653057d589d1910` remains the named fresh
 evidence. Keep workspace-wide format advisory `1` visible.
 
-The required mixed-lane sequence puts PostgreSQL before MySQL extended. After
-confirming no mixed gate was active, dispatched PostgreSQL only:
+The required mixed-lane sequence puts PostgreSQL before MySQL extended.
+PostgreSQL run
 [40173134481](https://github.com/auenkr/cadence-rust/actions/runs/40173134481)
-is in progress on exact head `29bdd2b04b573309112286c57f1c347f0ba0b60c` at
-`t3/matching-validation-history-ring-20261025`, with input `lane=postgres`.
-This lane's configured command includes the original Go Frontend/History/Worker
-with no Go Matching, PostgreSQL probes, restart/failure recovery, query standby,
-partition listing, durable restart and AutoConfigHint. Its Matching binary
-SHA256 and artifact evidence are pending completion. No second lane was
-dispatched; MySQL-probes remains queued.
+completed SUCCESS on exact head `29bdd2b04b573309112286c57f1c347f0ba0b60c` at
+`t3/matching-validation-history-ring-20261025`, with `lane=postgres`. Fresh
+Matching build, gate, lane and probe exits were 0; binary SHA256 is
+`8adfef671d7ce020e14079e829b04419892af15ffe79d5baa0328c7dd50a052a`. The
+artifact reports original Go Frontend/History/Worker with Rust Matching via
+production Ringpop and `goMatchingStarted=false`. SDK restart, crash/failure,
+idle recovery and graceful drain probes passed, as did PostgreSQL GC/domain,
+standby query, partition listing, durable restart/drain and AutoConfigHint.
+Literal result labels are `preliminary-passed` and `acceptanceEligible:false`;
+do not promote this lane to service sign-off. Compact exits, topology, recovery,
+probe and cleanup evidence are in
+`memory/evidence/matching-postgres-mixed-40173134481/`; the original ZIP is in
+`/mnt/storage/service/ci-evidence/run-40173134481/`.
+
+After confirming no mixed gate was active, dispatched only the next planned
+lane, MySQL extended (`lane=mysql-probes`):
+[40173683827](https://github.com/auenkr/cadence-rust/actions/runs/40173683827)
+is in progress on the same stable ref and exact head
+`29bdd2b04b573309112286c57f1c347f0ba0b60c`. Its Matching binary SHA256 and
+gate evidence are pending. Thrift, configstore, shard-distributor, Cassandra
+and active-offer remain queued. Do not dispatch another lane until MySQL
+completes and its artifact is reviewed.
 
 The exact `rust/` tree diff from `fade09c501e23212d4d86e64c653057d589d1910`
 to `29bdd2b04b573309112286c57f1c347f0ba0b60c` is empty. Thus fresh workspace
