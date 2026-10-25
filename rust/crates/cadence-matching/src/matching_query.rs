@@ -5,7 +5,10 @@
 use cadence_proto::{api as p, history as h, matching as m};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use tokio::sync::{oneshot, Notify};
 use tonic::Status;
@@ -56,45 +59,179 @@ impl WorkerAnswer {
 #[derive(Default)]
 pub struct QueryChannel {
     pending: Mutex<VecDeque<PendingQuery>>,
-    waiting: Mutex<HashMap<String, oneshot::Sender<QueryOutcome>>>,
+    waiting: Mutex<HashMap<String, (u64, oneshot::Sender<QueryOutcome>)>>,
+    /// Engine-wide task-ID index (Go `lockableQueryTaskMap`), shared by every
+    /// owner of one registry. `None` for standalone channels.
+    index: Option<Arc<QueryIndex>>,
     notify: Notify,
     /// Decision polls parked in `next`, used by `try_offer` to mirror Go's
     /// non-blocking `queryTaskC` send (succeeds only with a waiting poller).
     waiters: std::sync::atomic::AtomicUsize,
 }
+/// Go `lockableQueryTaskMap`: task ID -> the channel holding its waiter. The
+/// index owns an `Arc` of the channel, so a result can still be delivered after
+/// the owning task list was unloaded or replaced. A later `put` of the same ID
+/// wins; each entry carries a generation so an older registration's cleanup
+/// cannot remove the newer one.
+#[derive(Default)]
+pub struct QueryIndex {
+    entries: Mutex<HashMap<String, (u64, Arc<QueryChannel>)>>,
+    next_generation: AtomicU64,
+}
+
+impl QueryIndex {
+    /// Go `deliverQueryResult`: O(1) lookup by task ID alone.
+    pub fn deliver(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {
+        loop {
+            let entry = self
+                .entries
+                .lock()
+                .expect("matching query index lock")
+                .get(task_id)
+                .cloned();
+            let Some((generation, channel)) = entry else { break };
+            match channel.take_waiter(task_id, Some(generation)) {
+                Some(sender) => {
+                    // The waiter may have timed out; dropping the send is Go's
+                    // buffered-channel behaviour after the deferred delete.
+                    let _ = sender.send(outcome);
+                    return Ok(());
+                }
+                None => {
+                    // Stale entry (waiter already gone): drop it and report missing.
+                    self.remove(task_id, generation);
+                    break;
+                }
+            }
+        }
+        Err(Status::not_found("query task not found, or already expired"))
+    }
+
+    fn remove(&self, task_id: &str, generation: u64) {
+        let mut entries = self.entries.lock().expect("matching query index lock");
+        if entries.get(task_id).is_some_and(|(g, _)| *g == generation) {
+            entries.remove(task_id);
+        }
+    }
+}
+
 /// Mirror Go's deferred query-map deletion on completion, timeout, and RPC
 /// cancellation (not only on the explicit timeout branch).
 pub struct Registration {
     channel: std::sync::Arc<QueryChannel>,
     task_id: String,
+    generation: u64,
 }
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.channel.withdraw(&self.task_id);
+        self.channel.withdraw_generation(&self.task_id, self.generation);
     }
 }
 
 impl QueryChannel {
-    pub fn registration(self: &std::sync::Arc<Self>, task_id: &str) -> Registration {
-        Registration { channel: self.clone(), task_id: task_id.into() }
-    }
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A channel whose waiters are also indexed engine-wide.
+    pub fn with_index(index: Arc<QueryIndex>) -> Self {
+        Self {
+            index: Some(index),
+            ..Self::default()
+        }
+    }
+
+    /// Install the result waiter and return a guard that removes exactly this
+    /// registration (waiter, index entry, pending offer) when dropped.
+    pub fn register_guarded(
+        self: &Arc<Self>,
+        task_id: &str,
+    ) -> (oneshot::Receiver<QueryOutcome>, Registration) {
+        let (generation, receiver) = self.install_waiter(task_id);
+        let registration = Registration {
+            channel: self.clone(),
+            task_id: task_id.into(),
+            generation,
+        };
+        (receiver, registration)
+    }
+
+    fn install_waiter(self: &Arc<Self>, task_id: &str) -> (u64, oneshot::Receiver<QueryOutcome>) {
+        let (sender, receiver) = oneshot::channel();
+        let generation = match &self.index {
+            Some(index) => index.next_generation.fetch_add(1, Ordering::SeqCst) + 1,
+            None => 0,
+        };
+        self.waiting
+            .lock()
+            .expect("matching query lock")
+            .insert(task_id.into(), (generation, sender));
+        if let Some(index) = &self.index {
+            index
+                .entries
+                .lock()
+                .expect("matching query index lock")
+                .insert(task_id.into(), (generation, self.clone()));
+        }
+        (generation, receiver)
+    }
+
+    /// Remove the waiter for `task_id`; with `generation` only if it matches.
+    fn take_waiter(
+        &self,
+        task_id: &str,
+        generation: Option<u64>,
+    ) -> Option<oneshot::Sender<QueryOutcome>> {
+        let mut waiting = self.waiting.lock().expect("matching query lock");
+        if let Some(wanted) = generation {
+            if waiting.get(task_id).is_none_or(|(g, _)| *g != wanted) {
+                return None;
+            }
+        }
+        let (taken, sender) = waiting.remove(task_id)?;
+        drop(waiting);
+        if let Some(index) = &self.index {
+            index.remove(task_id, taken);
+        }
+        Some(sender)
+    }
+
+    fn withdraw_generation(&self, task_id: &str, generation: u64) {
+        let replaced = {
+            let mut waiting = self.waiting.lock().expect("matching query lock");
+            match waiting.get(task_id) {
+                Some((g, _)) if *g != generation => true,
+                Some(_) => {
+                    waiting.remove(task_id);
+                    false
+                }
+                None => false,
+            }
+        };
+        if replaced {
+            // A newer registration owns this ID; leave its waiter and offer.
+            return;
+        }
+        if let Some(index) = &self.index {
+            index.remove(task_id, generation);
+        }
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .retain(|query| query.task_id != task_id);
     }
 
     /// Go `QueryWorkflow`: install the result waiter, then offer the task. The
     /// waiter is registered first so a poller cannot pick up the offer before
     /// the result channel exists.
-    pub fn register(&self, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
+    pub fn register(self: &Arc<Self>, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
         let receiver = self.register_waiter(&query.task_id);
         self.offer(query);
         receiver
     }
 
-    pub fn register_waiter(&self, task_id: &str) -> oneshot::Receiver<QueryOutcome> {
-        let (sender, receiver) = oneshot::channel();
-        self.waiting.lock().expect("matching query lock").insert(task_id.into(), sender);
-        receiver
+    pub fn register_waiter(self: &Arc<Self>, task_id: &str) -> oneshot::Receiver<QueryOutcome> {
+        self.install_waiter(task_id).1
     }
 
     pub fn offer(&self, query: PendingQuery) {
@@ -139,35 +276,11 @@ impl QueryChannel {
         self.pending.lock().expect("matching query lock").pop_front()
     }
 
-    /// Deliver to a waiter on this channel, handing the outcome back when no
-    /// waiter is registered so an engine-wide lookup can try other channels.
-    pub fn try_complete(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), QueryOutcome> {
-        let sender = self
-            .waiting
-            .lock()
-            .expect("matching query lock")
-            .remove(task_id);
-        match sender {
-            Some(sender) => {
-                let _ = sender.send(outcome);
-                Ok(())
-            }
-            None => Err(outcome),
-        }
-    }
-
     /// Go `deliverQueryResult`. A missing waiter means the caller already gave
     /// up or the task expired.
     pub fn complete(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {
-        let sender = self
-            .waiting
-            .lock()
-            .expect("matching query lock")
-            .remove(task_id);
-        match sender {
+        match self.take_waiter(task_id, None) {
             Some(sender) => {
-                // The waiter may have timed out; dropping the send is Go's
-                // buffered-channel behaviour after the deferred delete.
                 let _ = sender.send(outcome);
                 Ok(())
             }
@@ -178,10 +291,7 @@ impl QueryChannel {
     /// Withdraw an offer whose caller gave up (Go's deferred
     /// `lockableQueryTaskMap.delete` plus matcher cleanup).
     pub fn withdraw(&self, task_id: &str) {
-        self.waiting
-            .lock()
-            .expect("matching query lock")
-            .remove(task_id);
+        let _ = self.take_waiter(task_id, None);
         self.pending
             .lock()
             .expect("matching query lock")
@@ -417,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_query_poll_removes_waiter_and_cannot_accept_an_offer() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let mut next = Box::pin(channel.next());
         assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
         assert!(channel.has_waiters());
@@ -435,7 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn registered_query_is_offered_exactly_once_to_a_parked_poller() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let _receiver = channel.register_waiter("task");
         assert!(channel.take().is_none());
         let mut next = Box::pin(channel.next());
@@ -449,7 +559,7 @@ mod tests {
 
     #[tokio::test]
     async fn offer_is_delivered_once_and_completed_by_task_id() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let receiver = channel.register(query("task-1"));
         let offered = channel.next().await;
         assert_eq!(offered.task_id, "task-1");
@@ -500,7 +610,7 @@ mod tests {
 
     #[tokio::test]
     async fn internal_error_fails_the_waiting_query() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let receiver = channel.register(query("task-3"));
         let _ = channel.next().await;
         channel
@@ -512,7 +622,7 @@ mod tests {
 
     #[tokio::test]
     async fn completing_an_unknown_task_reports_not_found() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         assert!(channel
             .complete("missing", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
             .is_err());
@@ -520,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn withdraw_removes_an_abandoned_offer() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let _receiver = channel.register(query("task-2"));
         channel.withdraw("task-2");
         // No offer remains, and a late completion is rejected.
@@ -591,7 +701,7 @@ mod tests {
     #[tokio::test]
     async fn sync_match_queued_query_is_returned_to_next() {
         // Go Test_poll_QueryTask: a query already on the query channel is the poll result.
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         channel.offer(query("query-1"));
         let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
             .await
@@ -619,7 +729,7 @@ mod tests {
     async fn sync_match_non_blocking_query_poll_returns_queued_query_once() {
         // Go Test_pollNonBlocking_QueryTask: a queued query is returned with no
         // wait, and once taken the query channel is empty again.
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         channel.offer(query("query-1"));
         let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
             .await
@@ -628,5 +738,38 @@ mod tests {
         assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
             .await
             .is_err());
+    }
+
+    #[test]
+    fn matching_query_index_delivers_after_owner_channel_detached() {
+        let index = std::sync::Arc::new(QueryIndex::default());
+        let channel = std::sync::Arc::new(QueryChannel::with_index(index.clone()));
+        let (mut receiver, registration) = channel.register_guarded("task-a");
+        drop(channel); // the owner lost its handle; the index keeps the channel
+        index
+            .deliver("task-a", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .unwrap();
+        assert!(receiver.try_recv().is_ok());
+        drop(registration);
+        assert_eq!(
+            index
+                .deliver("task-a", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+                .unwrap_err()
+                .code(),
+            tonic::Code::NotFound
+        );
+    }
+
+    #[test]
+    fn matching_query_older_registration_drop_keeps_newer_duplicate() {
+        let index = std::sync::Arc::new(QueryIndex::default());
+        let channel = std::sync::Arc::new(QueryChannel::with_index(index.clone()));
+        let (_old_receiver, old) = channel.register_guarded("dup");
+        let (mut new_receiver, _new) = channel.register_guarded("dup");
+        drop(old);
+        index
+            .deliver("dup", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .unwrap();
+        assert!(new_receiver.try_recv().is_ok());
     }
 }

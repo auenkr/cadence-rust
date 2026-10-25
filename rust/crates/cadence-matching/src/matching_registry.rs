@@ -170,6 +170,7 @@ pub struct QueueRegistry {
     history: MatchingHistoryClient,
     range_size: NonZeroU32,
     state: Arc<Mutex<State>>,
+    query_index: Arc<crate::matching_query::QueryIndex>,
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     ownership_policy: Arc<RwLock<Option<QueueOwnershipPolicy>>>,
@@ -553,23 +554,14 @@ impl QueueRegistry {
     }
 
     /// Go `deliverQueryResult`: the engine-wide `lockableQueryTaskMap` is keyed
-    /// by task ID alone, so the lookup ignores domain and task list.
+    /// by task ID alone, so the lookup ignores domain and task list and still
+    /// works after the owning queue was unloaded or replaced.
     pub fn deliver_query_result(
         &self,
         task_id: &str,
-        mut outcome: crate::matching_query::QueryOutcome,
+        outcome: crate::matching_query::QueryOutcome,
     ) -> Result<(), tonic::Status> {
-        let channels: Vec<_> = {
-            let state = self.state.lock().expect("Matching registry lock");
-            state.owners.values().map(|o| o.queries.clone()).collect()
-        };
-        for channel in channels {
-            match channel.try_complete(task_id, outcome) {
-                Ok(()) => return Ok(()),
-                Err(back) => outcome = back,
-            }
-        }
-        Err(tonic::Status::not_found("query task not found, or already expired"))
+        self.query_index.deliver(task_id, outcome)
     }
 
     /// Go's domain failover callback releases blocked normal decision/activity
@@ -730,6 +722,7 @@ impl QueueRegistry {
             history,
             range_size,
             state: Arc::new(Mutex::new(State::default())),
+            query_index: Arc::default(),
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
             ownership_policy: Arc::new(RwLock::new(None)),
@@ -1484,7 +1477,9 @@ impl QueueRegistry {
                         limiter,
                         queue,
                         pollers,
-                        queries: Arc::new(crate::matching_query::QueryChannel::new()),
+                        queries: Arc::new(crate::matching_query::QueryChannel::with_index(
+                            registry.query_index.clone(),
+                        )),
                         qps,
                         partitions,
                         sync_matcher,
