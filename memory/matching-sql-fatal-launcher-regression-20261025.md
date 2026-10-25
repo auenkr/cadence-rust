@@ -44,8 +44,11 @@
   or test evidence.
 - Phase 1 focused runs were reported by the user as passing and are merged to
   master at `592ee24c9`; this records the typed dependency baseline only.
-- Current branch's follow-up focused Matching CI: pending dispatch/result
-  (record exact run URL, head SHA, conclusion, and binary SHA when available).
+- Current branch's follow-up focused Matching CI:
+  <https://github.com/auenkr/cadence-rust/actions/runs/40221421999>, head
+  `ae699c9bd1a0fef096f9f86d1e6ffb3ee42aec5d`, status **in progress** at the
+  one-time status check. No conclusion or binary SHA is available yet; do not
+  treat it as passed.
 
 ## Remaining limits
 
