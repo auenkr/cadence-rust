@@ -1,0 +1,3 @@
+[1m[92m    Updating[0m crates.io index
+[1m[91merror[0m: cannot update the lock file /home/runner/work/cadence-rust/cadence-rust/rust/Cargo.lock because --locked was passed to prevent this
+help: to generate the lock file without accessing the network, remove the --locked flag and use --offline instead.

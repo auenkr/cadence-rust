@@ -332,16 +332,28 @@ The evidence summary is
 
 Run https://github.com/auenkr/cadence-rust/actions/runs/40165433074 was
 dispatched on pinned ref `t3/matching-validation-tls-e3c79b3-20261025` at head
-`4b5d90458471c36ab8064bb69c695854ffc23de5`; it is `in_progress`. At dispatch,
-no mixed gate was active. Master workspace run 40165304531 was still running.
-This is the only mixed gate dispatched; do not dispatch the next lane until it
-finishes and its artifacts are reviewed.
+`4b5d90458471c36ab8064bb69c695854ffc23de5`; it failed during build with exit
+101 because `--locked` prevented Cargo from refreshing `rust/Cargo.lock`.
+Interop was skipped; this is a setup failure, not production TLS evidence. At
+dispatch, no other mixed gate was active; master workspace run 40165304531 was
+still running. Compact failure evidence:
+`memory/evidence/matching-http-tls-interop-failure-40165433074/`.
 
 The initial dispatch request was rejected by GitHub before run creation with
 HTTP 422: `runner.temp` is unavailable in job-level `env` for
 `matching-http-tls-interop.yml`. Corrected the workflow to select the fresh
 target in a step via `$RUNNER_TEMP` and `$GITHUB_ENV`; Ruby YAML parsing and
-`git diff --check` passed. The validation branch is advanced once to include
-this dispatch-only workflow correction. The failed request did not start a
-gate. Master auto workspace run 40165304531 was in progress; no duplicate
-workspace dispatch is planned.
+`git diff --check` passed. The validation branch
+`t3/matching-validation-tls-e3c79b3-20261025` is pinned at
+`4b5d90458471c36ab8064bb69c695854ffc23de5`, including this dispatch-only
+workflow correction. The failed request did not start a gate. Master auto
+workspace run 40165304531 was in progress; no duplicate workspace dispatch is
+planned.
+
+The subsequent first-lane run failed because `--locked` prevented Cargo from
+refreshing the stale lockfile; no interoperability assertions ran. The
+workflow now uses the repository's standard unlocked CI build and records any
+resulting lockfile diff in its artifact. No TLS source/assertion changed. The
+retry ref is `t3/matching-validation-tls-e3c79b3-r1-20261025`. Dispatch only
+after checking that no mixed gate is active. Run evidence and diagnosis are
+preserved at `memory/evidence/matching-http-tls-interop-failure-40165433074/`.

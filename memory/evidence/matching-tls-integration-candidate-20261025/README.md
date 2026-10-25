@@ -41,8 +41,14 @@ dispatch is needed. Master push started automatic workspace run
 40165304531; record its result without dispatching a duplicate workspace run.
 
 First lane run: https://github.com/auenkr/cadence-rust/actions/runs/40165433074
-is `in_progress` on exact branch head
-`4b5d90458471c36ab8064bb69c695854ffc23de5`. It was dispatched after a run-list
-check showed no mixed gate active. The only active run then was master
-workspace `rust-ci` 40165304531. Do not start the next lane until run
-40165433074 completes and its artifacts are reviewed.
+failed during the build on exact branch head
+`4b5d90458471c36ab8064bb69c695854ffc23de5`; Cargo required updating
+`rust/Cargo.lock` while `--locked` was set, exit 101. The interop step was
+skipped, so this is not a TLS compatibility failure. See
+`memory/evidence/matching-http-tls-interop-failure-40165433074/README.md`.
+
+Workflow correction removes `--locked` and saves any generated lockfile diff
+in the gate artifact without changing TLS source or assertions. The retry uses
+the new immutable ref `t3/matching-validation-tls-e3c79b3-r1-20261025`; record
+its exact SHA before dispatch. Do not dispatch the next lane until that retry
+completes and its artifacts are reviewed.
