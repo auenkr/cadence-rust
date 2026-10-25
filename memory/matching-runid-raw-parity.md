@@ -26,7 +26,7 @@ Implementation review follow-up (branch `t3/matching-runid-raw-tests`):
 - Durable malformed decision Add now requires an error, so the assertion cannot pass if Add unexpectedly succeeds.
 
 Remaining divergences / unverified:
-1. No activity sync-match-to-poller test was added; the direct integration fixture exercises decision start only. Activity path behavior is inferred from shared `TaskData` conversion and distinct Activity history RPC handling, not claimed proven.
+1. Activity sync-match test added (`matching_rpc_activity_sync_match_passes_raw_run_id_to_history_without_persisting`, mocked History RecordActivityTaskStarted, asserts raw string + no durable row). UNCOMPILED/UNRUN: needs CI (`rust-ci.yml -f package=cadence-matching`, after `cadence-persistence`).
 2. Malformed non-empty RunID SQL behavior in Go remains a source-only inference: `MustParseUUID` panic occurs in the async task-writer goroutine with no recovery visible in the inspected writer. Rust instead returns a permanent persistence BackendConfiguration error to Add; it does not reproduce process crash.
 3. Cassandra error type/mapping for rejected UUID not compared with Go's wrapped persistence error; Rust uses BackendConfiguration.
 4. `run_id` best-effort bytes for valid noncanonical forms are canonical; readers needing the string use `run_id_string()` (raw). The queue-persisted row
