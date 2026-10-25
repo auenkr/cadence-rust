@@ -1,0 +1,10 @@
+# Matching Rust formatting remediation — 2026-10-25
+
+- Source commit: `e0e897b7960ab60f484239c9518b9d2e1fc6de8e`.
+- Source Actions run: [40218755961](https://github.com/auenkr/cadence-rust/actions/runs/40218755961), branch `master`; formatting and Rust CI steps completed successfully. The overall workflow remained `in_progress` because the original Go malformed DescribeTaskList oracle returned exit 2.
+- Downloaded artifacts with `TMPDIR=/mnt/storage/service/ci-evidence/download-tmp` into `/mnt/storage/service/ci-evidence/run-40218755961`.
+- Both generated patches contained the same two files: `grpc_matching.rs` and `matching_rpc_tests.rs`. Applied the complete query patch; applied the TLS patch only with `--include` for `launcher.rs` and `grpc_tls.rs` as requested (those files had no hunks). `matching_query.rs` and `matching_registry.rs` also had no patch hunks.
+- Base for the remediation branch: latest `origin/master` at `b87dfedc443facc8be863db7142bb540a6892252`, which includes unrelated SQL oracle workflow/test additions after the source commit.
+- Review: only the two generated Rust source diffs; `git diff --check` passed. A normalized comparison removing layout whitespace and Rustfmt's newly added trailing commas before closing delimiters matched both files byte-for-byte, confirming no program-token changes. No local formatter, Cargo, or Go command was run.
+- Source-run format evidence: `query-format.exit=0` (matching query files), `tls-format.exit=0` (TLS-touched files), `fmt.exit=0` (OpenFeature files), and `workspace-format.exit=1` (existing workspace formatting debt). The source run's targeted matching files therefore passed formatting, while the workspace-wide format check retains residual debt.
+- The focused committed-SHA Actions run will be recorded below after dispatch/completion state is known.
