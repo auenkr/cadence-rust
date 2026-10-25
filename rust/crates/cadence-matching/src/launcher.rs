@@ -1695,7 +1695,8 @@ pub async fn run(
                     (Some(Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)))), None)
                 },
             };
-            let fatal_writer = serving_result.as_ref()
+            let fatal_writer = serving_result
+                .as_ref()
                 .and_then(|result| result.as_ref().err())
                 .and_then(|error| error.downcast_ref::<SqlMatchingWriterFatal>())
                 .map(|fatal| fatal.0.clone());
