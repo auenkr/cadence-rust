@@ -516,4 +516,23 @@ start wait group and `DescribeTaskList` blocks in `startProfiling` until Start
 releases it. Run 40170706003 was canceled before result evidence was produced;
 it was pinned to the earlier exact-expectation revision and is not parity
 evidence. The corrected probe removes the direct engine start and starts the
-handler once. New Actions results are pending.
+handler once.
+
+Go oracle run 40170886290 on `d68fc736661656de3d7fe45b5ceb6bf5c9c2ac4a`
+passed; `go-oracle.exit=0`. Original Go results: absent outer request is
+recovered as a runtime nil-pointer panic; absent nested and empty task-list
+requests succeed in this fixture; malformed reserved name
+`/__cadence_sys//0` returns `*types.InternalServiceError` with
+`invalid partitioned task list name /__cadence_sys//0`, including when the
+domain ID is set to the mock unknown value. The malformed identifier is
+validated before manager/domain lookup. Unknown-domain cases with ordinary or
+nil/empty task-list inputs produce `InternalServiceError` only because the
+oracle's mocked cache returns a synthetic error; don't use its type/message as
+production parity evidence. Empty-name cases share the suite persistence
+manager and may reuse manager state. Full compact artifact and caveats are in
+`memory/evidence/matching-describe-tasklist-go-oracle-40170886290/`.
+
+The focused Rust CI run 40170886290 had completed the Go oracle and all
+preceding audit/format/clippy steps successfully; workspace test was still
+running at last status read. This focused run is not a mixed-cluster gate.
+Do not dispatch a mixed rerun before independent review.
