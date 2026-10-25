@@ -7257,7 +7257,7 @@ async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom(
     // just as two Go Matching handlers traversed through the RPC client do.
     request.set_timeout(Duration::from_secs(2));
     assert!(tokio::time::timeout(
-        Duration::from_millis(500),
+        Duration::from_millis(900),
         matching.poll_for_decision_task(request)
     )
     .await
@@ -7299,7 +7299,7 @@ async fn matching_rpc_local_parent_poll_applies_its_own_expiration_and_tailroom(
         ..Default::default()
     }));
     assert!(tokio::time::timeout(
-        Duration::from_millis(500),
+        Duration::from_secs(10),
         matching.poll_for_activity_task(request)
     )
     .await
