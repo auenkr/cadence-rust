@@ -3676,6 +3676,119 @@ async fn matching_rpc_delivers_query_to_decision_poller() {
 }
 
 #[tokio::test]
+async fn matching_rpc_respond_query_unknown_task_is_not_found_regardless_of_routing() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, _key) = fixture_with_history(&peer);
+    // Go `deliverQueryResult` looks up the task ID only: absent nested request,
+    // absent task list and an unknown domain all yield the same not-found error.
+    let error = matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: None,
+            domain_id: "unknown-domain".into(),
+            task_list: None,
+            task_id: "missing".into(),
+        }))
+        .await
+        .expect_err("unknown query task must fail");
+    assert_eq!(error.code(), tonic::Code::NotFound);
+    assert_eq!(error.message(), "query task not found, or already expired");
+}
+
+#[tokio::test]
+async fn matching_rpc_respond_query_ignores_domain_task_list_and_token_mismatch() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let worker = matching.clone();
+    let poll_domain = domain.clone();
+    let poll = tokio::spawn(async move {
+        worker
+            .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+                domain_id: poll_domain,
+                poller_id: "sdk-worker".into(),
+                request: Some(p::PollForDecisionTaskRequest {
+                    task_list: list(),
+                    identity: "sdk-worker".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })))
+            .await
+    });
+    let root = matching
+        .durable_queue(&domain, &list().unwrap(), 0)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !root.queries.has_waiters() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let querier = matching.clone();
+    let query_domain = domain.clone();
+    let query = tokio::spawn(async move {
+        querier
+            .query_workflow(Request::new(m::QueryWorkflowRequest {
+                request: Some(p::QueryWorkflowRequest {
+                    domain: "domain".into(),
+                    workflow_execution: execution(),
+                    query: Some(p::WorkflowQuery {
+                        query_type: "ping".into(),
+                        query_args: None,
+                    }),
+                    ..Default::default()
+                }),
+                domain_id: query_domain,
+                task_list: list(),
+                forwarded_from: String::new(),
+            }))
+            .await
+    });
+    let delivered = tokio::time::timeout(Duration::from_secs(5), poll)
+        .await
+        .expect("query should reach the decision poller")
+        .unwrap()
+        .expect("poll should succeed")
+        .into_inner();
+    let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+        &delivered.task_token,
+    )
+    .expect("poll should carry a query task token");
+    // Wrong domain, no task list and a token for another task: Go ignores all.
+    matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: Some(p::RespondQueryTaskCompletedRequest {
+                task_token: b"not-a-token".to_vec(),
+                result: Some(p::WorkflowQueryResult {
+                    result_type: p::QueryResultType::Answered as i32,
+                    answer: Some(p::Payload {
+                        data: b"pong".to_vec(),
+                    }),
+                    error_message: String::new(),
+                }),
+                worker_version_info: None,
+            }),
+            domain_id: "other-domain".into(),
+            task_list: None,
+            task_id: token.task_id,
+        }))
+        .await
+        .expect("task-ID-only delivery succeeds");
+    let response = tokio::time::timeout(Duration::from_secs(5), query)
+        .await
+        .expect("query should complete")
+        .unwrap()
+        .expect("query should succeed")
+        .into_inner();
+    assert_eq!(
+        response.query_result.map(|payload| payload.data),
+        Some(b"pong".to_vec())
+    );
+}
+
+#[tokio::test]
 async fn matching_rpc_strong_query_rejects_a_worker_without_consistent_query() {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);

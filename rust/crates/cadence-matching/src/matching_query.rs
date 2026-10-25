@@ -139,6 +139,23 @@ impl QueryChannel {
         self.pending.lock().expect("matching query lock").pop_front()
     }
 
+    /// Deliver to a waiter on this channel, handing the outcome back when no
+    /// waiter is registered so an engine-wide lookup can try other channels.
+    pub fn try_complete(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), QueryOutcome> {
+        let sender = self
+            .waiting
+            .lock()
+            .expect("matching query lock")
+            .remove(task_id);
+        match sender {
+            Some(sender) => {
+                let _ = sender.send(outcome);
+                Ok(())
+            }
+            None => Err(outcome),
+        }
+    }
+
     /// Go `deliverQueryResult`. A missing waiter means the caller already gave
     /// up or the task expired.
     pub fn complete(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {

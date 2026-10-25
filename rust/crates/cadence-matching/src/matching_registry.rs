@@ -552,6 +552,26 @@ impl QueueRegistry {
             .is_some_and(|owner| !owner.queue.is_stopped())
     }
 
+    /// Go `deliverQueryResult`: the engine-wide `lockableQueryTaskMap` is keyed
+    /// by task ID alone, so the lookup ignores domain and task list.
+    pub fn deliver_query_result(
+        &self,
+        task_id: &str,
+        mut outcome: crate::matching_query::QueryOutcome,
+    ) -> Result<(), tonic::Status> {
+        let channels: Vec<_> = {
+            let state = self.state.lock().expect("Matching registry lock");
+            state.owners.values().map(|o| o.queries.clone()).collect()
+        };
+        for channel in channels {
+            match channel.try_complete(task_id, outcome) {
+                Ok(()) => return Ok(()),
+                Err(back) => outcome = back,
+            }
+        }
+        Err(tonic::Status::not_found("query task not found, or already expired"))
+    }
+
     /// Go's domain failover callback releases blocked normal decision/activity
     /// pollers and sticky decision pollers. Owners and their manager state stay
     /// installed so later polls can immediately reuse the same queues.
