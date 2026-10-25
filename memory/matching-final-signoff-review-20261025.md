@@ -14,13 +14,22 @@ Matching is INCOMPLETE. This review does not mark completion.
 - Fixture: HTTP TLS interop (Go ring stub + Rust History fixture), synthetic Go oracle mock errors (nil outer panic / unknown-domain mapping: explicit limitations, no Rust guard).
 - SDK mixed (original Go Frontend/History/Worker + Rust Matching): only the serial lanes below; currently none current-source.
 
-## Concrete untested / open items
-1. No mixed lane on final source (7 lanes: postgres, mysql-probes, thrift, configstore, shard-distributor, Cassandra, active-offer). Only "13 RPC + lifecycle + backends + discovery + recovery" evidence with Go History/Frontend is these lanes.
-2. Real Go History + HTTP/Thrift TLS never combined; accept as limit unless a lane enables TLS (plan says existing lanes run plaintext gRPC).
-3. Audit "genuine gaps" (matching-completion-audit-20261024.md L139-175): `list_task_list_partitions_success_owner_hosts_match_go_lookups` (owner oracle now covers ordering, confirm row closed), `go_get_tasks_batch_size_returns_raw_non_positive_values` (check production observability), cancelled-context propagation tests, file config live reload vs one-shot (decide whether supported config source needs it). Must be explicitly closed/justified.
-4. Root-start `notify_read_partitions` push: ignored test is placeholder; mixed probes do not prove startup push (completion-requirements, runtime reader checkpoint).
-5. Workspace `fmt --all` advisory exit 1 remains; report, do not call pass.
-6. Fresh uncached workspace + Clippy on the final pinned SHA (29bdd or successor) if any further source change; otherwise record the fade09c5 equivalence explicitly.
+## Reconciliation of stale rows (verified read-only, supersedes the earlier list)
+Ancestry (git merge-base): 27d3ff5f, 4e88d36b, 11f13b791, 944e7c2bc are all ancestors of 29bdd and fade09c5; 4e88d36b and 11f13b791 are ancestors of 27d3ff5f.
+- Root-start persisted-config remote-child gRPC notification: CLOSED. Real test at 4e88d36b, CI 40090630855 / 40090951826 (audit L113-126). The old ignored placeholder is not evidence of a missing replacement. Earlier "no direct startup evidence" claim withdrawn.
+- Config file reload: CLOSED. Production watcher tests at 11f13b791 (1->2->malformed/removed retains 2->3, awaited shutdown); CI 40107592237 / 40108030889 in `memory/evidence/matching-runtime-watcher-tests-20261024.md`.
+- Raw batch size: CLOSED as no established gap. Go task_reader.go fallback to default for non-positive, reviewed in `memory/matching-historical-differences-audit-20261025.md` (944e7c2bc); raw getter preserved.
+- Cancellation (pre-cancelled caller, zero History calls, typed status): CLOSED by `memory/matching-refresh-typed-history-status-tests-20261025.md` and tracker (CI 40155206531, fresh 40155846010). Caveat: commit 4cabb9cee is NOT resolvable in this checkout (`git cat-file` fails); pointer rests on the memory record, not a verified object. Not ancestry-checked.
+- Owner-order oracle: CLOSED. Fresh 40168414544 (fade09c5) preserves baseline/add/remove/identity/address-replace/empty-ring/root-child-empty/decision-activity cases.
+Withdrawn: "older runs predate runtime-reader/lifecycle". Candidate 27d3ff5f (PostgreSQL 40108645569, Thrift 40153127238, Cassandra 40153493941, MySQL 40155956238 on e06fd8ca6, shard-distributor 40156296140, configstore 40086531679/e0aeae9e8 older still) is an ancestor of 29bdd.
+Still stale, verified: `git diff 27d3ff5f..29bdd2b04 -- rust` (non-test paths) changes grpc_matching.rs (+/-1693 lines), launcher.rs, grpc_tls.rs, Cargo.toml/lock; matching_rpc_tests.rs also. So every backend/transport lane was run on a different production binary (TLS, embedded-startup, and grpc_matching changes). Their green status is not inherited; I did not inspect whether the grpc_matching diff is behavioral.
+Real-Go-History x TLS: not required as an arbitrary cross-product. Transport interop (40172574953) and real-Go-History lanes are separate proofs. Meaningful remaining interaction: only that the Go History->Rust Matching callback path ran under the *final* binary (covered by active-offer + postgres/thrift lanes). Report the combo as a limit.
+
+## Remaining open (after reconciliation)
+1. The 7 mixed lanes on the final pin (fresh 29bdd preferred), serial. This is the only blocker identified.
+2. Fresh uncached workspace on 29bdd, or documented rust-tree equivalence to fade09c5 (diff empty).
+3. Workspace fmt advisory exit 1 reported, not a pass.
+4. Unresolved pointer: 4cabb9cee object missing locally; verify via `git fetch`/PR or accept memory record.
 
 ## Final done conditions
 - Pin one `EXPECTED_SHA`; each run's headSha equals it; serial dispatch; artifacts downloaded and inspected; binary SHA256 per mixed lane; cleanup evidence.
