@@ -16,7 +16,7 @@ candidate's acceptance and parity audit complete.
 | MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40155956238 | success with corrected harness; failed40153901033 preserved |
 | Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | success |
 | Real shard distributor | https://github.com/auenkr/cadence-rust/actions/runs/40156296140 | success |
-| Active offer with Go History, zero inserts | https://github.com/auenkr/cadence-rust/actions/runs/40156718234 | running |
+| Active offer with Go History, zero inserts | https://github.com/auenkr/cadence-rust/actions/runs/40157002080 | running; dependency-only failure40156718234 preserved |
 
 Run mixed lanes serially. Preserve source, binary SHA256, command, exit files
 and compact probe output for each. Earlier successes remain scenario evidence
@@ -80,3 +80,5 @@ production-path fix and tests. Active-offer40156718234 is still running on
 e06fd8ca6; all recorded lane evidence remains valid for its named source,
 but final acceptance must account for the forthcoming TLS change. Matching
 remains incomplete even if that last scheduled lane passes.
+
+Active-offer40156718234 failed before probing: missing @grpc/grpc-js. Workflow b1fda7fbf installs the same pinned probe dependencies as production-validation; rerun40157002080 uses that source without production Rust changes.
