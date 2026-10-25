@@ -566,6 +566,7 @@ impl MatchingHistoryClient {
         // Go's task execution carries the stored RunID string, which is empty when
         // the row has no run. An absent run is forwarded as "" rather than rejected.
         let run_id = match task.data.run_id.as_deref() {
+            _ if task.data.raw_run_id.is_some() => task.data.run_id_string(),
             None | Some([]) => String::new(),
             Some(run) => Uuid::from_slice(run)
                 .map_err(|_| Status::internal("Invalid run ID in persisted matching task."))?

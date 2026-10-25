@@ -8,6 +8,11 @@ use std::collections::BTreeMap;
 pub struct TaskData {
     pub workflow_id: String,
     pub run_id: Option<Vec<u8>>,
+    /// Runtime-only raw `WorkflowExecution.RunID` for a request whose run ID is not a
+    /// valid UUID (Go passes the string through unparsed on sync match). Never
+    /// serialized, never persisted; `run_id` stays `None` while this is set.
+    #[serde(skip)]
+    pub raw_run_id: Option<String>,
     pub schedule_id: i64,
     pub expiry_nanos: i64,
     pub created_nanos: i64,
@@ -16,6 +21,72 @@ pub struct TaskData {
 /// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
 pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
 impl TaskData {
+    /// Install the request RunID exactly as Go carries it (`TaskInfo.RunID` string),
+    /// for every value: valid, noncanonical, malformed or empty. `run_id` is a best-effort
+    /// parse for in-process readers only; stores must call `sql_run_id`/`cassandra_run_id`.
+    pub fn with_request_run_id(mut self, run_id: &str) -> Self {
+        // Replace both fields so a reused consuming setter never keeps stale state.
+        self.raw_run_id = Some(run_id.to_owned());
+        self.run_id = None;
+        self.run_id = uuid::Uuid::parse_str(run_id)
+            .ok()
+            .map(|id| id.as_bytes().to_vec());
+        self
+    }
+    /// RunID string as Go's `TaskInfo.RunID`: raw request string, canonical UUID, or "".
+    pub fn run_id_string(&self) -> String {
+        if let Some(raw) = &self.raw_run_id {
+            return raw.clone();
+        }
+        self.run_id
+            .as_deref()
+            .and_then(|id| uuid::Uuid::from_slice(id).ok())
+            .map(|id| id.to_string())
+            .unwrap_or_default()
+    }
+    /// Go SQL `serialization.MustParseUUID`: "" -> nil slice (field omitted from the blob,
+    /// i.e. absent, not the nil UUID); google/uuid `Parse` forms -> 16 bytes; else Go panics
+    /// (source-only inference: unrecovered in the task writer goroutine).
+    pub fn sql_run_id(&self) -> std::result::Result<Option<Vec<u8>>, String> {
+        match &self.raw_run_id {
+            None => Ok(self.run_id.clone()),
+            Some(raw) if raw.is_empty() => Ok(None),
+            Some(raw) => uuid::Uuid::parse_str(raw)
+                .map(|id| Some(id.as_bytes().to_vec()))
+                .map_err(|_| format!("invalid UUID {raw:?}")),
+        }
+    }
+    /// Go Cassandra passes the string to gocql `marshalUUID` -> `ParseUUID`: hyphens are
+    /// skipped at even nibble offsets, exactly 32 hex digits, empty is rejected.
+    pub fn cassandra_run_id(&self) -> std::result::Result<Option<Vec<u8>>, String> {
+        let Some(raw) = &self.raw_run_id else {
+            return Ok(self.run_id.clone());
+        };
+        let mut out = [0u8; 16];
+        let mut j = 0usize;
+        for c in raw.chars() {
+            match c {
+                '-' if j & 1 == 0 => continue,
+                _ if j < 32 && c.is_ascii_hexdigit() => {
+                    let v = c.to_digit(16).unwrap() as u8;
+                    out[j / 2] |= v << (4 - (j & 1) * 4);
+                }
+                _ => return Err(format!("invalid UUID {raw:?}")),
+            }
+            j += 1;
+        }
+        if j != 32 {
+            return Err(format!("invalid UUID {raw:?}"));
+        }
+        Ok(Some(out.to_vec()))
+    }
+    /// Copy for a SQL row: raw RunID resolved per `sql_run_id` and cleared.
+    pub fn for_sql(&self) -> std::result::Result<Self, String> {
+        let mut data = self.clone();
+        data.run_id = self.sql_run_id()?;
+        data.raw_run_id = None;
+        Ok(data)
+    }
     /// Go SQL CreateTasks computes expiry at persistence time, not enqueue time.
     /// Nonpositive schedule-to-start timeout means no expiry (Go zero time).
     pub fn at_creation(mut self, now_nanos: i64, schedule_to_start_seconds: i32) -> Self {
@@ -58,7 +129,13 @@ fn i32_field(w: &mut Writer, id: i16, value: i32) {
     w.write_field_begin(TType::I32, id);
     w.write_i32(value);
 }
-pub fn encode_task(data: &TaskData) -> Vec<u8> {
+pub fn encode_task(data: &TaskData) -> std::result::Result<Vec<u8>, String> {
+    // All SQL call sites resolve through `TaskData::for_sql`; Cassandra writes CQL, not this blob.
+    // Keep this serialization boundary fallible in release builds too. SQL stores resolve
+    // raw identifiers before calling it; accidental direct callers must not panic or drop it.
+    if data.raw_run_id.is_some() {
+        return Err("resolve raw RunID with TaskData::for_sql first".into());
+    }
     let mut w = Writer::new();
     w.write_field_begin(TType::String, 10);
     w.write_string(&data.workflow_id);
@@ -78,7 +155,7 @@ pub fn encode_task(data: &TaskData) -> Vec<u8> {
         }
     }
     w.write_field_stop();
-    w.into_bytes()
+    Ok(w.into_bytes())
 }
 fn write_config(w: &mut Writer, config: &PartitionConfig) {
     i64_field(w, 10, config.version);
@@ -158,6 +235,7 @@ pub fn decode_task(bytes: &[u8]) -> Result<TaskData> {
             Some(Value::Bytes(bytes)) => Some(bytes.clone()),
             _ => None,
         },
+        raw_run_id: None,
         schedule_id: i64_value(&s, 13),
         expiry_nanos: i64_value(&s, 14),
         created_nanos: i64_value(&s, 15),
@@ -277,6 +355,46 @@ impl std::fmt::Debug for EncodingSource {
 mod tests {
     use super::*;
     #[test]
+    fn request_run_id_keeps_every_raw_string() {
+        let valid = uuid::Uuid::from_u128(9);
+        let upper = valid.to_string().to_uppercase();
+        for raw in [valid.to_string(), upper.clone(), valid.simple().to_string(), "".into(), "not-a-uuid".into()] {
+            let d = TaskData::default().with_request_run_id(&raw);
+            assert_eq!(d.run_id_string(), raw);
+        }
+        assert_eq!(TaskData::default().with_request_run_id(&upper).run_id.as_deref(), Some(valid.as_bytes().as_slice()));
+        assert!(TaskData::default().with_request_run_id("bad").run_id.is_none());
+    }
+    #[test]
+    fn unresolved_raw_run_id_encoding_is_fallible() {
+        let data = TaskData::default().with_request_run_id("not-a-uuid");
+        assert!(encode_task(&data).unwrap_err().contains("resolve raw RunID"));
+    }
+    #[test]
+    fn sql_boundary_empty_is_absent_not_nil_uuid_and_malformed_errors() {
+        let empty = TaskData::default().with_request_run_id("").for_sql().unwrap();
+        assert_eq!(empty.run_id, None);
+        assert_eq!(empty.raw_run_id, None);
+        assert_eq!(decode_task(&encode_task(&empty).unwrap()).unwrap().run_id, None);
+        assert!(TaskData::default().with_request_run_id("bad").for_sql().is_err());
+        let up = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(5).to_string().to_uppercase()).for_sql().unwrap();
+        assert_eq!(up.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()));
+        assert_eq!(decode_task(&encode_task(&up).unwrap()).unwrap().raw_run_id, None);
+    }
+    #[test]
+    fn cassandra_boundary_follows_gocql_parse_uuid() {
+        let ok = |s: &str| TaskData::default().with_request_run_id(s).cassandra_run_id();
+        assert!(ok("").is_err());
+        assert!(ok("bad").is_err());
+        let id = uuid::Uuid::from_u128(0xabcdef).as_bytes().to_vec();
+        assert_eq!(ok(&uuid::Uuid::from_u128(0xabcdef).to_string().to_uppercase()).unwrap(), Some(id.clone()));
+        assert_eq!(ok(&uuid::Uuid::from_u128(0xabcdef).simple().to_string()).unwrap(), Some(id.clone()));
+        // gocql skips '-' at any even nibble offset, unlike google/uuid
+        assert_eq!(ok("00-00-00-00-00-00-00-00-00-00-00-00-00-ab-cd-ef").unwrap(), Some(id));
+        assert!(ok("0-000000000000000000000000000abcdef").is_err());
+        assert!(ok("00000000000000000000000000abcdef0").is_err());
+    }
+    #[test]
     fn dynamic_encoding_source_is_sampled_per_write_like_go_parser() {
         let value = std::sync::Arc::new(std::sync::Mutex::new("thriftrw".to_owned()));
         let reader = value.clone();
@@ -343,7 +461,7 @@ mod tests {
             if case["kind"] == "task" {
                 let data: TaskData = serde_json::from_value(case["data"].clone()).unwrap();
                 assert_eq!(decode_task(&plain).unwrap(), data);
-                assert_eq!(encode_task(&data), plain);
+                assert_eq!(encode_task(&data).unwrap(), plain);
             } else {
                 let data: TaskListData = serde_json::from_value(case["data"].clone()).unwrap();
                 assert_eq!(decode_task_list(&plain).unwrap(), data);
@@ -353,7 +471,7 @@ mod tests {
     }
     #[test]
     fn matching_blob_unknown_fields_and_malformed_input() {
-        let mut bytes = encode_task(&TaskData::default());
+        let mut bytes = encode_task(&TaskData::default()).unwrap();
         bytes.pop();
         let mut extra = Writer::new();
         extra.write_field_begin(TType::String, 99);

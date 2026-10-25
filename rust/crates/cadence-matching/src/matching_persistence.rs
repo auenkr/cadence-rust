@@ -52,7 +52,13 @@ fn get_tasks_byte_size(tasks: &[cadence_persistence::matching_task_store::Alloca
         + tasks
             .iter()
             .map(|task| {
-                let run_id = if task.data.run_id.is_some() { 36 } else { 0 };
+                // Go accounts the TaskInfo RunID string payload, in bytes. Preserve a
+                // raw request string while it is in memory; persisted UUID bytes read
+                // back as the canonical 36-byte UUID string.
+                let run_id = task.data.raw_run_id.as_ref().map_or_else(
+                    || if task.data.run_id.is_some() { 36 } else { 0 },
+                    |raw| raw.len() as u64,
+                );
                 let partition = task.data.partition_config.as_ref().map_or(0, |map| {
                     map.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum()
                 });

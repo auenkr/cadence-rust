@@ -438,7 +438,8 @@ impl SqliteTaskStore {
         let mut connection = self.connection.lock().expect("matching SQL lock");
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for (domain, task) in tasks {
-            let bytes = self.encoding.encode(&blob::encode_task(&task.data))?;
+            let data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
+            let bytes = self.encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             tx.execute("INSERT INTO tasks (domain_id,task_list_name,task_type,task_id,data,data_encoding) VALUES (?,?,?,?,?,?)",
                 params![domain.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
         }
@@ -968,6 +969,7 @@ mod interop_tests {
             data: TaskData {
                 workflow_id: "rust-workflow".into(),
                 run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                raw_run_id: None,
                 schedule_id: 5,
                 created_nanos: now + 2000,
                 expiry_nanos: -6_795_364_578_871_345_152,

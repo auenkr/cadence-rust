@@ -1134,6 +1134,45 @@ async fn matching_rpc_durable_add_does_not_require_local_workflow_state() {
         .0
         .is_empty());
 }
+fn run_id_decision(key: &TaskListKey, run_id: &str, schedule_id: i64) -> Request<m::AddDecisionTaskRequest> {
+    Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: Some(p::WorkflowExecution {
+            workflow_id: "run-id-workflow".into(),
+            run_id: run_id.into(),
+        }),
+        task_list: list(),
+        schedule_id,
+        ..Default::default()
+    })
+}
+#[tokio::test]
+async fn matching_rpc_add_decision_accepts_noncanonical_and_empty_run_ids_like_go_sql() {
+    // Go passes RunID raw; SQL MustParseUUID("") is a nil slice (blob field absent),
+    // other google/uuid forms are stored as the parsed 16 bytes.
+    let (_dir, store, matching, key) = fixture();
+    let id = Uuid::from_u128(0xabcdef);
+    matching.add_decision_task(run_id_decision(&key, &id.to_string().to_uppercase(), 1)).await.unwrap();
+    matching.add_decision_task(run_id_decision(&key, &id.simple().to_string(), 2)).await.unwrap();
+    matching.add_decision_task(run_id_decision(&key, "", 3)).await.unwrap();
+    let tasks = store.get_tasks(&key, 0, 100, 10).unwrap();
+    assert_eq!(tasks.len(), 3);
+    assert_eq!(tasks[0].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
+    assert_eq!(tasks[1].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
+    assert_eq!(tasks[2].data.run_id, None, "empty RunID is absent, not the nil UUID");
+    assert!(tasks.iter().all(|t| t.data.raw_run_id.is_none()));
+}
+#[tokio::test]
+async fn matching_rpc_add_decision_malformed_run_id_is_not_rejected_up_front() {
+    // Go's handler never validates RunID. Rust's deliberate divergence: the SQL store
+    // refuses the malformed row (Go's writer goroutine panics instead), so the
+    // error comes from persistence, not from request validation.
+    let (_dir, store, matching, key) = fixture();
+    let result = matching.add_decision_task(run_id_decision(&key, "not-a-uuid", 1)).await;
+    let status = result.expect_err("malformed RunID must fail at durable SQL conversion");
+    assert_ne!(status.message(), "Run UUID is not valid.");
+    assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
+}
 #[tokio::test]
 async fn matching_rpc_durable_activity_preserves_source_domain_and_type() {
     let (_dir, store, matching, mut target) = fixture();
@@ -3110,6 +3149,197 @@ impl h::history_api_server::HistoryApi for StartingHistory {
             started_event_id: request.schedule_id + 1,
             ..Default::default()
         }))
+    }
+}
+
+struct RunIdRecordingHistory(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for RunIdRecordingHistory {
+    async fn record_decision_task_started(
+        &self,
+        request: Request<h::RecordDecisionTaskStartedRequest>,
+    ) -> Result<Response<h::RecordDecisionTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        self.0
+            .lock()
+            .unwrap()
+            .push(request.workflow_execution.unwrap().run_id);
+        Ok(Response::new(h::RecordDecisionTaskStartedResponse {
+            scheduled_event_id: request.schedule_id,
+            started_event_id: request.schedule_id + 1,
+            ..Default::default()
+        }))
+    }
+
+    async fn record_activity_task_started(
+        &self,
+        request: Request<h::RecordActivityTaskStartedRequest>,
+    ) -> Result<Response<h::RecordActivityTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        self.0
+            .lock()
+            .unwrap()
+            .push(request.workflow_execution.unwrap().run_id);
+        Ok(Response::new(h::RecordActivityTaskStartedResponse {
+            scheduled_event: Some(p::HistoryEvent {
+                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                    p::ActivityTaskScheduledEventAttributes {
+                        activity_id: request.schedule_id.to_string(),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_match_passes_raw_run_id_to_history_without_persisting() {
+    // Go AddDecisionTask never parses RunID; a sync match hands the string to History
+    // unchanged (malformed, empty, uppercase and simple UUID forms included) and no
+    // CreateTasks call happens, so Go's SQL MustParseUUID is never reached either.
+    let id = Uuid::from_u128(0xabcdef);
+    let upper = id.to_string().to_uppercase();
+    let simple = id.simple().to_string();
+    for (case, raw) in ["not-a-uuid", "", upper.as_str(), simple.as_str()]
+        .into_iter()
+        .enumerate()
+    {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let service = RunIdRecordingHistory(seen.clone());
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(h::history_api_server::HistoryApiServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        let (_dir, store, matching, key) = fixture_with_history(&format!("http://{address}"));
+        let worker = matching.clone();
+        let domain = key.domain_id.to_string();
+        let poll = tokio::spawn(async move {
+            worker
+                .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+                    domain_id: domain,
+                    poller_id: format!("raw-run-{case}"),
+                    request: Some(p::PollForDecisionTaskRequest {
+                        task_list: list(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })))
+                .await
+                .unwrap()
+                .into_inner()
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while matching.polls.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        matching
+            .add_decision_task(run_id_decision(&key, raw, 31))
+            .await
+            .unwrap_or_else(|status| panic!("RunID {raw:?} must sync match: {status}"));
+        let started = tokio::time::timeout(Duration::from_secs(10), poll)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(started.started_event_id, 32);
+        assert_eq!(seen.lock().unwrap().as_slice(), [raw.to_owned()]);
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "no durable write for {raw:?}");
+        matching
+            .queues
+            .as_ref()
+            .unwrap()
+            .shutdown(matching_now())
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_activity_sync_match_passes_raw_run_id_to_history_without_persisting() {
+    // Activity twin of the decision regression: same raw string reaches History's
+    // RecordActivityTaskStarted and nothing is written durably.
+    let id = Uuid::from_u128(0xabcdef);
+    let upper = id.to_string().to_uppercase();
+    let simple = id.simple().to_string();
+    for (case, raw) in ["not-a-uuid", "", upper.as_str(), simple.as_str()]
+        .into_iter()
+        .enumerate()
+    {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let service = RunIdRecordingHistory(seen.clone());
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(h::history_api_server::HistoryApiServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        let (_dir, store, matching, key) = fixture_with_history(&format!("http://{address}"));
+        let worker = matching.clone();
+        let domain = key.domain_id.to_string();
+        let poll = tokio::spawn(async move {
+            worker
+                .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+                    domain_id: domain,
+                    poller_id: format!("raw-run-activity-{case}"),
+                    request: Some(p::PollForActivityTaskRequest {
+                        task_list: list(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })))
+                .await
+                .unwrap()
+                .into_inner()
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while matching.polls.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        matching
+            .add_activity_task(Request::new(m::AddActivityTaskRequest {
+                domain_id: key.domain_id.to_string(),
+                source_domain_id: key.domain_id.to_string(),
+                workflow_execution: Some(p::WorkflowExecution {
+                    workflow_id: "run-id-workflow".into(),
+                    run_id: raw.into(),
+                }),
+                task_list: list(),
+                schedule_id: 31,
+                ..Default::default()
+            }))
+            .await
+            .unwrap_or_else(|status| panic!("RunID {raw:?} must sync match: {status}"));
+        let started = tokio::time::timeout(Duration::from_secs(10), poll)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!started.task_token.is_empty(), "poller got the activity for {raw:?}");
+        assert_eq!(seen.lock().unwrap().as_slice(), [raw.to_owned()]);
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "no durable write for {raw:?}");
+        matching
+            .queues
+            .as_ref()
+            .unwrap()
+            .shutdown(matching_now())
+            .await
+            .unwrap();
     }
 }
 

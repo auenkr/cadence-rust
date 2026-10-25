@@ -1623,12 +1623,7 @@ impl Matching {
             if let Some(channel) = self.remote_channel_for_task_list(&list.name).await? {
                 let execution = Some(p::WorkflowExecution {
                     workflow_id: data.workflow_id.clone(),
-                    run_id: data
-                        .run_id
-                        .as_deref()
-                        .and_then(|id| uuid::Uuid::from_slice(id).ok())
-                        .map(|id| id.to_string())
-                        .unwrap_or_default(),
+                    run_id: data.run_id_string(),
                 });
                 let partition_config = data
                     .partition_config
@@ -2296,16 +2291,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let list = r.task_list.as_ref().unwrap_or(&default_list);
                         let default_execution = p::WorkflowExecution::default();
                         let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
-                        let run = if r.workflow_execution.is_none() {
-                            None
-                        } else {
-                            Some(
-                                uuid::Uuid::parse_str(&execution.run_id)
-                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
-                                    .as_bytes()
-                                    .to_vec(),
-                            )
-                        };
                         let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
                         let queue = self.durable_queue(&r.domain_id, list, 0).await?;
                         if queue.stop_if_isolation_changed() {
@@ -2315,7 +2300,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                         check_sticky_poller(&queue, list)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
@@ -2324,6 +2308,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             },
                             ..Default::default()
                         }
+                        .with_request_run_id(&execution.run_id)
                         .at_creation(matching_now(), 0);
                         let forwarded = !r.forwarded_from.is_empty();
                         // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
@@ -2527,16 +2512,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                         let list = r.task_list.as_ref().unwrap_or(&default_list);
                         let default_execution = p::WorkflowExecution::default();
                         let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
-                        let run = if r.workflow_execution.is_none() {
-                            None
-                        } else {
-                            Some(
-                                uuid::Uuid::parse_str(&execution.run_id)
-                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
-                                    .as_bytes()
-                                    .to_vec(),
-                            )
-                        };
                         self.domain_name(&r.source_domain_id)?;
                         let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| {
                             Status::invalid_argument("Source domain UUID is not valid.")
@@ -2548,7 +2523,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                         self.check_write_partition(&r.domain_id, list, 1, &queue)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
@@ -2557,6 +2531,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             },
                             ..Default::default()
                         }
+                        .with_request_run_id(&execution.run_id)
                         .at_creation(matching_now(), 0);
                         let forwarded = !r.forwarded_from.is_empty();
                         if !forwarded {

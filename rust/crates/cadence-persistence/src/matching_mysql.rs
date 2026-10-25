@@ -900,9 +900,9 @@ impl MatchingTaskStore for MySqlTaskStore {
         let encoding = self.write_encoding()?;
         for (domain, task) in tasks {
             // Go stamps CreatedTimestamp with the CreateTasks request time.
-            let mut data = task.data.clone();
+            let mut data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
             data.created_nanos = now_nanos;
-            let bytes = encoding.encode(&blob::encode_task(&data))?;
+            let bytes = encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             transaction
                 .exec_drop(
                     INSERT_TASK,
