@@ -268,8 +268,12 @@ async fn stalled_custom_tls_handshakes_do_not_cap_matching_accepts_and_close_on_
         tokio::task::yield_now().await;
     }
 
-    let client_tls = cadence_service_core::grpc_tls::client_tls(&tls).unwrap().unwrap();
-    let channel = cadence_service_core::grpc_tls::endpoint_channel(&addr.to_string(), Some(&client_tls)).unwrap();
+    let client_tls = cadence_service_core::grpc_tls::client_tls(&tls)
+        .unwrap()
+        .unwrap();
+    let channel =
+        cadence_service_core::grpc_tls::endpoint_channel(&addr.to_string(), Some(&client_tls))
+            .unwrap();
     let mut client = ServerReflectionClient::new(channel);
     let request = ServerReflectionRequest {
         host: String::new(),

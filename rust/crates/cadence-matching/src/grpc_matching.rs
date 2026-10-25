@@ -3943,47 +3943,49 @@ fn no_identity_tls_incoming(
 
     let handshakes = FuturesUnordered::<Handshake>::new();
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-    futures_util::stream::unfold((incoming, handshakes), move |(mut listener, mut handshakes)| {
-        let acceptor = acceptor.clone();
-        async move {
-            loop {
-                tokio::select! {
-                    accepted = listener.next() => match accepted {
-                        Some(Ok(socket)) => {
-                            let acceptor = acceptor.clone();
-                            handshakes.push(Box::pin(async move {
-                                tokio::time::timeout(
-                                    std::time::Duration::from_secs(120),
-                                    acceptor.accept(socket),
-                                )
-                                .await
-                                .map_err(|_| {
-                                    std::io::Error::new(
-                                        std::io::ErrorKind::TimedOut,
-                                        "TLS handshake timed out",
+    futures_util::stream::unfold(
+        (incoming, handshakes),
+        move |(mut listener, mut handshakes)| {
+            let acceptor = acceptor.clone();
+            async move {
+                loop {
+                    tokio::select! {
+                        accepted = listener.next() => match accepted {
+                            Some(Ok(socket)) => {
+                                let acceptor = acceptor.clone();
+                                handshakes.push(Box::pin(async move {
+                                    tokio::time::timeout(
+                                        std::time::Duration::from_secs(120),
+                                        acceptor.accept(socket),
                                     )
-                                })
-                                .and_then(|stream| stream.map_err(std::io::Error::other))
-                            }));
+                                    .await
+                                    .map_err(|_| {
+                                        std::io::Error::new(
+                                            std::io::ErrorKind::TimedOut,
+                                            "TLS handshake timed out",
+                                        )
+                                    })
+                                    .and_then(|stream| stream.map_err(std::io::Error::other))
+                                }));
+                            }
+                            Some(Err(_)) => {
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            }
+                            None => return None,
+                        },
+                        result = handshakes.next(), if !handshakes.is_empty() => {
+                            if let Some(Ok(stream)) = result {
+                                return Some((
+                                    Ok(NoIdentityTlsStream(stream)),
+                                    (listener, handshakes),
+                                ));
+                            }
                         }
-                        Some(Err(_)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        }
-                        None => return None,
-                    },
-                    result = handshakes.next(), if !handshakes.is_empty() => match result {
-                        Some(Ok(stream)) => {
-                            return Some((
-                                Ok(NoIdentityTlsStream(stream)),
-                                (listener, handshakes),
-                            ));
-                        }
-                        Some(Err(_)) | None => {}
                     }
                 }
             }
-        }
-    })
+        },
+    )
 }
 
 struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
