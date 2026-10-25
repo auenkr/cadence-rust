@@ -40,6 +40,33 @@ jobs:
         with:
           go-version: "1.25.14"
           cache: false
+      - name: Run original Go malformed DescribeTaskList oracle
+        working-directory: go
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/matching-describe-tasklist-go-oracle"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          cat > "$RUNNER_TEMP/describe-tasklist-overlay.json" <<EOF
+          {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/handler/describe_tasklist_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-describe-tasklist-oracle_test.go"}}
+          EOF
+          cp "$RUNNER_TEMP/describe-tasklist-overlay.json" "$evidence/overlay.json"
+          printf '%s\n' 'go test -overlay $RUNNER_TEMP/describe-tasklist-overlay.json ./service/matching/handler -run ^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$ -count=1 -v' > "$evidence/command.txt"
+          set +e
+          go test -overlay "$RUNNER_TEMP/describe-tasklist-overlay.json" ./service/matching/handler \
+            -run '^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$' -count=1 -v \
+            > "$evidence/go-oracle.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/go-oracle.exit"
+          cat "$evidence/go-oracle.log"
+          exit "$result"
+      - name: Upload original Go oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-describe-tasklist-go-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-describe-tasklist-go-oracle
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
       - name: Execute production Go Matching owner ordering oracle

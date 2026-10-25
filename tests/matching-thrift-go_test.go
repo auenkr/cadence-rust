@@ -92,11 +92,30 @@ func TestRustMatchingNativeThrift(t *testing.T) {
 			}
 			domainID := described.DomainInfo.GetUUID()
 			list := &s.TaskList{Name: common.StringPtr("tasks-" + uuid.NewString()), Kind: s.TaskListKindNormal.Ptr()}
-			// These original generated clients check declared exception ids.
-			_, err = matching.DescribeTaskList(ctx, &m.DescribeTaskListRequest{DomainUUID: common.StringPtr(domainID)})
-			var bad *s.BadRequestError
-			if !errors.As(err, &bad) {
-				t.Fatalf("bad request type: %T %v", err, err)
+			// The Go handler/engine oracle records both absent and empty task-list
+			// shapes as successful DescribeTaskList calls with no pollers.
+			for _, request := range []*m.DescribeTaskListRequest{
+				{DomainUUID: common.StringPtr(domainID)},
+				{DomainUUID: common.StringPtr(domainID), DescRequest: &s.DescribeTaskListRequest{TaskList: &s.TaskList{}}},
+			} {
+				described, describeErr := matching.DescribeTaskList(ctx, request)
+				pollerCount := -1
+				if described != nil {
+					pollerCount = len(described.GetPollers())
+				}
+				if describeErr != nil || pollerCount != 0 {
+					t.Fatalf("empty DescribeTaskList shape: response=%v pollers=%d error=%T %v", described, pollerCount, describeErr, describeErr)
+				}
+			}
+			// NewIdentifier rejects malformed reserved partition names before the
+			// manager/domain lookup; the original Go oracle preserves this typed error.
+			_, err = matching.DescribeTaskList(ctx, &m.DescribeTaskListRequest{
+				DomainUUID: common.StringPtr(domainID),
+				DescRequest: &s.DescribeTaskListRequest{TaskList: &s.TaskList{Name: common.StringPtr("/__cadence_sys//0")}},
+			})
+			var internal *s.InternalServiceError
+			if !errors.As(err, &internal) || internal.GetMessage() != "invalid partitioned task list name /__cadence_sys//0" {
+				t.Fatalf("malformed reserved task-list error: %T %v", err, err)
 			}
 			sticky := &s.TaskList{Name: common.StringPtr("sticky"), Kind: s.TaskListKindSticky.Ptr()}
 			err = matching.AddDecisionTask(ctx, &m.AddDecisionTaskRequest{DomainUUID: common.StringPtr(domainID), TaskList: sticky, Execution: &s.WorkflowExecution{WorkflowId: common.StringPtr("wf"), RunId: common.StringPtr(uuid.NewString())}, ScheduleId: common.Int64Ptr(2)})

@@ -1,0 +1,638 @@
+{
+  "scenarios": [
+    {
+      "name": "baseline",
+      "hosts": [
+        {
+          "address": "one:7935",
+          "identity": "one",
+          "grpc_address": ""
+        },
+        {
+          "address": "two:7935",
+          "identity": "two",
+          "grpc_address": ""
+        },
+        {
+          "address": "three:7935",
+          "identity": "three",
+          "grpc_address": ""
+        }
+      ],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "two:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "two:7935"
+          }
+        ]
+      }
+    },
+    {
+      "name": "add",
+      "hosts": [
+        {
+          "address": "one:7935",
+          "identity": "one",
+          "grpc_address": ""
+        },
+        {
+          "address": "two:7935",
+          "identity": "two",
+          "grpc_address": ""
+        },
+        {
+          "address": "three:7935",
+          "identity": "three",
+          "grpc_address": ""
+        },
+        {
+          "address": "four:7935",
+          "identity": "four",
+          "grpc_address": ""
+        }
+      ],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "two:7935"
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "four:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "two:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "four:7935"
+          }
+        ]
+      }
+    },
+    {
+      "name": "remove",
+      "hosts": [
+        {
+          "address": "one:7935",
+          "identity": "one",
+          "grpc_address": ""
+        },
+        {
+          "address": "three:7935",
+          "identity": "three",
+          "grpc_address": ""
+        }
+      ],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "three:7935"
+          }
+        ]
+      }
+    },
+    {
+      "name": "identity-replacement",
+      "hosts": [
+        {
+          "address": "one:7935",
+          "identity": "one-v2",
+          "grpc_address": ""
+        },
+        {
+          "address": "three:7935",
+          "identity": "three",
+          "grpc_address": ""
+        }
+      ],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "three:7935"
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "three:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "three:7935"
+          }
+        ]
+      }
+    },
+    {
+      "name": "address-replacement",
+      "hosts": [
+        {
+          "address": "one-new:7935",
+          "identity": "one-v2",
+          "grpc_address": ""
+        },
+        {
+          "address": "three:7935",
+          "identity": "three",
+          "grpc_address": ""
+        }
+      ],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "one-new:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "one-new:7935"
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "one-new:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": "three:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": "one-new:7935"
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "one-new:7935"
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": "one-new:7935"
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": "one-new:7935"
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty",
+      "hosts": [],
+      "root": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": ""
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": ""
+          }
+        ]
+      },
+      "child": {
+        "activity": [
+          {
+            "key": "queue",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": ""
+          }
+        ],
+        "decision": [
+          {
+            "key": "queue",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys/queue/2",
+            "owner": ""
+          }
+        ]
+      },
+      "empty": {
+        "activity": [
+          {
+            "key": "",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": ""
+          }
+        ],
+        "decision": [
+          {
+            "key": "",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys//1",
+            "owner": ""
+          },
+          {
+            "key": "/__cadence_sys//2",
+            "owner": ""
+          }
+        ]
+      }
+    }
+  ]
+}

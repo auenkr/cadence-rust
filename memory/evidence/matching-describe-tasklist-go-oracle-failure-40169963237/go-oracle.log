@@ -1,0 +1,103 @@
+go: downloading github.com/cadence-workflow/shard-manager v0.0.0-20260610143419-4bef35311802
+go: downloading github.com/pborman/uuid v0.0.0-20180906182336-adf5a7427709
+go: downloading github.com/uber-go/tally v3.5.8+incompatible
+go: downloading go.uber.org/mock v0.6.0
+go: downloading go.uber.org/zap v1.27.0
+go: downloading golang.org/x/sync v0.22.0
+go: downloading github.com/stretchr/testify v1.11.1
+go: downloading go.uber.org/goleak v1.3.0
+go: downloading go.uber.org/yarpc v1.88.0
+go: downloading github.com/google/uuid v1.6.0
+go: downloading github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da
+go: downloading go.uber.org/cadence v1.4.0-rc.3
+go: downloading github.com/robfig/cron/v3 v3.0.1
+go: downloading github.com/robfig/cron v1.2.0
+go: downloading github.com/gogo/protobuf v1.3.2
+go: downloading github.com/hashicorp/go-version v1.2.0
+go: downloading github.com/uber/cadence-idl v0.0.0-20261006184647-bfbf273b41b9
+go: downloading github.com/jonboulle/clockwork v0.5.0
+go: downloading golang.org/x/time v0.14.0
+go: downloading github.com/uber/ringpop-go v0.10.0
+go: downloading github.com/golang/snappy v0.0.4
+go: downloading go.uber.org/multierr v1.11.0
+go: downloading google.golang.org/grpc v1.83.1
+go: downloading github.com/golang/mock v1.7.0-rc.1
+go: downloading go.uber.org/atomic v1.11.0
+go: downloading github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
+go: downloading github.com/emirpasic/gods v1.18.1
+go: downloading go.uber.org/fx v1.23.0
+go: downloading github.com/aws/aws-sdk-go v1.54.12
+go: downloading github.com/cactus/go-statsd-client/statsd v0.0.0-20191106001114-12b4e2b38748
+go: downloading github.com/golang-jwt/jwt/v5 v5.3.1
+go: downloading github.com/m3db/prometheus_client_golang v1.12.8
+go: downloading go.uber.org/config v1.4.0
+go: downloading gopkg.in/validator.v2 v2.0.0-20180514200540-135c24b11c19
+go: downloading gopkg.in/yaml.v2 v2.4.0
+go: downloading github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
+go: downloading github.com/opentracing/opentracing-go v1.2.0
+go: downloading github.com/uber/tchannel-go v1.34.4
+go: downloading go.uber.org/net/metrics v1.4.0
+go: downloading go.uber.org/thriftrw v1.34.0
+go: downloading github.com/uber-common/bark v1.2.1
+go: downloading github.com/MicahParks/keyfunc/v2 v2.1.0
+go: downloading github.com/jmespath/go-jmespath v0.4.0
+go: downloading github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c
+go: downloading github.com/gogo/googleapis v1.4.1
+go: downloading github.com/gogo/status v1.1.0
+go: downloading golang.org/x/net v0.58.0
+go: downloading github.com/google/gofuzz v1.0.0
+go: downloading github.com/twmb/murmur3 v1.1.8
+go: downloading google.golang.org/protobuf v1.36.11
+go: downloading go.uber.org/dig v1.18.0
+go: downloading golang.org/x/sys v0.47.0
+go: downloading github.com/beorn7/perks v1.0.1
+go: downloading github.com/golang/protobuf v1.5.4
+go: downloading github.com/m3db/prometheus_client_model v0.2.1
+go: downloading github.com/m3db/prometheus_common v0.34.6
+go: downloading github.com/prometheus/procfs v0.16.0
+go: downloading github.com/pkg/errors v0.9.1
+go: downloading golang.org/x/text v0.41.0
+go: downloading github.com/stretchr/objx v0.5.2
+go: downloading github.com/olivere/elastic v6.2.37+incompatible
+go: downloading github.com/startreedata/pinot-client-go v0.2.0
+go: downloading github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading github.com/prometheus/client_golang v1.21.1
+go: downloading github.com/prometheus/client_model v0.6.2
+go: downloading github.com/apache/thrift v0.16.0
+go: downloading github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a
+go: downloading golang.org/x/oauth2 v0.36.0
+go: downloading github.com/sirupsen/logrus v1.9.3
+go: downloading github.com/uber-go/mapdecode v1.0.0
+go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
+go: downloading github.com/xdg/stringprep v1.0.0
+go: downloading google.golang.org/genproto v0.0.0-20260128011058-8636f8732409
+go: downloading golang.org/x/crypto v0.55.0
+go: downloading github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369
+go: downloading github.com/opensearch-project/opensearch-go/v4 v4.1.0
+go: downloading github.com/olivere/elastic/v7 v7.0.21
+go: downloading github.com/cch123/elasticsql v0.0.0-20190321073543-a1a440758eb9
+go: downloading github.com/valyala/fastjson v1.4.1
+go: downloading golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
+go: downloading github.com/go-zookeeper/zk v1.0.3
+go: downloading github.com/cespare/xxhash/v2 v2.3.0
+go: downloading github.com/prometheus/common v0.63.0
+go: downloading github.com/klauspost/compress v1.19.2
+go: downloading github.com/marusama/semaphore/v2 v2.5.0
+go: downloading github.com/mailru/easyjson v0.7.7
+go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+go: downloading github.com/josharian/intern v1.0.0
+=== RUN   TestMatchingEngineSuite
+=== RUN   TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle
+    handler.go:560: Unexpected call to *cache.MockDomainCache.GetDomainName([]) at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/handler.go:560 because: 
+        expected call at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/describe_tasklist_oracle_test.go:25 doesn't match the argument at index 0.
+        Got:  (string)
+        Want: is equal to test-domain-id (string)
+        expected call at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/describe_tasklist_oracle_test.go:27 doesn't match the argument at index 0.
+        Got:  (string)
+        Want: is equal to missing-domain (string)
+--- FAIL: TestMatchingEngineSuite (0.00s)
+    --- FAIL: TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle (0.00s)
+FAIL
+FAIL	github.com/uber/cadence/service/matching/handler	0.017s
+FAIL

@@ -510,3 +510,49 @@ TLS gaps and does not establish Matching completion. Matching remains
 INCOMPLETE; preserve existing `preliminary-passed` and
 `acceptanceEligible:false` labels. No local Cargo/Go/rustfmt validation was
 run.
+
+## DescribeTaskList oracle correction and latest interop status (2026-10-25)
+
+Approved branch `t3/http-tls-go-oracle-correction-20261025` was reviewed at
+code source `5cafc2dc941fc676cad66d6756fb812c502aa5bf` (commit
+`fefe4c663f08d9b2ded05eb24a14cc5e42e15af5`), then received only documentation
+and evidence commits through terminal tip
+`d04ee7492a3744c92adc9e8b118351a25303bfe7`. The tip-to-approved-commit delta
+was verified documentation-only. The source diff contains CI/oracle and
+interop-test harness work, with no Rust production file changes. The branch
+also preserves earlier failed and superseded oracle attempts and their
+limitations; see its committed evidence directories.
+
+Original Go oracle run
+[40171379726](https://github.com/auenkr/cadence-rust/actions/runs/40171379726)
+completed successfully on exact code source
+`5cafc2dc941fc676cad66d6756fb812c502aa5bf`. It verified absent nested request
+and empty task-list success with zero pollers, plus the malformed reserved
+task-list `InternalServiceError` and exact message. The run's Go oracle exited
+0, followed by successful strict Clippy and workspace tests. It used the
+standard cached target; fresh target selection was skipped, so it is not a
+fresh final workspace gate. TLS-touched formatting passed (`0`); global
+workspace formatting remains advisory `1`. Compact logs, exits, run metadata,
+oracle output and artifact hashes are retained at
+`memory/evidence/matching-workspace-and-go-oracle-40171379726/`; original
+artifact ZIPs are under `/mnt/storage/service/ci-evidence/run-40171379726/`.
+
+The separate HTTP TLS interop run
+[40171381762](https://github.com/auenkr/cadence-rust/actions/runs/40171381762)
+failed on that same source before TLS assertions. Parent-reported progress:
+embedded TChannel passed; the configured decision-task delivery probe using
+TChannel/HTTP/trailing behavior then emitted a “not enough hosts” membership
+warning, and TLS was not reached. Its original artifact ZIP is retained at
+`/mnt/storage/service/ci-evidence/run-40171381762/` and a separate concise
+record is at
+`memory/evidence/matching-http-tls-interop-failure-40171381762/README.md`.
+Sonnet owns diagnosis; no cause or fix is inferred here. Do not dispatch
+another workflow until that diagnosis and correction are reviewed.
+
+The proposed `84cadec2` Rust guard remains rejected and is absent from the
+approved source. Go oracle run 40170886290 established empty/absent-nested
+success in its fixture and reserved malformed-name rejection; its synthetic
+mock errors for ordinary unknown-domain requests are explicitly not production
+error-mapping evidence. Preserve domain lookup/precedence. This integration
+does not close HTTP TLS interop, gRPC TLS gaps, or Matching parity; Matching
+remains INCOMPLETE and the existing eligibility labels stay unchanged.
