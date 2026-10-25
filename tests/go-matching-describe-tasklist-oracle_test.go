@@ -39,7 +39,6 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 	domainCache.EXPECT().UnregisterDomainChangeCallback(gomock.Any()).AnyTimes()
 	s.mockDomainCache = domainCache
 	s.matchingEngine = s.newMatchingEngine(defaultTestConfig(), s.taskManager)
-	s.matchingEngine.Start()
 	handler := NewHandler(
 		s.matchingEngine,
 		defaultTestConfig(),
@@ -48,6 +47,7 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 		s.logger,
 		s.logger,
 	)
+	handler.Start()
 
 	valid := "test-domain-id"
 	cases := []struct {

@@ -510,5 +510,10 @@ behavior conclusion is drawn from this run. Its compact proof is saved at
 `memory/evidence/matching-describe-tasklist-go-oracle-failure-40169963237/`.
 The oracle now uses one fresh-mock `GetDomainName(gomock.Any())` dispatcher with
 explicit results for valid, empty and unknown IDs (and an error for any
-unexpected ID), avoiding overlapping exact expectations. Rerun evidence is
-pending.
+unexpected ID), avoiding overlapping exact expectations. Review then found
+that the probe also had to call `handler.Start()`: `NewHandler` adds one to its
+start wait group and `DescribeTaskList` blocks in `startProfiling` until Start
+releases it. Run 40170706003 was canceled before result evidence was produced;
+it was pinned to the earlier exact-expectation revision and is not parity
+evidence. The corrected probe removes the direct engine start and starts the
+handler once. New Actions results are pending.
