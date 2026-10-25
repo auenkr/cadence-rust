@@ -3153,6 +3153,96 @@ impl h::history_api_server::HistoryApi for StartingHistory {
     }
 }
 
+struct RunIdRecordingHistory(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for RunIdRecordingHistory {
+    async fn record_decision_task_started(
+        &self,
+        request: Request<h::RecordDecisionTaskStartedRequest>,
+    ) -> Result<Response<h::RecordDecisionTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        self.0
+            .lock()
+            .unwrap()
+            .push(request.workflow_execution.unwrap().run_id);
+        Ok(Response::new(h::RecordDecisionTaskStartedResponse {
+            scheduled_event_id: request.schedule_id,
+            started_event_id: request.schedule_id + 1,
+            ..Default::default()
+        }))
+    }
+}
+
+#[tokio::test]
+async fn matching_rpc_sync_match_passes_raw_run_id_to_history_without_persisting() {
+    // Go AddDecisionTask never parses RunID; a sync match hands the string to History
+    // unchanged (malformed, empty, uppercase and simple UUID forms included) and no
+    // CreateTasks call happens, so Go's SQL MustParseUUID is never reached either.
+    let id = Uuid::from_u128(0xabcdef);
+    let upper = id.to_string().to_uppercase();
+    let simple = id.simple().to_string();
+    for (case, raw) in ["not-a-uuid", "", upper.as_str(), simple.as_str()]
+        .into_iter()
+        .enumerate()
+    {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let service = RunIdRecordingHistory(seen.clone());
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(h::history_api_server::HistoryApiServer::new(service))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        let (_dir, store, matching, key) = fixture_with_history(&format!("http://{address}"));
+        let worker = matching.clone();
+        let domain = key.domain_id.to_string();
+        let poll = tokio::spawn(async move {
+            worker
+                .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+                    domain_id: domain,
+                    poller_id: format!("raw-run-{case}"),
+                    request: Some(p::PollForDecisionTaskRequest {
+                        task_list: list(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })))
+                .await
+                .unwrap()
+                .into_inner()
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while matching.polls.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        matching
+            .add_decision_task(run_id_decision(&key, raw, 31))
+            .await
+            .unwrap_or_else(|status| panic!("RunID {raw:?} must sync match: {status}"));
+        let started = tokio::time::timeout(Duration::from_secs(10), poll)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(started.started_event_id, 32);
+        assert_eq!(seen.lock().unwrap().as_slice(), [raw.to_owned()]);
+        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "no durable write for {raw:?}");
+        matching
+            .queues
+            .as_ref()
+            .unwrap()
+            .shutdown(matching_now())
+            .await
+            .unwrap();
+    }
+}
+
 async fn start_starting_history() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
