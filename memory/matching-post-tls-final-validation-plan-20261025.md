@@ -288,17 +288,23 @@ gh workflow run matching-http-tls-interop.yml --ref t3/matching-validation-http-
 gh workflow run rust-ci.yml --ref t3/matching-validation-http-embedded-20261025 -f clean_target=true
 ```
 
-At dispatch time no mixed lane was active. HTTP TLS interop run
+HTTP TLS interop run
 [40168201737](https://github.com/auenkr/cadence-rust/actions/runs/40168201737)
-is now in progress on the exact pinned head `fade09c501e23212d4d86e64c653057d589d1910`.
-It must pass embedded startup and continue through TLS assertions; preserve
-its server binary SHA256 and inspect the artifact before recording success.
-The required fresh workspace gate remains undispatched while this gate and
-the automatic cached master run are active; then run `rust-ci.yml` with
-`clean_target=true` on the same pinned ref. Verify Clippy precedes workspace
-tests; keep focused format and workspace format results distinct. Matching
-remains INCOMPLETE, and the existing preliminary-passed / acceptanceEligible
-labels remain unchanged.
+completed with failure on the exact pinned head
+`fade09c501e23212d4d86e64c653057d589d1910`; its diagnosis is assigned
+separately. Preserve this as a source-bound failure and inspect the artifact
+before recording its cause.
+
+After confirming no mixed gate was active, dispatched fresh workspace run
+[40168414544](https://github.com/auenkr/cadence-rust/actions/runs/40168414544)
+on `t3/matching-validation-http-embedded-20261025` at exact head
+`fade09c501e23212d4d86e64c653057d589d1910`, with `clean_target=true`. This
+selects `$RUNNER_TEMP/cargo-target-final` and skips `rust-cache`; the required
+order is strict workspace Clippy then workspace tests. The run is pending and
+its artifacts/exits still need review. Automatic master run 40168143481 uses
+the cached target path and does not substitute for this run. No second mixed
+lane has been dispatched. Matching remains INCOMPLETE, and the existing
+preliminary-passed / acceptanceEligible labels remain unchanged.
 
 ## TLS candidate CI result (2026-10-25)
 
