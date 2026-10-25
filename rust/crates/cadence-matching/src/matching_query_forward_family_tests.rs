@@ -449,7 +449,6 @@ async fn absent_query_case(
     shaped: impl FnOnce(&mut m::QueryWorkflowRequest),
     poll_list: p::TaskList,
 ) {
-    let poll_list_name = poll_list.name.clone();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
@@ -467,11 +466,6 @@ async fn absent_query_case(
         (result, started.elapsed())
     };
     let poller = async {
-        // An empty default list is not pollable in Rust (partition drain check precedes
-        // the query arm); the caller-side deadline behaviour is still verified.
-        if poll_list_name.is_empty() {
-            return;
-        }
         tokio::time::sleep(Duration::from_millis(200)).await;
         let poll_error = child
             .poll_for_decision_task(decision_poll(
@@ -490,12 +484,6 @@ async fn absent_query_case(
     };
     let ((result, elapsed), ()) = tokio::join!(caller, poller);
     let error = result.expect_err("query ends only at its deadline");
-    if poll_list_name.is_empty() {
-        // Empty default list: the durable partition check rejects it (Aborted) before
-        // any poller; no nil-deref path is reachable. Not asserted as Go parity.
-        shut_down(&child, server).await;
-        return;
-    }
     assert_eq!(error.code(), tonic::Code::Internal);
     assert_eq!(error.message(), "context deadline exceeded");
     assert!(
