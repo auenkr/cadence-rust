@@ -1,0 +1,1 @@
+tests/gates/run-mysql-lane.sh out/gate /tmp/cargo-target-final-40153127238/debug/cadence-matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --matching-transport thrift --history-transport tchannel --probe-auto-config-hint 
