@@ -1,0 +1,1010 @@
+2026-10-25T03:00:05.435Z	INFO	namespace/manager.go:83	Starting namespace handler	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:83"}
+2026-10-25T03:00:05.436Z	INFO	namespace/manager.go:166	Entering campaigning state	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:166"}
+2026-10-25T03:00:05.436Z	INFO	election/election.go:156	Run election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:156"}
+2026-10-25T03:00:05.436Z	DEBUG	election/election.go:160	Adding random delay before campaigning	{"component": "shard-leader-election", "shard-namespace": "matching", "election-delay": "49.550998ms", "logging-call-at": "election.go:160"}
+2026-10-25T03:00:05.485Z	DEBUG	election/election.go:164	Random delay before campaigning completed	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:164"}
+2026-10-25T03:00:05.485Z	INFO	election/election.go:170	Creating election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:170"}
+2026-10-25T03:00:05.488Z	INFO	election/election.go:194	Starting campaign for leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:194"}
+2026-10-25T03:00:05.489Z	DEBUG	election/election.go:202	Run leader process	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:202"}
+2026-10-25T03:00:05.489Z	INFO	process/processor.go:132	Starting	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:132"}
+2026-10-25T03:00:05.489Z	INFO	election/election.go:212	Became leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:212"}
+2026-10-25T03:00:05.490Z	INFO	namespace/manager.go:203	Became leader for namespace	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:203"}
+2026-10-25T03:00:05.490Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:191
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:00:06.116Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:06.177Z	ERROR	metered/api_generated.go:120	Internal service error	{"shard-namespace": "matching", "error": "failed to assign ephemeral shard: plan initial placement: no active executors available", "logging-call-at": "metered.go:40"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:120
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:45
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:417
+go.uber.org/yarpc/encoding/protobuf.(*unaryHandler).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:56
+go.uber.org/yarpc/internal/observability.(*Middleware).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:188
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/middleware.nopUnaryInbound.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:77
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/transport.InvokeUnaryHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:70
+go.uber.org/yarpc/transport/grpc.(*handler).callUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:255
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnaryBeforeErrorConversion
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:247
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:205
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:78
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:06.453Z	ERROR	metered/api_generated.go:120	Internal service error	{"shard-namespace": "matching", "error": "failed to assign ephemeral shard: plan initial placement: no active executors available", "logging-call-at": "metered.go:40"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:120
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:45
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:417
+go.uber.org/yarpc/encoding/protobuf.(*unaryHandler).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:56
+go.uber.org/yarpc/internal/observability.(*Middleware).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:188
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/middleware.nopUnaryInbound.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:77
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/transport.InvokeUnaryHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:70
+go.uber.org/yarpc/transport/grpc.(*handler).callUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:255
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnaryBeforeErrorConversion
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:247
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:205
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:78
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:06.490Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:06.491Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:00:06.731Z	ERROR	metered/api_generated.go:120	Internal service error	{"shard-namespace": "matching", "error": "failed to assign ephemeral shard: plan initial placement: no active executors available", "logging-call-at": "metered.go:40"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:120
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:45
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).GetShardOwner
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:417
+go.uber.org/yarpc/encoding/protobuf.(*unaryHandler).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:56
+go.uber.org/yarpc/internal/observability.(*Middleware).Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:188
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/middleware.nopUnaryInbound.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:77
+go.uber.org/yarpc/api/middleware.unaryHandlerWithMiddleware.Handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:71
+go.uber.org/yarpc/api/transport.InvokeUnaryHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:70
+go.uber.org/yarpc/transport/grpc.(*handler).callUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:255
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnaryBeforeErrorConversion
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:247
+go.uber.org/yarpc/transport/grpc.(*handler).handleUnary
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:205
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:78
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:06.776Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:06.776Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:06.776Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:07.275Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc000318f90:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:07.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:07.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:07.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:07.741Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:07.742Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:07.742Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:08.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:08.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:08.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:09.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:09.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:09.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:10.490Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:10.490Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:10.491Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:10.491Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:11.490Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:11.491Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:11.491Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:12.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:12.491Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:12.491Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:13.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:13.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:13.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:13.572Z	ERROR	metered/api_generated.go:210	internal uncategorized error	{"shard-namespace": "matching", "error": "context canceled", "logging-call-at": "metered.go:55"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:210
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:65
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:546
+go.uber.org/yarpc/encoding/protobuf.(*streamHandler).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:128
+go.uber.org/yarpc/internal/observability.(*Middleware).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:260
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/middleware.nopStreamInbound.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:178
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/transport.InvokeStreamHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:108
+go.uber.org/yarpc/transport/grpc.(*handler).handleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:174
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:90
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:14.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:14.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:14.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:15.491Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:15.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:15.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:15.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:16.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:16.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:16.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:17.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:17.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b", "a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:17.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:18.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:18.492Z	INFO	process/processor.go:320	Executor has not reported a heartbeat recently	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executor": "a4202bb8-ade5-4890-962c-eef088eae70b", "shard-namespace": "matching", "value": "2026-10-25 03:00:13.1870062 +0000 UTC", "logging-call-at": "processor.go:320"}
+2026-10-25T03:00:18.492Z	INFO	process/processor.go:419	Identified stale executors for removal	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a4202bb8-ade5-4890-962c-eef088eae70b"], "logging-call-at": "processor.go:419"}
+2026-10-25T03:00:18.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:18.492Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:18.742Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:18.743Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:18.743Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:19.490Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:19.491Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:19.491Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:20.113Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc0007ad038:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7 production-idle-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:20.351Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:20.352Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:20.352Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:20.490Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:20.601Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:20.602Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:20.602Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:20.816Z	ERROR	metered/api_generated.go:210	internal uncategorized error	{"shard-namespace": "matching", "error": "context canceled", "logging-call-at": "metered.go:55"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:210
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:65
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:546
+go.uber.org/yarpc/encoding/protobuf.(*streamHandler).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:128
+go.uber.org/yarpc/internal/observability.(*Middleware).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:260
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/middleware.nopStreamInbound.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:178
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/transport.InvokeStreamHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:108
+go.uber.org/yarpc/transport/grpc.(*handler).handleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:174
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:90
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:20.854Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc000409a40:[production-crash-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7] 0xc000409a58:[production-idle-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:20.879Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:20.881Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:20.881Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:21.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:21.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:21.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:22.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:22.491Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:22.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:23.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:23.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:23.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:24.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:24.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:24.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:25.490Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:25.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:25.492Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "a6335075-ade4-4214-a5cf-3b524117d88f", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:25.492Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:26.491Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:26.493Z	INFO	process/processor.go:320	Executor has not reported a heartbeat recently	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executor": "a6335075-ade4-4214-a5cf-3b524117d88f", "shard-namespace": "matching", "value": "2026-10-25 03:00:20.789949154 +0000 UTC", "logging-call-at": "processor.go:320"}
+2026-10-25T03:00:26.493Z	INFO	process/processor.go:419	Identified stale executors for removal	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["a6335075-ade4-4214-a5cf-3b524117d88f"], "logging-call-at": "processor.go:419"}
+2026-10-25T03:00:26.493Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:26.493Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:26.741Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:26.742Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099", "ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:26.742Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:27.466Z	INFO	namespace/manager.go:83	Starting namespace handler	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:83"}
+2026-10-25T03:00:27.466Z	INFO	namespace/manager.go:166	Entering campaigning state	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:166"}
+2026-10-25T03:00:27.466Z	INFO	election/election.go:156	Run election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:156"}
+2026-10-25T03:00:27.466Z	DEBUG	election/election.go:160	Adding random delay before campaigning	{"component": "shard-leader-election", "shard-namespace": "matching", "election-delay": "424.136298ms", "logging-call-at": "election.go:160"}
+2026-10-25T03:00:27.890Z	DEBUG	election/election.go:164	Random delay before campaigning completed	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:164"}
+2026-10-25T03:00:27.890Z	INFO	election/election.go:170	Creating election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:170"}
+2026-10-25T03:00:27.891Z	INFO	election/election.go:194	Starting campaign for leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:194"}
+2026-10-25T03:00:28.399Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc0000127c8:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7 production-idle-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-restart-33379f51-e199-4452-a230-deaef29ca9e7] 0xc0000127e0:[secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:28.449Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc0000127c8:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7 production-idle-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-restart-33379f51-e199-4452-a230-deaef29ca9e7] 0xc0000127e0:[secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:29.903Z	ERROR	metered/api_generated.go:210	internal uncategorized error	{"shard-namespace": "matching", "error": "context canceled", "logging-call-at": "metered.go:55"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:210
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:65
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:546
+go.uber.org/yarpc/encoding/protobuf.(*streamHandler).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:128
+go.uber.org/yarpc/internal/observability.(*Middleware).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:260
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/middleware.nopStreamInbound.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:178
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/transport.InvokeStreamHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:108
+go.uber.org/yarpc/transport/grpc.(*handler).handleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:174
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:90
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:00:30.846Z	DEBUG	election/election.go:202	Run leader process	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:202"}
+2026-10-25T03:00:30.846Z	INFO	process/processor.go:132	Starting	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:132"}
+2026-10-25T03:00:30.846Z	INFO	election/election.go:212	Became leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:212"}
+2026-10-25T03:00:30.846Z	INFO	namespace/manager.go:203	Became leader for namespace	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:203"}
+2026-10-25T03:00:30.846Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:30.846Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:31.848Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:31.850Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:31.850Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:32.848Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:32.850Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:32.850Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:33.002Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc0007bd4a0:[production-idle-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-restart-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7 graceful-drain-tasks-33379f51-e199-4452-a230-deaef29ca9e7 discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7] 0xc0007bd4b8:[restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:33.848Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:33.849Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:33.849Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:34.098Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:34.099Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:34.099Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:34.485Z	INFO	namespace/manager.go:83	Starting namespace handler	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:83"}
+2026-10-25T03:00:34.485Z	INFO	namespace/manager.go:166	Entering campaigning state	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:166"}
+2026-10-25T03:00:34.485Z	INFO	election/election.go:156	Run election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:156"}
+2026-10-25T03:00:34.485Z	DEBUG	election/election.go:160	Adding random delay before campaigning	{"component": "shard-leader-election", "shard-namespace": "matching", "election-delay": "435.549857ms", "logging-call-at": "election.go:160"}
+2026-10-25T03:00:34.922Z	DEBUG	election/election.go:164	Random delay before campaigning completed	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:164"}
+2026-10-25T03:00:34.922Z	INFO	election/election.go:170	Creating election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:170"}
+2026-10-25T03:00:34.923Z	INFO	election/election.go:194	Starting campaign for leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:194"}
+2026-10-25T03:00:35.491Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc000012ea0:[graceful-drain-tasks-33379f51-e199-4452-a230-deaef29ca9e7 paced-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-graceful-drain-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7] 0xc000012eb8:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7 production-idle-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-restart-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7] 0xc000012ee8:[secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:35.563Z	INFO	shardcache/namespaceshardcache.go:192	initial state sent to subscriber	{"shard-namespace": "matching", "value": "map[0xc000012ea0:[graceful-drain-tasks-33379f51-e199-4452-a230-deaef29ca9e7 paced-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-graceful-drain-33379f51-e199-4452-a230-deaef29ca9e7 secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7] 0xc000012eb8:[discovery-ready-33379f51-e199-4452-a230-deaef29ca9e7 production-crash-33379f51-e199-4452-a230-deaef29ca9e7 production-idle-33379f51-e199-4452-a230-deaef29ca9e7 sd-restart-restart-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7] 0xc000012ee8:[secondary-ready-33379f51-e199-4452-a230-deaef29ca9e7 secondary-restarted-33379f51-e199-4452-a230-deaef29ca9e7 tasks-33379f51-e199-4452-a230-deaef29ca9e7 restart-tasks-33379f51-e199-4452-a230-deaef29ca9e7]]", "logging-call-at": "namespaceshardcache.go:192"}
+2026-10-25T03:00:39.354Z	DEBUG	election/election.go:202	Run leader process	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:202"}
+2026-10-25T03:00:39.354Z	INFO	process/processor.go:132	Starting	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:132"}
+2026-10-25T03:00:39.354Z	INFO	election/election.go:212	Became leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:212"}
+2026-10-25T03:00:39.354Z	INFO	namespace/manager.go:203	Became leader for namespace	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:203"}
+2026-10-25T03:00:39.355Z	INFO	process/processor.go:320	Executor has not reported a heartbeat recently	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executor": "ce301b6a-1694-49fb-a8bb-76940f922f8f", "shard-namespace": "matching", "value": "2026-10-25 03:00:29.901171688 +0000 UTC", "logging-call-at": "processor.go:320"}
+2026-10-25T03:00:39.355Z	INFO	process/processor.go:419	Identified stale executors for removal	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["ce301b6a-1694-49fb-a8bb-76940f922f8f"], "logging-call-at": "processor.go:419"}
+2026-10-25T03:00:39.355Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:39.355Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:00:40.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:40.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:40.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:41.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:41.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:41.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:42.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:42.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:42.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:43.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:43.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:43.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:44.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:44.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:44.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:44.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:45.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:45.357Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:45.357Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:46.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:46.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:46.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:47.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:47.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:47.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:48.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:48.357Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:48.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:49.354Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:49.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:49.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:49.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:50.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:50.357Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:50.357Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:51.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:51.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:51.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:52.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:52.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:52.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:53.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:53.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:53.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:54.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:54.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:54.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:54.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:55.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:55.359Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:55.359Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:56.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:56.357Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:56.357Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:57.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:57.357Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:57.357Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:58.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:58.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:58.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:00:59.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:00:59.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:00:59.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:00:59.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:01:00.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:00.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:01:00.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:01:01.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:01.358Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:01:01.358Z	INFO	process/processor.go:473	No changes to distribution detected. Skipping rebalance.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:473"}
+2026-10-25T03:01:01.775Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:01.776Z	INFO	process/processor.go:435	Active executors	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356"], "logging-call-at": "processor.go:435"}
+2026-10-25T03:01:01.776Z	INFO	process/processor.go:482	Applying new shard distribution.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:482"}
+2026-10-25T03:01:01.777Z	ERROR	metered/api_generated.go:210	internal uncategorized error	{"shard-namespace": "matching", "error": "context canceled", "logging-call-at": "metered.go:55"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:210
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:65
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:546
+go.uber.org/yarpc/encoding/protobuf.(*streamHandler).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:128
+go.uber.org/yarpc/internal/observability.(*Middleware).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:260
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/middleware.nopStreamInbound.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:178
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/transport.InvokeStreamHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:108
+go.uber.org/yarpc/transport/grpc.(*handler).handleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:174
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:90
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:01:01.846Z	ERROR	metered/api_generated.go:210	internal uncategorized error	{"shard-namespace": "matching", "error": "context canceled", "logging-call-at": "metered.go:55"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/metered.(*metricsHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/metered/api_generated.go:210
+github.com/cadence-workflow/shard-manager/service/sharddistributor/wrappers/grpc.GRPCHandler.WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/wrappers/grpc/grpc_handler_generated.go:65
+github.com/cadence-workflow/shard-manager/.gen/proto/sharddistributor/v1.(*_ShardDistributorAPIYARPCHandler).WatchNamespaceState
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/.gen/proto/sharddistributor/v1/service.pb.yarpc.go:546
+go.uber.org/yarpc/encoding/protobuf.(*streamHandler).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/encoding/protobuf/inbound.go:128
+go.uber.org/yarpc/internal/observability.(*Middleware).HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/internal/observability/middleware.go:260
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/middleware.nopStreamInbound.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:178
+go.uber.org/yarpc/api/middleware.streamHandlerWithMiddleware.HandleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/middleware/inbound.go:172
+go.uber.org/yarpc/api/transport.InvokeStreamHandler
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/api/transport/handler_invoker.go:108
+go.uber.org/yarpc/transport/grpc.(*handler).handleStream
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:174
+go.uber.org/yarpc/transport/grpc.(*handler).handle
+	/home/runner/go/pkg/mod/go.uber.org/yarpc@v1.88.0/transport/grpc/handler.go:90
+google.golang.org/grpc.(*Server).processStreamingRPC
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1729
+google.golang.org/grpc.(*Server).handleStream
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1868
+google.golang.org/grpc.(*Server).serveStreams.func2.1
+	/home/runner/go/pkg/mod/google.golang.org/grpc@v1.83.1/server.go:1078
+2026-10-25T03:01:02.026Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:02.027Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:02.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:02.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:03.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:03.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:04.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:04.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:04.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:05.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:05.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:06.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:06.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:07.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:07.357Z	INFO	process/processor.go:320	Executor has not reported a heartbeat recently	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executor": "7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "shard-namespace": "matching", "value": "2026-10-25 03:01:01.844931891 +0000 UTC", "logging-call-at": "processor.go:320"}
+2026-10-25T03:01:07.358Z	INFO	process/processor.go:320	Executor has not reported a heartbeat recently	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executor": "8411ee01-bba1-4e29-a4b7-b82fc3da8099", "shard-namespace": "matching", "value": "2026-10-25 03:01:01.774471738 +0000 UTC", "logging-call-at": "processor.go:320"}
+2026-10-25T03:01:07.358Z	INFO	process/processor.go:419	Identified stale executors for removal	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:419"}
+2026-10-25T03:01:07.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:07.358Z	INFO	process/processor.go:428	Cleaning up stale executors (no active executors)	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-executors": ["7665b6d3-8e6a-49e9-ae82-ec8e9c449356", "8411ee01-bba1-4e29-a4b7-b82fc3da8099"], "logging-call-at": "processor.go:428"}
+2026-10-25T03:01:07.607Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "State change detected", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:07.608Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:08.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:08.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:09.354Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:09.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:09.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:10.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:10.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:11.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:11.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:12.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:12.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:13.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:13.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:14.354Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:14.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:14.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:15.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:15.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:16.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:16.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:17.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:17.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:18.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:18.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:19.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:19.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:19.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:20.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:20.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:21.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:21.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:22.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:22.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:23.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:23.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:24.354Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:24.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:24.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:25.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:25.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:26.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:26.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:27.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:27.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:28.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:28.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:29.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:29.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:29.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:30.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:30.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:31.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:31.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:32.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:32.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:33.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:33.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:34.354Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:34.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:34.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:35.356Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:35.357Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:36.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:36.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:37.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:37.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:38.357Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:38.358Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:39.355Z	INFO	election/election.go:229	Leadership period ended, voluntarily resigning	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:229"}
+2026-10-25T03:01:39.355Z	INFO	process/processor.go:147	Stopping	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:147"}
+2026-10-25T03:01:39.355Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:39.355Z	INFO	process/processor.go:206	Rebalancing loop cancelled	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:206"}
+2026-10-25T03:01:39.355Z	INFO	process/processor.go:285	Shard stats cleanup loop cancelled.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:285"}
+2026-10-25T03:01:39.355Z	INFO	process/processor.go:260	Rebalance triggering loop cancelled	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:260"}
+2026-10-25T03:01:39.356Z	INFO	election/election.go:156	Run election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:156"}
+2026-10-25T03:01:39.356Z	DEBUG	election/election.go:160	Adding random delay before campaigning	{"component": "shard-leader-election", "shard-namespace": "matching", "election-delay": "197.831507ms", "logging-call-at": "election.go:160"}
+2026-10-25T03:01:39.356Z	INFO	namespace/manager.go:206	Lost leadership for namespace	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:206"}
+2026-10-25T03:01:39.555Z	DEBUG	election/election.go:164	Random delay before campaigning completed	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:164"}
+2026-10-25T03:01:39.555Z	INFO	election/election.go:170	Creating election	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:170"}
+2026-10-25T03:01:39.556Z	INFO	election/election.go:194	Starting campaign for leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:194"}
+2026-10-25T03:01:39.557Z	DEBUG	election/election.go:202	Run leader process	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:202"}
+2026-10-25T03:01:39.557Z	INFO	process/processor.go:132	Starting	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:132"}
+2026-10-25T03:01:39.558Z	INFO	election/election.go:212	Became leader	{"component": "shard-leader-election", "shard-namespace": "matching", "logging-call-at": "election.go:212"}
+2026-10-25T03:01:39.558Z	INFO	namespace/manager.go:203	Became leader for namespace	{"component": "shard-namespace-manager", "shard-namespace": "matching", "logging-call-at": "manager.go:203"}
+2026-10-25T03:01:39.558Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:191
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:40.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:40.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:41.558Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:41.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:42.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:42.560Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:43.558Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:43.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:44.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:44.559Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:44.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:45.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:45.560Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:46.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:46.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:47.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:47.560Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:48.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:48.559Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
+2026-10-25T03:01:49.558Z	DEBUG	process/processor.go:291	Load balancing mode is not GREEDY, skipping shard stats cleanup.	{"component": "shard-leader-processor", "shard-namespace": "matching", "shard-namespace": "matching", "logging-call-at": "processor.go:291"}
+2026-10-25T03:01:49.559Z	INFO	process/processor.go:216	Rebalancing triggered	{"component": "shard-leader-processor", "shard-namespace": "matching", "triggerReason": "Periodic reconciliation triggered", "logging-call-at": "processor.go:216"}
+2026-10-25T03:01:49.560Z	ERROR	process/processor.go:424	No active executors found. Cannot assign shards.	{"component": "shard-leader-processor", "shard-namespace": "matching", "logging-call-at": "processor.go:424"}
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShardsImpl
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:424
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).rebalanceShards
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:407
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runRebalancingLoop
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:217
+github.com/cadence-workflow/shard-manager/service/sharddistributor/leader/process.(*namespaceProcessor).runProcess.func1
+	/home/runner/go/pkg/mod/github.com/cadence-workflow/shard-manager@v0.0.0-20260610143419-4bef35311802/service/sharddistributor/leader/process/processor.go:172
