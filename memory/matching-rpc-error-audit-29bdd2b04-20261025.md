@@ -58,3 +58,11 @@ gRPC wrapper: `proto.FromError` falls through every typed converter to `protobuf
 status is Unknown with the bare text (no `panic:` prefix; that comes only from YARPC recovery of panics escaping the handler). Thrift wrapper:
 `thrift.FromError` returns an unconverted error unchanged (mapper/thrift/errors.go:56) => unexpected/unknown transport error, modelled by `is_captured_panic`.
 Unknown-domain real-cache class for polls is not asserted (mock error synthetic). Go Add* with a present invalid run UUID: not traced; Rust still strict.
+
+## Unknown-domain polls (traced, no code change)
+Real path: `getOrCreateTaskListManager` -> `tasklist.NewManager` -> `DomainCache.GetDomainName(id)` returns the cache's typed `EntityNotExistsError` raw (empty id:
+`BadRequestError "DomainID is empty."`, cache.go:382 for GetDomainByID). Poll wraps `couldn't load tasklist manager: %w`; `handleErr` uses `errors.As` so a
+typed inner error passes through, and mapper `ConvertError` (`errors.As`) rebuilds the wire error from the inner typed error. So the wire class for a valid-name
+unknown-domain poll is EntityNotExists with the inner message (NOT the wrapper text, NOT Internal); Rust `domain_name` NotFound is the same class. The oracle's
+"Internal ... oracle unknown domain" result came from the synthetic mock error and is not a contract. Empty-domain BadRequest text and Rust equality: untraced.
+Activity nil-request order fixed to Go order: IsValidContext (Internal) before manager load. Open and unproven: Query absent payload, Add present invalid run UUID.

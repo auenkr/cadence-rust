@@ -8914,3 +8914,33 @@ async fn go_oracle_activity_poll_absent_request_is_captured_nil_dereference() {
     );
     assert!(crate::matching_panic::is_captured_panic(&err));
 }
+
+// Go order for PollForActivityTask with an absent PollRequest: worker quota, long-poll deadline
+// validation (BadRequest), `common.IsValidContext` (Internal deadline error), manager load,
+// then the engine.go:915 nil dereference. Thrift/TChannel report the plain error as 0x05.
+#[tokio::test]
+async fn go_activity_poll_absent_request_deadline_precedence_and_wire_code() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain_id = key.domain_id.to_string();
+    let request = || {
+        Request::new(m::PollForActivityTaskRequest {
+            domain_id: domain_id.clone(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })
+    };
+    let no_deadline = matching.poll_for_activity_task(request()).await.unwrap_err();
+    assert_eq!(no_deadline.code(), tonic::Code::InvalidArgument);
+    assert_eq!(no_deadline.message(), "Context timeout is not set.");
+    let mut expired = request();
+    expired.set_timeout(Duration::from_millis(1));
+    let expired = matching.poll_for_activity_task(expired).await.unwrap_err();
+    assert_eq!(expired.code(), tonic::Code::Internal);
+    assert_eq!(expired.message(), "context deadline exceeded");
+    assert_eq!(
+        crate::thrift_matching::tchannel_error_code(
+            crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+        ),
+        0x05
+    );
+}

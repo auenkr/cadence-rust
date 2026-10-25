@@ -2023,8 +2023,8 @@ impl m::matching_api_server::MatchingApi for Matching {
             // list's manager, then dereferences `request.TaskListMetadata` (engine.go:915). The
             // runtime panic is captured by the handler as a plain error (Go oracle run
             // 40175488464: `runtime error: invalid memory address or nil pointer dereference`).
-            self.domain_name(&r.domain_id)?;
             check_poll_context(incoming_deadline)?;
+            self.domain_name(&r.domain_id)?;
             return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE));
         };
         // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
