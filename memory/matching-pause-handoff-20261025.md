@@ -1,5 +1,26 @@
 # Matching pause checkpoint — 2026-10-25
 
+## Resumed at 16:10 IST
+
+The user-authorized one-time timer fired at 2026-10-25 10:40 UTC and was disabled
+(`nextRunAt: null`). The pause below is historical; work resumed with Claude Sonnet
+5.5 low-effort workers and CI-only validation.
+
+- Query run 40177106445: artifacts confirm Clippy/test/query-format/TLS-format/fmt
+  exits 0, workspace-format exit 1. Evidence note on `t3/97f447de` at `34a6618d`.
+- Request fixture CI 40185780201 tests `1b1b37da6`; pending at last check.
+  Source review note on request branch docs head `72bc0e61f`.
+- Raw RunID activity regression and storage review on
+  `t3/matching-activity-runid-regression` at `6b8672d2`; persistence CI
+  40185891064 pending at last check. Matching CI not dispatched yet.
+- Absent Query fields and malformed SQL domain handling remain open. New source
+  note on `t3/matching-nil-domain-review` at `a26bfa291` needs correction: pinned
+  google/uuid is v1.6.0. Handler domain-name lookup happens before throttle and
+  deadline checks; a SQL malformed-UUID panic differs from an ordinary swallowed
+  domain-cache error. Worker is verifying backend/wire specifics before code edits.
+
+No implementation branch merged at this resume checkpoint.
+
 User requested: pause after both current workers finish, save work, continue later.
 Both Luna fallback workers finished and pushed clean worktrees. Work is paused;
 do not resume implementation, dispatch CI, merge or spawn workers until requested.
