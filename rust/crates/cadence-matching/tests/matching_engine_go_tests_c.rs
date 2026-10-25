@@ -20,10 +20,13 @@
 //! a UUID, because the handler parses it.
 use cadence_api::types::DomainInfo;
 use cadence_matching::{
-    grpc_matching::Matching, matching_history::MatchingHistoryClient,
+    grpc_matching::Matching,
+    matching_history::MatchingHistoryClient,
     matching_registry::QueueRegistry,
     matching_shard_distributor::{setup_shard_executor, GetShardProcessError, ShardExecutorSetup},
-    matching_shard_routing::{shard_distributor_onboarded, task_list_excluded_from_shard_distributor},
+    matching_shard_routing::{
+        shard_distributor_onboarded, task_list_excluded_from_shard_distributor,
+    },
 };
 use cadence_persistence::{
     matching_blob::{BlobEncoding, TaskData},
