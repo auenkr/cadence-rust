@@ -28,11 +28,16 @@ artifact's SHA is for the metrics oracle executable, not a Matching binary.
 ## Candidate and first serial lane
 
 The stable branch `t3/matching-validation-tls-e3c79b3-20261025` is pinned to
-the documented integrated candidate commit. Its exact full SHA is the branch
-tip at creation and must match the first mixed workflow's `headSha`. The sole
-first gate is `matching-http-tls-interop.yml`, which uses `ubuntu-latest`, a
-90-minute job timeout, three-day artifact retention, and cancel-in-progress
-concurrency. Do not dispatch a second lane until this run completes and its
-artifacts are reviewed. Fresh equivalent workspace evidence above means no
-manual workspace dispatch is needed. A push to master may trigger automatic
-`rust-ci`; record it if present rather than dispatching a duplicate.
+the documented integrated candidate commit; its exact full SHA is recorded in
+the plan after it is advanced to include the workflow parser fix. The first
+dispatch attempt was rejected before creating a run (HTTP 422: `runner.temp`
+is unavailable in job-level `env`). The workflow now selects its fresh target
+in a step using `$RUNNER_TEMP` and `$GITHUB_ENV`; YAML parsing and `git diff
+--check` passed. Advance the stable ref to this corrected workflow commit and
+verify that its SHA before dispatching. The sole first gate is
+`matching-http-tls-interop.yml`, which uses `ubuntu-latest`, a 90-minute job
+timeout, three-day artifact retention, and cancel-in-progress concurrency. Do
+not dispatch a second lane until this run completes and its artifacts are
+reviewed. Fresh equivalent workspace evidence above means no manual workspace
+dispatch is needed. Master push started automatic workspace run
+40165304531; record its result without dispatching a duplicate workspace run.

@@ -11,8 +11,6 @@ jobs:
   interop:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/matching-http-tls-cargo-target
     steps:
       - uses: actions/checkout@v4
       - name: Initialize Go IDL submodule
@@ -24,6 +22,8 @@ jobs:
             go/go.sum
             tests/go-sdk/go.sum
       - uses: dtolnay/rust-toolchain@stable
+      - name: Select fresh Rust target
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/matching-http-tls-cargo-target" >> "$GITHUB_ENV"
       - name: Record source identity
         run: |
           mkdir -p out/interop

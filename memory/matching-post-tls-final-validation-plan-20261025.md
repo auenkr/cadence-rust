@@ -332,3 +332,12 @@ The evidence summary is
 
 Pending dispatch after the pinned ref is pushed. No workflow dispatch is
 recorded in this checkpoint.
+
+The initial dispatch request was rejected by GitHub before run creation with
+HTTP 422: `runner.temp` is unavailable in job-level `env` for
+`matching-http-tls-interop.yml`. Corrected the workflow to select the fresh
+target in a step via `$RUNNER_TEMP` and `$GITHUB_ENV`; Ruby YAML parsing and
+`git diff --check` passed. The validation branch is advanced once to include
+this dispatch-only workflow correction. The failed request did not start a
+gate. Master auto workspace run 40165304531 was in progress; no duplicate
+workspace dispatch is planned.
