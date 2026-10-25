@@ -70,6 +70,20 @@ jobs:
           echo "$?" > workspace-format.exit
           exit 0
         continue-on-error: true
+      - name: Check TLS-touched Rust files formatting
+        working-directory: rust
+        run: |
+          set +e
+          rustfmt --edition 2021 --check \
+            crates/cadence-matching/src/grpc_matching.rs \
+            crates/cadence-matching/src/launcher.rs \
+            crates/cadence-matching/src/matching_rpc_tests.rs \
+            crates/cadence-service-core/src/grpc_tls.rs \
+            > tls-format.log 2>&1
+          result=$?
+          echo "$result" > tls-format.exit
+          cat tls-format.log
+          exit 0
       - name: Check changed Matching runtime formatting
         working-directory: rust
         run: |
@@ -142,5 +156,7 @@ jobs:
             rust/commit.txt
             rust/target-dir.txt
             rust/format.log
+            rust/tls-format.log
+            rust/tls-format.exit
             rust/Cargo.lock
             ${{ runner.temp }}/cadence-matching-owner-order.json
