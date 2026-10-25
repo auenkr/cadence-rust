@@ -284,3 +284,51 @@ the workspace-format advisory is also 1; neither is a pass. The earlier
 the independent final review, which remains active. Do not integrate or begin
 mixed validation until that review approves the source and formatting state.
 Compact evidence is in `memory/evidence/matching-tls-fix-ci-20261025/`.
+
+## Approved TLS integration candidate (2026-10-25)
+
+Independent code review approved TLS branch commit
+`e3c79b3014e80e98f1c1d0a18604588d5c068929`. Its production source and CI
+formatter updates were merged into root master as
+`357e36567032f4da2a929d86614e12b5cf7a43e6`. The existing
+`.github/workflows/matching-http-tls-interop.yml` and this validation plan are
+present after the merge. Matching remains incomplete.
+
+Fresh workspace CI already covers that exact source commit:
+https://github.com/auenkr/cadence-rust/actions/runs/40164484146. GitHub reports
+head `e3c79b3014e80e98f1c1d0a18604588d5c068929`, success, fresh
+`/home/runner/work/_temp/cargo-target-final`, skipped cache, Clippy before
+workspace tests, both exit 0. The TLS-touched-file formatter marker is 0 and
+produced an empty formatting patch; workspace format advisory remains 1. This
+fresh equivalent means no separate workspace CI dispatch is needed for this
+code source. The master push can trigger automatic `rust-ci`; record that
+result if it runs, without duplicating a workspace dispatch.
+
+The pinned serial validation ref is
+`t3/matching-validation-tls-e3c79b3-20261025`, created from the integrated
+documentation commit after this note is committed. It will remain fixed while
+later run evidence is recorded on master. The first and only gate to dispatch
+now is:
+
+```bash
+gh workflow run matching-http-tls-interop.yml --ref t3/matching-validation-tls-e3c79b3-20261025
+```
+
+No other mixed gate was in progress at pre-dispatch check. This workflow uses
+`ubuntu-latest`, a 90-minute timeout, three-day artifact retention and
+cancel-in-progress concurrency. Record its exact run URL, head SHA and initial
+status below. Do not dispatch the next backend/transport mixed lane until this
+one finishes and its artifacts have been reviewed.
+
+The TLS branch was independently approved and merged: code commit
+`e3c79b3014e80e98f1c1d0a18604588d5c068929`, merge commit
+`357e36567032f4da2a929d86614e12b5cf7a43e6`. Fresh workspace run 40164484146
+covers the exact code SHA (Clippy 0, workspace tests 0, touched-file format 0,
+workspace advisory 1), so no manual duplicate workspace dispatch is needed.
+The evidence summary is
+`memory/evidence/matching-tls-integration-candidate-20261025/README.md`.
+
+### First serial gate dispatch
+
+Pending dispatch after the pinned ref is pushed. No workflow dispatch is
+recorded in this checkpoint.
