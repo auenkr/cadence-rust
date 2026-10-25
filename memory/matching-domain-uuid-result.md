@@ -1,0 +1,6 @@
+# Matching empty/malformed DomainUUID parity result
+- Branch t3/mw-domain-uuid, CI-validated head 385ae6f2f680ece7f88f4d79b5963ec021e27417. CI: https://github.com/auenkr/cadence-rust/actions/runs/40187059726 (rust-ci, package=cadence-matching): success (clippy + tests). First run 40186817928 failed clippy result_large_err; fixed with an allow.
+- Implementation: merged t3/matching-sql-domain-uuid-design (guard, DomainIdParse mode, tests). Design: memory/matching-sql-malformed-domain-uuid-design.md.
+- Go refs: go/service/matching/handler/handler.go:559 domainName (swallows returned errors; first call in handlers, before throttle/deadline); go/common/persistence/sql/sql_domain_store.go:206-207 MustParseUUID panics (SQL only) -> CapturePanic -> gRPC Unknown / Thrift 0x05 `panic object is not error: "uuid: Parse(x): ..."`. Cassandra: gocql ParseUUID returns an error, swallowed, request continues. Empty ID never panics. google/uuid v1.6.0.
+- Rust: sqlite/mysql/postgres return the captured-panic status before quota/deadline; Cassandra/embedded are Lenient. No process crash (Go CapturePanic also recovers).
+- Differences: panic text uses Rust {:?} vs Go %#v (equal for ASCII); Cassandra gocql case/format-insensitive lookup not mirrored; Rust History::domain_name still InvalidArgument on engine paths; no mixed Go/Rust wire capture yet; cadence-persistence untouched.
