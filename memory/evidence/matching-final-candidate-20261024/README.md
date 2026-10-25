@@ -55,3 +55,13 @@ Matching package run40155206531 passed strict clippy and tests on worker code
 `4cabb9cecee5a177a2a9462a9e8838ed9fb13324`. Workspace formatting remains
 advisory debt as described in the note. This supplement does not alter the
 production candidate or the corrected mixed-gate validation branch.
+
+## Integrated master fresh-target supplement
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40155846010 validates
+master source `1fc3a899c00c6eac5b2079b933092ca0df270313` with
+`clean_target=true`, workspace strict clippy followed by workspace tests.
+Pending when dispatched. It includes the merged typed-refresh tests and the
+readiness harness fix; no production Rust source differs from27d3ff5f.
+Automatic cached run40155703537 was superseded/cancelled in favor of this
+explicit fresh-target gate.
