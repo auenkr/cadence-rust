@@ -9,9 +9,9 @@ candidate's acceptance and parity audit complete.
 
 | Required lane | Run | State when recorded |
 | --- | --- | --- |
-| Fresh uncached workspace clippy then tests, ownership/metric oracles | https://github.com/auenkr/cadence-rust/actions/runs/40108643448 | running |
-| PostgreSQL SDK, two-node recovery and extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40108645569 | running |
-| Thrift/TChannel | pending | not started |
+| Fresh uncached workspace clippy then tests, ownership/metric oracles | https://github.com/auenkr/cadence-rust/actions/runs/40108643448 | success |
+| PostgreSQL SDK, two-node recovery and extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40108645569 | success |
+| Thrift/TChannel | https://github.com/auenkr/cadence-rust/actions/runs/40153127238 | running |
 | Cassandra | pending | not started |
 | MySQL extended probes | pending | not started |
 | Configstore | pending | not started |
