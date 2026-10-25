@@ -589,6 +589,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn server_ca_and_client_auth_matrix_matches_go_startup_and_handshakes() {
+        install_tls_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let ca = new_ca();
+        let server_identity = issue(&ca, &["localhost", "127.0.0.1"]);
+        let ca_file = write(dir.path(), "matrix-ca.pem", &ca.cert.pem());
+        let empty_ca_file = write(dir.path(), "matrix-empty-ca.pem", "not PEM");
+
+        for ca_file in [None, Some(empty_ca_file.as_str()), Some(ca_file.as_str())] {
+            let config = TlsConfig {
+                enabled: true,
+                cert_file: write(dir.path(), "matrix-server-cert.pem", &server_identity.0),
+                key_file: write(dir.path(), "matrix-server-key.pem", &server_identity.1),
+                ca_file: ca_file.unwrap_or_default().to_owned(),
+                ..Default::default()
+            };
+            let server = server_tls(&config).unwrap().unwrap();
+            let addr = serve_reflection(Some(server)).await;
+            let peer = client_tls(&TlsConfig {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(call(addr, Some(&peer)).await, Ok(()));
+        }
+
+        // Without an explicit CA Go uses system roots; with an invalid PEM CA
+        // Go keeps an empty pool. Both start successfully and reject a client
+        // that presents no certificate. The valid-CA case (accept, reject
+        // missing and rogue clients) is covered by the test above.
+        for ca_file in [None, Some(empty_ca_file.as_str())] {
+            let config = TlsConfig {
+                enabled: true,
+                cert_file: write(dir.path(), "auth-server-cert.pem", &server_identity.0),
+                key_file: write(dir.path(), "auth-server-key.pem", &server_identity.1),
+                ca_file: ca_file.unwrap_or_default().to_owned(),
+                require_client_auth: true,
+                ..Default::default()
+            };
+            let server = server_tls(&config).unwrap().unwrap();
+            let addr = serve_reflection(Some(server)).await;
+            let peer = client_tls(&TlsConfig {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .unwrap();
+            assert!(call(addr, Some(&peer)).await.is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn host_verification_checks_chain_and_server_name() {
         install_tls_crypto_provider();
         let dir = tempfile::tempdir().unwrap();
