@@ -547,7 +547,10 @@ error checks. The oracle asserts the zero-poller result in the same focused
 Actions step. Existing plaintext-under-enforced-TLS probe accepts Go's alert,
 orderly EOF, or reset behavior, and still fails on any non-alert response byte.
 No missing/empty TaskList guard was added to Rust. Exact combined probe source
-is committed at `5cafc2dc941fc676cad66d6756fb812c502aa5bf`; the focused
-`rust-ci.yml` oracle/test rerun is 40171379726 and standalone Go HTTP TLS
-interop rerun is 40171381762. Both are pending; no mixed cluster gate has been
-dispatched.
+is committed at `5cafc2dc941fc676cad66d6756fb812c502aa5bf`; its oracle step in
+run 40171379726 passed with exit 0 and explicit `pollers=0` for both success
+shapes. Raw artifact is preserved at
+`memory/evidence/matching-describe-tasklist-go-oracle-40171379726/`. At last
+status read, rust-ci had moved to Rust toolchain setup; standalone Go HTTP TLS
+interop run 40171381762 was building its fresh Rust server. No mixed cluster
+gate has been dispatched.
