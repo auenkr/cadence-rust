@@ -25,7 +25,9 @@ impl TaskData {
     /// for every value: valid, noncanonical, malformed or empty. `run_id` is a best-effort
     /// parse for in-process readers only; stores must call `sql_run_id`/`cassandra_run_id`.
     pub fn with_request_run_id(mut self, run_id: &str) -> Self {
+        // Replace both fields so a reused consuming setter never keeps stale state.
         self.raw_run_id = Some(run_id.to_owned());
+        self.run_id = None;
         self.run_id = uuid::Uuid::parse_str(run_id)
             .ok()
             .map(|id| id.as_bytes().to_vec());
@@ -128,7 +130,9 @@ fn i32_field(w: &mut Writer, id: i16, value: i32) {
     w.write_i32(value);
 }
 pub fn encode_task(data: &TaskData) -> Vec<u8> {
-    debug_assert!(data.raw_run_id.is_none(), "resolve raw RunID with TaskData::for_sql first");
+    // All SQL call sites resolve through `TaskData::for_sql`; Cassandra writes CQL, not this blob.
+    // A hard assert (also in release) keeps an unresolved raw RunID from being dropped silently.
+    assert!(data.raw_run_id.is_none(), "resolve raw RunID with TaskData::for_sql first");
     let mut w = Writer::new();
     w.write_field_begin(TType::String, 10);
     w.write_string(&data.workflow_id);
