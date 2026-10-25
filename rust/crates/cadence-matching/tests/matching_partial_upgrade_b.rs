@@ -298,9 +298,21 @@ fn poller_start_without_identity_records_no_history() {
 
 // Go TestManager_HistoryCallback, "Require identity" and StartPoll/EndPoll counter (manager_test.go:38).
 #[test]
-#[ignore = "parity gap: cadence_common::poller::Manager has no history-change callback; Go calls historyCallback on StartPoll and EndPoll with an identity (manager_test.go:38)"]
 fn poller_history_callback_fires_on_start_and_end_with_identity() {
-    panic!("Go historyCallback counter is not exposed by cadence_common::poller::Manager");
+    let mut manager = PollerManager::default();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let seen = counter.clone();
+    manager.set_history_callback(Arc::new(move || {
+        seen.fetch_add(1, Ordering::SeqCst);
+    }));
+    manager.start("a", Info { identity: "a".into(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+    manager.end("a", START);
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
+    // No identity: neither start nor end touches history.
+    manager.start("b", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.end("b", START);
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
 }
 
 // Go TestManager_CancelPoll, cases "happy path", "repeated", "unknown" (manager_test.go:58). Rust's
@@ -336,9 +348,13 @@ fn poller_cancel_invokes_registered_callback_per_poll() {
 
 // Go TestManager_CancelPoll "happy path"/"unknown" assert `CancelPoll` returns true and false.
 #[test]
-#[ignore = "parity gap: cadence_common::poller::Manager::cancel returns () while Go CancelPoll returns bool (true for a known poll, false for an unknown one) (manager_test.go:58)"]
 fn poller_cancel_reports_whether_the_poll_is_known() {
-    panic!("Rust Manager::cancel has no return value");
+    let mut manager = PollerManager::default();
+    manager.start("a", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.set_cancel("a", Arc::new(|| {}));
+    assert!(manager.cancel("a"));
+    assert!(manager.cancel("a"));
+    assert!(!manager.cancel("unknown"));
 }
 
 type Setup = fn(&mut PollerManager);
