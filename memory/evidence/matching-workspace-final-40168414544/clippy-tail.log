@@ -1,0 +1,25 @@
+    Checking axum-server v0.8.0
+    Checking tonic-reflection v0.12.3
+    Checking if-addrs v0.13.4
+    Checking lazy_static v1.5.1
+    Checking cadence-persistence v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-persistence)
+    Checking sharded-slab v0.1.7
+    Checking matchers v0.2.0
+    Checking tracing-log v0.2.0
+    Checking thread_local v1.1.10
+    Checking nu-ansi-term v0.50.3
+    Checking deranged v0.5.9
+    Checking powerfmt v0.2.1
+    Checking num-conv v0.2.2
+    Checking time-core v0.1.9
+    Checking tracing-subscriber v0.3.23
+    Checking time v0.3.55
+    Checking yasna v0.5.2
+    Checking rcgen v0.13.2
+    Checking cadence-service-core v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-matching)
+    Checking cadence-history v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-history)
+    Checking cadence-worker v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-worker)
+    Checking cadence-frontend v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-frontend)
+    Checking cadence-server v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-server)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 50s

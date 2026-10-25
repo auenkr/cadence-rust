@@ -185,12 +185,11 @@ and exercise committed TLS tests on the exact integrated source.
    not enable Matching gRPC TLS with absent/lone identity. The TLS patch must
    provide an executable production-path test included by workspace CI, or the
    parent must decide to add a dedicated CI gate/workflow in a later task.
-2. **Go HTTP TLS interop workflow gap:** detailed Go interop assertions live in
-   `tests/run-matching-thrift-compat.py`, but no current workflow references
-   that script (nor its configured-store wrapper). Current workflow inputs
-   provide no standalone HTTP TLS lane. Parent must decide whether committed
-   Rust listener tests suffice for the current requirement or whether a
-   dedicated/reused CI workflow invocation is needed for Go HTTP TLS interop.
+2. **Go HTTP TLS interop result unresolved:** the dedicated
+   `.github/workflows/matching-http-tls-interop.yml` now invokes
+   `tests/run-matching-thrift-compat.py`, but run 40168201737 failed before TLS
+   assertions. Its failure/correction is under separate investigation; do not
+   treat the workspace gate or this failed lane as Go HTTP TLS compatibility.
 3. **Workspace format debt:** known workspace-wide format check is advisory and
    can remain nonzero under current policy. Parent must retain the distinction
    from required changed-file formatting and avoid claiming whole-workspace
@@ -474,5 +473,40 @@ The embedded defaults include a shard-distributor namespace, so startup
 necessarily failed. Follow-up branch
 `t3/http-tls-embedded-probe-fix-20261025` now gates shard-distributor setup on
 `!embedded_development`. This leaves explicit-config production setup intact.
-No local Cargo/Go/rustfmt validation or mixed gate has been run; parent review
-and CI validation are pending.
+
+## Fresh workspace result and current validation status
+
+Fresh uncached workspace run
+[40168414544](https://github.com/auenkr/cadence-rust/actions/runs/40168414544)
+passed on the exact pinned source
+`fade09c501e23212d4d86e64c653057d589d1910` from
+`t3/matching-validation-http-embedded-20261025`. The fresh target step selected
+`/home/runner/work/_temp/cargo-target-final`; the cache action was skipped.
+Strict workspace Clippy completed before workspace tests; both exits were 0.
+Focused TLS-touched Rust formatting exit was 0 and changed Matching runtime
+formatting passed. The separate formatting step exit was also 0. Workspace
+`cargo fmt --all -- --check` remains advisory exit 1 due to unrelated broad
+format drift, including `cadence-thrift/tests/go_fixtures.rs`; it is not a
+format pass. Details, compact log excerpts and selected artifacts are in
+`memory/evidence/matching-workspace-final-40168414544/`; original artifact
+ZIPs and hashes are at `/mnt/storage/service/ci-evidence/run-40168414544/`.
+
+The Go owner-order oracle succeeded. All four Rust/Go matching metrics
+comparisons returned `match` with series counts 20, 24, 21 and 23. The
+metrics-example binary digest is recorded, not a Matching server binary.
+
+HTTP TLS interop run
+[40168201737](https://github.com/auenkr/cadence-rust/actions/runs/40168201737)
+failed before TLS assertions: parent reports `DescribeTaskList` returned
+`expectedBadRequest` in the embedded probe. A proposed guard at `84cadec2` was
+rejected by independent source review because Go is nil-safe for the empty
+request through downstream handling and domain precedence must be preserved.
+The correction worker is investigating the actual Go path. Do not merge that
+proposal or dispatch another mixed lane until correction/review and the
+pending interop result are resolved. No second mixed lane has run.
+
+This named-source workspace pass does not close the HTTP TLS interop or gRPC
+TLS gaps and does not establish Matching completion. Matching remains
+INCOMPLETE; preserve existing `preliminary-passed` and
+`acceptanceEligible:false` labels. No local Cargo/Go/rustfmt validation was
+run.
