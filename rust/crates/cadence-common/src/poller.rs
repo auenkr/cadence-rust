@@ -29,8 +29,16 @@ pub struct Manager {
     group_count: HashMap<String, usize>,
     last_end: Option<i64>,
     group_end: HashMap<String, i64>,
+    history_callback: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
 impl Manager {
+    /// Go onHistoryUpdatedFunc: runs after every history-cache update from start/end.
+    pub fn set_history_callback(&mut self, callback: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        self.history_callback = Some(callback);
+    }
+    fn notify_history(&self) {
+        if let Some(callback) = &self.history_callback { callback(); }
+    }
     fn put(&mut self, info: Info, now: i64, outstanding: bool) {
         let identity = info.identity.clone();
         self.order.retain(|key| key != &identity);
@@ -52,6 +60,7 @@ impl Manager {
     pub fn start(&mut self, id: &str, info: Info, now: i64) {
         if !info.identity.is_empty() {
             self.put(info.clone(), now, !id.is_empty());
+            self.notify_history();
         }
         if !id.is_empty() {
             if !info.isolation_group.is_empty() {
@@ -66,8 +75,10 @@ impl Manager {
     pub fn set_cancel(&mut self, id: &str, cancel: std::sync::Arc<dyn Fn() + Send + Sync>) {
         if !id.is_empty() { self.cancellations.insert(id.into(), cancel); }
     }
-    pub fn cancel(&self, id: &str) {
+    /// Go CancelPoll: true when the poll is outstanding (its cancel callback, if set, runs).
+    pub fn cancel(&self, id: &str) -> bool {
         if let Some(cancel) = self.cancellations.get(id) { cancel(); }
+        self.outstanding.contains_key(id)
     }
     pub fn end(&mut self, id: &str, now: i64) {
         self.cancellations.remove(id);
@@ -82,6 +93,7 @@ impl Manager {
             }
             if !info.identity.is_empty() {
                 self.put(info, now, false);
+                self.notify_history();
             }
         }
     }
