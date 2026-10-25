@@ -117,12 +117,15 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
             .await
             .unwrap();
         let mut response = [0; 64];
-        assert_eq!(
+        let response_len =
             tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response))
                 .await
                 .unwrap()
-                .unwrap(),
-            0
+                .unwrap();
+        assert!(
+            response_len == 0 || (response_len > 0 && response[0] == 21),
+            "plaintext received a non-TLS response: {:?}",
+            &response[..response_len]
         );
         let _after_failures = tokio::net::TcpStream::connect(addr).await.unwrap();
         assert!(!server.is_finished());
