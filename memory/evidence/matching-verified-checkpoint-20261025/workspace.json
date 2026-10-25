@@ -1,0 +1,14 @@
+{
+  "query-format.exit": "1",
+  "test.exit": "0",
+  "fmt.exit": "0",
+  "target-dir.txt": "/home/runner/work/_temp/cargo-target-final",
+  "tls-format.exit": "1",
+  "clippy.exit": "0",
+  "workspace-format.exit": "1",
+  "commit.txt": "6af476941031193317fdd6c44070e9785e6384b9",
+  "run_url": "https://github.com/auenkr/cadence-rust/actions/runs/40217841072",
+  "conclusion": "success",
+  "clean_target": true,
+  "package": "workspace"
+}

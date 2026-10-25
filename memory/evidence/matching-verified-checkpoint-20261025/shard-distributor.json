@@ -1,0 +1,170 @@
+{
+  "commit.txt": "a5a8e2a14638efcc2d7f6cc5bd6ec027271978dd",
+  "binary.sha256": "5d9a60123b651e6cdd1fa3197a9955085351536a668daf8eb57085c8663d52e3  /tmp/cargo-target-final-40218022772/debug/cadence-matching",
+  "build.exit": "0",
+  "gate.exit": "0",
+  "run_url": "https://github.com/auenkr/cadence-rust/actions/runs/40218022772",
+  "conclusion": "success",
+  "result": "preliminary-passed",
+  "acceptanceEligible": false,
+  "topology": "Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery",
+  "shardDistributor": [
+    {
+      "check": "executor-heartbeat",
+      "label": "before-sigkill",
+      "executors": [
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "d96f388e-152e-479b-9af0-f6470ebbca35"
+      ],
+      "observedAt": "2026-10-25T17:50:06.801Z"
+    },
+    {
+      "check": "sigkill-target-selected",
+      "primaryGrpcPort": "24141",
+      "selected": [
+        {
+          "id": "d96f388e-152e-479b-9af0-f6470ebbca35",
+          "metadata": {
+            "grpc": "24141",
+            "hostIP": "127.0.0.1",
+            "tchannel": "29443"
+          }
+        }
+      ],
+      "observed": [
+        {
+          "id": "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+          "metadata": {
+            "grpc": "19990",
+            "hostIP": "127.0.0.1",
+            "tchannel": "13873"
+          },
+          "lastHeartbeat": "2026-10-25T17:50:06.733306276Z"
+        },
+        {
+          "id": "d96f388e-152e-479b-9af0-f6470ebbca35",
+          "metadata": {
+            "grpc": "24141",
+            "hostIP": "127.0.0.1",
+            "tchannel": "29443"
+          },
+          "lastHeartbeat": "2026-10-25T17:50:06.626001236Z"
+        }
+      ]
+    },
+    {
+      "check": "executor-expired-by-ttl",
+      "label": "after-sigkill",
+      "expired": [
+        "d96f388e-152e-479b-9af0-f6470ebbca35"
+      ],
+      "elapsedMsSinceKill": 5128
+    },
+    {
+      "check": "executor-heartbeat",
+      "label": "after-sigkill-restart",
+      "executors": [
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "94394f6a-65d2-46fa-bd95-c8f3a28b469c"
+      ],
+      "observedAt": "2026-10-25T17:50:11.932Z"
+    },
+    {
+      "check": "ownership-reassigned",
+      "label": "after-sigkill-restart",
+      "taskList": "restart-tasks-92b6d51d-4e0b-494e-acc6-e7e89c36eb25"
+    },
+    {
+      "check": "executor-heartbeat",
+      "label": "restart-flow-after-restart",
+      "executors": [
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "94394f6a-65d2-46fa-bd95-c8f3a28b469c"
+      ],
+      "observedAt": "2026-10-25T17:50:12.574Z"
+    },
+    {
+      "check": "shard-distributor-restart",
+      "label": "restart-flow",
+      "taskList": "sd-restart-restart-92b6d51d-4e0b-494e-acc6-e7e89c36eb25"
+    },
+    {
+      "check": "executor-heartbeat",
+      "label": "before-sigterm",
+      "executors": [
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "94394f6a-65d2-46fa-bd95-c8f3a28b469c"
+      ],
+      "observedAt": "2026-10-25T17:50:14.604Z"
+    },
+    {
+      "check": "executor-stopped",
+      "label": "after-sigterm-drain",
+      "stopped": [
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762"
+      ],
+      "status": {
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762": "ExecutorStatusDRAINING"
+      }
+    },
+    {
+      "check": "executor-heartbeat",
+      "label": "after-sigterm-restart",
+      "executors": [
+        "19c92c5f-56a6-452a-9a51-7ec6a5432d74",
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "94394f6a-65d2-46fa-bd95-c8f3a28b469c"
+      ],
+      "observedAt": "2026-10-25T17:50:18.751Z"
+    },
+    {
+      "check": "ownership-reassigned",
+      "label": "after-sigterm-restart",
+      "taskList": "graceful-drain-tasks-92b6d51d-4e0b-494e-acc6-e7e89c36eb25"
+    },
+    {
+      "check": "executor-heartbeat",
+      "label": "drain-flow-after-restart",
+      "executors": [
+        "19c92c5f-56a6-452a-9a51-7ec6a5432d74",
+        "70c30041-f8e4-4f2b-9df5-95e0140ab762",
+        "94394f6a-65d2-46fa-bd95-c8f3a28b469c"
+      ],
+      "observedAt": "2026-10-25T17:50:19.384Z"
+    },
+    {
+      "check": "shard-distributor-restart",
+      "label": "drain-flow",
+      "taskList": "sd-restart-graceful-drain-92b6d51d-4e0b-494e-acc6-e7e89c36eb25"
+    }
+  ],
+  "processRestart": {
+    "workflowId": "restart-92b6d51d-4e0b-494e-acc6-e7e89c36eb25",
+    "runId": "e6224618-d45b-45a7-92ac-9dd564f6d626",
+    "taskList": "restart-tasks-92b6d51d-4e0b-494e-acc6-e7e89c36eb25",
+    "durableTaskRowsBeforeKill": 1,
+    "taskRangeBeforeKill": 1,
+    "durableWatermarkBeforeKill": {
+      "taskType": 0,
+      "rows": 1,
+      "maxTaskId": 1
+    },
+    "firstRustPid": 9885,
+    "secondRustPid": 9986,
+    "completionEvents": 1,
+    "goServicesPid": 9561
+  },
+  "gracefulDrainRecovery": {
+    "workflowId": "graceful-drain-92b6d51d-4e0b-494e-acc6-e7e89c36eb25",
+    "runId": "380083d1-8000-4118-bfb4-ba3a821571dd",
+    "taskList": "graceful-drain-tasks-92b6d51d-4e0b-494e-acc6-e7e89c36eb25",
+    "taskListOwner": "127.0.0.1:13873",
+    "queuedRowsBeforeSignal": 1,
+    "rangeBeforeSignal": 1,
+    "queuedRowsAfterRecovery": 0,
+    "drainingPid": 9632,
+    "recoveredByRustPid": 10219,
+    "completionEvents": 1,
+    "goServicesPid": 9561
+  }
+}
