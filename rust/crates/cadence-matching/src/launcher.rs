@@ -1003,12 +1003,12 @@ pub async fn run(
             let matching_service_config = cfg.services.get("matching");
             // Go's rpc.NewParams: the listener uses Matching's own rpc.tls, and
             // Matching-to-Matching peers use the same block as their target.
-            let matching_server_tls_without_identity = matching_rpc
+            let matching_server_tls_custom_incoming = matching_rpc
                 .as_ref()
-                .map(|rpc| crate::grpc_tls::server_tls_without_identity(&rpc.tls))
+                .map(|rpc| crate::grpc_tls::server_tls_custom_incoming(&rpc.tls))
                 .transpose()?
                 .flatten();
-            let matching_server_tls = if matching_server_tls_without_identity.is_some() {
+            let matching_server_tls = if matching_server_tls_custom_incoming.is_some() {
                 None
             } else {
                 matching_rpc
@@ -1612,7 +1612,7 @@ pub async fn run(
                             listener,
                             matching_grpc_service,
                             matching_server_tls,
-                            matching_server_tls_without_identity,
+                            matching_server_tls_custom_incoming,
                         )
                         .await
                     } else {
@@ -1620,7 +1620,7 @@ pub async fn run(
                             matching_addr,
                             matching_grpc_service,
                             matching_server_tls,
-                            matching_server_tls_without_identity,
+                            matching_server_tls_custom_incoming,
                         )
                         .await
                     };

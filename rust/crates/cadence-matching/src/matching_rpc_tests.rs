@@ -21,8 +21,19 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     let ca_key = rcgen::KeyPair::generate().unwrap();
     let ca = ca_params.self_signed(&ca_key).unwrap();
+    let mut server_params =
+        rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
+    server_params
+        .subject_alt_names
+        .push(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()));
+    let server_key = rcgen::KeyPair::generate().unwrap();
+    let server_cert = server_params.signed_by(&server_key, &ca, &ca_key).unwrap();
     let ca_file = dir.path().join("ca.pem");
     std::fs::write(&ca_file, ca.pem()).unwrap();
+    let server_cert_file = dir.path().join("server-cert.pem");
+    let server_key_file = dir.path().join("server-key.pem");
+    std::fs::write(&server_cert_file, server_cert.pem()).unwrap();
+    std::fs::write(&server_key_file, server_key.serialize_pem()).unwrap();
     let empty_ca_file = dir.path().join("empty-ca.pem");
     std::fs::write(&empty_ca_file, b"not PEM").unwrap();
     let configs = [
@@ -68,6 +79,14 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
             require_client_auth: true,
             ..Default::default()
         },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            cert_file: server_cert_file.to_string_lossy().into_owned(),
+            key_file: server_key_file.to_string_lossy().into_owned(),
+            ca_file: empty_ca_file.to_string_lossy().into_owned(),
+            require_client_auth: true,
+            ..Default::default()
+        },
     ];
 
     // Exercise the production serve path for missing-both, lone-cert, lone-key
@@ -75,7 +94,7 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
     for (index, tls) in configs.into_iter().enumerate() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let config = cadence_service_core::grpc_tls::server_tls_without_identity(&tls)
+        let config = cadence_service_core::grpc_tls::server_tls_custom_incoming(&tls)
             .unwrap()
             .unwrap();
         let matching = Matching::new(crate::handlers::AppState::default());

@@ -50,17 +50,22 @@ pub fn server_tls(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {
     Ok(Some(server))
 }
 
-/// Build rustls server TLS for Go's valid enabled configuration where either
-/// identity path is absent. Go starts in this case and fails each handshake
-/// because it has no certificate to present.
-pub fn server_tls_without_identity(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ServerConfig>>> {
-    if !tls.enabled || (!tls.cert_file.is_empty() && !tls.key_file.is_empty()) {
+/// Build rustls server TLS for Go-compatible cases tonic cannot represent:
+/// either an absent server identity, or required client auth with an explicit
+/// CA file/list that parsed to an empty certificate pool.
+pub fn server_tls_custom_incoming(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ServerConfig>>> {
+    let explicit_ca = !tls.ca_file.is_empty() || !tls.ca_files.is_empty();
+    let missing_identity = tls.cert_file.is_empty() || tls.key_file.is_empty();
+    if !tls.enabled || (!missing_identity && !(tls.require_client_auth && explicit_ca)) {
         return Ok(None);
     }
     install_tls_crypto_provider();
     let ca_certs = ca_certs(tls)?;
-    let builder =
-        ServerConfig::builder_with_provider(provider()).with_safe_default_protocol_versions()?;
+    if !missing_identity && !ca_certs.is_empty() {
+        return Ok(None);
+    }
+    let builder = ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()?;
     let builder = if tls.require_client_auth {
         let mut roots = RootCertStore::empty();
         for cert in ca_certs {
@@ -75,7 +80,15 @@ pub fn server_tls_without_identity(tls: &TlsConfig) -> anyhow::Result<Option<Arc
     } else {
         builder.with_no_client_auth()
     };
-    let mut server = builder.with_cert_resolver(Arc::new(NoServerCertificate));
+    let mut server = if missing_identity {
+        builder.with_cert_resolver(Arc::new(NoServerCertificate))
+    } else {
+        let (cert_pem, key_pem) = read_identity(tls)?;
+        let (certs, key) = parse_identity(&cert_pem, &key_pem)?;
+        builder
+            .with_single_cert(certs, key)
+            .context("rpc.tls certFile/keyFile pair is not valid")?
+    };
     server.alpn_protocols = vec![b"h2".to_vec()];
     Ok(Some(Arc::new(server)))
 }
@@ -538,7 +551,7 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            let server = server_tls_without_identity(&config).unwrap().unwrap();
+            let server = server_tls_custom_incoming(&config).unwrap().unwrap();
             assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
         }
         let missing_ca = TlsConfig {
@@ -546,7 +559,7 @@ mod tests {
             ca_file: "/missing/cadence-ca.pem".into(),
             ..Default::default()
         };
-        assert!(server_tls_without_identity(&missing_ca).is_err());
+        assert!(server_tls_custom_incoming(&missing_ca).is_err());
     }
 
     #[tokio::test]
@@ -629,6 +642,10 @@ mod tests {
                 require_client_auth: true,
                 ..Default::default()
             };
+            if ca_file.is_some() {
+                assert!(server_tls_custom_incoming(&config).unwrap().is_some());
+                continue;
+            }
             let server = server_tls(&config).unwrap().unwrap();
             let addr = serve_reflection(Some(server)).await;
             let peer = client_tls(&TlsConfig {
