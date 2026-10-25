@@ -3512,6 +3512,20 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>(
             "respond_query_task_completed",
             async move {
+                // Go's generated gRPC wrapper runs the proto mapper before the handler:
+                // `ToRespondQueryTaskCompletedRequest` dereferences a nil `Result` when
+                // the nested request is present. YARPC recovers it as a plain error that
+                // gRPC reports as Unknown, before any domain, quota or metric side effect.
+                if request
+                    .get_ref()
+                    .request
+                    .as_ref()
+                    .is_some_and(|nested| nested.result.is_none())
+                {
+                    return Err(Status::unknown(
+                        "panic: runtime error: invalid memory address or nil pointer dereference",
+                    ));
+                }
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",

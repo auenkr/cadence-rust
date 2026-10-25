@@ -3873,6 +3873,49 @@ async fn matching_rpc_respond_query_missing_nested_request_is_unknown_completed_
 }
 
 #[tokio::test]
+async fn matching_rpc_respond_query_present_request_nil_result_is_unknown_before_lookup() {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    // Go's mapper dereferences the nil Result before the handler runs, so even an
+    // unknown task ID reports the recovered panic, not EntityNotExists.
+    let error = matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: Some(p::RespondQueryTaskCompletedRequest {
+                task_token: Vec::new(),
+                result: None,
+                worker_version_info: None,
+            }),
+            domain_id: domain.clone(),
+            task_list: list(),
+            task_id: "missing".into(),
+        }))
+        .await
+        .expect_err("nil result must fail");
+    assert_eq!(error.code(), tonic::Code::Unknown);
+    assert_eq!(
+        error.message(),
+        "panic: runtime error: invalid memory address or nil pointer dereference"
+    );
+    // A live query is untouched by the rejected call and still completes.
+    let (query, task_id) = deliver_query_to_poller(&matching, &domain, false).await;
+    matching
+        .respond_query_task_completed(Request::new(m::RespondQueryTaskCompletedRequest {
+            request: answered(b"pong"),
+            domain_id: domain,
+            task_list: list(),
+            task_id,
+        }))
+        .await
+        .unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(5), query)
+        .await
+        .expect("query should complete")
+        .unwrap()
+        .is_ok());
+}
+
+#[tokio::test]
 async fn matching_rpc_strong_query_with_nil_worker_version_is_rejected() {
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
