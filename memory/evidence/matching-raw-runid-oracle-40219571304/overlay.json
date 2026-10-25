@@ -1,0 +1,6 @@
+{
+  "Replace": {
+    "/home/runner/work/cadence-rust/cadence-rust/go/common/persistence/sql/raw_runid_oracle_export.go": "/home/runner/work/cadence-rust/cadence-rust/tests/matching-taskwriter-oracle/sql_task_store_oracle.go",
+    "/home/runner/work/cadence-rust/cadence-rust/go/service/matching/tasklist/raw_runid_sql_oracle_test.go": "/home/runner/work/cadence-rust/cadence-rust/tests/matching-taskwriter-oracle/task_writer_oracle_test.go"
+  }
+}
