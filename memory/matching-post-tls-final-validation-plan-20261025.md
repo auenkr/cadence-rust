@@ -198,3 +198,45 @@ and exercise committed TLS tests on the exact integrated source.
 4. **Scope remains service completion:** passing this list does not itself
    close any unresolved parity-audit rows not covered by these gates; resolve
    those against Go behavior before Matching sign-off.
+
+## CI wiring update (2026-10-25)
+
+The workflow `.github/workflows/matching-http-tls-interop.yml` adds a manual
+standard-runner gate for the previously unreferenced
+`tests/run-matching-thrift-compat.py`. It checks out the selected source,
+initializes `go/idls`, provisions Go from `go/go.mod`, builds a fresh
+`cadence-server` with Cargo, records the source commit and server SHA256, then
+runs the existing script with the freshly built binary. The script's original
+Go YARPC/Thrift client is the peer and covers TLS health, plaintext behavior,
+TLS sniffing, malformed/short/stalled handshakes, timeout recovery and Go
+compatibility assertions. Artifacts include source SHA, exact commands,
+build/interoperability exits and logs, binary digest and script-generated
+server/database/certificate evidence; retention is three days. Limits are
+`ubuntu-latest`, 90 minutes, and ref-scoped cancel-in-progress concurrency.
+
+No production code or TLS tests are changed here. The TLS worker branch
+`t3/matching-tls-handshake-parity` modifies the production-path test
+`missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext` in
+`rust/crates/cadence-matching/src/matching_rpc_tests.rs` to cover missing-both,
+lone-cert, lone-key and CA-backed configurations. The unchanged
+`.github/workflows/rust-ci.yml` workspace path invokes `cargo clippy
+--workspace --all-targets -- -D warnings`, followed by `cargo test --workspace`;
+these commands discover the test through the crate's normal test target. The
+fresh final workspace invocation remains:
+
+```bash
+gh workflow run rust-ci.yml --ref "$BRANCH" -f clean_target=true
+```
+
+The new standalone interop lane is intentionally separate and is not
+dispatched here. After this workflow is integrated into the TLS integration
+branch, dispatch serially with:
+
+```bash
+gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"
+```
+
+Verify the workflow's `headSha` equals the integration `EXPECTED_SHA`, inspect
+and archive the artifact immediately, and record its run URL and conclusion
+with the other source-bound evidence. This change does not close the gRPC TLS
+test or Matching parity audit by itself.
