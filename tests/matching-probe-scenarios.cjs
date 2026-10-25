@@ -222,16 +222,19 @@ async function durableRestart(ctx) {
   }
   const restart = await ctx.restartRust();
   const drained = [];
-  // Root first: a cold child partition forwards its poll to the root after the
-  // 10ms local wait (Go LocalPollWaitTime parity) while its backlog is still
-  // loading, so the root backlog must already be drained to keep the result
-  // deterministic. Each child must then still return its own backlog task.
-  for (const entry of [queued[0], queued[1], queued[2]]) {
+  // A cold partition forwards its poll to its parent after the 10ms local wait (Go
+  // LocalPollWaitTime parity) while its own backlog is still loading, and a loaded child
+  // may hand its task to a waiting parent poller, so which partition's task a given poll
+  // returns is timing dependent in Go too. Assert every backlog task survives the restart
+  // and is delivered exactly once across the three polls.
+  const remaining = new Set(queued.map(entry => entry.activityId));
+  for (const entry of queued) {
     const task = await ownerRpc(ctx, 'PollForActivityTask', { domainId: ctx.domainId, pollerId: randomUUID(), request: { taskList: { name: entry.partition }, identity: 'durable-restart-poller' } });
-    assert.equal(task.activityId, entry.activityId, `partition ${entry.partition} did not return its own backlog task after restart`);
+    assert(remaining.delete(task.activityId), `partition ${entry.partition} returned unexpected or duplicate task ${task.activityId} after restart`);
     await ctx.call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: task.taskToken, result: payload('durable-ok') });
     drained.push({ partition: entry.partition, activityId: task.activityId });
   }
+  assert.equal(remaining.size, 0, `backlog tasks not delivered after restart: ${[...remaining]}`);
   return { result: 'passed', rootPartition: rootName, queuedBeforeRestart: queued, restart, drainedAfterRestart: drained };
 }
 
