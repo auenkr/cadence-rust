@@ -1,0 +1,203 @@
+{
+  "runId": "40173683827",
+  "artifactId": "12592035248",
+  "artifactZipSha256": "0259bb1931de5ae01f0290605fe79ee96244c12f2133e04a0951f320baf22a3b",
+  "sources": [
+    {
+      "artifactPath": "gate/run/results.json",
+      "sha256": "665e7e665c72d7c76eab9a7fc67a3cc31e85038258ab12c8e3e1bff12b648e5b",
+      "taskGarbageCollection": {
+        "pendingTaskRows": 1,
+        "rangeSize": 100000,
+        "queues": {
+          "backlogDecision": {
+            "taskList": "gc-backlog-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 1,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 2,
+            "liveBlock": {
+              "startId": 100001,
+              "endId": 200000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "backlogActivity": {
+            "taskList": "gc-backlog-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 0,
+            "observedMaxTaskId": null,
+            "minAck": 0,
+            "persistedRange": 2,
+            "liveBlock": {
+              "startId": 100001,
+              "endId": 200000
+            },
+            "dataEncoding": "thriftrw",
+            "durableGcEvidence": false,
+            "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+          },
+          "mainDecision": {
+            "taskList": "tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": 2,
+            "minAck": null,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "mainActivity": {
+            "taskList": "tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "restartDecision": {
+            "taskList": "restart-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 200000,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 4,
+            "liveBlock": {
+              "startId": 300001,
+              "endId": 400000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "restartActivity": {
+            "taskList": "restart-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": null,
+            "minAck": 0,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw",
+            "durableGcEvidence": false,
+            "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+          }
+        }
+      }
+    },
+    {
+      "artifactPath": "gate/run/rust-matching/db-observations.json",
+      "sha256": "874c0345a849449f94220c8e9ad94381762121457568a81006ec524ffdee83d9",
+      "taskGarbageCollection": {
+        "pendingTaskRows": 1,
+        "rangeSize": 100000,
+        "queues": {
+          "backlogDecision": {
+            "taskList": "gc-backlog-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 1,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 2,
+            "liveBlock": {
+              "startId": 100001,
+              "endId": 200000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "backlogActivity": {
+            "taskList": "gc-backlog-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 0,
+            "observedMaxTaskId": null,
+            "minAck": 0,
+            "persistedRange": 2,
+            "liveBlock": {
+              "startId": 100001,
+              "endId": 200000
+            },
+            "dataEncoding": "thriftrw",
+            "durableGcEvidence": false,
+            "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+          },
+          "mainDecision": {
+            "taskList": "tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": 2,
+            "minAck": null,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "mainActivity": {
+            "taskList": "tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "restartDecision": {
+            "taskList": "restart-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 0,
+            "remainingTaskRows": 0,
+            "ackLevel": 200000,
+            "observedMaxTaskId": 1,
+            "minAck": null,
+            "persistedRange": 4,
+            "liveBlock": {
+              "startId": 300001,
+              "endId": 400000
+            },
+            "dataEncoding": "thriftrw"
+          },
+          "restartActivity": {
+            "taskList": "restart-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+            "taskType": 1,
+            "remainingTaskRows": 0,
+            "ackLevel": 100000,
+            "observedMaxTaskId": null,
+            "minAck": 0,
+            "persistedRange": 3,
+            "liveBlock": {
+              "startId": 200001,
+              "endId": 300000
+            },
+            "dataEncoding": "thriftrw",
+            "durableGcEvidence": false,
+            "note": "no durable garbage collection evidence: no persisted task row of this queue was observed before its delivery"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -642,10 +642,14 @@ partition listing, durable restart/drain and AutoConfigHint scenarios passed.
 The exact labels remain `preliminary-passed` / `acceptanceEligible:false`;
 this is preliminary scenario evidence, not Matching acceptance. MySQL GC
 observations retain a pending row and explicitly lack durable GC evidence for
-two activity queues. Compact evidence is in
-`memory/evidence/matching-mysql-extended-40173683827/`; artifact ZIP and raw
-logs/binary are retained outside git under
-`/mnt/storage/service/ci-evidence/run-40173683827/`.
+two activity queues. Those two `durableGcEvidence:false` values mean no
+persisted row was observed before delivery, not a GC bug. This is expected
+scenario evidence; `acceptanceEligible:false` is the gate's classification for
+this non-Cassandra lane. Exact queue names, observed maximum task IDs, ack
+levels, remaining rows, notes, artifact paths and raw-file hashes are preserved
+in `memory/evidence/matching-mysql-extended-40173683827/mysql-gc-queues.json`.
+Compact evidence is in that directory; the artifact ZIP and raw logs/binary are
+retained outside git under `/mnt/storage/service/ci-evidence/run-40173683827/`.
 
 After checking that no mixed gate was active, dispatched only the next lane,
 Thrift/TChannel (`lane=thrift`), on the same stable ref and exact SHA. See the

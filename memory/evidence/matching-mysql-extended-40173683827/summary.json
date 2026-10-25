@@ -212,5 +212,5 @@
   },
   "runExitCode": 0,
   "probeExitCode": 0,
-  "caveat": "preliminary scenario evidence only; no Matching acceptance eligibility. MySQL task-GC snapshot retains one pending row and explicitly notes absent durable GC evidence for activity queues; no separate full acceptance parity claim."
+  "caveat": "preliminary scenario evidence only; acceptanceEligible:false is the expected classification for this non-Cassandra lane. Two activity queues have durableGcEvidence:false because no persisted row was observed before delivery; this is a measurement limit, not evidence of a GC bug. Exact queue objects and source hashes are in mysql-gc-queues.json."
 }

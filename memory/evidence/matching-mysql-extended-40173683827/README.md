@@ -14,3 +14,18 @@ The probe's literal result is `preliminary-passed` and `acceptanceEligible:false
 Limit: this remains scenario evidence, not Matching acceptance. MySQL GC observations report a pending row and explicitly say durable GC evidence was not observed for two activity queues; no claim of complete GC parity is made. Preserve `preliminary-passed` / `acceptanceEligible:false` literally.
 
 The full artifact ZIP and extracted raw logs/binary are outside git under `/mnt/storage/service/ci-evidence/run-40173683827/`. Only compact text metadata and scenario summary are committed here.
+
+## MySQL GC queue observations
+
+`mysql-gc-queues.json` is a selective extraction of the current run's raw
+`taskGarbageCollection` queue objects from both artifact paths
+`gate/run/results.json` and `gate/run/rust-matching/db-observations.json`.
+Each source path's SHA256 is recorded there; both extracts agree. The queue
+names, observed maximum task IDs, ack levels, remaining task rows and original
+notes are preserved. No older dated GC evidence was used.
+
+For `backlogActivity` and `restartActivity`, `durableGcEvidence:false` means no
+persisted task row for that queue was observed before its delivery. This is a
+limitation of the observation, not evidence of a GC bug. The run's
+`acceptanceEligible:false` is expected for this non-Cassandra lane by the gate's
+classification; retain that literal and the `preliminary-passed` result.
