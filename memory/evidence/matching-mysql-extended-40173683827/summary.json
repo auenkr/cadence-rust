@@ -1,0 +1,216 @@
+{
+  "run": "40173683827",
+  "headSha": "29bdd2b04b573309112286c57f1c347f0ba0b60c",
+  "conclusion": "success",
+  "workflow": "Matching production validation",
+  "lane": "mysql-probes",
+  "runUrl": "https://github.com/auenkr/cadence-rust/actions/runs/40173683827",
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustServices": [
+    "matching"
+  ],
+  "matchingTransport": "grpc",
+  "historyTransport": "grpc",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "probeResult": "preliminary-passed",
+  "acceptanceEligible": false,
+  "sdkRecovery": {
+    "idleUnloadAndRecovery": "production process idle eviction and recovery",
+    "gracefulDrainRecovery": {
+      "workflowId": "graceful-drain-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "runId": "cea2c159-ec66-44d4-b63f-7285e1abbba5",
+      "taskList": "graceful-drain-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "taskListOwner": "127.0.0.1:18031",
+      "queuedRowsBeforeSignal": 1,
+      "rangeBeforeSignal": 1,
+      "queuedRowsAfterRecovery": 0,
+      "drainingPid": 8723,
+      "recoveredByRustPid": 9299,
+      "completionEvents": 1,
+      "goServicesPid": 8651
+    },
+    "processRestart": {
+      "workflowId": "restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "runId": "0a9e20d8-4cc8-4e41-80ef-88e6c1f3afb3",
+      "taskList": "restart-tasks-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "durableTaskRowsBeforeKill": 1,
+      "taskRangeBeforeKill": 1,
+      "durableWatermarkBeforeKill": {
+        "taskType": 0,
+        "rows": 1,
+        "maxTaskId": 1
+      },
+      "firstRustPid": 8992,
+      "secondRustPid": 9088,
+      "completionEvents": 1,
+      "goServicesPid": 8651
+    }
+  },
+  "backlogForward": {
+    "rootPartition": "backlog-forward-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+    "childPartition": "/__cadence_sys/backlog-forward-6e4c3a44-b884-4d87-8554-e5f2310e93b9/1",
+    "numReadPartitions": 2,
+    "numWritePartitions": 2,
+    "childToRoot": {
+      "workflowId": "fwd-child-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "activityId": "forwarded-from-child",
+      "childBacklogRowsBeforeRootPoll": 1,
+      "rootPollOnly": true
+    },
+    "parentToChild": {
+      "workflowId": "fwd-parent-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+      "activityId": "forwarded-from-parent",
+      "rootBacklogRowsBeforeChildPoll": 1,
+      "childPollOnly": true
+    }
+  },
+  "queryStandbyForwarding": {
+    "result": "passed",
+    "rootPartition": "query-standby-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+    "childPartition": "/__cadence_sys/query-standby-6e4c3a44-b884-4d87-8554-e5f2310e93b9/1",
+    "directChildAnswered": true,
+    "frontendAnswered": 6
+  },
+  "listTaskListPartitions": {
+    "result": "passed",
+    "transport": "grpc",
+    "nodes": 2,
+    "lists": [
+      {
+        "requested": "probe-list-partitions-root",
+        "keys": [
+          "probe-list-partitions-root",
+          "/__cadence_sys/probe-list-partitions-root/1",
+          "/__cadence_sys/probe-list-partitions-root/2"
+        ],
+        "owners": [
+          "127.0.0.1:14340",
+          "127.0.0.1:14340",
+          "127.0.0.1:18031"
+        ],
+        "describes": [
+          {
+            "key": "probe-list-partitions-root",
+            "servedBy": "127.0.0.1:14340"
+          },
+          {
+            "key": "/__cadence_sys/probe-list-partitions-root/1",
+            "servedBy": "127.0.0.1:14340"
+          },
+          {
+            "key": "/__cadence_sys/probe-list-partitions-root/2",
+            "servedBy": "127.0.0.1:18031"
+          }
+        ],
+        "sources": [
+          "127.0.0.1:14340",
+          "127.0.0.1:18031",
+          "go-frontend"
+        ]
+      },
+      {
+        "requested": "/__cadence_sys/probe-list-partitions-child/2",
+        "keys": [
+          "probe-list-partitions-child",
+          "/__cadence_sys/probe-list-partitions-child/1",
+          "/__cadence_sys/probe-list-partitions-child/2"
+        ],
+        "owners": [
+          "127.0.0.1:18031",
+          "127.0.0.1:14340",
+          "127.0.0.1:18031"
+        ],
+        "describes": [
+          {
+            "key": "probe-list-partitions-child",
+            "servedBy": "127.0.0.1:18031"
+          },
+          {
+            "key": "/__cadence_sys/probe-list-partitions-child/1",
+            "servedBy": "127.0.0.1:14340"
+          },
+          {
+            "key": "/__cadence_sys/probe-list-partitions-child/2",
+            "servedBy": "127.0.0.1:18031"
+          }
+        ],
+        "sources": [
+          "127.0.0.1:14340",
+          "127.0.0.1:18031",
+          "go-frontend"
+        ]
+      }
+    ]
+  },
+  "durableRestartDrain": {
+    "result": "passed",
+    "rootPartition": "durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+    "queuedBeforeRestart": [
+      {
+        "partition": "durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+        "activityId": "durable-0",
+        "rows": 1
+      },
+      {
+        "partition": "/__cadence_sys/durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9/1",
+        "activityId": "durable-1",
+        "rows": 1
+      },
+      {
+        "partition": "/__cadence_sys/durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9/2",
+        "activityId": "durable-2",
+        "rows": 1
+      }
+    ],
+    "restart": {
+      "killedPid": 9088,
+      "restartedPid": 9559
+    },
+    "drainedAfterRestart": [
+      {
+        "partition": "/__cadence_sys/durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9/1",
+        "activityId": "durable-1"
+      },
+      {
+        "partition": "/__cadence_sys/durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9/2",
+        "activityId": "durable-2"
+      },
+      {
+        "partition": "durable-restart-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+        "activityId": "durable-0"
+      }
+    ]
+  },
+  "autoConfigHint": {
+    "result": "passed",
+    "decisionHint": {
+      "enableAutoConfig": false
+    },
+    "activityHint": {
+      "enableAutoConfig": false
+    }
+  },
+  "mysqlSchema": {
+    "presentTableCount": 29,
+    "missingGoTables": []
+  },
+  "domainMetadata": {
+    "domain": "service-compat-6e4c3a44-b884-4d87-8554-e5f2310e93b9",
+    "domainId": "01a1720459b17d8a967a08aa37b3293e",
+    "isGlobal": 0,
+    "dataEncoding": "thriftrw",
+    "dataLength": 493,
+    "notificationVersions": [
+      5
+    ]
+  },
+  "runExitCode": 0,
+  "probeExitCode": 0,
+  "caveat": "preliminary scenario evidence only; no Matching acceptance eligibility. MySQL task-GC snapshot retains one pending row and explicitly notes absent durable GC evidence for activity queues; no separate full acceptance parity claim."
+}

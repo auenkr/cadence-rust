@@ -7,7 +7,7 @@ Matching is INCOMPLETE. This review does not mark completion.
 - Fresh workspace 40168414544 is bound to `fade09c5`, not 29bdd. It does not run the new Go oracle step; that ran in cached run 40171379726 on `5cafc2dc`. No fresh run exists on 29bdd. Production equality justifies reuse for Rust tests, but must be stated as inference.
 - HTTP TLS interop 40172574953: success on exactly 29bdd (verified via gh). Peer = original Go YARPC clients; History endpoint = real Go Ringpop member fronting the Rust History gRPC fixture, NOT original Go History. Fixture/standalone evidence, not Go-service mixed acceptance.
 - TLS production fix e3c79b30 is in 29bdd (ancestor of fade09c5); fresh 40164484146 covers it.
-- Backend/transport/discovery lanes (PostgreSQL, MySQL, Thrift, configstore, shard-distributor, Cassandra, active-offer) are all source-pinned at `29bdd2b04b573309112286c57f1c347f0ba0b60c`. PostgreSQL run 40173134481 succeeded with `preliminary-passed` / `acceptanceEligible:false`. MySQL run 40173683827 is in progress; Thrift, configstore, shard-distributor, Cassandra and active-offer remain queued. Older runs pre-date TLS merge and runtime-reader/Unleash/lifecycle changes and must not be inherited.
+- Backend/transport/discovery lanes (PostgreSQL, MySQL, Thrift, configstore, shard-distributor, Cassandra, active-offer) are all source-pinned at `29bdd2b04b573309112286c57f1c347f0ba0b60c`. PostgreSQL run 40173134481 succeeded with `preliminary-passed` / `acceptanceEligible:false`. MySQL extended run 40173683827 succeeded on the exact source with the same labels; compact evidence is in `memory/evidence/matching-mysql-extended-40173683827/`. Its MySQL GC observation explicitly lacks durable GC evidence for two activity queues. Thrift is now dispatched serially on the same pin; configstore, shard-distributor, Cassandra and active-offer remain queued. Older runs pre-date TLS merge and runtime-reader/Unleash/lifecycle changes and must not be inherited.
 
 ## Coverage classes
 - Source/unit: 13 RPC handlers, lifecycle units, TLS matrix (invalid DER, lone cert/key, missing identity), metrics comparison (4 `match`, fade09c5), owner-order Go oracle, DescribeTaskList oracle (5cafc2dc).
@@ -26,7 +26,7 @@ Still stale, verified: `git diff 27d3ff5f..29bdd2b04 -- rust` (non-test paths) c
 Real-Go-History x TLS: not required as an arbitrary cross-product. Transport interop (40172574953) and real-Go-History lanes are separate proofs. Meaningful remaining interaction: only that the Go History->Rust Matching callback path ran under the *final* binary (covered by active-offer + postgres/thrift lanes). Report the combo as a limit.
 
 ## Remaining open (after reconciliation)
-1. Complete the 7 mixed lanes on final pin `29bdd2b04b573309112286c57f1c347f0ba0b60c`, serial. PostgreSQL succeeded; MySQL run 40173683827 is pending; the other five lanes remain queued. No production Go-service gate can be counted from the HTTP fixture lane.
+1. Complete the 7 mixed lanes on final pin `29bdd2b04b573309112286c57f1c347f0ba0b60c`, serial. PostgreSQL and MySQL extended succeeded; Thrift is pending; configstore, shard-distributor, Cassandra and active-offer remain queued. No production Go-service gate can be counted from the HTTP fixture lane.
 2. Fresh uncached workspace directly on 29bdd was not run. The exact `rust/` tree comparison to fade09c5 is empty, so reusing 40168414544 is a documented production-tree-equivalence inference, not an exact-29bdd CI result.
 3. Workspace fmt advisory exit 1 reported, not a pass.
 

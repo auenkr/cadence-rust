@@ -628,14 +628,29 @@ probe and cleanup evidence are in
 `memory/evidence/matching-postgres-mixed-40173134481/`; the original ZIP is in
 `/mnt/storage/service/ci-evidence/run-40173134481/`.
 
-After confirming no mixed gate was active, dispatched only the next planned
-lane, MySQL extended (`lane=mysql-probes`):
+After confirming no mixed gate was active, dispatched MySQL extended
+(`lane=mysql-probes`). Run
 [40173683827](https://github.com/auenkr/cadence-rust/actions/runs/40173683827)
-is in progress on the same stable ref and exact head
-`29bdd2b04b573309112286c57f1c347f0ba0b60c`. Its Matching binary SHA256 and
-gate evidence are pending. Thrift, configstore, shard-distributor, Cassandra
-and active-offer remain queued. Do not dispatch another lane until MySQL
-completes and its artifact is reviewed.
+completed SUCCESS on the stable ref and exact head
+`29bdd2b04b573309112286c57f1c347f0ba0b60c`. Build, gate, lane and probe exits
+are 0; Matching binary SHA256 is
+`e3792553dfc83b9779858d9a94390a928374e2ed8d59a3a7124d6b8df43283cf`. It used
+original Go Frontend/History/Worker and Rust Matching discovered through
+production Go Ringpop, with no Go Matching (`goMatchingStarted=false`). SDK
+restart/recovery, graceful drain, child/root backlog forwarding, standby query,
+partition listing, durable restart/drain and AutoConfigHint scenarios passed.
+The exact labels remain `preliminary-passed` / `acceptanceEligible:false`;
+this is preliminary scenario evidence, not Matching acceptance. MySQL GC
+observations retain a pending row and explicitly lack durable GC evidence for
+two activity queues. Compact evidence is in
+`memory/evidence/matching-mysql-extended-40173683827/`; artifact ZIP and raw
+logs/binary are retained outside git under
+`/mnt/storage/service/ci-evidence/run-40173683827/`.
+
+After checking that no mixed gate was active, dispatched only the next lane,
+Thrift/TChannel (`lane=thrift`), on the same stable ref and exact SHA. See the
+serial run status recorded below; configstore, shard-distributor, Cassandra
+and active-offer remain queued.
 
 The exact `rust/` tree diff from `fade09c501e23212d4d86e64c653057d589d1910`
 to `29bdd2b04b573309112286c57f1c347f0ba0b60c` is empty. Thus fresh workspace
@@ -658,3 +673,27 @@ stable validation branch remains pinned to
 `fade09c501e23212d4d86e64c653057d589d1910`; the later History-ring candidate
 is separately pinned as documented above. No worker branch/worktree cleanup
 was performed.
+
+## MySQL and Thrift status update (2026-10-25)
+
+MySQL extended evidence and its limits are recorded above and in
+`memory/evidence/matching-mysql-extended-40173683827/`. The production artifact
+result says `preliminary-passed`, `acceptanceEligible:false`; preserve both
+literal values. It is a real mixed topology using original Go
+Frontend/History/Worker and Rust Matching, not a standalone fixture.
+
+After an immediate `gh run list` check showed no queued or in-progress
+mixed-gate run, dispatched only:
+
+```bash
+gh workflow run matching-production-validation.yml --ref t3/matching-validation-history-ring-20261025 -f lane=thrift
+```
+
+Thrift run [40174280100](https://github.com/auenkr/cadence-rust/actions/runs/40174280100) is queued on `t3/matching-validation-history-ring-20261025` at exact
+SHA `29bdd2b04b573309112286c57f1c347f0ba0b60c`; verify its URL and head before
+interpreting evidence. Workflow inputs select Thrift Matching transport,
+TChannel History transport and AutoConfigHint. Its intended topology is
+original Go Frontend/History/Worker with Rust Matching; it is not the separate
+Go Ringpop stub plus Rust History HTTP/TLS fixture topology. Configstore,
+shard-distributor, Cassandra and active-offer remain queued. Matching remains
+INCOMPLETE.
