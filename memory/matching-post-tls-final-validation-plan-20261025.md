@@ -242,3 +242,19 @@ Verify the workflow's `headSha` equals the integration `EXPECTED_SHA`, inspect
 and archive the artifact immediately, and record its run URL and conclusion
 with the other source-bound evidence. This change does not close the gRPC TLS
 test or Matching parity audit by itself.
+
+## Integration status (2026-10-25)
+
+Reviewed branch `t3/matching-http-tls-interop-ci-20261025` at
+`8e169976858e88d793394e399b98cbbd76084709` (original workflow commit
+`eb3d205c35`) was merged into shared master by merge commit
+`9cdd80165773a2813c64d5ce2f1e9a165d9bfa76`. The artifact exclusion is exactly
+`!out/interop/matching-drain.test`; the rest of `out/` remains uploaded. Ruby
+Psych parsed the workflow YAML successfully, and `git diff --check` passed
+before merge. Master was pushed after this memory update.
+
+No Cargo/Go commands or workflow dispatch were run. The new manual interop
+workflow is pending validation on the TLS-integrated source. The production
+TLS worker branch remains separate; dispatch the fresh workspace gate, all
+required mixed lanes, and this HTTP TLS interop lane only after that patch is
+integrated and pinned as `EXPECTED_SHA`.
