@@ -31,3 +31,18 @@ SDK workflow/restart/drain/crash scenarios, active-offer zero-insert audit, and
 file watcher reload/error-retention/shutdown tests. The requirement mapping is
 memory/matching-completion-audit-20261024.md; update its stale status lines
 with actual final results, not blanket claims inferred from green workspace CI.
+
+## MySQL readiness correction (2026-10-25)
+
+Failed MySQL run40153901033 exposed a probe readiness race: Frontend could
+route to the secondary before the restarted primary bound gRPC. Integrated
+harness correction is master commit `e06fd8ca6`, pinned for rerun on
+`matching-final-validation-20261025`. Both that commit and original candidate
+27d3ff5f have exactly the same `rust/` tree hash
+`823ff09bee39660110e07c915e449ff84a33bbf0`; no production, Go or workflow files
+changed. The validation branch adds the exact-primary readiness assertion and
+memory updates. Existing candidate lane evidence remains bound to its original
+source; new runs must record their own source and binary hash. Configstore
+40155523508 is currently running on the original candidate. After it ends,
+rerun MySQL using the corrected validation branch before the remaining lanes.
+See `memory/mysql-final-40153901033-restart-diagnosis.md`.
