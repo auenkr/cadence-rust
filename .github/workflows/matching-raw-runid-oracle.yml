@@ -87,3 +87,14 @@ jobs:
           path: ${{ runner.temp }}/matching-oracle-evidence/
           if-no-files-found: error
           retention-days: 3
+      - name: Fail when formatting or oracle execution failed
+        if: always()
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/matching-oracle-evidence"
+          format_status=$(cat "$evidence/format.exit" 2>/dev/null || echo missing)
+          test_status=$(cat "$evidence/go-test.exit" 2>/dev/null || echo missing)
+          if [ "$format_status" != "0" ] || [ "$test_status" != "0" ]; then
+            echo "format exit: $format_status; oracle exit: $test_status"
+            exit 1
+          fi
