@@ -1267,6 +1267,12 @@ async function run() {
   // Dispatch order is not identity-FIFO; assert the delivered set and that the
   // cumulative pacing delayed the later backlog deliveries (the wait may land on any poll after the first).
   assert.deepEqual(pacedInputs.slice().sort(), ['paced-0', 'paced-1', 'paced-2']);
+  if (pacedLatency.slice(1).reduce((a, b) => a + b, 0) < 500) {
+    // Trace-only diagnostics for a failed pacing assertion: the assertion itself is unchanged.
+    const traced = await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: pacedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true }).catch(error => ({ describeError: String(error) }));
+    const owners = await observePacedOwners('after-paced-failure');
+    fs.writeFileSync(path.join(work, 'paced-failure-trace.json'), JSON.stringify({ pacedLatency, pacedInputs, traced, owners }, null, 2) + '\n');
+  }
   assert(pacedLatency.slice(1).reduce((a, b) => a + b, 0) >= 500, `paced activity dispatch was not rate limited: ${JSON.stringify(pacedLatency)}`);
   const pacedOwnerChanged = (before, after) => !after.agree || after.primaryOwner !== before.primaryOwner || after.secondaryOwner !== before.secondaryOwner;
   const pacedOwnershipAtDescribe = await observePacedOwners('before-paced-describe');
