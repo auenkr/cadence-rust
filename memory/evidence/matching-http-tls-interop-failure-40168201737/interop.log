@@ -1,0 +1,43 @@
+go: downloading go.uber.org/goleak v1.3.0
+=== RUN   TestIsTLSClientHelloRecord
+=== RUN   TestIsTLSClientHelloRecord/non_tls
+=== RUN   TestIsTLSClientHelloRecord/read_error
+=== RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+=== RUN   TestIsTLSClientHelloRecord/tls_header
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+=== RUN   TestIsTLSClientHelloRecord/e2e_tls
+--- PASS: TestIsTLSClientHelloRecord (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/read_error (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/tls_header (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_0 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_1 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_2 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_3 (0.00s)
+        --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_4 (0.00s)
+    --- PASS: TestIsTLSClientHelloRecord/e2e_tls (0.00s)
+PASS
+ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.004s
+ok  	github.com/uber/cadence/common/persistence/sql	0.618s
+ok  	github.com/uber/cadence/common/persistence/sql	0.606s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+    rust_native_test.go:99: bad request type: <nil> <nil>
+--- FAIL: TestRustMatchingNativeThrift (0.02s)
+    --- FAIL: TestRustMatchingNativeThrift/tchannel (0.02s)
+FAIL
+FAIL	github.com/uber/cadence/service/matching/wrappers/thrift	0.025s
+FAIL
+Traceback (most recent call last):
+  File "/home/runner/work/cadence-rust/cadence-rust/tests/run-matching-thrift-compat.py", line 223, in <module>
+    assert_embedded_start_succeeds()
+  File "/home/runner/work/cadence-rust/cadence-rust/tests/run-matching-thrift-compat.py", line 143, in assert_embedded_start_succeeds
+    subprocess.run([
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['go', 'test', '-overlay', '/home/runner/work/cadence-rust/cadence-rust/out/interop/overlay.json', './service/matching/wrappers/thrift', '-run', '^TestRustMatchingNativeThrift$', '-count=1', '-v']' returned non-zero exit status 1.

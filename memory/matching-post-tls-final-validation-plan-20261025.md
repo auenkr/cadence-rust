@@ -476,3 +476,20 @@ necessarily failed. Follow-up branch
 `!embedded_development`. This leaves explicit-config production setup intact.
 No local Cargo/Go/rustfmt validation or mixed gate has been run; parent review
 and CI validation are pending.
+
+The next serial HTTP TLS run,
+https://github.com/auenkr/cadence-rust/actions/runs/40168201737, failed on the
+embedded Thrift probe after startup was fixed. Fresh locked build passed at
+source `fade09c501e23212d4d86e64c653057d589d1910` with binary SHA256
+`500e4ee26df85af47f0182a34c568ae13c29377590628a05a56c5e55547997a7`; lock
+diff is empty. Go `Meta::health` and domain APIs passed, then a missing-
+TaskList `DescribeTaskList` request returned success from Rust where the Go
+client expects `BadRequestError`. This is a production behavior mismatch:
+`grpc_matching.rs::describe_task_list` defaulted the missing request and
+allowed its absent task list to become an empty name. Follow-up branch
+`t3/http-tls-describe-tasklist-parity-20261025` rejects missing/empty task
+lists with `InvalidArgument` and adds a Rust regression test. The Thrift
+adapter maps this status to `BadRequestError`; assertions remain unchanged.
+Evidence and a read-through inventory of remaining startup/TLS probes are at
+`memory/evidence/matching-http-tls-interop-failure-40168201737/`. No local
+Cargo/Go/rustfmt validation or mixed gate was run.

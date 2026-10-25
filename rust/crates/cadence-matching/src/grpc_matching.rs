@@ -3653,6 +3653,12 @@ impl m::matching_api_server::MatchingApi for Matching {
                             let r = request.get_ref().clone();
                             let mut payload = r.request.unwrap_or_default();
                             let task_list = payload.task_list.clone();
+                            if task_list
+                                .as_ref()
+                                .map_or(true, |task_list| task_list.name.is_empty())
+                            {
+                                return Err(Status::invalid_argument("TaskList is not set."));
+                            }
                             let task_list_type = crate::matching_config::persistence_task_list_type(
                                 payload.task_list_type,
                             ) + 1;

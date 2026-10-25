@@ -1,0 +1,14 @@
+starting frontend (api v1-thrift)
+starting history (api v1-thrift)
+starting matching (api v1-thrift)
+starting worker (api v1-thrift)
+starting sharddistributor (api v1-thrift)
+warning: loading dynamic config "/home/runner/work/cadence-rust/cadence-rust/config/dynamicconfig/development.yaml": No such file or directory (os error 2); using no-op configuration
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:57293: frontend,history,matching,worker,sharddistributor
+Cadence gRPC frontend listening on 127.0.0.1:52549
+Cadence TChannel frontend listening on 127.0.0.1:34821
+Cadence internal history gRPC listening on 127.0.0.1:51993
+Cadence internal matching gRPC listening on 127.0.0.1:34171
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:55867
+shutting down

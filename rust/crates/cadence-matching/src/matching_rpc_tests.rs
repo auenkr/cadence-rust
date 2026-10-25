@@ -8329,6 +8329,20 @@ async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_no
 // Go handler_test.go TestDescribeTaskList "Success case": a healthy engine returns the
 // describe response to the caller with no error.
 #[tokio::test]
+async fn go_handler_describe_task_list_rejects_missing_task_list() {
+    let (_dir, _store, matching, key) = fixture();
+    let status = matching
+        .describe_task_list(Request::new(m::DescribeTaskListRequest {
+            domain_id: key.domain_id.to_string(),
+            request: None,
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    assert_eq!(status.message(), "TaskList is not set.");
+}
+
+#[tokio::test]
 async fn go_handler_describe_task_list_success_returns_response() {
     let (_dir, _store, matching, key) = fixture();
     let response = matching
