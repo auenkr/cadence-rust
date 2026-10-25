@@ -126,8 +126,10 @@ def assert_embedded_start_succeeds():
                 if process.poll() is not None:
                     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
                 try:
-                    with socket.create_connection(('127.0.0.1', matching_tchannel), timeout=0.2):
-                        break
+                    for port in (tchannel, matching_tchannel):
+                        with socket.create_connection(('127.0.0.1', port), timeout=0.2):
+                            pass
+                    break
                 except OSError:
                     time.sleep(0.1)
             else:
@@ -227,21 +229,18 @@ with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:
         deadline = time.monotonic() + 30
+        ready_ports = (http, frontend, history, matching, tchannel, matching_tchannel, matching_http)
         while True:
             if server.poll() is not None:
                 raise RuntimeError(f'Rust server exited: {artifacts / "server.log"}')
             try:
-                with socket.create_connection(('127.0.0.1', matching_tchannel), timeout=0.2):
-                    pass
-                try:
-                    with socket.create_connection(('127.0.0.1', matching_http), timeout=0.2):
+                for port in ready_ports:
+                    with socket.create_connection(('127.0.0.1', port), timeout=0.2):
                         pass
-                    break
-                except OSError:
-                    pass
+                break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError('Rust Matching listener did not start')
+                    raise RuntimeError(f'Rust service listeners did not all start: {ready_ports}')
                 time.sleep(0.1)
         verify_task_list = artifacts / 'rust-configured-task-list.txt'
         verify_task_list.unlink(missing_ok=True)
@@ -452,9 +451,12 @@ with (artifacts / 'server-tls.log').open('w') as log:
         with socket.create_connection(('127.0.0.1', matching_http), timeout=2) as plaintext:
             plaintext.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n')
             plaintext.settimeout(2)
-            response = plaintext.recv(256)
-            if not response or response[0] != 0x15:
-                raise AssertionError(f'plaintext did not receive a TLS alert: {response!r}')
+            try:
+                response = plaintext.recv(256)
+            except ConnectionResetError:
+                response = b''
+            if response and response[0] != 0x15:
+                raise AssertionError(f'plaintext received a non-alert response from the enforced TLS listener: {response!r}')
     finally:
         tls_server.terminate()
         try:

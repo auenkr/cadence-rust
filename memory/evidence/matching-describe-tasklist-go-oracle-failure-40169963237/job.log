@@ -1,0 +1,413 @@
+clippy-test	Set up job	﻿2026-10-25T06:41:07.9304075Z Current runner version: '2.338.0'
+clippy-test	Set up job	2026-10-25T06:41:07.9330114Z ##[group]Runner Image Provisioner
+clippy-test	Set up job	2026-10-25T06:41:07.9331213Z Hosted Compute Agent
+clippy-test	Set up job	2026-10-25T06:41:07.9332318Z Version: 20261021.618
+clippy-test	Set up job	2026-10-25T06:41:07.9333064Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+clippy-test	Set up job	2026-10-25T06:41:07.9333880Z Build Date: 2026-10-21T00:45:21Z
+clippy-test	Set up job	2026-10-25T06:41:07.9334647Z Worker ID: {1f3dc092-18a7-4919-a013-d16ad31c4f60}
+clippy-test	Set up job	2026-10-25T06:41:07.9335525Z Region: westcentralus
+clippy-test	Set up job	2026-10-25T06:41:07.9336166Z Cloud: Azure
+clippy-test	Set up job	2026-10-25T06:41:07.9336789Z ##[endgroup]
+clippy-test	Set up job	2026-10-25T06:41:07.9338388Z ##[group]Operating System
+clippy-test	Set up job	2026-10-25T06:41:07.9339081Z Ubuntu
+clippy-test	Set up job	2026-10-25T06:41:07.9339784Z 24.04.5
+clippy-test	Set up job	2026-10-25T06:41:07.9340356Z LTS
+clippy-test	Set up job	2026-10-25T06:41:07.9340904Z ##[endgroup]
+clippy-test	Set up job	2026-10-25T06:41:07.9341797Z ##[group]Runner Image
+clippy-test	Set up job	2026-10-25T06:41:07.9342517Z Image: ubuntu-24.04
+clippy-test	Set up job	2026-10-25T06:41:07.9343236Z Version: 20261012.334.1
+clippy-test	Set up job	2026-10-25T06:41:07.9344341Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+clippy-test	Set up job	2026-10-25T06:41:07.9346189Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+clippy-test	Set up job	2026-10-25T06:41:07.9347262Z ##[endgroup]
+clippy-test	Set up job	2026-10-25T06:41:07.9348630Z ##[group]GITHUB_TOKEN Permissions
+clippy-test	Set up job	2026-10-25T06:41:07.9350779Z Contents: read
+clippy-test	Set up job	2026-10-25T06:41:07.9352800Z Metadata: read
+clippy-test	Set up job	2026-10-25T06:41:07.9353776Z Packages: read
+clippy-test	Set up job	2026-10-25T06:41:07.9354746Z ##[endgroup]
+clippy-test	Set up job	2026-10-25T06:41:07.9357521Z Secret source: Actions
+clippy-test	Set up job	2026-10-25T06:41:07.9358520Z Cache mode: write
+clippy-test	Set up job	2026-10-25T06:41:07.9359639Z Prepare workflow directory
+clippy-test	Set up job	2026-10-25T06:41:07.9882803Z Prepare all required actions
+clippy-test	Set up job	2026-10-25T06:41:07.9932492Z Getting action download info
+clippy-test	Set up job	2026-10-25T06:41:08.3068837Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+clippy-test	Set up job	2026-10-25T06:41:08.4049753Z Download action repository 'actions/setup-go@v5' (SHA:40f1582b2485089dde7abd97c1529aa768e1baff)
+clippy-test	Set up job	2026-10-25T06:41:09.1025518Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+clippy-test	Set up job	2026-10-25T06:41:09.2188984Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:b725eda525362e7cf34af9a7243cac1e3f01a7ec)
+clippy-test	Set up job	2026-10-25T06:41:09.4373762Z Download action repository 'Swatinem/rust-cache@v2' (SHA:d1527c8f67ef9af357290475d4af4b0fab8f12e0)
+clippy-test	Set up job	2026-10-25T06:41:10.2401600Z Complete job name: clippy-test
+clippy-test	Run actions/checkout@v4	﻿2026-10-25T06:41:10.3508482Z ##[group]Run actions/checkout@v4
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3509702Z with:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3510471Z   repository: auenkr/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3514401Z   token: ***
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3515157Z   ssh-strict: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3515891Z   ssh-user: git
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3516644Z   persist-credentials: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3517409Z   clean: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3518178Z   sparse-checkout-cone-mode: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3518991Z   fetch-depth: 1
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3519712Z   fetch-tags: false
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3520464Z   show-progress: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3521223Z   lfs: false
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3522154Z   submodules: false
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3522934Z   set-safe-directory: true
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3523755Z   allow-unsafe-pr-checkout: false
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3524846Z env:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3525585Z   CARGO_TERM_COLOR: never
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3526362Z   PKG: cadence-matching
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.3527115Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4598503Z Syncing repository: auenkr/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4601588Z ##[group]Getting Git version info
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4603061Z Working directory is '/home/runner/work/cadence-rust/cadence-rust'
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4605392Z [command]/usr/bin/git version
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4689146Z git version 2.55.0
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4720921Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4736911Z Temporarily overriding HOME='/home/runner/work/_temp/13b17828-b7f4-480f-acb7-f2ea63a888e4' before making global git config changes
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4743677Z Adding repository directory to the temporary git global config as a safe directory
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4745389Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/cadence-rust/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4803682Z Deleting the contents of '/home/runner/work/cadence-rust/cadence-rust'
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4814222Z ##[group]Initializing the repository
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4817066Z [command]/usr/bin/git init /home/runner/work/cadence-rust/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4950683Z hint: Using 'master' as the name for the initial branch. This default branch name
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4955790Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4957738Z hint: to use in all of your new repositories, which will suppress this warning,
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4959404Z hint: call:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4960553Z hint:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4962296Z hint: 	git config --global init.defaultBranch <name>
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4963754Z hint:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4965180Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4967135Z hint: 'development'. The just-created branch can be renamed via this command:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4968751Z hint:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4969994Z hint: 	git branch -m <name>
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4971254Z hint:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4973061Z hint: Disable this message with "git config set advice.defaultBranchName false"
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4975124Z Initialized empty Git repository in /home/runner/work/cadence-rust/cadence-rust/.git/
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.4979156Z [command]/usr/bin/git remote add origin https://github.com/auenkr/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5022982Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5025313Z ##[group]Disabling automatic garbage collection
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5027565Z [command]/usr/bin/git config --local gc.auto 0
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5064560Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5066652Z ##[group]Setting up auth
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5072178Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5108507Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5559705Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5596851Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5826463Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.5865333Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.6098064Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.6141492Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.6142996Z ##[group]Fetching the repository
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:10.6152079Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +3a1996c800f2d03209116497613bb43c6e065125:refs/remotes/origin/t3/http-tls-go-oracle-correction-20261025
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6358112Z From https://github.com/auenkr/cadence-rust
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6359084Z  * [new ref]         3a1996c800f2d03209116497613bb43c6e065125 -> origin/t3/http-tls-go-oracle-correction-20261025
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6375446Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6376752Z ##[group]Determining the checkout info
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6377611Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6377961Z [command]/usr/bin/git sparse-checkout disable
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6443130Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6476644Z ##[group]Checking out the ref
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:13.6484066Z [command]/usr/bin/git checkout --progress --force -B t3/http-tls-go-oracle-correction-20261025 refs/remotes/origin/t3/http-tls-go-oracle-correction-20261025
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:14.2469169Z Switched to a new branch 't3/http-tls-go-oracle-correction-20261025'
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:14.2474633Z branch 't3/http-tls-go-oracle-correction-20261025' set up to track 'origin/t3/http-tls-go-oracle-correction-20261025'.
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:14.2512773Z ##[endgroup]
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:14.2565077Z [command]/usr/bin/git log -1 --format=%H
+clippy-test	Run actions/checkout@v4	2026-10-25T06:41:14.2592487Z 3a1996c800f2d03209116497613bb43c6e065125
+clippy-test	Init IDL submodule	﻿2026-10-25T06:41:14.2801917Z ##[group]Run git submodule update --init go/idls
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.2802430Z ^[[36;1mgit submodule update --init go/idls^[[0m
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3074260Z shell: /usr/bin/bash -e {0}
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3074643Z env:
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3074919Z   CARGO_TERM_COLOR: never
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3075268Z   PKG: cadence-matching
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3075587Z ##[endgroup]
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3403211Z Submodule 'idls' (https://github.com/cadence-workflow/cadence-idl.git) registered for path 'go/idls'
+clippy-test	Init IDL submodule	2026-10-25T06:41:14.3428641Z Cloning into '/home/runner/work/cadence-rust/cadence-rust/go/idls'...
+clippy-test	Init IDL submodule	2026-10-25T06:41:16.2147346Z Submodule path 'go/idls': checked out 'bfbf273b41b9e36ce21e47a49600d22d73e4614c'
+clippy-test	Run actions/setup-go@v5	﻿2026-10-25T06:41:16.2251706Z ##[group]Run actions/setup-go@v5
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2252044Z with:
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2252254Z   go-version: 1.25.14
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2252482Z   cache: false
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2252695Z   check-latest: false
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2255204Z   token: ***
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2255446Z env:
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2255648Z   CARGO_TERM_COLOR: never
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2255900Z   PKG: cadence-matching
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.2256131Z ##[endgroup]
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.3549778Z Setup go version spec 1.25.14
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.4406814Z Found in cache @ /opt/hostedtoolcache/go/1.25.14/x64
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.4409132Z (node:2391) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.4411093Z (Use `node --trace-deprecation ...` to show where the warning was created)
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.4414944Z Added go to the path
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:16.4421285Z Successfully set up Go version 1.25.14
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.2074129Z go version go1.25.14 linux/amd64
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.2074506Z 
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.2074857Z ##[group]go env
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3506912Z AR='ar'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3507326Z CC='gcc'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3507711Z CGO_CFLAGS='-O2 -g'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3508066Z CGO_CPPFLAGS=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3508407Z CGO_CXXFLAGS='-O2 -g'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3508760Z CGO_ENABLED='1'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3509106Z CGO_FFLAGS='-O2 -g'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3509440Z CGO_LDFLAGS='-O2 -g'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3509762Z CXX='g++'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3510103Z GCCGO='gccgo'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3510466Z GO111MODULE=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3510798Z GOAMD64='v1'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3511172Z GOARCH='amd64'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3511760Z GOAUTH='netrc'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3512101Z GOBIN=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3512472Z GOCACHE='/home/runner/.cache/go-build'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3512966Z GOCACHEPROG=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3513325Z GODEBUG=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3513731Z GOENV='/home/runner/.config/go/env'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3514195Z GOEXE=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3514533Z GOEXPERIMENT=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3514949Z GOFIPS140='off'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3515314Z GOFLAGS=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3516394Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build4170355472=/tmp/go-build -gno-record-gcc-switches'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3517692Z GOHOSTARCH='amd64'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3518127Z GOHOSTOS='linux'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3518498Z GOINSECURE=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3518862Z GOMOD='/dev/null'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3519253Z GOMODCACHE='/home/runner/go/pkg/mod'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3519730Z GONOPROXY=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3520119Z GONOSUMDB=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3520472Z GOOS='linux'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3520851Z GOPATH='/home/runner/go'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3521467Z GOPRIVATE=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3521920Z GOPROXY='https://proxy.golang.org,direct'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3522473Z GOROOT='/opt/hostedtoolcache/go/1.25.14/x64'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3523295Z GOSUMDB='sum.golang.org'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3523699Z GOTELEMETRY='local'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3524153Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3524692Z GOTMPDIR=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3565763Z GOTOOLCHAIN='auto'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3566427Z GOTOOLDIR='/opt/hostedtoolcache/go/1.25.14/x64/pkg/tool/linux_amd64'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3567026Z GOVCS=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3567365Z GOVERSION='go1.25.14'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3567714Z GOWORK=''
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3568072Z PKG_CONFIG='pkg-config'
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3568293Z 
+clippy-test	Run actions/setup-go@v5	2026-10-25T06:41:18.3568877Z ##[endgroup]
+clippy-test	Run original Go malformed DescribeTaskList oracle	﻿2026-10-25T06:41:18.3638501Z ##[group]Run set -euo pipefail
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3638863Z ^[[36;1mset -euo pipefail^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3639250Z ^[[36;1mevidence="$RUNNER_TEMP/matching-describe-tasklist-go-oracle"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3639650Z ^[[36;1mmkdir -p "$evidence"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3639958Z ^[[36;1mgit rev-parse HEAD > "$evidence/source-sha.txt"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3640385Z ^[[36;1mcat > "$RUNNER_TEMP/describe-tasklist-overlay.json" <<EOF^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3641208Z ^[[36;1m{"Replace":{"$GITHUB_WORKSPACE/go/service/matching/handler/describe_tasklist_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-describe-tasklist-oracle_test.go"}}^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3642223Z ^[[36;1mEOF^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3642579Z ^[[36;1mcp "$RUNNER_TEMP/describe-tasklist-overlay.json" "$evidence/overlay.json"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3643645Z ^[[36;1mprintf '%s\n' 'go test -overlay $RUNNER_TEMP/describe-tasklist-overlay.json ./service/matching/handler -run ^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$ -count=1 -v' > "$evidence/command.txt"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3644581Z ^[[36;1mset +e^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3644993Z ^[[36;1mgo test -overlay "$RUNNER_TEMP/describe-tasklist-overlay.json" ./service/matching/handler \^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3645664Z ^[[36;1m  -run '^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$' -count=1 -v \^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3646158Z ^[[36;1m  > "$evidence/go-oracle.log" 2>&1^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3646442Z ^[[36;1mresult=$?^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3646694Z ^[[36;1mecho "$result" > "$evidence/go-oracle.exit"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3647008Z ^[[36;1mcat "$evidence/go-oracle.log"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3647277Z ^[[36;1mexit "$result"^[[0m
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3712614Z shell: /usr/bin/bash -e {0}
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3712919Z env:
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3713147Z   CARGO_TERM_COLOR: never
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3713402Z   PKG: cadence-matching
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:41:18.3713635Z ##[endgroup]
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2023199Z go: downloading github.com/cadence-workflow/shard-manager v0.0.0-20260610143419-4bef35311802
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2024322Z go: downloading github.com/pborman/uuid v0.0.0-20180906182336-adf5a7427709
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2025094Z go: downloading github.com/uber-go/tally v3.5.8+incompatible
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2025684Z go: downloading go.uber.org/mock v0.6.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2026166Z go: downloading go.uber.org/zap v1.27.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2026704Z go: downloading golang.org/x/sync v0.22.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2027289Z go: downloading github.com/stretchr/testify v1.11.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2027873Z go: downloading go.uber.org/goleak v1.3.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2028414Z go: downloading go.uber.org/yarpc v1.88.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2029012Z go: downloading github.com/google/uuid v1.6.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2029822Z go: downloading github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2030480Z go: downloading go.uber.org/cadence v1.4.0-rc.3
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2030857Z go: downloading github.com/robfig/cron/v3 v3.0.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2031215Z go: downloading github.com/robfig/cron v1.2.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2031887Z go: downloading github.com/gogo/protobuf v1.3.2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2032285Z go: downloading github.com/hashicorp/go-version v1.2.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2032765Z go: downloading github.com/uber/cadence-idl v0.0.0-20261006184647-bfbf273b41b9
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2033248Z go: downloading github.com/jonboulle/clockwork v0.5.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2033861Z go: downloading golang.org/x/time v0.14.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2034214Z go: downloading github.com/uber/ringpop-go v0.10.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2034580Z go: downloading github.com/golang/snappy v0.0.4
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2034925Z go: downloading go.uber.org/multierr v1.11.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2035280Z go: downloading google.golang.org/grpc v1.83.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2035643Z go: downloading github.com/golang/mock v1.7.0-rc.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2036014Z go: downloading go.uber.org/atomic v1.11.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2036458Z go: downloading github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2037115Z go: downloading github.com/emirpasic/gods v1.18.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2037454Z go: downloading go.uber.org/fx v1.23.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2038043Z go: downloading github.com/aws/aws-sdk-go v1.54.12
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2038942Z go: downloading github.com/cactus/go-statsd-client/statsd v0.0.0-20191106001114-12b4e2b38748
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2039813Z go: downloading github.com/golang-jwt/jwt/v5 v5.3.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2040526Z go: downloading github.com/m3db/prometheus_client_golang v1.12.8
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2041215Z go: downloading go.uber.org/config v1.4.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2042158Z go: downloading gopkg.in/validator.v2 v2.0.0-20180514200540-135c24b11c19
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2042872Z go: downloading gopkg.in/yaml.v2 v2.4.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2043648Z go: downloading github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2044573Z go: downloading github.com/opentracing/opentracing-go v1.2.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2045303Z go: downloading github.com/uber/tchannel-go v1.34.4
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2045961Z go: downloading go.uber.org/net/metrics v1.4.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2046554Z go: downloading go.uber.org/thriftrw v1.34.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2047168Z go: downloading github.com/uber-common/bark v1.2.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2047834Z go: downloading github.com/MicahParks/keyfunc/v2 v2.1.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2048571Z go: downloading github.com/jmespath/go-jmespath v0.4.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2049348Z go: downloading github.com/xdg/scram v0.0.0-20180814205039-7eeb5667e42c
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2050087Z go: downloading github.com/gogo/googleapis v1.4.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2050685Z go: downloading github.com/gogo/status v1.1.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2051246Z go: downloading golang.org/x/net v0.58.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2055523Z go: downloading github.com/google/gofuzz v1.0.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2056147Z go: downloading github.com/twmb/murmur3 v1.1.8
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2056791Z go: downloading google.golang.org/protobuf v1.36.11
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2057413Z go: downloading go.uber.org/dig v1.18.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2057980Z go: downloading golang.org/x/sys v0.47.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2058559Z go: downloading github.com/beorn7/perks v1.0.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2059194Z go: downloading github.com/golang/protobuf v1.5.4
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2059913Z go: downloading github.com/m3db/prometheus_client_model v0.2.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2060686Z go: downloading github.com/m3db/prometheus_common v0.34.6
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2061873Z go: downloading github.com/prometheus/procfs v0.16.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2062525Z go: downloading github.com/pkg/errors v0.9.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2063099Z go: downloading golang.org/x/text v0.41.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2063687Z go: downloading github.com/stretchr/objx v0.5.2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2064404Z go: downloading github.com/olivere/elastic v6.2.37+incompatible
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2065221Z go: downloading github.com/startreedata/pinot-client-go v0.2.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2066093Z go: downloading github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2066871Z go: downloading gopkg.in/yaml.v3 v3.0.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2067549Z go: downloading github.com/prometheus/client_golang v1.21.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2068332Z go: downloading github.com/prometheus/client_model v0.6.2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2069036Z go: downloading github.com/apache/thrift v0.16.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2070168Z go: downloading github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2070974Z go: downloading golang.org/x/oauth2 v0.36.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2071862Z go: downloading github.com/sirupsen/logrus v1.9.3
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2072253Z go: downloading github.com/uber-go/mapdecode v1.0.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2072777Z go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2073278Z go: downloading github.com/xdg/stringprep v1.0.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2073718Z go: downloading google.golang.org/genproto v0.0.0-20260128011058-8636f8732409
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2074146Z go: downloading golang.org/x/crypto v0.55.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2074880Z go: downloading github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2075487Z go: downloading github.com/opensearch-project/opensearch-go/v4 v4.1.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2075926Z go: downloading github.com/olivere/elastic/v7 v7.0.21
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2076373Z go: downloading github.com/cch123/elasticsql v0.0.0-20190321073543-a1a440758eb9
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2076812Z go: downloading github.com/valyala/fastjson v1.4.1
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2077209Z go: downloading golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2077609Z go: downloading github.com/go-zookeeper/zk v1.0.3
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2077959Z go: downloading github.com/cespare/xxhash/v2 v2.3.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2078313Z go: downloading github.com/prometheus/common v0.63.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2078674Z go: downloading github.com/klauspost/compress v1.19.2
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2079048Z go: downloading github.com/marusama/semaphore/v2 v2.5.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2079410Z go: downloading github.com/mailru/easyjson v0.7.7
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2079846Z go: downloading github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2080286Z go: downloading github.com/josharian/intern v1.0.0
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2080615Z === RUN   TestMatchingEngineSuite
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2081006Z === RUN   TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2082423Z     handler.go:560: Unexpected call to *cache.MockDomainCache.GetDomainName([]) at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/handler.go:560 because: 
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2083996Z         expected call at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/describe_tasklist_oracle_test.go:25 doesn't match the argument at index 0.
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2084755Z         Got:  (string)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2085093Z         Want: is equal to test-domain-id (string)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2086804Z         expected call at /home/runner/work/cadence-rust/cadence-rust/go/service/matching/handler/describe_tasklist_oracle_test.go:27 doesn't match the argument at index 0.
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2087933Z         Got:  (string)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2088279Z         Want: is equal to missing-domain (string)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2088618Z --- FAIL: TestMatchingEngineSuite (0.00s)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2089149Z     --- FAIL: TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle (0.00s)
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2089561Z FAIL
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2089870Z FAIL	github.com/uber/cadence/service/matching/handler	0.017s
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2090201Z FAIL
+clippy-test	Run original Go malformed DescribeTaskList oracle	2026-10-25T06:42:49.2100070Z ##[error]Process completed with exit code 1.
+clippy-test	Upload original Go oracle evidence	﻿2026-10-25T06:42:49.2200029Z ##[group]Run actions/upload-artifact@v4
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2200386Z with:
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2200624Z   name: matching-describe-tasklist-go-oracle
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2200933Z   retention-days: 3
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2201570Z   path: /home/runner/work/_temp/matching-describe-tasklist-go-oracle
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2201992Z   if-no-files-found: warn
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2202237Z   compression-level: 6
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2202457Z   overwrite: false
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2202677Z   include-hidden-files: false
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2202909Z env:
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2203100Z   CARGO_TERM_COLOR: never
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2203331Z   PKG: cadence-matching
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.2203720Z ##[endgroup]
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.3933354Z (node:11645) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.3934342Z (Use `node --trace-deprecation ...` to show where the warning was created)
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.4001840Z With the provided path, there will be 5 files uploaded
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.4008897Z Artifact name is valid!
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.4009703Z Root directory input is valid!
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.7289055Z Beginning upload of artifact content to blob storage
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.7559937Z (node:11645) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:49.9643557Z Uploaded bytes 2703
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.0235254Z Finished uploading artifact content to blob storage!
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.0236649Z SHA256 digest of uploaded artifact zip is 8b63ddd685ddfedb9a27f3ab9f15e19e2dba09731b2d7f39f069aa9f251bbc69
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.0238051Z Finalizing artifact upload
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.4778508Z Artifact matching-describe-tasklist-go-oracle.zip successfully finalized. Artifact ID 12589638974
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.4780221Z Artifact matching-describe-tasklist-go-oracle has been successfully uploaded! Final size is 2703 bytes. Artifact ID is 12589638974
+clippy-test	Upload original Go oracle evidence	2026-10-25T06:42:50.4785622Z Artifact download URL: https://github.com/auenkr/cadence-rust/actions/runs/40169963237/artifacts/12589638974
+clippy-test	Record validation identity	﻿2026-10-25T06:42:50.4985911Z ##[group]Run git rev-parse HEAD > rust/commit.txt
+clippy-test	Record validation identity	2026-10-25T06:42:50.4986308Z ^[[36;1mgit rev-parse HEAD > rust/commit.txt^[[0m
+clippy-test	Record validation identity	2026-10-25T06:42:50.4986738Z ^[[36;1mprintf '%s\n' "${CARGO_TARGET_DIR:-$PWD/rust/target}" > rust/target-dir.txt^[[0m
+clippy-test	Record validation identity	2026-10-25T06:42:50.5051146Z shell: /usr/bin/bash -e {0}
+clippy-test	Record validation identity	2026-10-25T06:42:50.5051686Z env:
+clippy-test	Record validation identity	2026-10-25T06:42:50.5051898Z   CARGO_TERM_COLOR: never
+clippy-test	Record validation identity	2026-10-25T06:42:50.5052154Z   PKG: cadence-matching
+clippy-test	Record validation identity	2026-10-25T06:42:50.5052396Z ##[endgroup]
+clippy-test	Upload logs	﻿2026-10-25T06:42:50.5218247Z ##[group]Run actions/upload-artifact@v4
+clippy-test	Upload logs	2026-10-25T06:42:50.5218564Z with:
+clippy-test	Upload logs	2026-10-25T06:42:50.5218767Z   name: rust-ci-logs
+clippy-test	Upload logs	2026-10-25T06:42:50.5218991Z   retention-days: 3
+clippy-test	Upload logs	2026-10-25T06:42:50.5219855Z   path: rust/clippy.log
+clippy-test	Upload logs	rust/fmt.log
+clippy-test	Upload logs	rust/test.log
+clippy-test	Upload logs	rust/*.exit
+clippy-test	Upload logs	rust/commit.txt
+clippy-test	Upload logs	rust/target-dir.txt
+clippy-test	Upload logs	rust/format.log
+clippy-test	Upload logs	rust/tls-format.log
+clippy-test	Upload logs	rust/tls-format.exit
+clippy-test	Upload logs	rust/Cargo.lock
+clippy-test	Upload logs	/home/runner/work/_temp/cadence-matching-owner-order.json
+clippy-test	Upload logs	
+clippy-test	Upload logs	2026-10-25T06:42:50.5220794Z   if-no-files-found: warn
+clippy-test	Upload logs	2026-10-25T06:42:50.5221044Z   compression-level: 6
+clippy-test	Upload logs	2026-10-25T06:42:50.5221575Z   overwrite: false
+clippy-test	Upload logs	2026-10-25T06:42:50.5221862Z   include-hidden-files: false
+clippy-test	Upload logs	2026-10-25T06:42:50.5222104Z env:
+clippy-test	Upload logs	2026-10-25T06:42:50.5222300Z   CARGO_TERM_COLOR: never
+clippy-test	Upload logs	2026-10-25T06:42:50.5222534Z   PKG: cadence-matching
+clippy-test	Upload logs	2026-10-25T06:42:50.5222763Z ##[endgroup]
+clippy-test	Upload logs	2026-10-25T06:42:50.6893225Z (node:11660) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+clippy-test	Upload logs	2026-10-25T06:42:50.6895014Z (Use `node --trace-deprecation ...` to show where the warning was created)
+clippy-test	Upload logs	2026-10-25T06:42:50.7054529Z Multiple search paths detected. Calculating the least common ancestor of all paths
+clippy-test	Upload logs	2026-10-25T06:42:50.7056802Z The least common ancestor is /home/runner/work. This will be the root directory of the artifact
+clippy-test	Upload logs	2026-10-25T06:42:50.7057934Z With the provided path, there will be 3 files uploaded
+clippy-test	Upload logs	2026-10-25T06:42:50.7062349Z Artifact name is valid!
+clippy-test	Upload logs	2026-10-25T06:42:50.7063721Z Root directory input is valid!
+clippy-test	Upload logs	2026-10-25T06:42:51.0371294Z Beginning upload of artifact content to blob storage
+clippy-test	Upload logs	2026-10-25T06:42:51.0636629Z (node:11660) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+clippy-test	Upload logs	2026-10-25T06:42:51.3092720Z Uploaded bytes 24719
+clippy-test	Upload logs	2026-10-25T06:42:51.3672455Z Finished uploading artifact content to blob storage!
+clippy-test	Upload logs	2026-10-25T06:42:51.3674716Z SHA256 digest of uploaded artifact zip is e106258f9145cbc871055b73466e0c05a2a04ea2bd0efa55cd0a6a87bea88c31
+clippy-test	Upload logs	2026-10-25T06:42:51.3682970Z Finalizing artifact upload
+clippy-test	Upload logs	2026-10-25T06:42:51.8059930Z Artifact rust-ci-logs.zip successfully finalized. Artifact ID 12589908667
+clippy-test	Upload logs	2026-10-25T06:42:51.8061633Z Artifact rust-ci-logs has been successfully uploaded! Final size is 24719 bytes. Artifact ID is 12589908667
+clippy-test	Upload logs	2026-10-25T06:42:51.8068033Z Artifact download URL: https://github.com/auenkr/cadence-rust/actions/runs/40169963237/artifacts/12589908667
+clippy-test	Post Run actions/checkout@v4	﻿2026-10-25T06:42:51.8280110Z Post job cleanup.
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9163628Z [command]/usr/bin/git version
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9208970Z git version 2.55.0
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9250262Z Temporarily overriding HOME='/home/runner/work/_temp/fa77b993-9a97-47d0-a7c7-7467c2dd5c85' before making global git config changes
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9251952Z Adding repository directory to the temporary git global config as a safe directory
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9257191Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/cadence-rust/cadence-rust
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9296829Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9333912Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9584776Z Entering 'go/idls'
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9662223Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9692373Z http.https://github.com/.extraheader
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9713777Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9746746Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:51.9995759Z Entering 'go/idls'
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:52.0068657Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:52.0128617Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:52.0399559Z Entering 'go/idls'
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:52.0423992Z file:/home/runner/work/cadence-rust/cadence-rust/.git/modules/idls/config	remote.origin.url
+clippy-test	Post Run actions/checkout@v4	2026-10-25T06:42:52.0460217Z [command]/usr/bin/git config --file /home/runner/work/cadence-rust/cadence-rust/.git/modules/idls/config --name-only --get-regexp ^includeIf\.gitdir:
+clippy-test	Complete job	﻿2026-10-25T06:42:52.0637084Z Cleaning up orphan processes
+clippy-test	Complete job	2026-10-25T06:42:52.0956955Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-go@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

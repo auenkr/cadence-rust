@@ -24,6 +24,8 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 		Return(cache.CreateDomainCacheEntry(matchingTestDomainName), nil).AnyTimes()
 	domainCache.EXPECT().GetDomainName("test-domain-id").
 		Return(matchingTestDomainName, nil).AnyTimes()
+	domainCache.EXPECT().GetDomainName("").
+		Return("", errors.New("oracle empty domain")).AnyTimes()
 	domainCache.EXPECT().GetDomainName("missing-domain").
 		Return("", errors.New("oracle unknown domain")).AnyTimes()
 	domainCache.EXPECT().RegisterDomainChangeCallback(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()

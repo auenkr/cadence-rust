@@ -500,3 +500,12 @@ that executes the original handler and engine for absent outer request, absent
 nested request, empty task-list name, and invalid domain combinations. Use its
 recorded Go error types/messages and ordering to correct the compatibility
 probe, then run focused CI. No local Cargo/Go/rustfmt or mixed gate was run.
+
+Go oracle run 40169963237 on source
+`3a1996c800f2d03209116497613bb43c6e065125` failed in the probe setup before
+case results: the replacement MockDomainCache lacked `GetDomainName("")` for
+the absent-outer case. It reached no Rust/Cargo steps. Its exact log, command,
+exit and artifact proof are saved at
+`memory/evidence/matching-describe-tasklist-go-oracle-failure-40169963237/`.
+The oracle now has an explicit empty-domain expectation; no behavior conclusion
+is drawn from the failed run.
