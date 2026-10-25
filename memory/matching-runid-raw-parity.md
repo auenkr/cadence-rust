@@ -1,4 +1,4 @@
-# Matching AddDecision/AddActivity raw RunID (UNVERIFIED: nothing compiled, no CI)
+# Matching AddDecision/AddActivity raw RunID (PATCH REVIEWED; UNVERIFIED: no local or CI validation)
 
 Scope: Go Add handlers never validate `WorkflowExecution.RunID`; Rust eagerly uuid-parsed it (grpc_matching.rs decision/activity add) and
 returned InvalidArgument. Base: master a453ac12e (not 70a7eebb; absent-execution changes there are untouched, so integration should be
@@ -18,16 +18,21 @@ uuid.go:39 panics via google/uuid MustParse; task_writer.go:113 `go w.taskWriter
 task_list_manager) => malformed RunID on SQL async persist panics an unrecovered goroutine = process crash. Handler returned success first.
 gocql marshalUUID(string) -> ParseUUID (module gocql@v0.0.0-20211015133455-b225f9b53fa1 uuid.go:64).
 
-Remaining divergences (exact):
-1. Malformed non-empty RunID on SQL: Go crashes the process after acking the add; Rust returns a persistence error from the writer (not InvalidArgument).
-   Whether Rust's writer treats that error as retryable/fatal for the task list is NOT verified.
-2. Validation ordering: the early RunID error is gone, so domain/task-list/sticky checks now come first (matches Go, which has none).
+Implementation review follow-up (branch `t3/matching-runid-raw-tests`):
+- History-backed decision Add -> poller test is present in `matching_rpc_tests.rs`. It sends malformed, empty, uppercase and compact valid strings through AddDecisionTask, asserts exact raw string at the mocked History RecordDecisionTaskStarted RPC, and asserts no durable row for sync-matched tasks.
+- `matching_queue.rs` advances `max_read_level` after a durable store error, then `MatchingTaskStoreError::BackendConfiguration` is non-transient under `matching_retry.rs`; this malformed SQL task fails once and is returned to the Matching handler (no task-list retry/stop). This is source trace only, not runtime evidence.
+- Replaced `encode_task`'s release-mode `assert!` with a checked `Result`; SQLite/MySQL/PostgreSQL map any accidental unresolved raw value to BackendConfiguration. SQL call sites still resolve first through `for_sql`. Blob field/schema layout is unchanged.
+- Corrected Matching GetTasks accounting to count an in-memory raw RunID by UTF-8 byte length, otherwise canonical persisted UUID strings as 36 bytes. This mirrors Go string length accounting.
+- Durable malformed decision Add now requires an error, so the assertion cannot pass if Add unexpectedly succeeds.
+
+Remaining divergences / unverified:
+1. No activity sync-match-to-poller test was added; the direct integration fixture exercises decision start only. Activity path behavior is inferred from shared `TaskData` conversion and distinct Activity history RPC handling, not claimed proven.
+2. Malformed non-empty RunID SQL behavior in Go remains a source-only inference: `MustParseUUID` panic occurs in the async task-writer goroutine with no recovery visible in the inspected writer. Rust instead returns a permanent persistence BackendConfiguration error to Add; it does not reproduce process crash.
 3. Cassandra error type/mapping for rejected UUID not compared with Go's wrapped persistence error; Rust uses BackendConfiguration.
 4. `run_id` best-effort bytes for valid noncanonical forms are canonical; readers needing the string use `run_id_string()` (raw). The queue-persisted row
    is the parsed 16 bytes as in Go (readback canonical lowercase).
-5. No real history-backed sync-match RPC regression: coverage is forward-to-parent raw pass-through (matching_dispatch test), durable SQLite add tests
-   (matching_rpc_tests) and blob/Cassandra parser unit tests. A sync-match-to-poller test through MatchingHistoryClient mock was not written.
+5. SQL malformed RunID does not emulate Go's inferred fatal process panic; this divergence is retained as a Rust persistence error and needs an explicit product decision if strict crash parity is required.
 
-Tests added: matching_blob (raw kept for all forms; SQL empty absent + malformed error + uppercase; gocql parser edge cases),
-matching_forward_preserves_raw_request_run_ids_like_go, matching_rpc_add_decision_* (2). All written without compiling.
-Next (when parent allows): `rust-ci.yml -f package=cadence-persistence`, then `cadence-matching`.
+Tests added: matching_blob (raw kept for all forms; SQL empty absent + malformed error + uppercase; gocql parser edge cases; unresolved raw encode is fallible),
+matching_forward_preserves_raw_request_run_ids_like_go, matching_rpc_add_decision_* and history-backed sync-match regression. All remain uncompiled/unrun.
+No CI was dispatched by this task. Next validation should dispatch `rust-ci.yml -f package=cadence-persistence`, then `cadence-matching`, on explicit authorization.

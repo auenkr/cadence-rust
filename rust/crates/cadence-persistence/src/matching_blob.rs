@@ -129,10 +129,13 @@ fn i32_field(w: &mut Writer, id: i16, value: i32) {
     w.write_field_begin(TType::I32, id);
     w.write_i32(value);
 }
-pub fn encode_task(data: &TaskData) -> Vec<u8> {
+pub fn encode_task(data: &TaskData) -> std::result::Result<Vec<u8>, String> {
     // All SQL call sites resolve through `TaskData::for_sql`; Cassandra writes CQL, not this blob.
-    // A hard assert (also in release) keeps an unresolved raw RunID from being dropped silently.
-    assert!(data.raw_run_id.is_none(), "resolve raw RunID with TaskData::for_sql first");
+    // Keep this serialization boundary fallible in release builds too. SQL stores resolve
+    // raw identifiers before calling it; accidental direct callers must not panic or drop it.
+    if data.raw_run_id.is_some() {
+        return Err("resolve raw RunID with TaskData::for_sql first".into());
+    }
     let mut w = Writer::new();
     w.write_field_begin(TType::String, 10);
     w.write_string(&data.workflow_id);
@@ -152,7 +155,7 @@ pub fn encode_task(data: &TaskData) -> Vec<u8> {
         }
     }
     w.write_field_stop();
-    w.into_bytes()
+    Ok(w.into_bytes())
 }
 fn write_config(w: &mut Writer, config: &PartitionConfig) {
     i64_field(w, 10, config.version);
@@ -363,15 +366,20 @@ mod tests {
         assert!(TaskData::default().with_request_run_id("bad").run_id.is_none());
     }
     #[test]
+    fn unresolved_raw_run_id_encoding_is_fallible() {
+        let data = TaskData::default().with_request_run_id("not-a-uuid");
+        assert!(encode_task(&data).unwrap_err().contains("resolve raw RunID"));
+    }
+    #[test]
     fn sql_boundary_empty_is_absent_not_nil_uuid_and_malformed_errors() {
         let empty = TaskData::default().with_request_run_id("").for_sql().unwrap();
         assert_eq!(empty.run_id, None);
         assert_eq!(empty.raw_run_id, None);
-        assert_eq!(decode_task(&encode_task(&empty)).unwrap().run_id, None);
+        assert_eq!(decode_task(&encode_task(&empty).unwrap()).unwrap().run_id, None);
         assert!(TaskData::default().with_request_run_id("bad").for_sql().is_err());
         let up = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(5).to_string().to_uppercase()).for_sql().unwrap();
         assert_eq!(up.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()));
-        assert_eq!(decode_task(&encode_task(&up)).unwrap().raw_run_id, None);
+        assert_eq!(decode_task(&encode_task(&up).unwrap()).unwrap().raw_run_id, None);
     }
     #[test]
     fn cassandra_boundary_follows_gocql_parse_uuid() {
@@ -453,7 +461,7 @@ mod tests {
             if case["kind"] == "task" {
                 let data: TaskData = serde_json::from_value(case["data"].clone()).unwrap();
                 assert_eq!(decode_task(&plain).unwrap(), data);
-                assert_eq!(encode_task(&data), plain);
+                assert_eq!(encode_task(&data).unwrap(), plain);
             } else {
                 let data: TaskListData = serde_json::from_value(case["data"].clone()).unwrap();
                 assert_eq!(decode_task_list(&plain).unwrap(), data);
@@ -463,7 +471,7 @@ mod tests {
     }
     #[test]
     fn matching_blob_unknown_fields_and_malformed_input() {
-        let mut bytes = encode_task(&TaskData::default());
+        let mut bytes = encode_task(&TaskData::default()).unwrap();
         bytes.pop();
         let mut extra = Writer::new();
         extra.write_field_begin(TType::String, 99);

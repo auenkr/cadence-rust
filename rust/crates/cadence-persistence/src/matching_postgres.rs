@@ -623,7 +623,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         for (domain, task) in tasks {
             let mut data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
             data.created_nanos = now_nanos;
-            let bytes = write_encoding.encode(&blob::encode_task(&data))?;
+            let bytes = write_encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             let encoding = write_encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
                 &domain.as_bytes().as_slice(),
