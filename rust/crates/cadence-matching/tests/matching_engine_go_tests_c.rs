@@ -31,9 +31,9 @@ use cadence_persistence::{
     matching_task_store::AllocatedTask,
 };
 use cadence_proto::{api as p, history as h, matching as m};
-use prost::Message;
 use cadence_service_core::handlers::AppState;
 use m::matching_api_server::MatchingApi;
+use prost::Message;
 use std::{
     collections::HashMap,
     num::NonZeroU32,
@@ -263,11 +263,7 @@ fn typed_history_status<M: Message>(type_name: &str, message: &str, detail: M) -
             value: detail.encode_to_vec(),
         }],
     };
-    Status::with_details(
-        Code::NotFound,
-        message,
-        status.encode_to_vec().into(),
-    )
+    Status::with_details(Code::NotFound, message, status.encode_to_vec().into())
 }
 
 #[tonic::async_trait]
@@ -355,7 +351,11 @@ async fn refresh_workflow_tasks_entity_not_exists_returns_ok() {
         .refresh_workflow_tasks("test-domain-id", &allocated_task())
         .await
         .unwrap();
-    assert_eq!(seen.lock().unwrap().len(), 1, "terminal miss is not retried");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "terminal miss is not retried"
+    );
 }
 
 #[tokio::test]
@@ -403,12 +403,15 @@ async fn refresh_workflow_tasks_already_completed_is_propagated() {
         decoded.details[0].type_url,
         "type.googleapis.com/uber.cadence.api.v1.WorkflowExecutionAlreadyCompletedError"
     );
-    let typed = p::WorkflowExecutionAlreadyCompletedError::decode(
-        decoded.details[0].value.as_slice(),
-    )
-    .unwrap();
+    let typed =
+        p::WorkflowExecutionAlreadyCompletedError::decode(decoded.details[0].value.as_slice())
+            .unwrap();
     assert_eq!(typed, p::WorkflowExecutionAlreadyCompletedError {});
-    assert_eq!(seen.lock().unwrap().len(), 1, "terminal error is not retried");
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "terminal error is not retried"
+    );
 }
 
 #[tokio::test]
