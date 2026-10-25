@@ -1,0 +1,5 @@
+# Matching nil/empty TaskList (QueryWorkflow and siblings)
+Go: handler.go QueryWorkflow uses nil-safe getters; engine.go QueryWorkflow -> tasklist.NewIdentifier(domain, "", Decision). newTaskListName("") has no reserved prefix so init() returns nil: empty name is a valid ordinary root list (partition 0). No drain check on the query path (ReadOnlyPartitionError only in taskListManagerImpl.AddTask). Then getOrCreateTaskListManager -> errIfShardOwnershipLost: ownership of "" decided by hash ring / shard distributor like any name; non-owner returns TaskListNotOwnedByHostError; owner dispatches and waits for a poller until ctx deadline.
+Correction of earlier note: Rust returned Aborted NOT from a partition drain but from TaskListNotOwnedByHost ("OwnedBy: go-matching, Me: rust-matching-0, Tasklist: "): the test fixture ring assigns "" to the Go peer. That is Go-faithful; no Rust production code change needed. Applies equally to Add/Poll/Describe etc (same identifier path).
+Tests: absent_query_case now asserts Aborted + empty Tasklist in message for caller and poller when the name is empty (previously skipped).
+CI: filled below.

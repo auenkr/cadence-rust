@@ -299,6 +299,7 @@ async fn query_forward_family_busy_parent_keeps_query_for_local_poller() {
     // child keeps the query for a local poller instead of failing the caller.
     // Go starts the local poller only after the forward was attempted; the
     // poller here waits for the parent's receipt in the same way.
+    let empty_list = poll_list.name.is_empty();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
@@ -476,7 +477,12 @@ async fn absent_query_case(
             ))
             .await
             .expect_err("poll of an absent-field query must fail");
-        assert_eq!(poll_error.code(), tonic::Code::Unknown, "poll error: {poll_error:?}");
+        if empty_list {
+            assert_eq!(poll_error.code(), tonic::Code::Aborted);
+            assert!(poll_error.message().ends_with("Tasklist: "), "{poll_error:?}");
+            return;
+        }
+        assert_eq!(poll_error.code(), tonic::Code::Unknown);
         assert_eq!(
             poll_error.message(),
             "runtime error: invalid memory address or nil pointer dereference"
@@ -484,6 +490,15 @@ async fn absent_query_case(
     };
     let ((result, elapsed), ()) = tokio::join!(caller, poller);
     let error = result.expect_err("query ends only at its deadline");
+    if empty_list {
+        // Go NewIdentifier accepts "" as an ordinary name; ownership then comes from the
+        // hash ring. The fixture ring assigns "" to the Go peer, so both calls are refused
+        // with TaskListNotOwnedByHost, exactly as Go answers a non-owner host.
+        assert_eq!(error.code(), tonic::Code::Aborted);
+        assert!(error.message().ends_with("Tasklist: "), "{error:?}");
+        shut_down(&child, server).await;
+        return;
+    }
     assert_eq!(error.code(), tonic::Code::Internal);
     assert_eq!(error.message(), "context deadline exceeded");
     assert!(
