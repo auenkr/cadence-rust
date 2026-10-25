@@ -16,7 +16,7 @@ candidate's acceptance and parity audit complete.
 | MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40155956238 | success with corrected harness; failed40153901033 preserved |
 | Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | success |
 | Real shard distributor | https://github.com/auenkr/cadence-rust/actions/runs/40156296140 | success |
-| Active offer with Go History, zero inserts | https://github.com/auenkr/cadence-rust/actions/runs/40157002080 | running; dependency-only failure40156718234 preserved |
+| Active offer with Go History, zero inserts | https://github.com/auenkr/cadence-rust/actions/runs/40157002080 | successful scenario evidence; `preliminary-passed`, `acceptanceEligible:false`; Matching still incomplete |
 
 Run mixed lanes serially. Preserve source, binary SHA256, command, exit files
 and compact probe output for each. Earlier successes remain scenario evidence
@@ -81,4 +81,21 @@ e06fd8ca6; all recorded lane evidence remains valid for its named source,
 but final acceptance must account for the forthcoming TLS change. Matching
 remains incomplete even if that last scheduled lane passes.
 
-Active-offer40156718234 failed before probing: missing @grpc/grpc-js. Workflow b1fda7fbf installs the same pinned probe dependencies as production-validation; rerun40157002080 uses that source without production Rust changes.
+Active-offer run 40157002080 succeeded on workflow source/head
+`b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`; the Rust Matching binary SHA256 is
+`59e202b88c25ad43e0da27c13a1809235f1c88cb53b3105db86ec6fe3a58ef8b`. The
+probe confirms Go History scheduled a decision task, Rust Matching delivered
+the token, and both persisted task rows and insert attempts were zero. Go
+Matching was not started; Go Frontend, History and Worker stayed alive. Keep the
+artifact's `preliminary-passed` and `acceptanceEligible:false` labels: this is
+successful scenario evidence, not acceptance. See
+[`active-offer/README.md`](active-offer/README.md) for scope and run details.
+
+Checkpoint: fresh integrated workspace run 40155846010 succeeded on
+`1fc3a899c00c6eac5b2079b933092ca0df270313`, with clean target, strict workspace
+clippy then workspace tests both exit 0. Workspace-format advisory remains 1;
+focused required formatting check is 0. Backend, transport, configstore and
+shard-distributor lane successes remain tied to their recorded source commits.
+The final TLS integration still needs workspace and mixed-gate revalidation.
+Matching remains INCOMPLETE because the missing-identity gRPC TLS startup
+mismatch is being fixed separately and the full parity audit is unfinished.

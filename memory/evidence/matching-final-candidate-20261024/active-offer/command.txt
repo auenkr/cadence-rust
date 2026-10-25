@@ -1,0 +1,1 @@
+tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --probe-active-offer --matching-idle-check-seconds 3

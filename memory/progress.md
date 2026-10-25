@@ -1,5 +1,20 @@
 # Progress log
 
+- **2026-10-25 — Matching evidence checkpoint.** Active-offer mixed gate
+  40157002080 succeeded on `b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`; Rust
+  Matching binary SHA256
+  `59e202b88c25ad43e0da27c13a1809235f1c88cb53b3105db86ec6fe3a58ef8b`.
+  The Go History scheduled task was delivered with zero persisted task rows
+  and zero inserts, with Go Matching absent. Preserve the probe labels
+  `preliminary-passed` and `acceptanceEligible:false`. Fresh integrated
+  workspace run 40155846010 passed strict clippy and workspace tests (exit 0)
+  on `1fc3a899c00c6eac5b2079b933092ca0df270313`; workspace-format advisory was
+  1 while focused formatting was 0. Backend, transport, configstore and shard
+  lanes are green on their individually recorded sources. Matching remains
+  INCOMPLETE because gRPC TLS missing-identity startup parity is under a
+  separate fix; revalidate the final workspace and mixed integration on the
+  TLS-fixed source. Details: `memory/evidence/matching-final-candidate-20261024/`.
+
 - **2026-10-17 — Matching strong/sticky query version gates.** `SupportsStickyQuery`
   is now ported exactly (uber-go/uber-java/empty impl need feature version
   >= 1.0.0; CLI and unknown impls do not). Added the previously missing

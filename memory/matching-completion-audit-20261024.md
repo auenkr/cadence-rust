@@ -3,10 +3,16 @@
 > Current validation status (2026-10-25): this document retains historical
 > observations below. The authoritative integrated-source tracker is
 > [final candidate evidence](evidence/matching-final-candidate-20261024/README.md),
-> pinned to `27d3ff5f60f0604553824420da0cf61026eda468`. Workspace strict clippy
-> and tests, PostgreSQL, Thrift and Cassandra lanes passed that candidate.
-> MySQL run 40153901033 is running; configstore, shard-distributor and
-> active-offer candidate lanes remain pending. Matching is not signed off.
+> with each lane bound to its recorded source. Fresh integrated workspace run
+> 40155846010 passed strict clippy then workspace tests on
+> `1fc3a899c00c6eac5b2079b933092ca0df270313`. Active-offer run 40157002080
+> succeeded on `b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`, binary SHA256
+> `59e202b88c25ad43e0da27c13a1809235f1c88cb53b3105db86ec6fe3a58ef8b`; its
+> classification remains `preliminary-passed` / `acceptanceEligible:false`.
+> Previously green backend, transport, configstore and shard-distributor lanes
+> are evidence only for their named sources. Matching remains INCOMPLETE: the
+> gRPC TLS missing-identity startup mismatch is being fixed separately, and
+> final TLS integration revalidation and the complete parity audit remain.
 > Owner ordering including membership changes is covered by the executable
 > Go/Rust oracle preserved in the candidate workspace evidence. Metrics
 > comparison evidence is preserved there too, with the representative-path
