@@ -222,8 +222,11 @@ async function durableRestart(ctx) {
   }
   const restart = await ctx.restartRust();
   const drained = [];
-  // Children first so each partition returns its own backlog before the root can be reached by forwarding.
-  for (const entry of [queued[1], queued[2], queued[0]]) {
+  // Root first: a cold child partition forwards its poll to the root after the
+  // 10ms local wait (Go LocalPollWaitTime parity) while its backlog is still
+  // loading, so the root backlog must already be drained to keep the result
+  // deterministic. Each child must then still return its own backlog task.
+  for (const entry of [queued[0], queued[1], queued[2]]) {
     const task = await ownerRpc(ctx, 'PollForActivityTask', { domainId: ctx.domainId, pollerId: randomUUID(), request: { taskList: { name: entry.partition }, identity: 'durable-restart-poller' } });
     assert.equal(task.activityId, entry.activityId, `partition ${entry.partition} did not return its own backlog task after restart`);
     await ctx.call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: task.taskToken, result: payload('durable-ok') });
