@@ -14,7 +14,7 @@ candidate's acceptance and parity audit complete.
 | Thrift/TChannel | https://github.com/auenkr/cadence-rust/actions/runs/40153127238 | success |
 | Cassandra | https://github.com/auenkr/cadence-rust/actions/runs/40153493941 | success |
 | MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40153901033 | failed: durable-restart connection refusal; investigation active |
-| Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | running |
+| Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | success |
 | Real shard distributor | pending | not started |
 | Active offer with Go History, zero inserts | pending | not started |
 
@@ -65,3 +65,5 @@ Pending when dispatched. It includes the merged typed-refresh tests and the
 readiness harness fix; no production Rust source differs from27d3ff5f.
 Automatic cached run40155703537 was superseded/cancelled in favor of this
 explicit fresh-target gate.
+
+Corrected MySQL rerun: https://github.com/auenkr/cadence-rust/actions/runs/40155956238 on validation branch `matching-final-validation-20261025` (source e06fd8ca6); running.
