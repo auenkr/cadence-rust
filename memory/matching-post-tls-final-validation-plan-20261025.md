@@ -213,6 +213,8 @@ compatibility assertions. Artifacts include source SHA, exact commands,
 build/interoperability exits and logs, binary digest and script-generated
 server/database/certificate evidence; retention is three days. Limits are
 `ubuntu-latest`, 90 minutes, and ref-scoped cancel-in-progress concurrency.
+The upload explicitly excludes `out/interop/matching-drain.test`, a temporary
+Go test executable used by the script; logs and result evidence remain included.
 
 No production code or TLS tests are changed here. The TLS worker branch
 `t3/matching-tls-handshake-parity` modifies the production-path test

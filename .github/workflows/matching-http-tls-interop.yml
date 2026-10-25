@@ -52,5 +52,7 @@ jobs:
         if: always()
         with:
           name: matching-http-tls-interop
-          path: out/
+          path: |
+            out/
+            !out/interop/matching-drain.test
           retention-days: 3
