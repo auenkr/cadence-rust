@@ -1,5 +1,20 @@
 # Matching completion audit — 2026-10-24, source ae442535c
 
+> Current validation status (2026-10-25): this document retains historical
+> observations below. The authoritative integrated-source tracker is
+> [final candidate evidence](evidence/matching-final-candidate-20261024/README.md),
+> pinned to `27d3ff5f60f0604553824420da0cf61026eda468`. Workspace strict clippy
+> and tests, PostgreSQL, Thrift and Cassandra lanes passed that candidate.
+> MySQL run 40153901033 is running; configstore, shard-distributor and
+> active-offer candidate lanes remain pending. Matching is not signed off.
+> Owner ordering including membership changes is covered by the executable
+> Go/Rust oracle preserved in the candidate workspace evidence. Metrics
+> comparison evidence is preserved there too, with the representative-path
+> limits in `memory/matching-metrics-emission-comparison-20261024.md`.
+> Startup root-to-child and production watcher lifecycle tests are integrated;
+> older statements that they are unexecuted or absent are superseded.
+
+
 This audit records current-source behavior coverage and limits. It is not a
 completion sign-off. No Cargo command or mixed runtime gate was run locally.
 

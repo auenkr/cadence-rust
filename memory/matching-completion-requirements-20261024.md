@@ -1,5 +1,20 @@
 # Matching completion requirements (current acceptance checklist)
 
+> Current validation status (2026-10-25): this document retains historical
+> observations below. The authoritative integrated-source tracker is
+> [final candidate evidence](evidence/matching-final-candidate-20261024/README.md),
+> pinned to `27d3ff5f60f0604553824420da0cf61026eda468`. Workspace strict clippy
+> and tests, PostgreSQL, Thrift and Cassandra lanes passed that candidate.
+> MySQL run 40153901033 is running; configstore, shard-distributor and
+> active-offer candidate lanes remain pending. Matching is not signed off.
+> Owner ordering including membership changes is covered by the executable
+> Go/Rust oracle preserved in the candidate workspace evidence. Metrics
+> comparison evidence is preserved there too, with the representative-path
+> limits in `memory/matching-metrics-emission-comparison-20261024.md`.
+> Startup root-to-child and production watcher lifecycle tests are integrated;
+> older statements that they are unexecuted or absent are superseded.
+
+
 This is the completion contract, not a sign-off. Matching remains incomplete.
 The original scope is every Go Matching observable behavior and its required
 infrastructure; the other services remain Go in compatibility gates.
