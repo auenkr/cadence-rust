@@ -259,6 +259,43 @@ TLS worker branch remains separate; dispatch the fresh workspace gate, all
 required mixed lanes, and this HTTP TLS interop lane only after that patch is
 integrated and pinned as `EXPECTED_SHA`.
 
+## Embedded startup fix integration and validation (2026-10-25)
+
+Independently approved branch `t3/http-tls-embedded-probe-fix-20261025` at
+`fade09c501e23212d4d86e64c653057d589d1910` was fast-forwarded to master and
+pushed. It adds only the embedded-development guard around shard-manager
+startup in `cadence-matching/src/launcher.rs`; explicit-config behavior is
+preserved. The same commit retains the exact failure evidence for HTTP TLS
+interop run [40166507919](https://github.com/auenkr/cadence-rust/actions/runs/40166507919)
+at source `5811c0d8bc14ff57e03004260a83843726ef1291`: fresh locked build passed,
+but the interop exited 1 before TLS assertions because embedded startup
+required unavailable Ringpop membership. See
+`memory/evidence/matching-http-tls-interop-failure-40166507919/`.
+
+Focused run [40167687605](https://github.com/auenkr/cadence-rust/actions/runs/40167687605)
+completed successfully on the exact fix SHA, but used the Rust cache path and
+is not the required fresh uncached workspace final gate. The automatic master
+push run [40168143481](https://github.com/auenkr/cadence-rust/actions/runs/40168143481)
+also targets the exact fix SHA, but uses that same cached path. Neither result
+replaces a `clean_target=true` workspace run.
+
+Pin the validation branch `t3/matching-validation-http-embedded-20261025` to
+the exact source `fade09c501e23212d4d86e64c653057d589d1910`. Dispatch only the
+HTTP TLS interop lane and fresh workspace gate first:
+
+```bash
+gh workflow run matching-http-tls-interop.yml --ref t3/matching-validation-http-embedded-20261025
+gh workflow run rust-ci.yml --ref t3/matching-validation-http-embedded-20261025 -f clean_target=true
+```
+
+At dispatch time no mixed lane was active. Both gates remain pending until
+their exact head SHA, conclusion, logs/artifacts and required exits are
+verified. The HTTP TLS interop must pass the embedded startup and continue
+through the TLS assertions; preserve its server binary SHA256. The fresh
+workspace gate must report Clippy before workspace tests; keep focused format
+and workspace format results distinct. Matching remains INCOMPLETE, and the
+existing preliminary-passed / acceptanceEligible labels remain unchanged.
+
 ## TLS candidate CI result (2026-10-25)
 
 Run 40159753424 succeeded on exact source
