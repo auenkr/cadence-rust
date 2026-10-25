@@ -59,3 +59,12 @@ Before retry dispatch, the active-run query was empty; automatic master
 workspace run 40165304531 had completed successfully on
 `389c36527908c20d461576d0868a22ece2519f69`. No duplicate workspace run or
 second mixed lane was started.
+
+Independent review approved branch `t3/http-tls-lockfix-20261025` at
+`204c2414f3707577f5bce921c82f8fcc72b056c7`; it is merged as
+`1e537b135ad6919cfcb44ad09fbc7fe57f4957fd`. The change applies the CI lockfile
+delta, restores `--locked`, records the lock diff against HEAD, and makes the
+unsupported NoSQL negative startup probe deterministic. It changes no TLS
+production code or TLS assertions. The retry uses stable candidate branch
+`t3/matching-validation-http-lockfix-20261025`; its exact SHA and dispatch
+status are in the final validation plan.

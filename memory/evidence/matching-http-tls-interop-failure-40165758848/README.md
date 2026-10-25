@@ -2,7 +2,7 @@
 
 Run: https://github.com/auenkr/cadence-rust/actions/runs/40165758848
 
-Source SHA: `e787524851b06f0f9aab007ae645c5d9cf8c85e5`  
+Source SHA: `e787524851b06f0f9aab007ae645c5d9cf8c85e5`
 Conclusion: failure. The fresh server build passed (`build.exit=0`) and produced
 binary SHA256 `ec2582601d96e73cbaf7650b67afeffe0aebeeefa2181ef772f8b12fbe444351`.
 The standalone Go HTTP/Thrift interop harness failed (`interop.exit=1`) before

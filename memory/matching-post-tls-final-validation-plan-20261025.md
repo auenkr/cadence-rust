@@ -388,3 +388,28 @@ NoSQL assertion now uses an unsupported plugin name in the same development
 config, giving a deterministic startup rejection before any database
 connection. No production code or TLS assertions changed. Mixed validation
 has not been rerun.
+
+## Lock/harness retry candidate after independent approval
+
+Independent review approved branch `t3/http-tls-lockfix-20261025` at exact
+source `204c2414f3707577f5bce921c82f8fcc72b056c7`. Merged to root master as
+`1e537b135ad6919cfcb44ad09fbc7fe57f4957fd`. It restores `--locked` after
+applying the exact CI-generated lock delta, captures any lock diff against
+HEAD, and makes the unsupported NoSQL startup probe deterministic by changing
+the development config's plugin name to an unsupported test value. Production
+code and TLS assertions are unchanged. The full prior run 40165758848 failure
+evidence is retained at
+`memory/evidence/matching-http-tls-interop-failure-40165758848/`.
+
+Push of the lockfile change is expected to trigger automatic `rust-ci`; record
+that run if it occurs and do not manually duplicate the workspace gate. The
+stable candidate ref is
+`t3/matching-validation-http-lockfix-20261025`; its exact head SHA is recorded
+after creation. Only the first serial workflow is eligible for dispatch:
+`matching-http-tls-interop.yml`. Before dispatch, confirm no other mixed gate
+is active. Do not dispatch another lane until that run finishes and its
+artifact is reviewed.
+
+### Corrected first-lane run
+
+Pending pinned-ref dispatch and initial status.
