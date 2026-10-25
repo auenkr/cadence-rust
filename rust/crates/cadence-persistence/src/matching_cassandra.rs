@@ -298,8 +298,10 @@ fn cql_map(values: &std::collections::BTreeMap<String, String>) -> String {
     )
 }
 fn task_literal(domain: Uuid, data: &TaskData) -> Result<String> {
-    let run = data
-        .run_id
+    let run_bytes = data
+        .cassandra_run_id()
+        .map_err(MatchingTaskStoreError::BackendConfiguration)?;
+    let run = run_bytes
         .as_deref()
         .map(Uuid::from_slice)
         .transpose()
