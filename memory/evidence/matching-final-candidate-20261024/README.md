@@ -67,3 +67,16 @@ Automatic cached run40155703537 was superseded/cancelled in favor of this
 explicit fresh-target gate.
 
 Corrected MySQL rerun: https://github.com/auenkr/cadence-rust/actions/runs/40155956238 on validation branch `matching-final-validation-20261025` (source e06fd8ca6); success.
+
+## Final audit reopened: gRPC TLS certificate absence
+
+2026-10-25 source inspection confirms a concrete outstanding difference in
+service-core grpc_tls.rs: absent/lone server certificate fields cause startup
+error via read_identity; Go's TLS config leaves certificates empty, starts,
+and rejects handshakes. The historical matching-tls-dyncfg note explicitly
+recorded this difference; later green gates did not cover it.
+`matching-tls-no-cert-parity-20261025` (Luna medium/default) now owns the
+production-path fix and tests. Active-offer40156718234 is still running on
+e06fd8ca6; all recorded lane evidence remains valid for its named source,
+but final acceptance must account for the forthcoming TLS change. Matching
+remains incomplete even if that last scheduled lane passes.
