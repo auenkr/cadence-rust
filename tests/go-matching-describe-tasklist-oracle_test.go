@@ -7,12 +7,30 @@ import (
 	"context"
 	"errors"
 
+	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/types"
+	"go.uber.org/mock/gomock"
 )
 
 func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
-	s.mockDomainCache.EXPECT().GetDomainName("missing-domain").
+	// The suite setup installed an AnyTimes GetDomainName matcher. Stop that
+	// engine and replace its cache with a fresh mock so the unknown-domain
+	// result cannot be shadowed by a broad expectation.
+	s.matchingEngine.Stop()
+	domainCache := cache.NewMockDomainCache(s.controller)
+	domainCache.EXPECT().GetDomainByID(gomock.Any()).
+		Return(cache.CreateDomainCacheEntry(matchingTestDomainName), nil).AnyTimes()
+	domainCache.EXPECT().GetDomain(gomock.Any()).
+		Return(cache.CreateDomainCacheEntry(matchingTestDomainName), nil).AnyTimes()
+	domainCache.EXPECT().GetDomainName("test-domain-id").
+		Return(matchingTestDomainName, nil).AnyTimes()
+	domainCache.EXPECT().GetDomainName("missing-domain").
 		Return("", errors.New("oracle unknown domain")).AnyTimes()
+	domainCache.EXPECT().RegisterDomainChangeCallback(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	domainCache.EXPECT().UnregisterDomainChangeCallback(gomock.Any()).AnyTimes()
+	s.mockDomainCache = domainCache
+	s.matchingEngine = s.newMatchingEngine(defaultTestConfig(), s.taskManager)
+	s.matchingEngine.Start()
 	handler := NewHandler(
 		s.matchingEngine,
 		defaultTestConfig(),
@@ -38,9 +56,17 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 			DomainUUID:  "missing-domain",
 			DescRequest: &types.DescribeTaskListRequest{TaskList: &types.TaskList{}},
 		}},
+		{name: "invalid-domain-malformed-reserved-name", req: &types.MatchingDescribeTaskListRequest{
+			DomainUUID:  "missing-domain",
+			DescRequest: &types.DescribeTaskListRequest{TaskList: &types.TaskList{Name: "/__cadence_sys//0"}},
+		}},
 		{name: "invalid-domain-valid-task-list", req: &types.MatchingDescribeTaskListRequest{
 			DomainUUID:  "missing-domain",
 			DescRequest: &types.DescribeTaskListRequest{TaskList: &types.TaskList{Name: "oracle-task-list"}},
+		}},
+		{name: "valid-domain-malformed-reserved-name", req: &types.MatchingDescribeTaskListRequest{
+			DomainUUID:  valid,
+			DescRequest: &types.DescribeTaskListRequest{TaskList: &types.TaskList{Name: "/__cadence_sys//0"}},
 		}},
 	}
 	for _, tc := range cases {
