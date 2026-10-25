@@ -23,3 +23,23 @@ Candidate reviewed: `27d3ff5f60f0604553824420da0cf61026eda468`. This checkout is
 ## Scope and conclusion
 
 Reviewed actual Go handler/engine anchors for `AcquireSemaphore`, `CancelOutstandingPoll`, and task-list description, Rust semaphore status/cancellation tests, the raw-versus-validated task batch-size accessor tests, ignored-test reasons, prior completion audit corrections, and the candidate README/evidence inventory. This is a core parity review, not a full service signoff. No additional concrete production correctness bug was proven. The candidate is not established as fully accepted because several required mixed-cluster lanes and the named owner-order evidence remain unclosed or unlinked in the reviewed record.
+
+## Parent evidence reconciliation
+
+The candidate workspace artifact preserved at
+`memory/evidence/matching-final-candidate-20261024/workspace/cadence-matching-owner-order.json`
+contains ordered activity/decision responses for baseline, add, remove,
+identity-replacement, address-replacement and empty-ring scenarios, each for
+root, child and empty task-list requests. Run40108643448 passed the actual Go
+handler/resolver versus Rust handler comparison on pinned27d3ff5f. The oracle
+feeds snapshots through each production refresh policy (including address-only
+change detection). This directly supplies the post-membership-change evidence
+requested by item2; the ignored scripted mock test is not the evidence used.
+
+`refresh_workflow_tasks_canceled_context_is_propagated` in
+matching_engine_go_tests_c.rs is active, not ignored. It checks a real in-process
+gRPC History cancellation status and pre-cancelled caller no-request behavior.
+Typed EntityNotExists/AlreadyCompleted refresh integration placeholders remain;
+matching-refresh-failure-coverage-20261025 is adding their actual wire-boundary
+coverage. Production classification is already active in matching_history.rs,
+but that is not substituted for the requested client-path tests.
