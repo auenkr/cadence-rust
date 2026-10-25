@@ -118,7 +118,6 @@ struct Inner {
     // Go deliberately leaves appendCh open on stop. Keep the receiver alive
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
-    fatal: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
 }
 #[derive(Clone)]
 pub struct TaskWriter {
@@ -200,7 +199,6 @@ impl TaskWriter {
             config,
             live_config: live_config.clone(),
             parked: Mutex::new(None),
-            fatal: fatal.clone(),
         });
         let stop_signal = inner.stop.clone();
         queue.set_stop_waker(Arc::new(move || {
@@ -687,7 +685,6 @@ mod tests {
                 },
                 live_config: None,
                 parked: Mutex::new(Some(receiver)),
-                fatal: None,
             }),
         };
         let task = WriteTask {
@@ -731,7 +728,7 @@ mod tests {
         let (stop, _) = watch::channel(false);
         let writer = TaskWriter { inner: Arc::new(Inner {
             sender, rendezvous: None, stop, queue, config: WriterConfig::default(), live_config: Some(live),
-            parked: Mutex::new(Some(receiver)), fatal: None,
+            parked: Mutex::new(Some(receiver)),
         }) };
         let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
         assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::Internal,
