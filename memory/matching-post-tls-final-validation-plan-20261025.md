@@ -258,3 +258,16 @@ workflow is pending validation on the TLS-integrated source. The production
 TLS worker branch remains separate; dispatch the fresh workspace gate, all
 required mixed lanes, and this HTTP TLS interop lane only after that patch is
 integrated and pinned as `EXPECTED_SHA`.
+
+## TLS candidate CI result (2026-10-25)
+
+Run 40159753424 succeeded on exact source
+`ad997b07f57a435b26e56c1e5a1c2c9e89ceeede`, with clean runner target,
+workspace Clippy before workspace tests (both exit 0), focused formatting
+marker 0 and workspace-wide format advisory 1. The production-path missing
+identity gRPC listener test passed. This candidate is **not approved for
+integration**: final code review found a blocking invalid-DER PEM CA parsing
+issue, and source-only final review remains active. See
+`memory/evidence/matching-tls-final-ci-20261025/README.md` for compact extracted
+proof, artifacts, and formatting limits. The implementation fix requires new
+source-pinned CI and review; no workflow was dispatched for it in this task.
