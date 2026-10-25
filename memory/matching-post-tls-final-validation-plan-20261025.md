@@ -546,8 +546,10 @@ warning, and TLS was not reached. Its original artifact ZIP is retained at
 `/mnt/storage/service/ci-evidence/run-40171381762/` and a separate concise
 record is at
 `memory/evidence/matching-http-tls-interop-failure-40171381762/README.md`.
-Sonnet owns diagnosis; no cause or fix is inferred here. Do not dispatch
-another workflow until that diagnosis and correction are reviewed.
+At that earlier status read, Sonnet diagnosis was still pending. The later
+reviewed harness diagnosis and correction are recorded in the History ring
+stub section below; the first rerun on that candidate is pending. No additional
+workflow has been dispatched after it.
 
 The proposed `84cadec2` Rust guard remains rejected and is absent from the
 approved source. Go oracle run 40170886290 established empty/absent-nested
@@ -594,14 +596,16 @@ production Go-service gates pending until standalone interop passes, then run
 them serially on a separately pinned final source. Matching remains
 INCOMPLETE; retain `preliminary-passed` and `acceptanceEligible:false`.
 
-Integration record: the reviewed branch terminal tip
+Earlier integration record (before the History ring stub follow-up): the
+reviewed branch terminal tip
 `d04ee7492a3744c92adc9e8b118351a25303bfe7` was merged with the routine plan
 overlap resolved in merge commit
 `80bddb3e94e5871b6da9a1a1f07cc423422b27e9` and pushed to master. The push
 automatically started `rust-ci` run
 [40172228720](https://github.com/auenkr/cadence-rust/actions/runs/40172228720)
-on that exact merge SHA; it was in progress at the last status read. No manual
-workflow dispatch or mixed gate was started. The stable validation branch
-still pins `fade09c501e23212d4d86e64c653057d589d1910`; do not move it based on
-this docs/test-harness integration. No worker branch/worktree cleanup was
-performed.
+on that exact merge SHA; it was in progress at that status read. No manual
+workflow dispatch or mixed gate had been started at that time. That earlier
+stable validation branch remains pinned to
+`fade09c501e23212d4d86e64c653057d589d1910`; the later History-ring candidate
+is separately pinned as documented above. No worker branch/worktree cleanup
+was performed.
