@@ -476,7 +476,7 @@ async fn absent_query_case(
             ))
             .await
             .expect_err("poll of an absent-field query must fail");
-        assert_eq!(poll_error.code(), tonic::Code::Unknown);
+        assert_eq!(poll_error.code(), tonic::Code::Unknown, "poll error: {poll_error:?}");
         assert_eq!(
             poll_error.message(),
             "runtime error: invalid memory address or nil pointer dereference"
