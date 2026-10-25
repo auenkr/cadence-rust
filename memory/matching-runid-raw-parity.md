@@ -36,3 +36,11 @@ Remaining divergences / unverified:
 Tests added: matching_blob (raw kept for all forms; SQL empty absent + malformed error + uppercase; gocql parser edge cases; unresolved raw encode is fallible),
 matching_forward_preserves_raw_request_run_ids_like_go, matching_rpc_add_decision_* and history-backed sync-match regression. All remain uncompiled/unrun.
 No CI was dispatched by this task. Next validation should dispatch `rust-ci.yml -f package=cadence-persistence`, then `cadence-matching`, on explicit authorization.
+
+## Source review (activity branch, no defects found, no code change)
+- encode_task callers: only matching_sqlite.rs:441-442, matching_mysql.rs:903-905, matching_postgres.rs:624-626, each after `for_sql()`; Cassandra uses `task_literal` (matching_cassandra.rs:299) -> `cassandra_run_id` (matching_blob.rs:61), no blob. Guard at matching_blob.rs:132-138 returns Err in release.
+- `cassandra_run_id` re-derived against gocql ParseUUID (hyphen only at even nibble, exactly 32 ASCII hex, empty rejected): matches.
+- Size accounting matching_persistence.rs:58-61: raw.len() bytes, else 36 if run_id Some, else 0 (SQL empty reads back as "" in Go): consistent.
+- Writer error: `BackendConfiguration` is not in `is_transient` (matching_task_store.rs:60-72) => permanent, not retried.
+- DELIBERATE DIVERGENCE: Go SQL malformed non-empty RunID panics in unrecovered task-writer goroutine (process crash, source inference); Rust returns a permanent persistence error. Kept intentionally (no crash emulation).
+- Activity test mock returns default RecordActivityTaskStartedResponse; `task_token` assertion is unverified until CI (if empty, add scheduled_event as in tests/matching_longpoll_expiry_parity.rs:55). `task_list_size(&key,0)` = COUNT(*) rows task_id>0 (sqlite 487-489), so 0 does prove no durable row.
