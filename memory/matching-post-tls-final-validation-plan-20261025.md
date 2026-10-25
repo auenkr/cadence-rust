@@ -536,3 +536,18 @@ The focused Rust CI run 40170886290 had completed the Go oracle and all
 preceding audit/format/clippy steps successfully; workspace test was still
 running at last status read. This focused run is not a mixed-cluster gate.
 Do not dispatch a mixed rerun before independent review.
+
+Run 40170886290 subsequently completed SUCCESS on exact source
+`d68fc736661656de3d7fe45b5ceb6bf5c9c2ac4a`; Go oracle, Clippy, formatting and
+workspace Test all passed. Its Go oracle artifact is preserved above. The
+Go-generated Thrift interop probe now treats absent nested and explicit empty
+task-list DescribeTaskList as success with zero pollers, asserts the Go-proven
+malformed reserved-name `InternalServiceError` type/message, and retains other
+error checks. The oracle asserts the zero-poller result in the same focused
+Actions step. Existing plaintext-under-enforced-TLS probe accepts Go's alert,
+orderly EOF, or reset behavior, and still fails on any non-alert response byte.
+No missing/empty TaskList guard was added to Rust. Exact combined probe source
+is committed at `5cafc2dc941fc676cad66d6756fb812c502aa5bf`; the focused
+`rust-ci.yml` oracle/test rerun is 40171379726 and standalone Go HTTP TLS
+interop rerun is 40171381762. Both are pending; no mixed cluster gate has been
+dispatched.
