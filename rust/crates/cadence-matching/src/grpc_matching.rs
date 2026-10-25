@@ -126,8 +126,20 @@ pub(crate) fn check_poll_context(deadline: Option<tokio::time::Instant>) -> Resu
         _ => Ok(()),
     }
 }
+/// Go `tasklist.NewIdentifier` returns an untyped `fmt.Errorf`, which the handler's
+/// `handleErr` turns into an `InternalServiceError` (never BadRequest).
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
-    TaskListName::parse(name).map_err(Status::invalid_argument)
+    TaskListName::parse(name).map_err(Status::internal)
+}
+
+/// Go `PollForDecisionTask` (engine.go:704) wraps the identifier error as
+/// `couldn't create new decision tasklist %w`; `PollForActivityTask` (engine.go:906) returns it bare.
+fn poll_task_list_name(kind: &str, name: &str) -> Result<TaskListName, Status> {
+    if kind == "activity" {
+        return task_list_name(name);
+    }
+    TaskListName::parse(name)
+        .map_err(|e| Status::internal(format!("couldn't create new {kind} tasklist {e}")))
 }
 /// Go `_stickyPollerUnavailableWindow`.
 const STICKY_POLLER_UNAVAILABLE_WINDOW: i64 = 10_000_000_000;
@@ -1709,6 +1721,12 @@ impl Matching {
         }
     }
     fn domain_name(&self, id: &str) -> Result<String, Status> {
+        // Go cache miss -> sql/nosql_domain_store checkDomainExists: typed BadRequest, two spaces.
+        if id.is_empty() {
+            return Err(Status::invalid_argument(
+                "GetDomain operation failed.  Both ID and Name are empty.",
+            ));
+        }
         History {
             frontend: self.frontend.clone(),
         }
@@ -1771,9 +1789,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let mut payload = r.request.unwrap_or_default();
+        // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
+        // identifier is validated before any domain lookup.
+        poll_task_list_name("decision", payload.task_list.as_ref().map_or("", |t| t.name.as_str()))?;
+        payload.task_list.get_or_insert_with(Default::default);
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         check_poll_context(incoming_deadline)?;
@@ -1786,13 +1806,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 poller_isolation_group: r.isolation_group.clone(),
             });
         }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
+        let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -2010,9 +2024,19 @@ impl m::matching_api_server::MatchingApi for Matching {
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let Some(mut payload) = r.request else {
+            // Go PollForActivityTask reads `request.GetTaskList()` nil-safely, validates the empty
+            // identifier, then dereferences `request.TaskListMetadata` (engine.go:915) before
+            // `getOrCreateTaskListManager` (engine.go:928), so a domain lookup never runs first. The
+            // runtime panic is captured by the handler as a plain error (Go oracle run
+            // 40175488464: `runtime error: invalid memory address or nil pointer dereference`).
+            check_poll_context(incoming_deadline)?;
+            return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE));
+        };
+        // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
+        // identifier is validated before any domain lookup.
+        poll_task_list_name("activity", payload.task_list.as_ref().map_or("", |t| t.name.as_str()))?;
+        payload.task_list.get_or_insert_with(Default::default);
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         check_poll_context(incoming_deadline)?;
@@ -2025,13 +2049,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 poller_isolation_group: r.isolation_group.clone(),
             });
         }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
+        let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -2272,15 +2290,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                         log_tasklist_counter("Emitting tasklist counter on decision task", &r.domain_id, r.task_list.as_ref());
                     }
                     if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                        // Go Add* use nil-safe getters: an absent TaskList or Execution is
+                        // empty and still accepted (Go oracle run 40175488464).
+                        let default_list = p::TaskList::default();
+                        let list = r.task_list.as_ref().unwrap_or(&default_list);
+                        let default_execution = p::WorkflowExecution::default();
+                        let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
+                        let run = if r.workflow_execution.is_none() {
+                            None
+                        } else {
+                            Some(
+                                uuid::Uuid::parse_str(&execution.run_id)
+                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
+                                    .as_bytes()
+                                    .to_vec(),
+                            )
+                        };
                         let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
                         let queue = self.durable_queue(&r.domain_id, list, 0).await?;
                         if queue.stop_if_isolation_changed() {
@@ -2290,7 +2315,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         check_sticky_poller(&queue, list)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
+                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
@@ -2496,15 +2521,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                         log_tasklist_counter("Emitting tasklist counter on activity task", &r.domain_id, r.task_list.as_ref());
                     }
                     if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                        // Go Add* use nil-safe getters: an absent TaskList or Execution is
+                        // empty and still accepted (Go oracle run 40175488464).
+                        let default_list = p::TaskList::default();
+                        let list = r.task_list.as_ref().unwrap_or(&default_list);
+                        let default_execution = p::WorkflowExecution::default();
+                        let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
+                        let run = if r.workflow_execution.is_none() {
+                            None
+                        } else {
+                            Some(
+                                uuid::Uuid::parse_str(&execution.run_id)
+                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
+                                    .as_bytes()
+                                    .to_vec(),
+                            )
+                        };
                         self.domain_name(&r.source_domain_id)?;
                         let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| {
                             Status::invalid_argument("Source domain UUID is not valid.")
@@ -2516,7 +2548,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         self.check_write_partition(&r.domain_id, list, 1, &queue)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
+                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
@@ -3213,13 +3245,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let caller_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
-                        .task_list
-                        .clone()
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
+                    // Go `request.TaskList.GetName()/GetKind()` are nil-safe: an absent list is the
+                    // empty-named normal list and goes through the same checks.
+                    let task_list = r.task_list.clone().unwrap_or_default();
                     // Go rejects manual updates while the scaler owns the config, before
                     // the kind checks.
                     if let Some(scaler) = &self.scaler_config {
@@ -3359,12 +3387,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
-                        .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
+                    let task_list = r.task_list.unwrap_or_default();
                     // Same Go `ToTaskListKind` mapping as UpdateTaskListPartitionConfig.
                     if matches!(task_list.kind, 2 | 3) {
                         return Err(Status::invalid_argument(
@@ -3454,9 +3477,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             )?;
                             let r = request.get_ref().clone();
                             self.domain_name(&r.domain_id)?;
-                            let list = r
-                                .task_list
-                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let list = r.task_list.unwrap_or_default();
                             let task_list = list.name.clone();
                             task_list_name(&task_list)?;
                             // Go getOrCreateTaskListManager: a non-owner gets an error and

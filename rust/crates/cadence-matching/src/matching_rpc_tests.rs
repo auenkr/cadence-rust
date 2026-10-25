@@ -8291,18 +8291,6 @@ async fn go_handler_update_task_list_partition_config_rate_limited_returns_servi
 async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds() {
     let (_dir, _store, matching, _key) = fixture();
     let domain = Uuid::from_u128(1).to_string();
-    let missing = matching
-        .refresh_task_list_partition_config(Request::new(
-            m::RefreshTaskListPartitionConfigRequest {
-                domain_id: domain.clone(),
-                task_list: None,
-                ..Default::default()
-            },
-        ))
-        .await
-        .unwrap_err();
-    assert_eq!(missing.code(), tonic::Code::InvalidArgument);
-    assert_eq!(missing.message(), "TaskList is not set.");
     for kind in [2, 3] {
         let err = matching
             .refresh_task_list_partition_config(Request::new(
@@ -8734,4 +8722,279 @@ async fn matching_rpc_sticky_partition_query_without_any_sticky_poller_fails_fas
         "a sticky query must never reach the parent partition"
     );
     parent_poll.abort();
+}
+
+// Go `tasklist.NewIdentifier` returns an untyped error, which handleErr wraps as
+// InternalServiceError; the Thrift adapter maps tonic Internal to InternalServiceError.
+#[tokio::test]
+async fn go_malformed_reserved_task_list_name_is_internal_for_every_rpc() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let bad = || {
+        Some(p::TaskList {
+            name: "/__cadence_sys//0".into(),
+            ..Default::default()
+        })
+    };
+    let want = "invalid partitioned task list name /__cadence_sys//0";
+    let add = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: bad(),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(add.code(), tonic::Code::Internal);
+    assert_eq!(add.message(), want);
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list: bad(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(cancel.code(), tonic::Code::Internal);
+    assert_eq!(cancel.message(), want);
+    let refresh = matching
+        .refresh_task_list_partition_config(Request::new(
+            m::RefreshTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                task_list: bad(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refresh.code(), tonic::Code::Internal);
+    let update = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                task_list: bad(),
+                partition_config: Some(Default::default()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(update.code(), tonic::Code::Internal);
+    // Go PollForDecisionTask wraps the identifier error and checks it before the domain
+    // lookup, so an unknown domain does not mask it.
+    let poll = matching
+        .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: bad(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(poll.code(), tonic::Code::Internal);
+    assert_eq!(
+        poll.message(),
+        format!("couldn't create new decision tasklist {want}")
+    );
+    // Go PollForActivityTask (engine.go:906) returns the identifier error bare.
+    let activity = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            request: Some(p::PollForActivityTaskRequest {
+                task_list: bad(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(activity.code(), tonic::Code::Internal);
+    assert_eq!(activity.message(), want);
+}
+
+// Go oracle run 40175488464 (`GO_OPTIONAL_ORACLE` lines, original handler): absent optional
+// payloads on valid domains.
+#[tokio::test]
+async fn go_oracle_absent_optional_payloads_on_valid_domain() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    // refresh-absent-tasklist: nil error.
+    matching
+        .refresh_task_list_partition_config(Request::new(
+            m::RefreshTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    // update-absent-tasklist-absent-config: BadRequestError.
+    let err = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        err.message(),
+        "Task list partition config is not set in the request."
+    );
+    // update-absent-tasklist with an empty config: BadRequestError "read partitions < 1".
+    let err = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                partition_config: Some(Default::default()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(err.message(), "read partitions < 1");
+    // cancel-poll-absent-tasklist: nil error.
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    // add-decision-absent-tasklist / absent-execution: nil error.
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            workflow_execution: execution(),
+            schedule_id: 1,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            schedule_id: 1,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+}
+
+// Go oracle: activity-poll-absent-pollrequest => plain `runtime.errorString` (nil
+// dereference at engine.go:915 after the context check and manager load), which the
+// handler's CapturePanic returns as-is; unknown domain fails earlier on manager load.
+#[tokio::test]
+async fn go_oracle_activity_poll_absent_request_is_captured_nil_dereference() {
+    let (_dir, _store, matching, key) = fixture();
+    let err = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: key.domain_id.to_string(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unknown);
+    assert_eq!(
+        err.message(),
+        "runtime error: invalid memory address or nil pointer dereference"
+    );
+    assert!(crate::matching_panic::is_captured_panic(&err));
+}
+
+// Go order for PollForActivityTask with an absent PollRequest: worker quota, long-poll deadline
+// validation (BadRequest), `common.IsValidContext` (Internal deadline error), manager load,
+// then the engine.go:915 nil dereference. Thrift/TChannel report the plain error as 0x05.
+#[tokio::test]
+async fn go_activity_poll_absent_request_deadline_precedence_and_wire_code() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain_id = key.domain_id.to_string();
+    let request = || {
+        Request::new(m::PollForActivityTaskRequest {
+            domain_id: domain_id.clone(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })
+    };
+    let no_deadline = matching.poll_for_activity_task(request()).await.unwrap_err();
+    assert_eq!(no_deadline.code(), tonic::Code::InvalidArgument);
+    assert_eq!(no_deadline.message(), "Context timeout is not set.");
+    let mut expired = request();
+    expired.set_timeout(Duration::from_millis(1));
+    let expired = matching.poll_for_activity_task(expired).await.unwrap_err();
+    assert_eq!(expired.code(), tonic::Code::Internal);
+    assert_eq!(expired.message(), "context deadline exceeded");
+    assert_eq!(
+        crate::thrift_matching::tchannel_error_code(
+            crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+        ),
+        0x05
+    );
+}
+
+// Go engine.go:915 dereferences `request.TaskListMetadata` before the manager (and domain)
+// load at :928, so an unknown domain does not mask the nil-request failure.
+#[tokio::test]
+async fn go_activity_poll_absent_request_precedes_domain_lookup() {
+    let (_dir, _store, matching, _key) = fixture();
+    let err = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unknown);
+    assert_eq!(
+        err.message(),
+        crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+    );
+}
+
+// Go GetDomainName("") -> checkDomainExists: typed BadRequest (two spaces), after the
+// NewIdentifier validation.
+#[tokio::test]
+async fn go_add_task_empty_domain_is_typed_bad_request_after_identifier() {
+    let (_dir, _store, matching, _key) = fixture();
+    let err = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: String::new(),
+            task_list: list(),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        err.message(),
+        "GetDomain operation failed.  Both ID and Name are empty."
+    );
+    let err = matching
+        .add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: String::new(),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys//0".into(),
+                ..Default::default()
+            }),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Internal);
 }

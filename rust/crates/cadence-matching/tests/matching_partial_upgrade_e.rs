@@ -16,7 +16,7 @@ use cadence_matching::{
 };
 use cadence_proto::{api as p, matching as m};
 use cadence_service_core::handlers::AppState;
-use cadence_thrift::Struct;
+use cadence_thrift::{Struct, Value};
 use cadence_api::types::DomainInfo;
 use m::matching_api_server::MatchingApi;
 use std::{
@@ -493,7 +493,43 @@ async fn go_thrift_handler_routes_each_tested_method() {
         let deadline = Instant::now() + Duration::from_secs(5);
         let routed = tokio::time::timeout(
             Duration::from_secs(10),
-            dispatch(&matching, procedure, &Struct::default(), deadline),
+            dispatch(
+                &matching,
+                procedure,
+                &if procedure == "MatchingService::PollForActivityTask" {
+                    // PollForActivityTask dereferences its inner request before routing.
+                    // Keep this as a valid poll so this test checks procedure dispatch,
+                    // while nil transport behavior is covered by dedicated contract tests.
+                    // Thrift args carry the request struct at field 1; the inner PollRequest is field 20.
+                    Struct {
+                        fields: vec![(
+                            1,
+                            Value::Struct(Struct {
+                                fields: vec![(
+                                    20,
+                                    Value::Struct(Struct {
+                                        fields: vec![
+                                            (10, Value::Bytes(b"domain".to_vec())),
+                                            (
+                                                20,
+                                                Value::Struct(Struct {
+                                                    fields: vec![(
+                                                        10,
+                                                        Value::Bytes(b"task-list".to_vec()),
+                                                    )],
+                                                }),
+                                            ),
+                                        ],
+                                    }),
+                                )],
+                            }),
+                        )],
+                    }
+                } else {
+                    Struct::default()
+                },
+                deadline,
+            ),
         )
         .await
         .unwrap_or_else(|_| panic!("{procedure} did not return"));

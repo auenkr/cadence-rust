@@ -159,7 +159,7 @@ async fn refresh_task_list_partition_config_manager_error_is_propagated() {
 }
 
 #[tokio::test]
-async fn refresh_task_list_partition_config_invalid_tasklist_name_is_invalid_argument() {
+async fn refresh_task_list_partition_config_invalid_tasklist_name_is_internal() {
     let (_dir, matching) = matching_with_domain();
     let err = matching
         .refresh_task_list_partition_config(refresh_request(
@@ -169,9 +169,11 @@ async fn refresh_task_list_partition_config_invalid_tasklist_name_is_invalid_arg
         ))
         .await
         .unwrap_err();
-    assert_invalid_argument(
-        err,
-        "invalid partitioned task list name /__cadence_sys/test-tasklist",
+    // Go oracle (run 40175488464): `*types.InternalServiceError`, bare identifier message.
+    assert_eq!(err.code(), Code::Internal);
+    assert_eq!(
+        err.message(),
+        "invalid partitioned task list name /__cadence_sys/test-tasklist"
     );
 }
 
