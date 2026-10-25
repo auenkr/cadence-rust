@@ -357,9 +357,8 @@ pub fn query_response(
 /// consistentQuery:` fallthrough; a known impl with no feature version, an
 /// unknown impl, or the CLI is not.
 fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
-    if client_impl.is_empty() {
-        return true;
-    }
+    // Go `featureSupported`: the empty-impl `consistentQuery` case is an empty
+    // switch arm, so it falls through to the impl/version lookup and fails.
     if !matches!(client_impl, "uber-go" | "uber-java") {
         return false;
     }
@@ -659,7 +658,7 @@ mod tests {
         assert!(supports_consistent_query("uber-go", "1.5.0"));
         assert!(supports_consistent_query("uber-java", "1.9.3"));
         // An older client that omits clientImpl is treated as supported.
-        assert!(supports_consistent_query("", ""));
+        assert!(!supports_consistent_query("", ""));
         assert!(!supports_consistent_query("uber-go", "1.4.9"));
         assert!(!supports_consistent_query("uber-java", "1.0.0"));
         assert!(!supports_consistent_query("cli", "9.9.9"));

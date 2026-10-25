@@ -3930,6 +3930,7 @@ async fn matching_rpc_strong_query_with_nil_worker_version_is_rejected() {
         }))
         .await
         .unwrap();
+    // Go `featureSupported` rejects an empty client impl for consistent query.
     let error = tokio::time::timeout(Duration::from_secs(5), query)
         .await
         .expect("query should complete")
