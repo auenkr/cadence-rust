@@ -1,0 +1,21 @@
+{"pacedListOwner":{"label":"before-paced-poll","primaryOwner":"127.0.0.1:11556","secondaryOwner":"127.0.0.1:11556","agree":true}}
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: paced activity dispatch was not rate limited: [8,6,7]
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1242:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: paced activity dispatch was not rate limited: [8,6,7]
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1242:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

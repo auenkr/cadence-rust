@@ -701,3 +701,31 @@ original Go Frontend/History/Worker with Rust Matching; it is not the separate
 Go Ringpop stub plus Rust History HTTP/TLS fixture topology. Configstore,
 shard-distributor, Cassandra and active-offer remain queued. Matching remains
 INCOMPLETE.
+
+## Thrift lane result and current ledger (2026-10-25, docs-only)
+
+Candidate: `29bdd2b04b573309112286c57f1c347f0ba0b60c` on
+`t3/matching-validation-history-ring-20261025`. Rust tree is identical to
+`fade09c5…` (workspace run 40168414544; fmt scoped 0, workspace-format advisory 1).
+
+| Gate | Run | Result | Binary SHA256 / note |
+|---|---|---|---|
+| Workspace (fresh) | 40168414544 (on fade09c5, tree-equivalent) | success | inference, not run on 29bdd |
+| HTTP TLS interop | 40172574953 | success | fixture: Go YARPC + Rust History, Go Ringpop stub |
+| PostgreSQL mixed | 40173134481 | success | 8adfef671d7ce020e14079e829b04419892af15ffe79d5baa0328c7dd50a052a |
+| MySQL mixed | 40173683827 | success (`preliminary-passed`, `acceptanceEligible:false`) | e3792553dfc83b9779858d9a94390a928374e2ed8d59a3a7124d6b8df43283cf |
+| **Thrift** | **40174280100** | **FAILURE** | f9e1735c2f7c01c8bf7fb899512f95c2ea9b0df96e8cdec382c66abd6675cd1b |
+| Configstore, shard-distributor, Cassandra, active-offer | not dispatched | queued | |
+
+The "queued" wording for run 40174280100 above is superseded: it failed at
+probe `matching-service-compat.cjs:1242` (paced activity dispatch not rate
+limited: [8,6,7]). Compact evidence: `memory/evidence/matching-thrift-mixed-failure-40174280100/`.
+PostgreSQL/MySQL/HTTP runs use original Go Frontend/History/Worker, no Go Matching
+(HTTP run is a fixture, not the full mixed cluster). Matching remains INCOMPLETE.
+
+### Remaining checklist / exact pins needed
+- [ ] Thrift fix integrated; Thrift rerun green on the new exact SHA.
+- [ ] After any Rust change: fresh workspace gate (clippy then tests, fresh target) on that exact SHA, plus rerun PostgreSQL and MySQL on it (current binaries are bound to 29bdd).
+- [ ] configstore, shard-distributor, Cassandra, active-offer dispatched serially on the same pin; archive URL, headSha, conclusion, binary SHA256, exits.
+- [ ] gRPC TLS missing-identity production-path coverage confirmed (see item 9 above).
+- [ ] Parity audit rows reconciled; keep `preliminary-passed`/`acceptanceEligible:false` labels as emitted.
