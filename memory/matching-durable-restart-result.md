@@ -7,3 +7,5 @@ Root cause: scenario race, not a Rust persistence bug. The restart-load path key
 Fix: tests/matching-probe-scenarios.cjs polls root first (draining its backlog), then children, still asserting each child returns its own task. No Rust change.
 
 Validation: see commit history / CI run notes appended below.
+
+Validation: mysql-probes lane run https://github.com/auenkr/cadence-rust/actions/runs/40192762057 head ead9d304db760028999d329f4406f0c2dc575383 conclusion success.
