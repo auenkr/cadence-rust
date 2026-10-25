@@ -267,6 +267,7 @@ fn task_from_udt(task_id: i64, task: CassandraTaskUdt, _ttl: Option<i32>) -> Res
         data: TaskData {
             workflow_id: task.workflow_id,
             run_id: task.run_id.map(|id| id.as_bytes().to_vec()),
+            raw_run_id: None,
             schedule_id: task.schedule_id,
             created_nanos: nanos(task.created_time)?,
             // Cassandra TTL expires the row itself. Go's Cassandra
@@ -772,6 +773,7 @@ mod tests {
         let plain = TaskData {
             workflow_id: "wf".into(),
             run_id: Some(run.as_bytes().to_vec()),
+            raw_run_id: None,
             schedule_id: 9,
             created_nanos: 1_700_000_000_123_456_789,
             expiry_nanos: crate::matching_blob::GO_ZERO_TIME_NANOS,

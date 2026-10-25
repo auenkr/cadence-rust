@@ -8,6 +8,11 @@ use std::collections::BTreeMap;
 pub struct TaskData {
     pub workflow_id: String,
     pub run_id: Option<Vec<u8>>,
+    /// Runtime-only raw `WorkflowExecution.RunID` for a request whose run ID is not a
+    /// valid UUID (Go passes the string through unparsed on sync match). Never
+    /// serialized, never persisted; `run_id` stays `None` while this is set.
+    #[serde(skip)]
+    pub raw_run_id: Option<String>,
     pub schedule_id: i64,
     pub expiry_nanos: i64,
     pub created_nanos: i64,
@@ -16,6 +21,39 @@ pub struct TaskData {
 /// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
 pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
 impl TaskData {
+    /// Split a request RunID the way Go carries it: a valid UUID becomes the 16 stored
+    /// bytes, anything else (including empty) stays a raw string for sync match only.
+    pub fn with_request_run_id(mut self, run_id: &str) -> Self {
+        match uuid::Uuid::parse_str(run_id) {
+            Ok(id) => self.run_id = Some(id.as_bytes().to_vec()),
+            Err(_) => self.raw_run_id = Some(run_id.to_owned()),
+        }
+        self
+    }
+    /// RunID string as Go's `TaskInfo.RunID`: raw request string, canonical UUID, or "".
+    pub fn run_id_string(&self) -> String {
+        if let Some(raw) = &self.raw_run_id {
+            return raw.clone();
+        }
+        self.run_id
+            .as_deref()
+            .and_then(|id| uuid::Uuid::from_slice(id).ok())
+            .map(|id| id.to_string())
+            .unwrap_or_default()
+    }
+    /// Persistence boundary. Go SQL stores an empty RunID as the nil UUID. A malformed
+    /// non-empty RunID makes Go's async writer goroutine panic (process crash); Rust
+    /// deliberately returns `Err` instead of reproducing the crash.
+    pub fn for_persistence(mut self) -> std::result::Result<Self, String> {
+        match self.raw_run_id.take() {
+            None => Ok(self),
+            Some(raw) if raw.is_empty() => {
+                self.run_id = Some(uuid::Uuid::nil().as_bytes().to_vec());
+                Ok(self)
+            }
+            Some(_) => Err("Run UUID is not valid.".into()),
+        }
+    }
     /// Go SQL CreateTasks computes expiry at persistence time, not enqueue time.
     /// Nonpositive schedule-to-start timeout means no expiry (Go zero time).
     pub fn at_creation(mut self, now_nanos: i64, schedule_to_start_seconds: i32) -> Self {
@@ -158,6 +196,7 @@ pub fn decode_task(bytes: &[u8]) -> Result<TaskData> {
             Some(Value::Bytes(bytes)) => Some(bytes.clone()),
             _ => None,
         },
+        raw_run_id: None,
         schedule_id: i64_value(&s, 13),
         expiry_nanos: i64_value(&s, 14),
         created_nanos: i64_value(&s, 15),
@@ -276,6 +315,29 @@ impl std::fmt::Debug for EncodingSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn request_run_id_keeps_raw_string_for_sync_match_only() {
+        let valid = uuid::Uuid::from_u128(9);
+        let ok = TaskData::default().with_request_run_id(&valid.to_string());
+        assert_eq!(ok.run_id.as_deref(), Some(valid.as_bytes().as_slice()));
+        assert_eq!(ok.run_id_string(), valid.to_string());
+        for raw in ["", "not-a-uuid", "0123"] {
+            let d = TaskData::default().with_request_run_id(raw);
+            assert!(d.run_id.is_none());
+            assert_eq!(d.run_id_string(), raw);
+            // raw value never reaches the wire blob
+            assert_eq!(decode_task(&encode_task(&d)).unwrap().raw_run_id, None);
+        }
+    }
+    #[test]
+    fn persistence_boundary_maps_empty_to_nil_and_rejects_malformed() {
+        let empty = TaskData::default().with_request_run_id("").for_persistence().unwrap();
+        assert_eq!(empty.run_id, Some(uuid::Uuid::nil().as_bytes().to_vec()));
+        assert_eq!(empty.raw_run_id, None);
+        assert!(TaskData::default().with_request_run_id("bad").for_persistence().is_err());
+        let valid = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(1).to_string());
+        assert_eq!(valid.clone().for_persistence().unwrap(), valid);
+    }
     #[test]
     fn dynamic_encoding_source_is_sampled_per_write_like_go_parser() {
         let value = std::sync::Arc::new(std::sync::Mutex::new("thriftrw".to_owned()));
