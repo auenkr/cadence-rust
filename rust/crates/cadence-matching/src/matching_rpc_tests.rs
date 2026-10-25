@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_without_stopping() {
+    use base64::Engine as _;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tonic_reflection::pb::v1::{
         server_reflection_client::ServerReflectionClient,
@@ -36,6 +37,14 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
     std::fs::write(&server_key_file, server_key.serialize_pem()).unwrap();
     let empty_ca_file = dir.path().join("empty-ca.pem");
     std::fs::write(&empty_ca_file, b"not PEM").unwrap();
+    let invalid_der_ca = format!(
+        "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+        base64::engine::general_purpose::STANDARD.encode(b"not an X.509 DER certificate")
+    );
+    let invalid_der_ca_file = dir.path().join("invalid-der-ca.pem");
+    std::fs::write(&invalid_der_ca_file, &invalid_der_ca).unwrap();
+    let mixed_ca_file = dir.path().join("mixed-ca.pem");
+    std::fs::write(&mixed_ca_file, format!("{}{}", ca.pem(), invalid_der_ca)).unwrap();
     let configs = [
         cadence_service_core::config::TlsConfig {
             enabled: true,
@@ -87,6 +96,22 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
             require_client_auth: true,
             ..Default::default()
         },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            cert_file: server_cert_file.to_string_lossy().into_owned(),
+            key_file: server_key_file.to_string_lossy().into_owned(),
+            ca_file: invalid_der_ca_file.to_string_lossy().into_owned(),
+            require_client_auth: true,
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            cert_file: server_cert_file.to_string_lossy().into_owned(),
+            key_file: server_key_file.to_string_lossy().into_owned(),
+            ca_file: mixed_ca_file.to_string_lossy().into_owned(),
+            require_client_auth: true,
+            ..Default::default()
+        },
     ];
 
     // Exercise the production serve path for missing-both, lone-cert, lone-key
@@ -121,13 +146,18 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
                 host: String::new(),
                 message_request: Some(MessageRequest::ListServices(String::new())),
             };
-            assert!(tokio::time::timeout(
+            let result = tokio::time::timeout(
                 Duration::from_secs(3),
                 client.server_reflection_info(tokio_stream::once(request))
             )
             .await
             .unwrap()
-            .is_err());
+            .map(|_| ());
+            if index == 10 {
+                assert_eq!(result, Ok(()), "mixed valid/invalid CA should retain the valid root");
+            } else {
+                assert!(result.is_err(), "TLS handshake unexpectedly succeeded for case {index}");
+            }
         }
 
         let mut plain_client = tokio::net::TcpStream::connect(addr).await.unwrap();
