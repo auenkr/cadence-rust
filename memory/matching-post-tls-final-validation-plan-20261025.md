@@ -357,3 +357,13 @@ resulting lockfile diff in its artifact. No TLS source/assertion changed. The
 retry ref is `t3/matching-validation-tls-e3c79b3-r1-20261025`. Dispatch only
 after checking that no mixed gate is active. Run evidence and diagnosis are
 preserved at `memory/evidence/matching-http-tls-interop-failure-40165433074/`.
+
+Before retry dispatch the active-run query was empty. Master automatic
+workspace run 40165304531 completed successfully on
+`389c36527908c20d461576d0868a22ece2519f69`; it was not manually duplicated.
+The retry ref is pinned at
+`e787524851b06f0f9aab007ae645c5d9cf8c85e5`. Run
+https://github.com/auenkr/cadence-rust/actions/runs/40165758848 is currently
+`in_progress` on that exact head; only the same first interop lane was
+dispatched. Do not dispatch another lane until this run completes and its
+artifacts are inspected.

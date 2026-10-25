@@ -49,6 +49,13 @@ skipped, so this is not a TLS compatibility failure. See
 
 Workflow correction removes `--locked` and saves any generated lockfile diff
 in the gate artifact without changing TLS source or assertions. The retry uses
-the new immutable ref `t3/matching-validation-tls-e3c79b3-r1-20261025`; record
-its exact SHA before dispatch. Do not dispatch the next lane until that retry
+immutable ref `t3/matching-validation-tls-e3c79b3-r1-20261025` at
+`e787524851b06f0f9aab007ae645c5d9cf8c85e5`. Retry run
+https://github.com/auenkr/cadence-rust/actions/runs/40165758848 is
+`in_progress` on that exact head. Do not dispatch the next lane until the retry
 completes and its artifacts are reviewed.
+
+Before retry dispatch, the active-run query was empty; automatic master
+workspace run 40165304531 had completed successfully on
+`389c36527908c20d461576d0868a22ece2519f69`. No duplicate workspace run or
+second mixed lane was started.
