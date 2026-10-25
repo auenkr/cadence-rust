@@ -1,0 +1,4 @@
+=== RUN   TestRustMatchingHistoryRingStub
+--- PASS: TestRustMatchingHistoryRingStub (19.08s)
+PASS
+ok  	github.com/uber/cadence/common/peerprovider/ringpopprovider	19.092s

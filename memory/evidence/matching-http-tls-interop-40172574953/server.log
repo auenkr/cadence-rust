@@ -1,0 +1,18 @@
+starting frontend (api v1-thrift)
+starting history (api v1-thrift)
+starting matching (api v1-thrift)
+starting worker (api v1-thrift)
+starting sharddistributor (api v1-thrift)
+warning: loading dynamic config "/home/runner/work/cadence-rust/cadence-rust/config/dynamicconfig/development.yaml": No such file or directory (os error 2); using no-op configuration
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:56139: frontend,history,matching,worker,sharddistributor
+Cadence gRPC frontend listening on 127.0.0.1:59191
+Cadence TChannel frontend listening on 127.0.0.1:52919
+Cadence internal history gRPC listening on 127.0.0.1:38693
+Cadence internal Matching HTTP listening on 127.0.0.1:49741
+Cadence internal matching gRPC listening on 127.0.0.1:42851
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:33685
+dynamic config integer read failed (value was not found); using default
+Matching membership cleanup failed: status: Internal, message: "Not enough hosts to serve the request", details: [], metadata: MetadataMap { headers: {} }
+flushing Matching metrics failed: Connection refused (os error 111)
+shutting down

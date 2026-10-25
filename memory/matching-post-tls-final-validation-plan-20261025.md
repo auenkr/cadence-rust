@@ -585,16 +585,37 @@ Go History service and cannot count as mixed Go-service acceptance.
 
 Merge commit `29bdd2b04b573309112286c57f1c347f0ba0b60c` is pushed. Stable
 candidate `t3/matching-validation-history-ring-20261025` pins that exact SHA.
-After checking that no interop or mixed gate was active, dispatched only the
-HTTP TLS interop workflow:
+HTTP TLS interop run
 [40172574953](https://github.com/auenkr/cadence-rust/actions/runs/40172574953)
-is in progress on the exact candidate SHA. Automatic cached workspace run
-40172228720 was still in progress at that pre-dispatch check and was not
-duplicated. No other workflow was dispatched. Inspect the interop artifact,
-binary SHA and all scenario outcomes before moving to another lane. Keep all
-production Go-service gates pending until standalone interop passes, then run
-them serially on a separately pinned final source. Matching remains
-INCOMPLETE; retain `preliminary-passed` and `acceptanceEligible:false`.
+completed successfully on the exact candidate SHA. Fresh locked build and
+interop exits were 0; lock patch was empty; Matching server SHA256 is
+`500e4ee26df85af47f0182a34c568ae13c29377590628a05a56c5e55547997a7`. See the
+selected source, exits, probe logs and artifact hash in
+`memory/evidence/matching-http-tls-interop-40172574953/`; the original ZIP is
+at `/mnt/storage/service/ci-evidence/run-40172574953/`.
+
+The Go ring stub passed for both configured main and permissive runs. With
+the main stub active, `TestRustMatchingNativeThrift` passed a decision delivery
+sequence: AddDecisionTask followed by PollForDecisionTask, asserting token,
+StartedEventId and RunId. This supports the History-discovery explanation for
+the prior “not enough hosts” result; the Go member still advertises the Rust
+History fixture and is not original-Go-History mixed acceptance. Enforced TLS,
+permissive TLS/plaintext, default and disabled modes, timeout recovery, all ten
+methods on tested transports, SQLite and drain probes passed. Preserve the
+scenario-only classification and do not promote the active-offer labels.
+
+Automatic workspace run
+[40172228720](https://github.com/auenkr/cadence-rust/actions/runs/40172228720)
+completed successfully on `80bddb3e94e5871b6da9a1a1f07cc423422b27e9`; no
+workspace rerun is needed here. The uncached final workspace run on production
+source `fade09c501e23212d4d86e64c653057d589d1910` remains the named fresh
+evidence. Keep workspace-wide format advisory `1` visible.
+
+The required mixed-lane sequence below puts PostgreSQL before MySQL extended;
+therefore PostgreSQL is next. The MySQL-probes lane remains queued. The
+History-ring fixture does not change the production Rust source from
+`fade09c5…`. Matching remains INCOMPLETE; retain `preliminary-passed` and
+`acceptanceEligible:false`.
 
 Earlier integration record (before the History ring stub follow-up): the
 reviewed branch terminal tip

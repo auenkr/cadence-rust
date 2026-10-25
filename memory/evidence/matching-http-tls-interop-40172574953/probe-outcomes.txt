@@ -1,0 +1,65 @@
+=== RUN   TestIsTLSClientHelloRecord
+=== RUN   TestIsTLSClientHelloRecord/non_tls
+=== RUN   TestIsTLSClientHelloRecord/read_error
+=== RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+=== RUN   TestIsTLSClientHelloRecord/tls_header
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+=== RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+=== RUN   TestIsTLSClientHelloRecord/e2e_tls
+--- PASS: TestIsTLSClientHelloRecord (0.00s)
+PASS
+ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.005s
+ok  	github.com/uber/cadence/common/persistence/sql	0.882s
+ok  	github.com/uber/cadence/common/persistence/sql	0.902s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+--- PASS: TestRustMatchingNativeThrift (1.13s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	1.148s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+=== RUN   TestRustMatchingNativeThrift/http
+Verified all ten native Matching Thrift methods via http
+=== RUN   TestRustMatchingNativeThrift/http-trailing-slash
+Verified all ten native Matching Thrift methods via http-trailing-slash
+--- PASS: TestRustMatchingNativeThrift (1.72s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	1.732s
+=== RUN   TestRustMatchingSQLiteInterop
+--- PASS: TestRustMatchingSQLiteInterop (0.86s)
+PASS
+ok  	github.com/uber/cadence/common/persistence/sql	0.874s
+=== RUN   TestRustMatchingDrainHealth
+--- PASS: TestRustMatchingDrainHealth (0.00s)
+PASS
+=== RUN   TestRustMatchingTLS
+--- PASS: TestRustMatchingTLS (0.00s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.018s
+=== RUN   TestRustMatchingNativeThrift
+=== RUN   TestRustMatchingNativeThrift/tchannel
+Verified all ten native Matching Thrift methods via tchannel
+=== RUN   TestRustMatchingNativeThrift/http
+Verified all ten native Matching Thrift methods via http
+=== RUN   TestRustMatchingNativeThrift/http-trailing-slash
+Verified all ten native Matching Thrift methods via http-trailing-slash
+=== RUN   TestRustMatchingNativeThrift/http-tls
+Verified all ten native Matching Thrift methods via http-tls
+--- PASS: TestRustMatchingNativeThrift (1.10s)
+=== RUN   TestRustMatchingTLS
+--- PASS: TestRustMatchingTLS (0.01s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	1.123s
+=== RUN   TestRustMatchingPlainHTTP
+--- PASS: TestRustMatchingPlainHTTP (0.00s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.014s
+=== RUN   TestRustMatchingPlainHTTP
+--- PASS: TestRustMatchingPlainHTTP (0.00s)
+PASS
+ok  	github.com/uber/cadence/service/matching/wrappers/thrift	0.014s
