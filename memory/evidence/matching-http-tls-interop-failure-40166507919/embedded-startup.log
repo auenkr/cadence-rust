@@ -1,0 +1,14 @@
+starting frontend (api v1-thrift)
+starting history (api v1-thrift)
+starting matching (api v1-thrift)
+starting worker (api v1-thrift)
+starting sharddistributor (api v1-thrift)
+warning: loading dynamic config "/home/runner/work/cadence-rust/cadence-rust/config/dynamicconfig/development.yaml": No such file or directory (os error 2); using no-op configuration
+dynamic config float read failed (value was missing or invalid); using default
+cadence-server running on 0.0.0.0:37855: frontend,history,matching,worker,sharddistributor
+Cadence gRPC frontend listening on 127.0.0.1:50447
+Cadence TChannel frontend listening on 127.0.0.1:42045
+Cadence internal history gRPC listening on 127.0.0.1:56461
+Cadence internal matching gRPC listening on 127.0.0.1:55683
+Cadence internal matching Thrift/TChannel listening on 127.0.0.1:58067
+Error: Matching shard-distributor configuration requires Ringpop membership

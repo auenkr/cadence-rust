@@ -1407,7 +1407,13 @@ pub async fn run(
                 )
             })
                 as std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
-            if run_matching && !cfg.shard_distributor_matching.namespaces.is_empty() {
+            // Embedded development deliberately has no production listeners or
+            // Ringpop membership, so its copied development shard-manager
+            // settings cannot be activated in this mode.
+            if run_matching
+                && !embedded_development
+                && !cfg.shard_distributor_matching.namespaces.is_empty()
+            {
                 let membership = matching_membership.clone().ok_or_else(|| {
                     anyhow::anyhow!(
                         "Matching shard-distributor configuration requires Ringpop membership"

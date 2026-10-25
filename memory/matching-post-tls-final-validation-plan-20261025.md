@@ -412,10 +412,20 @@ artifact is reviewed.
 
 ### Corrected first-lane run
 
-Run https://github.com/auenkr/cadence-rust/actions/runs/40166507919 is
-`in_progress` on exact pinned branch
-`t3/matching-validation-http-lockfix-20261025`, head
-`5811c0d8bc14ff57e03004260a83843726ef1291`. No mixed gate was active at
-dispatch. Master automatic `rust-ci` run 40166476374 was in progress; it is not
-duplicated. This is the only mixed lane dispatched. Do not start another lane
-until this run completes and its artifact is reviewed.
+Run https://github.com/auenkr/cadence-rust/actions/runs/40166507919 completed
+with failure on exact source `5811c0d8bc14ff57e03004260a83843726ef1291`.
+Master automatic `rust-ci` run 40166476374 succeeded on the same source. The
+HTTP TLS lane's locked build passed but its embedded no-config startup probe
+failed before TLS requests. See the precise diagnosis and retained evidence
+above and in `memory/evidence/matching-http-tls-interop-failure-40166507919/`.
+
+Production finding: no-config embedded mode deliberately skips production
+Ringpop setup (`rust/crates/cadence-matching/src/launcher.rs`, around
+1059–1104), but the later shard-distributor setup required Ringpop membership
+whenever configured development namespaces were present (around 1410–1415).
+The embedded defaults include a shard-distributor namespace, so startup
+necessarily failed. Follow-up branch
+`t3/http-tls-embedded-probe-fix-20261025` now gates shard-distributor setup on
+`!embedded_development`. This leaves explicit-config production setup intact.
+No local Cargo/Go/rustfmt validation or mixed gate has been run; parent review
+and CI validation are pending.

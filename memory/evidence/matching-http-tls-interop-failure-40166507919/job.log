@@ -1,0 +1,530 @@
+interop	Set up job	﻿2026-10-25T05:42:36.6498881Z Current runner version: '2.338.0'
+interop	Set up job	2026-10-25T05:42:36.6537516Z ##[group]Runner Image Provisioner
+interop	Set up job	2026-10-25T05:42:36.6538968Z Hosted Compute Agent
+interop	Set up job	2026-10-25T05:42:36.6539998Z Version: 20261021.618
+interop	Set up job	2026-10-25T05:42:36.6541312Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+interop	Set up job	2026-10-25T05:42:36.6542583Z Build Date: 2026-10-21T00:45:21Z
+interop	Set up job	2026-10-25T05:42:36.6543921Z Worker ID: {061549af-1d2a-4d46-9417-2e8d9ae8ebad}
+interop	Set up job	2026-10-25T05:42:36.6545605Z Region: eastus
+interop	Set up job	2026-10-25T05:42:36.6546605Z Cloud: Azure
+interop	Set up job	2026-10-25T05:42:36.6547776Z ##[endgroup]
+interop	Set up job	2026-10-25T05:42:36.6550390Z ##[group]Operating System
+interop	Set up job	2026-10-25T05:42:36.6551627Z Ubuntu
+interop	Set up job	2026-10-25T05:42:36.6552444Z 24.04.5
+interop	Set up job	2026-10-25T05:42:36.6553887Z LTS
+interop	Set up job	2026-10-25T05:42:36.6555206Z ##[endgroup]
+interop	Set up job	2026-10-25T05:42:36.6556317Z ##[group]Runner Image
+interop	Set up job	2026-10-25T05:42:36.6557424Z Image: ubuntu-24.04
+interop	Set up job	2026-10-25T05:42:36.6558425Z Version: 20261012.334.1
+interop	Set up job	2026-10-25T05:42:36.6560566Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+interop	Set up job	2026-10-25T05:42:36.6563799Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+interop	Set up job	2026-10-25T05:42:36.6565860Z ##[endgroup]
+interop	Set up job	2026-10-25T05:42:36.6567907Z ##[group]GITHUB_TOKEN Permissions
+interop	Set up job	2026-10-25T05:42:36.6570955Z Contents: read
+interop	Set up job	2026-10-25T05:42:36.6572098Z Metadata: read
+interop	Set up job	2026-10-25T05:42:36.6573146Z Packages: read
+interop	Set up job	2026-10-25T05:42:36.6574154Z ##[endgroup]
+interop	Set up job	2026-10-25T05:42:36.6577523Z Secret source: Actions
+interop	Set up job	2026-10-25T05:42:36.6579296Z Cache mode: write
+interop	Set up job	2026-10-25T05:42:36.6580858Z Prepare workflow directory
+interop	Set up job	2026-10-25T05:42:36.7070353Z Prepare all required actions
+interop	Set up job	2026-10-25T05:42:36.7142982Z Getting action download info
+interop	Set up job	2026-10-25T05:42:36.8764681Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+interop	Set up job	2026-10-25T05:42:36.9915434Z Download action repository 'actions/setup-go@v5' (SHA:40f1582b2485089dde7abd97c1529aa768e1baff)
+interop	Set up job	2026-10-25T05:42:37.1864421Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:b725eda525362e7cf34af9a7243cac1e3f01a7ec)
+interop	Set up job	2026-10-25T05:42:37.2710909Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+interop	Set up job	2026-10-25T05:42:37.5243962Z Complete job name: interop
+interop	Run actions/checkout@v4	﻿2026-10-25T05:42:37.6210018Z ##[group]Run actions/checkout@v4
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6211384Z with:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6212136Z   repository: auenkr/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6219623Z   token: ***
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6220430Z   ssh-strict: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6221192Z   ssh-user: git
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6221987Z   persist-credentials: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6222874Z   clean: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6223661Z   sparse-checkout-cone-mode: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6224869Z   fetch-depth: 1
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6225655Z   fetch-tags: false
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6226466Z   show-progress: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6227288Z   lfs: false
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6228028Z   submodules: false
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6228849Z   set-safe-directory: true
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6229816Z   allow-unsafe-pr-checkout: false
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.6231305Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7347932Z Syncing repository: auenkr/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7351097Z ##[group]Getting Git version info
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7352417Z Working directory is '/home/runner/work/cadence-rust/cadence-rust'
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7354272Z [command]/usr/bin/git version
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7465884Z git version 2.55.0
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7492612Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7510314Z Temporarily overriding HOME='/home/runner/work/_temp/594592ad-c233-4113-8b85-84a4d533f9bf' before making global git config changes
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7512998Z Adding repository directory to the temporary git global config as a safe directory
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7518008Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/cadence-rust/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7573675Z Deleting the contents of '/home/runner/work/cadence-rust/cadence-rust'
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7578793Z ##[group]Initializing the repository
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7583335Z [command]/usr/bin/git init /home/runner/work/cadence-rust/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7694834Z hint: Using 'master' as the name for the initial branch. This default branch name
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7696784Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7699018Z hint: to use in all of your new repositories, which will suppress this warning,
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7700285Z hint: call:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7701413Z hint:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7702212Z hint: 	git config --global init.defaultBranch <name>
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7703273Z hint:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7704273Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7706049Z hint: 'development'. The just-created branch can be renamed via this command:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7707249Z hint:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7707976Z hint: 	git branch -m <name>
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7708814Z hint:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7709850Z hint: Disable this message with "git config set advice.defaultBranchName false"
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7711781Z Initialized empty Git repository in /home/runner/work/cadence-rust/cadence-rust/.git/
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7714981Z [command]/usr/bin/git remote add origin https://github.com/auenkr/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7766107Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7767468Z ##[group]Disabling automatic garbage collection
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7775123Z [command]/usr/bin/git config --local gc.auto 0
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7806013Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7807167Z ##[group]Setting up auth
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7815664Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.7855639Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8279610Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8319192Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8550923Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8588892Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8832123Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8876747Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8877616Z ##[group]Fetching the repository
+interop	Run actions/checkout@v4	2026-10-25T05:42:37.8886909Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +5811c0d8bc14ff57e03004260a83843726ef1291:refs/remotes/origin/t3/matching-validation-http-lockfix-20261025
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7926470Z From https://github.com/auenkr/cadence-rust
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7929037Z  * [new ref]         5811c0d8bc14ff57e03004260a83843726ef1291 -> origin/t3/matching-validation-http-lockfix-20261025
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7932609Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7933966Z ##[group]Determining the checkout info
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7935827Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7941148Z [command]/usr/bin/git sparse-checkout disable
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.7997332Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.8030348Z ##[group]Checking out the ref
+interop	Run actions/checkout@v4	2026-10-25T05:42:40.8038425Z [command]/usr/bin/git checkout --progress --force -B t3/matching-validation-http-lockfix-20261025 refs/remotes/origin/t3/matching-validation-http-lockfix-20261025
+interop	Run actions/checkout@v4	2026-10-25T05:42:41.4021917Z Switched to a new branch 't3/matching-validation-http-lockfix-20261025'
+interop	Run actions/checkout@v4	2026-10-25T05:42:41.4028976Z branch 't3/matching-validation-http-lockfix-20261025' set up to track 'origin/t3/matching-validation-http-lockfix-20261025'.
+interop	Run actions/checkout@v4	2026-10-25T05:42:41.4063545Z ##[endgroup]
+interop	Run actions/checkout@v4	2026-10-25T05:42:41.4108957Z [command]/usr/bin/git log -1 --format=%H
+interop	Run actions/checkout@v4	2026-10-25T05:42:41.4136260Z 5811c0d8bc14ff57e03004260a83843726ef1291
+interop	Initialize Go IDL submodule	﻿2026-10-25T05:42:41.4360112Z ##[group]Run git submodule update --init go/idls
+interop	Initialize Go IDL submodule	2026-10-25T05:42:41.4360790Z ^[[36;1mgit submodule update --init go/idls^[[0m
+interop	Initialize Go IDL submodule	2026-10-25T05:42:41.4642911Z shell: /usr/bin/bash -e {0}
+interop	Initialize Go IDL submodule	2026-10-25T05:42:41.4643504Z ##[endgroup]
+interop	Initialize Go IDL submodule	2026-10-25T05:42:41.4980604Z Submodule 'idls' (https://github.com/cadence-workflow/cadence-idl.git) registered for path 'go/idls'
+interop	Initialize Go IDL submodule	2026-10-25T05:42:41.5005460Z Cloning into '/home/runner/work/cadence-rust/cadence-rust/go/idls'...
+interop	Initialize Go IDL submodule	2026-10-25T05:42:42.8736427Z Submodule path 'go/idls': checked out 'bfbf273b41b9e36ce21e47a49600d22d73e4614c'
+interop	Run actions/setup-go@v5	﻿2026-10-25T05:42:42.8844861Z ##[group]Run actions/setup-go@v5
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8845232Z with:
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8845456Z   go-version-file: go/go.mod
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8845773Z   cache-dependency-path: go/go.sum
+interop	Run actions/setup-go@v5	tests/go-sdk/go.sum
+interop	Run actions/setup-go@v5	
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8846143Z   check-latest: false
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8848587Z   token: ***
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8848807Z   cache: true
+interop	Run actions/setup-go@v5	2026-10-25T05:42:42.8849005Z ##[endgroup]
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.0172712Z Setup go version spec 1.25.0
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.0183822Z Attempting to download 1.25.0...
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.0298485Z (node:2316) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.0299854Z (Use `node --trace-deprecation ...` to show where the warning was created)
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.4465969Z matching 1.25.0...
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.4523492Z Acquiring 1.25.0 from https://github.com/actions/go-versions/releases/download/1.25.0-16925932082/go-1.25.0-linux-x64.tar.gz
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.8753131Z Extracting Go...
+interop	Run actions/setup-go@v5	2026-10-25T05:42:43.8901154Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/c1c1990d-1b4b-4f76-911f-c3ead4889666 -f /home/runner/work/_temp/e379ad87-d36b-4f87-b2ba-3799c95d5a16
+interop	Run actions/setup-go@v5	2026-10-25T05:42:45.4028641Z Successfully extracted go to /home/runner/work/_temp/c1c1990d-1b4b-4f76-911f-c3ead4889666
+interop	Run actions/setup-go@v5	2026-10-25T05:42:45.4029499Z Adding to the cache ...
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.2807673Z Successfully cached go to /opt/hostedtoolcache/go/1.25.0/x64
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.2810695Z Added go to the path
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.2813343Z Successfully set up Go version 1.25.0
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3040336Z [command]/opt/hostedtoolcache/go/1.25.0/x64/bin/go env GOMODCACHE
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3081253Z [command]/opt/hostedtoolcache/go/1.25.0/x64/bin/go env GOCACHE
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3123924Z /home/runner/go/pkg/mod
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3147376Z /home/runner/.cache/go-build
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3849642Z Cache hit for: setup-go-Linux-x64-ubuntu24-go-1.25.0-425b8100e92a5482fd6d2cf5848f11c583a3f3baff18617fe5ecc53ec80cb5a4
+interop	Run actions/setup-go@v5	2026-10-25T05:42:52.3967546Z (node:2316) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+interop	Run actions/setup-go@v5	2026-10-25T05:42:53.4319574Z Received 239075328 of 910960508 (26.2%), 225.7 MBs/sec
+interop	Run actions/setup-go@v5	2026-10-25T05:42:54.4336832Z Received 536870912 of 910960508 (58.9%), 254.6 MBs/sec
+interop	Run actions/setup-go@v5	2026-10-25T05:42:55.4337998Z Received 805306368 of 910960508 (88.4%), 255.0 MBs/sec
+interop	Run actions/setup-go@v5	2026-10-25T05:42:55.8391525Z Received 910960508 of 910960508 (100.0%), 254.2 MBs/sec
+interop	Run actions/setup-go@v5	2026-10-25T05:42:55.8392999Z Cache Size: ~869 MB (910960508 B)
+interop	Run actions/setup-go@v5	2026-10-25T05:42:55.8544731Z [command]/usr/bin/tar -xf /home/runner/work/_temp/c929c44b-292d-454b-a2d2-8357c5824f1a/cache.tzst -P -C /home/runner/work/cadence-rust/cadence-rust --use-compress-program unzstd
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.1030752Z Cache restored successfully
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.1474990Z Cache restored from key: setup-go-Linux-x64-ubuntu24-go-1.25.0-425b8100e92a5482fd6d2cf5848f11c583a3f3baff18617fe5ecc53ec80cb5a4
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.1500253Z go version go1.25.0 linux/amd64
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.1500523Z 
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.1500867Z ##[group]go env
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6839172Z AR='ar'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6839862Z CC='gcc'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6840292Z CGO_CFLAGS='-O2 -g'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6840674Z CGO_CPPFLAGS=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6841035Z CGO_CXXFLAGS='-O2 -g'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6841432Z CGO_ENABLED='1'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6841771Z CGO_FFLAGS='-O2 -g'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6842167Z CGO_LDFLAGS='-O2 -g'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6842548Z CXX='g++'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6843118Z GCCGO='gccgo'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6843450Z GO111MODULE=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6843775Z GOAMD64='v1'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6844201Z GOARCH='amd64'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6844761Z GOAUTH='netrc'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6856142Z GOBIN=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6856528Z GOCACHE='/home/runner/.cache/go-build'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6857351Z GOCACHEPROG=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6857718Z GODEBUG=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6858591Z GOENV='/home/runner/.config/go/env'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6859031Z GOEXE=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6859410Z GOEXPERIMENT=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6859953Z GOFIPS140='off'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6860371Z GOFLAGS=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6861503Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build3462006972=/tmp/go-build -gno-record-gcc-switches'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6862575Z GOHOSTARCH='amd64'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6863101Z GOHOSTOS='linux'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6863415Z GOINSECURE=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6863860Z GOMOD='/dev/null'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6864218Z GOMODCACHE='/home/runner/go/pkg/mod'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6877369Z GONOPROXY=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6877832Z GONOSUMDB=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6878211Z GOOS='linux'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6878586Z GOPATH='/home/runner/go'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6879017Z GOPRIVATE=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6879483Z GOPROXY='https://proxy.golang.org,direct'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6882726Z GOROOT='/opt/hostedtoolcache/go/1.25.0/x64'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6883673Z GOSUMDB='sum.golang.org'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6884333Z GOTELEMETRY='local'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6903816Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6904458Z GOTMPDIR=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6905049Z GOTOOLCHAIN='auto'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6905878Z GOTOOLDIR='/opt/hostedtoolcache/go/1.25.0/x64/pkg/tool/linux_amd64'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6906465Z GOVCS=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6906913Z GOVERSION='go1.25.0'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6907316Z GOWORK=''
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6907696Z PKG_CONFIG='pkg-config'
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6907982Z 
+interop	Run actions/setup-go@v5	2026-10-25T05:43:04.6908479Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	﻿2026-10-25T05:43:04.7912672Z ##[group]Run dtolnay/rust-toolchain@stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.7913322Z with:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.7913711Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.7914092Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.7988918Z ##[start-action display=Parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8429984Z ##[group]Run if [[ -z $toolchain ]]; then
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8430371Z ^[[36;1mif [[ -z $toolchain ]]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8430921Z ^[[36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8431507Z ^[[36;1m  echo "'toolchain' is a required input" >&2^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8431832Z ^[[36;1m  exit 1^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8432170Z ^[[36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8432594Z ^[[36;1m  if [[ Linux == macOS ]]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8433132Z ^[[36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8433707Z ^[[36;1m  else^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8434120Z ^[[36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8434950Z ^[[36;1m  fi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8435328Z ^[[36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8435877Z ^[[36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8436388Z ^[[36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8437189Z ^[[36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8437698Z ^[[36;1melse^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8437901Z ^[[36;1m  delimiter=EOF^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8438220Z ^[[36;1m  while [[ $toolchain == *$delimiter* ]]; do delimiter+=_; done^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8438748Z ^[[36;1m  printf 'toolchain<<%s\n%s\n%s\n' "$delimiter" "$toolchain" "$delimiter" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8439193Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8509797Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8510177Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8510390Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8510608Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8760451Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=77]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.8765596Z ##[start-action display=Set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.9836075Z ##[group]Run echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.9836690Z ^[[36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.9904698Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:04.9905113Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0338507Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=157]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0342292Z ##[start-action display=Install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0892146Z ##[group]Run if ! command -v rustup &>/dev/null; then
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0892810Z ^[[36;1mif ! command -v rustup &>/dev/null; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0894057Z ^[[36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0895643Z ^[[36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0896134Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0970317Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0970749Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0971004Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.0971308Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1452821Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=110]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1457344Z ##[start-action display=Install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1467626Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1485953Z ##[start-action display=rustup toolchain install stable;id=__dtolnay_rust-toolchain.__run_4]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1872745Z ##[group]Run set -f  # split targets and components on commas and whitespace, without glob expansion
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1873957Z ^[[36;1mset -f  # split targets and components on commas and whitespace, without glob expansion^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1874973Z ^[[36;1mflags=()^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1875468Z ^[[36;1mfor t in ${targets//,/ }; do flags+=(--target "$t"); done^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1876202Z ^[[36;1mfor c in ${components//,/ }; do flags+=(--component "$c"); done^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1877098Z ^[[36;1mif [[ $toolchain == nightly && -n $components ]]; then flags+=(--allow-downgrade); fi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1877855Z ^[[36;1mlog=$(mktemp)^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1878283Z ^[[36;1mtrap 'rm -f "$log"' EXIT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1878741Z ^[[36;1mfor attempt in 1 2 3 4 5; do^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1879765Z ^[[36;1m  if rustup toolchain install "$toolchain" "${flags[@]}" --profile minimal --no-self-update --force-non-host 2>&1 | tee "$log"; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1880789Z ^[[36;1m    break^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1881136Z ^[[36;1m  else^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1881478Z ^[[36;1m    status=$?^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1881844Z ^[[36;1m  fi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1882348Z ^[[36;1m  if [[ $attempt == 5 ]] || ! grep -Fq 'checksum failed for ' "$log" \^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1883561Z ^[[36;1m      || ! grep -Fq 'this is likely due to an ongoing update of the official release server' "$log"; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1884392Z ^[[36;1m    exit "$status"^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1884989Z ^[[36;1m  fi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1885612Z ^[[36;1m  echo "Retrying rustup toolchain install in 30 seconds (retry $attempt of 4)" >&2^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1886369Z ^[[36;1m  sleep 30^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1886724Z ^[[36;1mdone^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1962850Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1963228Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1963439Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1963705Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1963914Z   targets: 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1964113Z   components: 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1964328Z   RUSTUP_PERMIT_COPY_RENAME: 1
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:05.1964841Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:07.8162734Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1458749Z info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1700744Z info: removing previous version of component rustfmt
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1718172Z info: removing previous version of component clippy
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1730176Z info: removing previous version of component cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1777262Z info: removing previous version of component rust-std
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1824680Z info: removing previous version of component rustc
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:08.1877060Z info: downloading 5 components
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.6844178Z 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.6923103Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.99.1 (58cf8f9c3 2026-10-13) (from rustc 1.99.0 (b940084d7 2026-09-28))
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.6923716Z 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.7398066Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=11591]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.7406828Z ##[start-action display=rustup default stable;id=__dtolnay_rust-toolchain.__run_5]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.7944152Z ##[group]Run rustup default "$toolchain" --force-non-host
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.7945124Z ^[[36;1mrustup default "$toolchain" --force-non-host^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8026124Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8026499Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8026718Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8026988Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8027442Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8290880Z info: using existing install for stable-x86_64-unknown-linux-gnu
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8434411Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8455741Z 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8505718Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8506246Z 
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8525827Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=111]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8530040Z ##[start-action display=Create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8895507Z ##[group]Run DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8896645Z ^[[36;1mDATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8897527Z ^[[36;1mHASH=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-hash: //p')^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8898093Z ^[[36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8974169Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8974853Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8975088Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8975371Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.8975595Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9572640Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=104]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9577480Z ##[start-action display=Disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9821459Z ##[group]Run if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9822272Z ^[[36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9822940Z ^[[36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9823497Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9915805Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9916476Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9916847Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:16.9917309Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0365783Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=78]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0370061Z ##[start-action display=Enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0794315Z ##[group]Run if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0795195Z ^[[36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0795803Z ^[[36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0796305Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0865513Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0865928Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0866157Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0866442Z   CARGO_INCREMENTAL: 0
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.0866667Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.1443311Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=107]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.1448846Z ##[start-action display=Enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2380374Z ##[group]Run # implemented in 1.66, stabilized in 1.68, made default in 1.70
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2381269Z ^[[36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2382322Z ^[[36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2383367Z ^[[36;1m  if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[89]\.'; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2384168Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2385057Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2386060Z ^[[36;1m  elif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[67]\.'; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2386869Z ^[[36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2387580Z ^[[36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2388053Z ^[[36;1m  fi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2388301Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2469852Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2470219Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2470435Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2470720Z   CARGO_INCREMENTAL: 0
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2470955Z   CARGO_TERM_COLOR: always
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2471192Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.2471406Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3176415Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=172]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3180848Z ##[start-action display=Work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3978260Z ##[group]Run # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3979759Z ^[[36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3980910Z ^[[36;1mif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.7[01]\.'; then^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3981786Z ^[[36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.3982304Z ^[[36;1mfi^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4050499Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4051074Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4051292Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4051584Z   CARGO_INCREMENTAL: 0
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4051959Z   CARGO_TERM_COLOR: always
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4052291Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.4052725Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.6038348Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=285]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.6045712Z ##[start-action display=rustc +stable --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7415438Z ##[group]Run rustc +"$toolchain" --version --verbose
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7416303Z ^[[36;1mrustc +"$toolchain" --version --verbose^[[0m
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7485156Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7485525Z env:
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7485748Z   CARGO_HOME: /home/runner/.cargo
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7486018Z   CARGO_INCREMENTAL: 0
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7486273Z   CARGO_TERM_COLOR: always
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7486614Z   toolchain: stable
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.7486836Z ##[endgroup]
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9416743Z rustc 1.99.1 (58cf8f9c3 2026-10-13)
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9417657Z binary: rustc
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9418472Z commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9418980Z commit-date: 2026-10-13
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9419360Z host: x86_64-unknown-linux-gnu
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9419801Z release: 1.99.1
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9420172Z LLVM version: 23.1.1
+interop	Run dtolnay/rust-toolchain@stable	2026-10-25T05:43:17.9439189Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=339]
+interop	Select fresh Rust target	﻿2026-10-25T05:43:17.9497082Z ##[group]Run echo "CARGO_TARGET_DIR=$RUNNER_TEMP/matching-http-tls-cargo-target" >> "$GITHUB_ENV"
+interop	Select fresh Rust target	2026-10-25T05:43:17.9497827Z ^[[36;1mecho "CARGO_TARGET_DIR=$RUNNER_TEMP/matching-http-tls-cargo-target" >> "$GITHUB_ENV"^[[0m
+interop	Select fresh Rust target	2026-10-25T05:43:17.9561612Z shell: /usr/bin/bash -e {0}
+interop	Select fresh Rust target	2026-10-25T05:43:17.9561871Z env:
+interop	Select fresh Rust target	2026-10-25T05:43:17.9562089Z   CARGO_HOME: /home/runner/.cargo
+interop	Select fresh Rust target	2026-10-25T05:43:17.9562363Z   CARGO_INCREMENTAL: 0
+interop	Select fresh Rust target	2026-10-25T05:43:17.9562602Z   CARGO_TERM_COLOR: always
+interop	Select fresh Rust target	2026-10-25T05:43:17.9562828Z ##[endgroup]
+interop	Record source identity	﻿2026-10-25T05:43:17.9940991Z ##[group]Run mkdir -p out/interop
+interop	Record source identity	2026-10-25T05:43:17.9941428Z ^[[36;1mmkdir -p out/interop^[[0m
+interop	Record source identity	2026-10-25T05:43:17.9941805Z ^[[36;1mgit rev-parse HEAD > out/source-sha.txt^[[0m
+interop	Record source identity	2026-10-25T05:43:17.9942559Z ^[[36;1mprintf '%s\n' 'cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server' > out/build-command.txt^[[0m
+interop	Record source identity	2026-10-25T05:43:17.9943893Z ^[[36;1mprintf '%s\n' 'python3 tests/run-matching-thrift-compat.py --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" --artifacts-dir out/interop' > out/interop-command.txt^[[0m
+interop	Record source identity	2026-10-25T05:43:18.0007624Z shell: /usr/bin/bash -e {0}
+interop	Record source identity	2026-10-25T05:43:18.0007912Z env:
+interop	Record source identity	2026-10-25T05:43:18.0008147Z   CARGO_HOME: /home/runner/.cargo
+interop	Record source identity	2026-10-25T05:43:18.0008438Z   CARGO_INCREMENTAL: 0
+interop	Record source identity	2026-10-25T05:43:18.0008688Z   CARGO_TERM_COLOR: always
+interop	Record source identity	2026-10-25T05:43:18.0009098Z   CARGO_TARGET_DIR: /home/runner/work/_temp/matching-http-tls-cargo-target
+interop	Record source identity	2026-10-25T05:43:18.0009536Z ##[endgroup]
+interop	Build fresh Rust server	﻿2026-10-25T05:43:18.0902528Z ##[group]Run set +e
+interop	Build fresh Rust server	2026-10-25T05:43:18.0902870Z ^[[36;1mset +e^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0903437Z ^[[36;1mcargo build --locked --manifest-path rust/Cargo.toml -p cadence-server > out/build.log 2>&1^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0904080Z ^[[36;1mresult=$?^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0904373Z ^[[36;1mecho "$result" > out/build.exit^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0905073Z ^[[36;1mif [ "$result" != 0 ]; then tail -80 out/build.log; exit "$result"; fi^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0905703Z ^[[36;1mgit diff --binary HEAD -- rust/Cargo.lock > out/cargo-lock.patch^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0906311Z ^[[36;1msha256sum "$CARGO_TARGET_DIR/debug/cadence-server" > out/binary.sha256^[[0m
+interop	Build fresh Rust server	2026-10-25T05:43:18.0969707Z shell: /usr/bin/bash -e {0}
+interop	Build fresh Rust server	2026-10-25T05:43:18.0970000Z env:
+interop	Build fresh Rust server	2026-10-25T05:43:18.0970226Z   CARGO_HOME: /home/runner/.cargo
+interop	Build fresh Rust server	2026-10-25T05:43:18.0970528Z   CARGO_INCREMENTAL: 0
+interop	Build fresh Rust server	2026-10-25T05:43:18.0970973Z   CARGO_TERM_COLOR: always
+interop	Build fresh Rust server	2026-10-25T05:43:18.0971387Z   CARGO_TARGET_DIR: /home/runner/work/_temp/matching-http-tls-cargo-target
+interop	Build fresh Rust server	2026-10-25T05:43:18.0971876Z ##[endgroup]
+interop	Run standalone Go HTTP TLS interop	﻿2026-10-25T05:45:25.4508121Z ##[group]Run set +e
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4508446Z ^[[36;1mset +e^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4508738Z ^[[36;1mpython3 tests/run-matching-thrift-compat.py \^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4509178Z ^[[36;1m  --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" \^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4509641Z ^[[36;1m  --artifacts-dir "$PWD/out/interop" > out/interop.log 2>&1^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4510003Z ^[[36;1mresult=$?^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4510261Z ^[[36;1mecho "$result" > out/interop.exit^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4510557Z ^[[36;1mtail -100 out/interop.log^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4510814Z ^[[36;1mexit "$result"^[[0m
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4580220Z shell: /usr/bin/bash -e {0}
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4580496Z env:
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4580711Z   CARGO_HOME: /home/runner/.cargo
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4580980Z   CARGO_INCREMENTAL: 0
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4581228Z   CARGO_TERM_COLOR: always
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4581607Z   CARGO_TARGET_DIR: /home/runner/work/_temp/matching-http-tls-cargo-target
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:25.4581998Z ##[endgroup]
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0923373Z go: downloading go.uber.org/goleak v1.3.0
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0923886Z === RUN   TestIsTLSClientHelloRecord
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0926701Z === RUN   TestIsTLSClientHelloRecord/non_tls
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0927692Z === RUN   TestIsTLSClientHelloRecord/read_error
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0928592Z === RUN   TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0929418Z === RUN   TestIsTLSClientHelloRecord/tls_header
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0930230Z === RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_0
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0931021Z === RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_1
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0931793Z === RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_2
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0932252Z === RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_3
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0932712Z === RUN   TestIsTLSClientHelloRecord/tls_header/minor_version_4
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0933093Z === RUN   TestIsTLSClientHelloRecord/e2e_tls
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0933444Z --- PASS: TestIsTLSClientHelloRecord (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0933900Z     --- PASS: TestIsTLSClientHelloRecord/non_tls (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0934375Z     --- PASS: TestIsTLSClientHelloRecord/read_error (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0935349Z     --- PASS: TestIsTLSClientHelloRecord/non_tls_buf_shorter_than_header_length (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0935931Z     --- PASS: TestIsTLSClientHelloRecord/tls_header (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0936542Z         --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_0 (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0937220Z         --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_1 (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0937880Z         --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_2 (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0938535Z         --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_3 (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0939211Z         --- PASS: TestIsTLSClientHelloRecord/tls_header/minor_version_4 (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0939731Z     --- PASS: TestIsTLSClientHelloRecord/e2e_tls (0.00s)
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0940049Z PASS
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0940385Z ok  	go.uber.org/yarpc/transport/internal/tls/muxlistener	0.006s
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0940833Z ok  	github.com/uber/cadence/common/persistence/sql	0.908s
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0941245Z ok  	github.com/uber/cadence/common/persistence/sql	0.915s
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0941608Z Traceback (most recent call last):
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0942208Z   File "/home/runner/work/cadence-rust/cadence-rust/tests/run-matching-thrift-compat.py", line 223, in <module>
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0942802Z     assert_embedded_start_succeeds()
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0943489Z   File "/home/runner/work/cadence-rust/cadence-rust/tests/run-matching-thrift-compat.py", line 127, in assert_embedded_start_succeeds
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0944945Z     raise RuntimeError(f'no-config embedded Matching exited; see {log_path}')
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0945886Z RuntimeError: no-config embedded Matching exited; see /home/runner/work/cadence-rust/cadence-rust/out/interop/embedded-startup.log
+interop	Run standalone Go HTTP TLS interop	2026-10-25T05:45:48.0958578Z ##[error]Process completed with exit code 1.
+interop	Run actions/upload-artifact@v4	﻿2026-10-25T05:45:48.1029078Z ##[group]Run actions/upload-artifact@v4
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1029402Z with:
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1029621Z   name: matching-http-tls-interop
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1029921Z   path: out/
+interop	Run actions/upload-artifact@v4	!out/interop/matching-drain.test
+interop	Run actions/upload-artifact@v4	
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1030238Z   retention-days: 3
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1030456Z   if-no-files-found: warn
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1030689Z   compression-level: 6
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1030905Z   overwrite: false
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1031128Z   include-hidden-files: false
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1031361Z env:
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1031554Z   CARGO_HOME: /home/runner/.cargo
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1031802Z   CARGO_INCREMENTAL: 0
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1032022Z   CARGO_TERM_COLOR: always
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1032389Z   CARGO_TARGET_DIR: /home/runner/work/_temp/matching-http-tls-cargo-target
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.1032788Z ##[endgroup]
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.2811548Z (node:12983) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.2812363Z (Use `node --trace-deprecation ...` to show where the warning was created)
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.2962502Z With the provided path, there will be 29 files uploaded
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.2970469Z Artifact name is valid!
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.2971027Z Root directory input is valid!
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.4965401Z Beginning upload of artifact content to blob storage
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.5565349Z (node:12983) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.6079567Z Uploaded bytes 32699
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.6273362Z Finished uploading artifact content to blob storage!
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.6274982Z SHA256 digest of uploaded artifact zip is 7cb3684c0be30e2e2f7bef17ffae119804ab0ec89d9e94e028db0b8844e6343f
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:48.6277398Z Finalizing artifact upload
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:49.0117344Z Artifact matching-http-tls-interop.zip successfully finalized. Artifact ID 12588707611
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:49.0119048Z Artifact matching-http-tls-interop has been successfully uploaded! Final size is 32699 bytes. Artifact ID is 12588707611
+interop	Run actions/upload-artifact@v4	2026-10-25T05:45:49.0121323Z Artifact download URL: https://github.com/auenkr/cadence-rust/actions/runs/40166507919/artifacts/12588707611
+interop	Post Run actions/checkout@v4	﻿2026-10-25T05:45:49.0326485Z Post job cleanup.
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1253440Z [command]/usr/bin/git version
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1299961Z git version 2.55.0
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1342425Z Temporarily overriding HOME='/home/runner/work/_temp/a15823f6-31ae-40fe-9bb8-4c7bfcac7107' before making global git config changes
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1344043Z Adding repository directory to the temporary git global config as a safe directory
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1349428Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/cadence-rust/cadence-rust
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1397253Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1440449Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1698647Z Entering 'go/idls'
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1779768Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1817230Z http.https://github.com/.extraheader
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1827605Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.1876583Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2137076Z Entering 'go/idls'
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2199253Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2243775Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2497669Z Entering 'go/idls'
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2521048Z file:/home/runner/work/cadence-rust/cadence-rust/.git/modules/idls/config	remote.origin.url
+interop	Post Run actions/checkout@v4	2026-10-25T05:45:49.2560435Z [command]/usr/bin/git config --file /home/runner/work/cadence-rust/cadence-rust/.git/modules/idls/config --name-only --get-regexp ^includeIf\.gitdir:
+interop	Complete job	﻿2026-10-25T05:45:49.2760207Z Cleaning up orphan processes
+interop	Complete job	2026-10-25T05:45:49.3113904Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-go@v5, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
