@@ -22,12 +22,19 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 		Return(cache.CreateDomainCacheEntry(matchingTestDomainName), nil).AnyTimes()
 	domainCache.EXPECT().GetDomain(gomock.Any()).
 		Return(cache.CreateDomainCacheEntry(matchingTestDomainName), nil).AnyTimes()
-	domainCache.EXPECT().GetDomainName("test-domain-id").
-		Return(matchingTestDomainName, nil).AnyTimes()
-	domainCache.EXPECT().GetDomainName("").
-		Return("", errors.New("oracle empty domain")).AnyTimes()
-	domainCache.EXPECT().GetDomainName("missing-domain").
-		Return("", errors.New("oracle unknown domain")).AnyTimes()
+	domainCache.EXPECT().GetDomainName(gomock.Any()).
+		DoAndReturn(func(id string) (string, error) {
+			switch id {
+			case "test-domain-id":
+				return matchingTestDomainName, nil
+			case "":
+				return "", errors.New("oracle empty domain")
+			case "missing-domain":
+				return "", errors.New("oracle unknown domain")
+			default:
+				return "", errors.New("oracle unexpected domain ID: " + id)
+			}
+		}).AnyTimes()
 	domainCache.EXPECT().RegisterDomainChangeCallback(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	domainCache.EXPECT().UnregisterDomainChangeCallback(gomock.Any()).AnyTimes()
 	s.mockDomainCache = domainCache
