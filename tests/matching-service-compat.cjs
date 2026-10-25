@@ -96,9 +96,9 @@ async function registerShardWithGoManager(shardName, force = false) {
       // registered that port (alternating onto the secondary would reload task lists mid-scenario).
       const primaryGrpc = String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT || '');
       const allEntries = Object.entries(stats || {});
-      const primaryEntries = allEntries.filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === primaryGrpc
+      const primaryEntries = allEntries.filter(([, e]) => sdMatchesGrpc(e, primaryGrpc)
         && Date.now() - (Date.parse(e.LastHeartbeat || e.lastHeartbeat || '') || 0) < 10000);
-      const entries = (primaryEntries.length ? primaryEntries : allEntries).sort((a, b) =>
+      const entries = primaryEntries.sort((a, b) =>
         (Date.parse(b[1].LastHeartbeat || b[1].lastHeartbeat || '') || 0)
           - (Date.parse(a[1].LastHeartbeat || a[1].lastHeartbeat || '') || 0));
       if (entries.length) {
@@ -138,6 +138,13 @@ async function registerShardWithGoManager(shardName, force = false) {
 const shardDistributorRestartDir = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_RESTART_DIR;
 const shardDistributorEvidence = [];
 const sdHeartbeatMs = executor => Date.parse(executor?.LastHeartbeat || executor?.lastHeartbeat || '') || 0;
+const sdMetadata = executor => executor?.Metadata || executor?.metadata || {};
+function sdMatchesGrpc(executor, port) {
+  const advertised = String(sdMetadata(executor).grpc || '');
+  // Shard-manager stores executor metadata verbatim. Production registrations may
+  // advertise either a bare port or host:port, so compare the port component.
+  return advertised === String(port) || advertised.endsWith(`:${port}`);
+}
 async function sdFreshExecutors(maxAgeMs = 10000) {
   const stats = (await shardManagerCommand({ op: 'stats' })) || {};
   return Object.entries(stats).filter(([, executor]) => Date.now() - sdHeartbeatMs(executor) < maxAgeMs);
@@ -186,7 +193,14 @@ async function sdAssertExecutorExpired(label, previousIds, killedAt) {
       shardDistributorEvidence.push({ check: 'executor-expired-by-ttl', label, expired: previousIds, elapsedMsSinceKill: Date.now() - killedAt });
       return;
     }
-    if (Date.now() > deadline) throw new Error(`shard-distributor ${label}: real leader loop did not expire executor(s) ${lingering.join(',')} within 90s`);
+    if (Date.now() > deadline) {
+      const snapshot = { label, killedAt: new Date(killedAt).toISOString(), observedAt: new Date().toISOString(),
+        selectedExecutors: previousIds.map(id => ({ id, metadata: sdMetadata(stats[id]), lastHeartbeat: stats[id]?.LastHeartbeat || stats[id]?.lastHeartbeat || null })),
+        lingeringExecutors: lingering.map(id => ({ id, metadata: sdMetadata(stats[id]), lastHeartbeat: stats[id]?.LastHeartbeat || stats[id]?.lastHeartbeat || null, assignments: assignments[id] || [] })) };
+      const snapshotPath = path.join(work, `shard-distributor-${label}-failure.json`);
+      fs.writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
+      throw new Error(`shard-distributor ${label}: real leader loop did not expire executor(s) ${lingering.join(',')} within 90s; diagnostic snapshot: ${snapshotPath}`);
+    }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
@@ -1027,7 +1041,18 @@ async function run() {
     const beforePid = rust.pid;
     const sdBeforeKill = await sdAssertHeartbeat('before-sigkill');
     // Only the SIGKILLed primary's executor may expire; the secondary Rust node keeps heartbeating.
-    const sdKilledIds = (await sdFreshExecutors()).filter(([, e]) => String((e.Metadata || e.metadata || {}).grpc) === String(process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT)).map(([id]) => id);
+    const sdBeforeKillStats = await shardManagerCommand({ op: 'stats' }) || {};
+    const sdPrimaryPort = process.env.CADENCE_RUST_MATCHING_PRODUCTION_GRPC_PORT;
+    const sdKilledIds = Object.entries(sdBeforeKillStats).filter(([, e]) => sdMatchesGrpc(e, sdPrimaryPort)
+      && Date.now() - sdHeartbeatMs(e) < 10000).map(([id]) => id);
+    const sdSelection = { primaryGrpcPort: sdPrimaryPort, selected: sdKilledIds.map(id => ({ id, metadata: sdMetadata(sdBeforeKillStats[id]) })),
+      observed: Object.entries(sdBeforeKillStats).map(([id, e]) => ({ id, metadata: sdMetadata(e), lastHeartbeat: e.LastHeartbeat || e.lastHeartbeat || null })) };
+    if (sdBeforeKill && sdKilledIds.length !== 1) {
+      const diagnosticPath = path.join(work, 'shard-distributor-before-sigkill-selection-failure.json');
+      fs.writeFileSync(diagnosticPath, `${JSON.stringify(sdSelection, null, 2)}\n`);
+      throw new Error(`shard-distributor before-sigkill: expected exactly one fresh executor advertising primary gRPC port ${sdPrimaryPort}, found ${sdKilledIds.length}; diagnostic snapshot: ${diagnosticPath}`);
+    }
+    if (sdBeforeKill) shardDistributorEvidence.push({ check: 'sigkill-target-selected', ...sdSelection });
     const sdKilledAt = Date.now();
     rust.kill('SIGKILL');
     const beforeExit = await exited;
@@ -1036,7 +1061,7 @@ async function run() {
     rust = startRust('after-restart');
     await waitForRustReady('after-restart');
     if (sdBeforeKill) {
-      await sdAssertExecutorExpired('after-sigkill', sdKilledIds.length ? sdKilledIds : sdBeforeKill.executors, sdKilledAt);
+      await sdAssertExecutorExpired('after-sigkill', sdKilledIds, sdKilledAt);
       await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
       await sdReassign('after-sigkill-restart', restartTaskList);
     }
