@@ -13,9 +13,9 @@ candidate's acceptance and parity audit complete.
 | PostgreSQL SDK, two-node recovery and extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40108645569 | success |
 | Thrift/TChannel | https://github.com/auenkr/cadence-rust/actions/runs/40153127238 | success |
 | Cassandra | https://github.com/auenkr/cadence-rust/actions/runs/40153493941 | success |
-| MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40153901033 | failed: durable-restart connection refusal; investigation active |
+| MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40155956238 | success with corrected harness; failed40153901033 preserved |
 | Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | success |
-| Real shard distributor | pending | not started |
+| Real shard distributor | https://github.com/auenkr/cadence-rust/actions/runs/40156296140 | running |
 | Active offer with Go History, zero inserts | pending | not started |
 
 Run mixed lanes serially. Preserve source, binary SHA256, command, exit files
@@ -66,4 +66,4 @@ readiness harness fix; no production Rust source differs from27d3ff5f.
 Automatic cached run40155703537 was superseded/cancelled in favor of this
 explicit fresh-target gate.
 
-Corrected MySQL rerun: https://github.com/auenkr/cadence-rust/actions/runs/40155956238 on validation branch `matching-final-validation-20261025` (source e06fd8ca6); running.
+Corrected MySQL rerun: https://github.com/auenkr/cadence-rust/actions/runs/40155956238 on validation branch `matching-final-validation-20261025` (source e06fd8ca6); success.
