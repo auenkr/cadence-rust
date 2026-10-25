@@ -61,7 +61,7 @@ production candidate or the corrected mixed-gate validation branch.
 Run https://github.com/auenkr/cadence-rust/actions/runs/40155846010 validates
 master source `1fc3a899c00c6eac5b2079b933092ca0df270313` with
 `clean_target=true`, workspace strict clippy followed by workspace tests.
-Pending when dispatched. It includes the merged typed-refresh tests and the
+Success; compact evidence is in `integrated-workspace/`. It includes the merged typed-refresh tests and the
 readiness harness fix; no production Rust source differs from27d3ff5f.
 Automatic cached run40155703537 was superseded/cancelled in favor of this
 explicit fresh-target gate.
