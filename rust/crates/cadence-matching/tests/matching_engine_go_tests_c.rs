@@ -348,10 +348,7 @@ async fn refresh_workflow_tasks_entity_not_exists_returns_ok() {
     let status = typed_history_status(
         "EntityNotExistsError",
         "workflow not found",
-        p::EntityNotExistsError {
-            message: "workflow not found".into(),
-            ..Default::default()
-        },
+        p::EntityNotExistsError::default(),
     );
     let (client, seen) = refresh_history_client(Some(status)).await;
     client
@@ -389,9 +386,7 @@ async fn refresh_workflow_tasks_already_completed_is_propagated() {
     let status = typed_history_status(
         "WorkflowExecutionAlreadyCompletedError",
         "workflow already completed",
-        p::WorkflowExecutionAlreadyCompletedError {
-            message: "workflow already completed".into(),
-        },
+        p::WorkflowExecutionAlreadyCompletedError {},
     );
     let expected_status = status.clone();
     let (client, seen) = refresh_history_client(Some(status)).await;
@@ -412,7 +407,7 @@ async fn refresh_workflow_tasks_already_completed_is_propagated() {
         decoded.details[0].value.as_slice(),
     )
     .unwrap();
-    assert_eq!(typed.message, "workflow already completed");
+    assert_eq!(typed, p::WorkflowExecutionAlreadyCompletedError {});
     assert_eq!(seen.lock().unwrap().len(), 1, "terminal error is not retried");
 }
 
