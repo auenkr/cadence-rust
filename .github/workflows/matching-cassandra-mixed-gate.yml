@@ -1,13 +1,5 @@
 name: Matching mixed gate (Cassandra, Rust Matching with Go services)
 on:
-  push:
-    branches: ["matching-*"]
-    paths:
-      - '.github/workflows/matching-cassandra-mixed-gate.yml'
-      - 'rust/**'
-      - 'tests/**'
-      - 'go/idls'
-      - 'go/tests/matching-cassandra-interop/**'
   workflow_dispatch:
     inputs:
       extra_args:

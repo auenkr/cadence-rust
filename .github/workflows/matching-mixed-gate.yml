@@ -1,8 +1,5 @@
 name: Matching mixed gate (MySQL, two Rust Matching nodes)
 on:
-  push:
-    branches: ["matching-*"]
-    paths: ['.github/workflows/matching-mixed-gate.yml', 'rust/**', 'tests/**']
   workflow_dispatch:
     inputs:
       extra_args:
