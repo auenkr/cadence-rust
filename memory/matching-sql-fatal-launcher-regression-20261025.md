@@ -50,9 +50,14 @@
 - Current branch's follow-up focused Matching CI:
   <https://github.com/auenkr/cadence-rust/actions/runs/40221421999>, head
   `ae699c9bd1a0fef096f9f86d1e6ffb3ee42aec5d`, status **in progress** at the
-  one-time status check before the lifecycle-race follow-up. A source push may
-  cancel/supersede it. No conclusion or binary SHA was available then; do not
-  treat it as passed. Dispatch and record a focused run for the race fix.
+  one-time status check after the lifecycle-race follow-up dispatch. It tests
+  the subprocess regression but predates the race fix. No conclusion or binary
+  SHA is available; do not treat it as passed.
+- Latest focused Matching CI for the complete source change:
+  <https://github.com/auenkr/cadence-rust/actions/runs/40221531028>, head
+  `3e417ea10e1f93286bbd69ae2dee520d81e6ec8a`, status **pending** at the
+  one-time status check. No conclusion or binary SHA is available; do not
+  treat it as passed.
 
 ## Remaining limits
 
