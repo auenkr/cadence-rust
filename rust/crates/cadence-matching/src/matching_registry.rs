@@ -170,6 +170,7 @@ pub struct QueueRegistry {
     history: MatchingHistoryClient,
     range_size: NonZeroU32,
     state: Arc<Mutex<State>>,
+    query_index: Arc<crate::matching_query::QueryIndex>,
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     ownership_policy: Arc<RwLock<Option<QueueOwnershipPolicy>>>,
@@ -342,7 +343,8 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
     ) -> bool {
-        self.offer_sync(data, source_domain, deadline, true, false).await
+        self.offer_sync(data, source_domain, deadline, true, false)
+            .await
     }
     pub async fn try_sync_match_observed(
         &self,
@@ -350,7 +352,8 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
     ) -> SyncMatchOutcome {
-        self.offer_sync_observed(data, source_domain, deadline, true, false).await
+        self.offer_sync_observed(data, source_domain, deadline, true, false)
+            .await
     }
     /// Go `TaskMatcher.Offer` skips the dispatch rate limiter for tasks
     /// already forwarded from a child partition; the entry partition limited
@@ -361,7 +364,8 @@ impl QueueHandle {
         source_domain: Uuid,
         deadline: tokio::time::Instant,
     ) -> bool {
-        self.offer_sync(data, source_domain, deadline, false, true).await
+        self.offer_sync(data, source_domain, deadline, false, true)
+            .await
     }
     pub async fn offer_forwarded_backlog(
         &self,
@@ -390,7 +394,8 @@ impl QueueHandle {
         forwarded: bool,
     ) -> bool {
         matches!(
-            self.offer_sync_observed(data, source_domain, deadline, limit, forwarded).await,
+            self.offer_sync_observed(data, source_domain, deadline, limit, forwarded)
+                .await,
             SyncMatchOutcome::Matched
         )
     }
@@ -425,7 +430,8 @@ impl QueueHandle {
             }
         }
         let group = (self.isolation_select)(data).0;
-        if self.sync_matcher
+        if self
+            .sync_matcher
             .offer(
                 data.clone(),
                 &group,
@@ -552,6 +558,17 @@ impl QueueRegistry {
             .is_some_and(|owner| !owner.queue.is_stopped())
     }
 
+    /// Go `deliverQueryResult`: the engine-wide `lockableQueryTaskMap` is keyed
+    /// by task ID alone, so the lookup ignores domain and task list and still
+    /// works after the owning queue was unloaded or replaced.
+    pub fn deliver_query_result(
+        &self,
+        task_id: &str,
+        outcome: crate::matching_query::QueryOutcome,
+    ) -> Result<(), tonic::Status> {
+        self.query_index.deliver(task_id, outcome)
+    }
+
     /// Go's domain failover callback releases blocked normal decision/activity
     /// pollers and sticky decision pollers. Owners and their manager state stay
     /// installed so later polls can immediately reuse the same queues.
@@ -606,7 +623,9 @@ impl QueueRegistry {
             };
             match self.get(key, kind, registry_now()).await {
                 Ok(owner) => owner.dispatcher.release_blocked_pollers(),
-                Err(error) => eprintln!("warning: loading Matching manager after domain failover failed: {error}"),
+                Err(error) => eprintln!(
+                    "warning: loading Matching manager after domain failover failed: {error}"
+                ),
             }
         }
     }
@@ -615,16 +634,23 @@ impl QueueRegistry {
     pub(crate) fn qps_for_task_list_name(&self, name: &str) -> f64 {
         let owners = {
             let state = self.state.lock().expect("Matching registry lock");
-            state.owners.iter()
+            state
+                .owners
+                .iter()
                 .filter(|((_, task_list, _), owner)| task_list == name && !owner.queue.is_stopped())
-                .map(|(_, owner)| owner.qps.clone()).collect::<Vec<_>>()
+                .map(|(_, owner)| owner.qps.clone())
+                .collect::<Vec<_>>()
         };
         owners.iter().map(|qps| qps.qps()).sum()
     }
 
     #[cfg(test)]
     pub(crate) fn loaded_owner_count(&self) -> usize {
-        self.state.lock().expect("Matching registry lock").owners.len()
+        self.state
+            .lock()
+            .expect("Matching registry lock")
+            .owners
+            .len()
     }
 
     /// Stop all loaded owners for one exact task-list name so a later Get rebuilds them.
@@ -634,16 +660,26 @@ impl QueueRegistry {
         owner_work(move |readers| {
             let owners = {
                 let mut state = registry.state.lock().expect("Matching registry lock");
-                let keys = state.owners.keys().filter(|(_, task_list, _)| task_list == &name).cloned().collect::<Vec<_>>();
-                keys.into_iter().filter_map(|key| state.owners.remove(&key)).collect::<Vec<_>>()
+                let keys = state
+                    .owners
+                    .keys()
+                    .filter(|(_, task_list, _)| task_list == &name)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                keys.into_iter()
+                    .filter_map(|key| state.owners.remove(&key))
+                    .collect::<Vec<_>>()
             };
             let now = registry_now();
             let mut first_error = None;
             for owner in owners {
-                if let Err(error) = owner.finish(now, readers) { first_error.get_or_insert(error); }
+                if let Err(error) = owner.finish(now, readers) {
+                    first_error.get_or_insert(error);
+                }
             }
             first_error.map_or(Ok(()), Err)
-        }).await
+        })
+        .await
     }
 
     /// Snapshot loaded managers only, like Go ManagersByDomainID. This must
@@ -670,12 +706,12 @@ impl QueueRegistry {
                 .list(now)
                 .into_iter()
                 .map(|poller| cadence_proto::api::PollerInfo {
-                identity: poller.identity,
-                rate_per_second: poller.rate_per_second,
-                last_access_time: Some(prost_types::Timestamp {
-                    seconds: poller.last_access_time.div_euclid(1_000_000_000),
-                    nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
-                }),
+                    identity: poller.identity,
+                    rate_per_second: poller.rate_per_second,
+                    last_access_time: Some(prost_types::Timestamp {
+                        seconds: poller.last_access_time.div_euclid(1_000_000_000),
+                        nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
+                    }),
                 })
                 .collect();
             let description = m::DescribeTaskListResponse {
@@ -710,6 +746,7 @@ impl QueueRegistry {
             history,
             range_size,
             state: Arc::new(Mutex::new(State::default())),
+            query_index: Arc::default(),
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
             ownership_policy: Arc::new(RwLock::new(None)),
@@ -780,9 +817,10 @@ impl QueueRegistry {
             .expect("Matching ownership policy lock")
             .clone();
         let Some(policy) = policy else {
-            return self.membership.as_ref().map_or(Ok(()), |membership| {
-                membership.check_task_list(name)
-            });
+            return self
+                .membership
+                .as_ref()
+                .map_or(Ok(()), |membership| membership.check_task_list(name));
         };
         if (policy.is_shard_distributor_eligible)(name) {
             if (policy.has_local_processor)(name) {
@@ -796,9 +834,9 @@ impl QueueRegistry {
         if cached {
             return Ok(());
         }
-        self.membership.as_ref().map_or(Ok(()), |membership| {
-            membership.check_task_list(name)
-        })
+        self.membership
+            .as_ref()
+            .map_or(Ok(()), |membership| membership.check_task_list(name))
     }
 
     /// Like Go's membership watcher, detach obsolete owners before doing I/O.
@@ -981,11 +1019,11 @@ impl QueueRegistry {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<QueueHandle, Status>> + Send + '_>>
     {
         Box::pin(async move {
-        if !(0..=1).contains(&key.task_type) {
-            return Err(Status::invalid_argument("Unknown persistence task type."));
-        }
-        let registry = self.clone();
-        owner_work(move |readers| {
+            if !(0..=1).contains(&key.task_type) {
+                return Err(Status::invalid_argument("Unknown persistence task type."));
+            }
+            let registry = self.clone();
+            owner_work(move |readers| {
             let lookup = (key.domain_id, key.name.clone(), key.task_type);
             // Go registers a manager before Start performs lease I/O. Serialize
             // startup by queue identity while keeping unrelated owners usable.
@@ -1464,7 +1502,9 @@ impl QueueRegistry {
                         limiter,
                         queue,
                         pollers,
-                        queries: Arc::new(crate::matching_query::QueryChannel::new()),
+                        queries: Arc::new(crate::matching_query::QueryChannel::with_index(
+                            registry.query_index.clone(),
+                        )),
                         qps,
                         partitions,
                         sync_matcher,
@@ -1639,7 +1679,11 @@ impl QueueRegistry {
                 domain: metric_domain,
                 task_list: root.name.clone(),
                 task_list_kind: 0,
-                task_type: if root.task_type == 1 { "activity_task" } else { "decision_task" },
+                task_type: if root.task_type == 1 {
+                    "activity_task"
+                } else {
+                    "decision_task"
+                },
                 poller_isolation_group: String::new(),
             },
         );
@@ -1678,7 +1722,11 @@ impl QueueRegistry {
     ) -> Result<ScaledPartition, Status> {
         if id != 0 && self.membership.is_some() {
             let response = self.describe_partition_rpc(root, name, id).await?;
-            return Ok(scaled_partition_from_response(id, &response, config.empty_check));
+            return Ok(scaled_partition_from_response(
+                id,
+                &response,
+                config.empty_check,
+            ));
         }
         let sub = TaskListKey {
             name: name.partition_name(id as i64),
@@ -1770,10 +1818,10 @@ impl QueueRegistry {
                 .partitions
                 .get()
                 .unwrap_or(cadence_persistence::StoredPartitionConfig {
-            version: 0,
-            read_partitions: HashMap::from([(0, Vec::new())]),
-            write_partitions: HashMap::from([(0, Vec::new())]),
-        });
+                    version: 0,
+                    read_partitions: HashMap::from([(0, Vec::new())]),
+                    write_partitions: HashMap::from([(0, Vec::new())]),
+                });
         let metrics = if config.isolation_assignment {
             let mut metrics = AggregateMetrics {
                 isolation_enabled: true,
@@ -1787,7 +1835,14 @@ impl QueueRegistry {
                 // Go `fetchMetricsFromPartitions` captures a panicking describe as that goroutine's error.
                 let described = match crate::matching_panic::capture(
                     "describe_partition",
-                    self.describe_scaled_partition(root, &name, id, config, &current.write_partitions, now),
+                    self.describe_scaled_partition(
+                        root,
+                        &name,
+                        id,
+                        config,
+                        &current.write_partitions,
+                        now,
+                    ),
                 )
                 .await
                 {
@@ -1850,25 +1905,32 @@ impl QueueRegistry {
             },
         )
         .await;
-        match scaler.tick_finish(prepared, &current.read_partitions, &metrics, read, read_changed) {
+        match scaler.tick_finish(
+            prepared,
+            &current.read_partitions,
+            &metrics,
+            read,
+            read_changed,
+        ) {
             Some((read_partitions, write_partitions)) => {
                 scaler.record_update_counter(false);
-                let result = self.update_partition_config(
-                    root.clone(),
-                    handle,
-                    cadence_persistence::StoredPartitionConfig {
-                        version: 0,
-                        read_partitions,
-                        write_partitions,
-                    },
-                    now,
-                )
-                .await;
+                let result = self
+                    .update_partition_config(
+                        root.clone(),
+                        handle,
+                        cadence_persistence::StoredPartitionConfig {
+                            version: 0,
+                            read_partitions,
+                            write_partitions,
+                        },
+                        now,
+                    )
+                    .await;
                 if result.is_err() {
                     scaler.record_update_counter(true);
                 }
                 result.map(|_| true)
-            },
+            }
             None => Ok(true),
         }
     }
@@ -1923,7 +1985,11 @@ impl QueueRegistry {
                     }
                 }
             }
-            Ok(Some((new, name.root().to_owned(), notify.into_iter().collect::<Vec<_>>())))
+            Ok(Some((
+                new,
+                name.root().to_owned(),
+                notify.into_iter().collect::<Vec<_>>(),
+            )))
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))??;
@@ -1962,7 +2028,10 @@ impl QueueRegistry {
         };
         let partition_config = crate::grpc_matching::partition_config_to_proto(config);
         let mut notifications = tokio::task::JoinSet::new();
-        for partition in read_partitions.into_iter().filter(|partition| *partition != 0) {
+        for partition in read_partitions
+            .into_iter()
+            .filter(|partition| *partition != 0)
+        {
             let task_list_name = format!("/__cadence_sys/{root_name}/{partition}");
             let request = cadence_proto::matching::RefreshTaskListPartitionConfigRequest {
                 domain_id: domain_id.to_string(),
@@ -2070,7 +2139,9 @@ impl QueueRegistry {
                 return Ok(false);
             }
             let owner = state.owners.remove(&lookup).expect("checked owner");
-            registry.metrics.task_list_managers_gauge(state.owners.len());
+            registry
+                .metrics
+                .task_list_managers_gauge(state.owners.len());
             drop(state);
             owner.finish(now, readers)?;
             Ok(true)
@@ -2119,8 +2190,8 @@ impl QueueRegistry {
                         .expect("Matching ack timer lock"))
                     .unwrap_or_else(|| {
                         *owner.last_update.lock().expect("Matching ack timer lock") + interval
-                        })
-                        .min(
+                    })
+                    .min(
                         *owner
                             .next_idle_check
                             .lock()
@@ -2270,13 +2341,13 @@ impl QueueRegistry {
                 let ack_due = live_deadline.map_or_else(
                     || {
                         due.is_none_or(|interval| {
-                        owner
-                            .last_update
-                            .lock()
-                            .expect("Matching ack timer lock")
-                            .elapsed()
+                            owner
+                                .last_update
+                                .lock()
+                                .expect("Matching ack timer lock")
+                                .elapsed()
                                 >= interval
-                    })
+                        })
                     },
                     |deadline| tokio::time::Instant::now() >= deadline,
                 );
@@ -2384,18 +2455,32 @@ mod tests {
             let observed = observed.clone();
             let live_value = live_value.clone();
             Arc::new(move |domain, list, kind| {
-                observed.lock().unwrap().push((domain.to_owned(), list.to_owned(), kind));
-                (live_value.load(std::sync::atomic::Ordering::SeqCst), 5_000_000_000, 250)
+                observed
+                    .lock()
+                    .unwrap()
+                    .push((domain.to_owned(), list.to_owned(), kind));
+                (
+                    live_value.load(std::sync::atomic::Ordering::SeqCst),
+                    5_000_000_000,
+                    250,
+                )
             })
         };
         let writer = scoped_writer_live(provider, "domain-uuid".into(), "physical-queue".into(), 1);
         assert_eq!(writer(), (1, 5_000_000_000, 250));
         live_value.store(7, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(writer(), (7, 5_000_000_000, 250), "the owner closure is retained while provider values change");
-        assert_eq!(*observed.lock().unwrap(), vec![
-            ("domain-uuid".into(), "physical-queue".into(), 1),
-            ("domain-uuid".into(), "physical-queue".into(), 1),
-        ]);
+        assert_eq!(
+            writer(),
+            (7, 5_000_000_000, 250),
+            "the owner closure is retained while provider values change"
+        );
+        assert_eq!(
+            *observed.lock().unwrap(),
+            vec![
+                ("domain-uuid".into(), "physical-queue".into(), 1),
+                ("domain-uuid".into(), "physical-queue".into(), 1),
+            ]
+        );
     }
     #[test]
     fn scaled_partition_from_response_reads_owner_describe_like_go() {
@@ -2492,8 +2577,10 @@ mod tests {
     }
     #[tokio::test]
     async fn task_list_manager_gauge_tracks_registry_lifecycle_not_get_calls() {
+        use crate::matching_metrics::{
+            MatchingMetrics, MetricValue, RecordingMetricSink, TASKLIST_MANAGERS,
+        };
         use cadence_common::membership::Host;
-        use crate::matching_metrics::{MatchingMetrics, MetricValue, RecordingMetricSink, TASKLIST_MANAGERS};
 
         let (_dir, _store, registry, key) = fixture();
         let host = |identity: &str| Host {
@@ -2511,7 +2598,10 @@ mod tests {
         let reused = registry.get(key.clone(), 0, 2).await.unwrap();
         assert!(Arc::ptr_eq(&first.queue, &reused.queue));
         assert_eq!(
-            sink.events().iter().filter(|event| event.name == TASKLIST_MANAGERS).count(),
+            sink.events()
+                .iter()
+                .filter(|event| event.name == TASKLIST_MANAGERS)
+                .count(),
             1,
             "lookup reuse does not register another manager"
         );
@@ -2606,17 +2696,15 @@ mod tests {
             identity: "other".into(),
             grpc_address: "other:7835".into(),
         };
-        let registry = registry.with_membership(
-            crate::matching_membership::Membership::new("self", vec![host]),
-        );
+        let registry = registry.with_membership(crate::matching_membership::Membership::new(
+            "self",
+            vec![host],
+        ));
         let checks = Arc::new(AtomicUsize::new(0));
-        let policy = QueueOwnershipPolicy::new(
-            Arc::new(|_| true),
-            {
-                let checks = checks.clone();
-                Arc::new(move |_| checks.fetch_add(1, Ordering::SeqCst) == 0)
-            },
-        );
+        let policy = QueueOwnershipPolicy::new(Arc::new(|_| true), {
+            let checks = checks.clone();
+            Arc::new(move |_| checks.fetch_add(1, Ordering::SeqCst) == 0)
+        });
         registry.set_ownership_policy(policy);
 
         let error = registry.get(key, 0, 1).await.err().unwrap();
@@ -2650,12 +2738,7 @@ mod tests {
         let mut uncached_key = key;
         uncached_key.name = "uncached-excluded".into();
         assert_eq!(
-            registry
-                .get(uncached_key, 0, 3)
-                .await
-                .err()
-                .unwrap()
-                .code(),
+            registry.get(uncached_key, 0, 3).await.err().unwrap().code(),
             tonic::Code::Aborted
         );
     }
@@ -2676,13 +2759,10 @@ mod tests {
         );
         let registry = registry.with_membership(membership);
         let assigned = Arc::new(AtomicBool::new(true));
-        registry.set_ownership_policy(QueueOwnershipPolicy::new(
-            Arc::new(|_| true),
-            {
-                let assigned = assigned.clone();
-                Arc::new(move |_| assigned.load(Ordering::SeqCst))
-            },
-        ));
+        registry.set_ownership_policy(QueueOwnershipPolicy::new(Arc::new(|_| true), {
+            let assigned = assigned.clone();
+            Arc::new(move |_| assigned.load(Ordering::SeqCst))
+        }));
         let handle = registry.get(key, 0, 1).await.unwrap();
         assigned.store(false, Ordering::SeqCst);
         assert_eq!(
@@ -2878,7 +2958,10 @@ mod tests {
         let initial = registry.get(key.clone(), 0, 1).await.unwrap();
         let same = registry.get(key.clone(), 0, 2).await.unwrap();
         assert!(Arc::ptr_eq(&initial.queue, &same.queue));
-        assert!(registry.unload(key.clone(), initial.clone(), 3).await.unwrap());
+        assert!(registry
+            .unload(key.clone(), initial.clone(), 3)
+            .await
+            .unwrap());
         assert!(!registry.state.lock().unwrap().owners.contains_key(&lookup));
         let updated = registry.get(key.clone(), 0, 4).await.unwrap();
         assert!(!Arc::ptr_eq(&initial.queue, &updated.queue));
@@ -3161,8 +3244,8 @@ mod tests {
     #[tokio::test]
     async fn liveness_event_loop_noop_keeps_marked_owner_loaded() {
         let (_dir, _store, registry, key) = fixture();
-        let registry =
-            registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
+        let registry = registry
+            .with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
         // Go: advance ttl/2 and mark alive.
         handle.liveness.mark_alive(250_000_000);
@@ -3170,26 +3253,32 @@ mod tests {
         registry.sweep_idle(500_000_000, false).await.unwrap();
         assert!(handle.liveness.is_alive(500_000_000));
         assert!(!handle.queue.is_stopped());
-        assert!(registry
-            .state
-            .lock()
-            .unwrap()
-            .owners
-            .contains_key(&(key.domain_id, key.name.clone(), key.task_type)));
+        assert!(registry.state.lock().unwrap().owners.contains_key(&(
+            key.domain_id,
+            key.name.clone(),
+            key.task_type
+        )));
     }
     // Go: livenessSuite.TestEventLoop_Shutdown (liveness/liveness_test.go:105). With no mark
     // for a full TTL, Go calls the shutdown callback; Rust unloads the owner and stops its queue.
     #[tokio::test]
     async fn liveness_event_loop_shutdown_unloads_owner_at_ttl() {
         let (_dir, _store, registry, key) = fixture();
-        let registry =
-            registry.with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
+        let registry = registry
+            .with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| 500_000_000));
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
         handle.liveness.mark_alive(0);
         // Go: shutdown fires only once the TTL has elapsed; one nanosecond earlier the owner is alive.
         registry.sweep_idle(500_000_000 - 1, false).await.unwrap();
-        assert!(!handle.queue.is_stopped(), "owner shut down before its TTL elapsed");
-        assert!(registry.state.lock().unwrap().owners.contains_key(&(key.domain_id, key.name.clone(), key.task_type)));
+        assert!(
+            !handle.queue.is_stopped(),
+            "owner shut down before its TTL elapsed"
+        );
+        assert!(registry.state.lock().unwrap().owners.contains_key(&(
+            key.domain_id,
+            key.name.clone(),
+            key.task_type
+        )));
         registry.sweep_idle(500_000_000, false).await.unwrap();
         assert!(handle.queue.is_stopped());
         assert!(registry.state.lock().unwrap().owners.is_empty());
@@ -3227,7 +3316,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         let elapsed = started.elapsed();
-        assert!(elapsed >= Duration::from_nanos(TTL as u64), "unloaded before one TTL: {elapsed:?}");
+        assert!(
+            elapsed >= Duration::from_nanos(TTL as u64),
+            "unloaded before one TTL: {elapsed:?}"
+        );
         assert!(
             elapsed <= Duration::from_nanos(3 * TTL as u64 / 2),
             "unloaded after 1.5 TTL: {elapsed:?}"
@@ -3243,7 +3335,10 @@ mod tests {
     async fn unload_notifies_registry_once_and_second_unload_is_noop() {
         let (_dir, _store, registry, key) = fixture();
         let handle = registry.get(key.clone(), 0, 1).await.unwrap();
-        assert!(registry.unload(key.clone(), handle.clone(), 2).await.unwrap());
+        assert!(registry
+            .unload(key.clone(), handle.clone(), 2)
+            .await
+            .unwrap());
         assert!(handle.queue.is_stopped());
         assert!(registry.state.lock().unwrap().owners.is_empty());
         assert!(!registry.unload(key, handle, 3).await.unwrap());
@@ -3255,7 +3350,12 @@ mod tests {
     #[tokio::test]
     async fn idle_check_unloads_only_after_full_ttl_without_activity() {
         const TTL: i64 = 1_000_000_000;
-        fn fixture_with_ttl() -> (tempfile::TempDir, Arc<SqliteTaskStore>, QueueRegistry, TaskListKey) {
+        fn fixture_with_ttl() -> (
+            tempfile::TempDir,
+            Arc<SqliteTaskStore>,
+            QueueRegistry,
+            TaskListKey,
+        ) {
             let (dir, store, registry, key) = fixture();
             let registry = registry
                 .with_idle_tasklist_check_interval(Arc::new(|_: &str, _: &str, _: i32| TTL));
@@ -3267,7 +3367,10 @@ mod tests {
         let idle = registry.get(key.clone(), 0, 1).await.unwrap();
         idle.liveness.mark_alive(0);
         registry.sweep_idle(TTL - 1, false).await.unwrap();
-        assert!(!idle.queue.is_stopped(), "idle check interval had not passed yet");
+        assert!(
+            !idle.queue.is_stopped(),
+            "idle check interval had not passed yet"
+        );
         registry.sweep_idle(TTL, false).await.unwrap();
         assert!(idle.queue.is_stopped());
 
@@ -3276,7 +3379,10 @@ mod tests {
         let poller = registry.get(key.clone(), 0, 1).await.unwrap();
         poller.liveness.mark_alive(TTL / 2);
         registry.sweep_idle(TTL, false).await.unwrap();
-        assert!(!poller.queue.is_stopped(), "manager should be alive after MarkAlive");
+        assert!(
+            !poller.queue.is_stopped(),
+            "manager should be alive after MarkAlive"
+        );
         registry.sweep_idle(TTL / 2 + TTL, false).await.unwrap();
         assert!(poller.queue.is_stopped());
 
@@ -3286,7 +3392,10 @@ mod tests {
         let base = registry_now();
         adding.append(vec![TaskData::default()], 1).await.unwrap();
         registry.sweep_idle(base + TTL / 2, false).await.unwrap();
-        assert!(!adding.queue.is_stopped(), "manager should be alive after AddTask MarkAlive");
+        assert!(
+            !adding.queue.is_stopped(),
+            "manager should be alive after AddTask MarkAlive"
+        );
         registry.sweep_idle(base + 2 * TTL, false).await.unwrap();
         assert!(adding.queue.is_stopped());
     }
@@ -3322,7 +3431,10 @@ mod tests {
                 Some(tokio::time::Instant::now() + Duration::from_secs(1)),
             )
             .await;
-        assert_eq!(crate::matching_panic::armed_left_for_test("notify_partition_config"), 0);
+        assert_eq!(
+            crate::matching_panic::armed_left_for_test("notify_partition_config"),
+            0
+        );
     }
 
     // Go `adaptiveScalerImpl.fetchMetricsFromPartitions` + `run()`: a panicking describe is captured as the
@@ -3340,7 +3452,10 @@ mod tests {
         crate::matching_panic::arm_panic_for_test("describe_partition", 1);
         let outcome = registry.scaler_update(&key, &config, &mut scaler).await;
         assert!(matches!(outcome, Ok(true)), "{outcome:?}");
-        assert_eq!(crate::matching_panic::armed_left_for_test("describe_partition"), 0);
+        assert_eq!(
+            crate::matching_panic::armed_left_for_test("describe_partition"),
+            0
+        );
     }
 
     // Go: TestRefreshTaskListPartitionConfig (task_list_manager_test.go:1380), cases "refresh from
@@ -3423,11 +3538,23 @@ mod tests {
         handle.pollers.lock().unwrap().start("poller1", info(), 1);
         assert!(handle.has_poller_after(i64::MIN), "outstanding poller");
         handle.pollers.lock().unwrap().end("poller1", 2);
-        assert!(handle.has_poller_after(i64::MIN), "poller finished after the query time");
-        assert!(handle.has_poller_after(1), "poller finished at 2 is after the query time 1");
+        assert!(
+            handle.has_poller_after(i64::MIN),
+            "poller finished after the query time"
+        );
+        assert!(
+            handle.has_poller_after(1),
+            "poller finished at 2 is after the query time 1"
+        );
         // Go's "finished before the query time" branch: a poller that ended at the query time or earlier does not count.
-        assert!(!handle.has_poller_after(2), "poller finished at the query time is not after it");
-        assert!(!handle.has_poller_after(3), "poller finished before the query time");
+        assert!(
+            !handle.has_poller_after(2),
+            "poller finished at the query time is not after it"
+        );
+        assert!(
+            !handle.has_poller_after(3),
+            "poller finished before the query time"
+        );
     }
     // Go: TestQueriesPerSecond (task_list_manager_test.go:457), case "returns zero QPS". Go reads
     // the manager's qpsTracker; Rust sums the tracker of loaded, unstopped owners with the name.
@@ -3469,18 +3596,32 @@ mod tests {
         let domain_b1 = registry.get(owner(2, "shared-name"), 0, 1).await.unwrap();
         assert_eq!(registry.loaded_owner_count(), 3, "all managers");
         let names_in = |domain: u128| {
-            let response = registry.describe_by_domain(Uuid::from_u128(domain), true, registry_now());
+            let response =
+                registry.describe_by_domain(Uuid::from_u128(domain), true, registry_now());
             let mut names: Vec<String> = response.decision_task_list_map.keys().cloned().collect();
             names.sort();
             names
         };
-        assert_eq!(names_in(1), vec!["other-name", "shared-name"], "managers by domain A");
+        assert_eq!(
+            names_in(1),
+            vec!["other-name", "shared-name"],
+            "managers by domain A"
+        );
         assert_eq!(names_in(2), vec!["shared-name"], "managers by domain B");
         assert!(names_in(3).is_empty(), "missing domain has no managers");
         registry.stop_task_list_name("shared-name").await.unwrap();
-        assert!(domain_a1.queue.is_stopped(), "exact name filter stops domain A");
-        assert!(domain_b1.queue.is_stopped(), "exact name filter spans domains");
-        assert!(!domain_a2.queue.is_stopped(), "a different name stays loaded");
+        assert!(
+            domain_a1.queue.is_stopped(),
+            "exact name filter stops domain A"
+        );
+        assert!(
+            domain_b1.queue.is_stopped(),
+            "exact name filter spans domains"
+        );
+        assert!(
+            !domain_a2.queue.is_stopped(),
+            "a different name stays loaded"
+        );
         assert_eq!(registry.loaded_owner_count(), 1);
     }
     // Go: TestDescribeTaskList (task_list_manager_test.go:304), case "no status, with config".

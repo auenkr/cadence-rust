@@ -1,0 +1,8 @@
+# Matching: absent QueryWorkflow fields (implementation, UNRUN)
+Source: origin/t3/matching-nil-domain-review memory/matching-nil-query-domain-source-review.md (corrected 14ccc39b6), base origin/t3/respond-query-task-parity 78006b797.
+- `QueryWorkflow` (grpc_matching.rs) no longer returns BadRequest for absent `request`/`task_list`: nil-safe like Go; absent list => default (empty) list; absent request => default payload.
+- `PendingQuery.shape: QueryShape{task_list_absent,query_absent}` is runtime-only (never persisted/serialized). Forwarding to a parent clears `task_list_absent` (Go forwarder builds a fresh TaskList); query absence is kept.
+- Local decision poll (`queue.queries.next()` arm): invalid shape => `Status::unknown("runtime error: invalid memory address or nil pointer dereference")`, no `deliver`/`complete`, so the caller stays pending until deadline (`context deadline exceeded`, Internal) and `Registration` drop cleans the waiter.
+- `matching_panic::is_captured_panic_message` also matches that exact message so Thrift/TChannel map it to system error 0x05.
+- Tests (matching_query_forward_family_tests.rs): `absent_query_fields_*` for absent list, absent query, absent request, both. Normal-query behaviour covered by existing tests.
+- NOT RUN: no Cargo/CI executed. Unverified: empty-name default list accepted by `TaskListName::parse`/`durable_queue` and by a poll on an empty list (if rejected, the absent-list tests need adjusting); remote-forwarded poll path (non-queues/frontend path, `forward_query_poll`) does not apply the shape check; malformed-domain work untouched.
