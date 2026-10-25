@@ -1749,7 +1749,10 @@ pub async fn run(
             // Writers are stopped by runtime shutdown; sample the channel
             // again after listener teardown so that race cannot hide exit 2.
             if fatal_writer.is_none() {
-                fatal_writer = fatal_writer_rx.try_recv().ok().map(|cause| cause.to_string());
+                fatal_writer = fatal_writer_rx
+                    .try_recv()
+                    .ok()
+                    .map(|cause| cause.to_string());
             }
             let mut shutdown_errors = Vec::new();
             if let Some(Err(error)) = serving_result {
