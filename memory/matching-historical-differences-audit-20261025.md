@@ -30,3 +30,13 @@ The first four rows' implementation/evidence details are in `memory/evidence/mat
 ## Result and limits
 
 No additional production behavior gap was established among the historical proposed accepted differences reviewed here. The gRPC TLS missing/lone certificate startup behavior is a verified open gap already assigned elsewhere. This is a narrow source reconciliation, not a full Matching parity sign-off and not evidence for mixed-service runtime behavior. The earlier historical open-gap counts and notes must not be treated as current status without their source revisions being reconciled.
+
+## Parent follow-up: nonpositive task batch size
+
+Checked primary Go `service/matching/tasklist/task_reader.go`: both
+`newTaskReader` (lines108-116) and `getTaskBatchWithRange` (lines300-308)
+explicitly replace nonpositive raw values with the property default. Rust
+`matching_reader.rs` keeps raw getters separate from `buffer_batch_size` and
+`read_batch_size`, and its active tests cover raw0/-5 plus fallback behavior.
+This resolves the limited raw-value concern in the source review above; raw
+accessor preservation is not a claim that production should request zero rows.
