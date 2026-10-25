@@ -299,7 +299,6 @@ async fn query_forward_family_busy_parent_keeps_query_for_local_poller() {
     // child keeps the query for a local poller instead of failing the caller.
     // Go starts the local poller only after the forward was attempted; the
     // poller here waits for the parent's receipt in the same way.
-    let empty_list = poll_list.name.is_empty();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
@@ -450,6 +449,7 @@ async fn absent_query_case(
     shaped: impl FnOnce(&mut m::QueryWorkflowRequest),
     poll_list: p::TaskList,
 ) {
+    let empty_list = poll_list.name.is_empty();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
