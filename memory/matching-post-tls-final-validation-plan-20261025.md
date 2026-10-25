@@ -557,6 +557,43 @@ error-mapping evidence. Preserve domain lookup/precedence. This integration
 does not close HTTP TLS interop, gRPC TLS gaps, or Matching parity; Matching
 remains INCOMPLETE and the existing eligibility labels stay unchanged.
 
+## History ring stub candidate and pending HTTP TLS rerun (2026-10-25)
+
+Independently approved stub branch
+`t3/matching-history-ring-stub-20261025` was based on code source
+`d28a5b22ca87a2978f9db6121510ba927b6179a` and integrated at final tip
+`107d5cfced5f8a6d8c29480507aaa75b1df6c792`. Review scope is test/harness
+only: the Go history ring member advertises `serviceName=cadence-history` and
+the existing Rust History gRPC fixture. It adds no Rust production or
+assertion change.
+
+Static review confirmed `ringpopprovider.Provider.Start` iterates and sets only
+the supplied port map; there is no required `PortTchannel` entry. The provider
+reads the TChannel label optionally and has an address-port fallback. The
+revised harness starts `go test` in a new session, writes its release signal,
+waits up to 30 seconds, kills the process group if needed, and waits to reap
+the group leader. The final approved diff from `d28a5b22` is limited to
+dropping the TChannel label from the fixture and this process-group cleanup.
+`git diff --check` passed for those code/docs changes.
+
+The fixture limitation is explicit: the Ringpop member is a real Go provider
+but it advertises the Rust History fixture's gRPC port. It exercises Matching's
+History discovery and request path; it is not validation against the original
+Go History service and cannot count as mixed Go-service acceptance.
+
+Merge commit `29bdd2b04b573309112286c57f1c347f0ba0b60c` is pushed. Stable
+candidate `t3/matching-validation-history-ring-20261025` pins that exact SHA.
+After checking that no interop or mixed gate was active, dispatched only the
+HTTP TLS interop workflow:
+[40172574953](https://github.com/auenkr/cadence-rust/actions/runs/40172574953)
+is in progress on the exact candidate SHA. Automatic cached workspace run
+40172228720 was still in progress at that pre-dispatch check and was not
+duplicated. No other workflow was dispatched. Inspect the interop artifact,
+binary SHA and all scenario outcomes before moving to another lane. Keep all
+production Go-service gates pending until standalone interop passes, then run
+them serially on a separately pinned final source. Matching remains
+INCOMPLETE; retain `preliminary-passed` and `acceptanceEligible:false`.
+
 Integration record: the reviewed branch terminal tip
 `d04ee7492a3744c92adc9e8b118351a25303bfe7` was merged with the routine plan
 overlap resolved in merge commit
