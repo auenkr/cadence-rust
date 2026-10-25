@@ -1,0 +1,35 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "rustProductionBinary": "/tmp/cargo-target-final-40153901033/debug/cadence-matching",
+  "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+  "historyTransport": "grpc",
+  "matchingTransport": "grpc",
+  "rustDynamicConfigFile": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-dynamic-config.yaml",
+  "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+  "acceptanceEligible": false,
+  "persistence": null,
+  "shardDistributor": null,
+  "serverCommand": [
+    "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/cadence-server",
+    "--config",
+    "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/config",
+    "--zone",
+    "mysql",
+    "start",
+    "--auto-setup",
+    "--services",
+    "frontend,history,worker"
+  ],
+  "artifactsDirectory": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+  "runExitCode": 1,
+  "failure": "TimeoutExpired: Command '['node', '/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs', '127.0.0.1:20764', '127.0.0.1:23417', '127.0.0.1:17595', '/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching', '127.0.0.1:29739', 'restart', '8635', 'production']' timed out after 1199.9999784880001 seconds"
+}

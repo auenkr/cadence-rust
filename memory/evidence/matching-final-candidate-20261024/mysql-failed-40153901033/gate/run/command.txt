@@ -1,0 +1,2 @@
+env CADENCE_MYSQL_ADDR=127.0.0.1:3306 CADENCE_MYSQL_DOCKER_CONTAINER=cadence-rust-gate-mysql-lane-20261025T022014-8068
+/usr/bin/python3 /home/runner/work/cadence-rust/cadence-rust/tests/run-go-service-baseline.py --rust-services matching --mysql --rust-production-binary /tmp/cargo-target-final-40153901033/debug/cadence-matching --artifacts-dir out/gate/run --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --matching-backlog-forward --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint

@@ -1,0 +1,27 @@
+{"pacedListOwner":{"label":"before-paced-poll","primaryOwner":"127.0.0.1:17594","secondaryOwner":"127.0.0.1:17594","agree":true}}
+{"pacedListOwner":{"label":"before-paced-describe","primaryOwner":"127.0.0.1:17594","secondaryOwner":"127.0.0.1:17594","agree":true}}
+PROBE BODY FAILED: Error: 14 UNAVAILABLE: No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:17595. Resolution note: 
+    at callErrorFromStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:84:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:23:19
+    at new Promise (<anonymous>)
+    at attempt (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:18:35)
+    at /home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:28:26
+    at ownerRpc (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:34:5)
+    at durableRestart (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:227:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async runScenario (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:332:19) {
+  code: 14,
+  details: 'No connection established. Last error: Error: connect ECONNREFUSED 127.0.0.1:17595. Resolution note: ',
+  metadata: Metadata { internalRepr: Map(0) {}, options: {} }
+}
+Error: Rust Matching exited {"code":null,"signal":"SIGTERM"}; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching/rust-server-after-restart.log
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1592:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)

@@ -1,0 +1,3 @@
+# Failed candidate MySQL extended lane
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40153901033, source `27d3ff5f60f0604553824420da0cf61026eda468`, conclusion failure. Fresh build passed; binary hash is preserved. Probe reports UNAVAILABLE/ECONNREFUSED after the durable-restart scenario restarts the primary. Finally then reports SIGTERM exit and process remains alive until the1200-second subprocess timeout. This is failed evidence, not backend acceptance. Root cause remains under investigation by matching-mysql-final-restart-20261025; no assertion has been weakened. Full artifact ZIP is retained on disk outside the repository; compact diagnostics are preserved here.
