@@ -36,9 +36,17 @@ jobs:
           echo "$result" > out/build.exit
           if [ "$result" != 0 ]; then tail -60 out/build.log; exit "$result"; fi
           sha256sum "$CARGO_TARGET_DIR/debug/cadence-matching" > out/binary.sha256
+      - name: Probe dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/node-grpc"
+          cd "$RUNNER_TEMP/node-grpc"
+          npm install @grpc/grpc-js@^1.14.6 @grpc/proto-loader@^0.8.1
       - name: Run active offer against Go History
+        env:
+          NODE_PATH: ${{ runner.temp }}/node-grpc/node_modules
         run: |
           set +e
+          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --probe-active-offer --matching-idle-check-seconds 3' > out/command.txt
           tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" \
             --probe-active-offer --matching-idle-check-seconds 3 > out/gate.log 2>&1
           result=$?
