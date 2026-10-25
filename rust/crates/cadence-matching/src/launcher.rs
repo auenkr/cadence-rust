@@ -1263,7 +1263,8 @@ pub async fn run(
                     .expect("configured Matching stores are opened for production");
                 Some(match stores.domain_metadata_source.clone() {
                     Some(source) => std::sync::Arc::new(
-                        crate::matching_domain_cache::MatchingDomainCache::new(source),
+                        crate::matching_domain_cache::MatchingDomainCache::new(source)
+                            .with_domain_id_parse(stores.domain_id_parse),
                     ),
                     None => crate::matching_domain_cache::MatchingDomainCache::from_default_store_with_limiter(
                         &cfg.persistence,

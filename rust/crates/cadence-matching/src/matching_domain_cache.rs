@@ -436,6 +436,7 @@ pub struct MatchingDomainCache {
     last_source_error_retryable: Mutex<Option<bool>>,
     stopped: Arc<std::sync::atomic::AtomicBool>,
     lifecycle: Mutex<Lifecycle>,
+    domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
 }
 
 impl MatchingDomainCache {
@@ -536,7 +537,10 @@ impl MatchingDomainCache {
             Some(limiter) => crate::matching_persistence::limit_domain_source(source, limiter),
             None => source,
         };
-        Ok(Arc::new(Self::new(source)))
+        // Go's sqlite plugin uses the SQL domain store (MustParseUUID).
+        Ok(Arc::new(Self::new(source).with_domain_id_parse(
+            crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
+        )))
     }
 
     pub fn new(source: Arc<dyn DomainMetadataSource>) -> Self {
@@ -561,7 +565,18 @@ impl MatchingDomainCache {
                 stopped: false,
                 worker: None,
             }),
+            domain_id_parse: Default::default(),
         }
+    }
+
+    /// Backend parse mode for the pre-handler domain lookup guard (set before sharing).
+    pub fn with_domain_id_parse(mut self, mode: crate::matching_domain_uuid::DomainIdParse) -> Self {
+        self.domain_id_parse = mode;
+        self
+    }
+
+    pub fn domain_id_parse(&self) -> crate::matching_domain_uuid::DomainIdParse {
+        self.domain_id_parse
     }
 
     /// Initial scan is synchronous, matching Go Start; a failed initial scan is
