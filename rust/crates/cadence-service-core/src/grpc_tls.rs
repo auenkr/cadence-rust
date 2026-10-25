@@ -50,6 +50,106 @@ pub fn server_tls(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {
     Ok(Some(server))
 }
 
+/// Build rustls server TLS for Go-compatible cases tonic cannot represent:
+/// either an absent server identity, or required client auth with an explicit
+/// CA file/list that parsed to an empty certificate pool.
+pub fn server_tls_custom_incoming(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ServerConfig>>> {
+    let explicit_ca = !tls.ca_file.is_empty() || !tls.ca_files.is_empty();
+    let missing_identity = tls.cert_file.is_empty() || tls.key_file.is_empty();
+    if !tls.enabled || (!missing_identity && !(tls.require_client_auth && explicit_ca)) {
+        return Ok(None);
+    }
+    install_tls_crypto_provider();
+    let ca_certs = ca_certs(tls)?;
+    let mut roots = RootCertStore::empty();
+    let mut ignored_invalid_ca = false;
+    for cert in &ca_certs {
+        if roots.add(cert.clone()).is_err() {
+            ignored_invalid_ca = true;
+        }
+    }
+    let empty_client_ca = tls.require_client_auth && roots.is_empty();
+    let needs_compatible_ca_filter = tls.require_client_auth && ignored_invalid_ca;
+    if !missing_identity && !empty_client_ca && !needs_compatible_ca_filter {
+        return Ok(None);
+    }
+    let builder =
+        ServerConfig::builder_with_provider(provider()).with_safe_default_protocol_versions()?;
+    let builder = if tls.require_client_auth {
+        let verifier: Arc<dyn rustls::server::danger::ClientCertVerifier> = if roots.is_empty() {
+            Arc::new(EmptyClientCaPool)
+        } else {
+            rustls::server::WebPkiClientVerifier::builder(Arc::new(roots)).build()?
+        };
+        builder.with_client_cert_verifier(verifier)
+    } else {
+        builder.with_no_client_auth()
+    };
+    let mut server = if missing_identity {
+        builder.with_cert_resolver(Arc::new(NoServerCertificate))
+    } else {
+        let (cert_pem, key_pem) = read_identity(tls)?;
+        let (certs, key) = parse_identity(&cert_pem, &key_pem)?;
+        builder
+            .with_single_cert(certs, key)
+            .context("rpc.tls certFile/keyFile pair is not valid")?
+    };
+    server.alpn_protocols = vec![b"h2".to_vec()];
+    Ok(Some(Arc::new(server)))
+}
+
+#[derive(Debug)]
+struct NoServerCertificate;
+impl rustls::server::ResolvesServerCert for NoServerCertificate {
+    fn resolve(
+        &self,
+        _: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        None
+    }
+}
+
+#[derive(Debug)]
+struct EmptyClientCaPool;
+impl rustls::server::danger::ClientCertVerifier for EmptyClientCaPool {
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+    fn verify_client_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls13_signature(
+        &self,
+        m: &[u8],
+        c: &CertificateDer<'_>,
+        s: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.verify_tls12_signature(m, c, s)
+    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 /// Outbound TLS for a gRPC peer, built from the target service's `rpc.tls`.
 #[derive(Clone)]
 pub struct ClientTls {
@@ -261,7 +361,9 @@ impl ServerCertVerifier for SkipChainVerification {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider.signature_verification_algorithms.supported_schemes()
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -275,8 +377,8 @@ mod tests {
     use std::{net::SocketAddr, path::Path, time::Duration};
 
     use tonic_reflection::pb::v1::{
-        server_reflection_client::ServerReflectionClient, server_reflection_request::MessageRequest,
-        ServerReflectionRequest,
+        server_reflection_client::ServerReflectionClient,
+        server_reflection_request::MessageRequest, ServerReflectionRequest,
     };
 
     use super::*;
@@ -297,9 +399,13 @@ mod tests {
 
     /// Returns `(certificate PEM, private key PEM)` for `names`, signed by `ca`.
     fn issue(ca: &Ca, names: &[&str]) -> (String, String) {
-        let params =
-            rcgen::CertificateParams::new(names.iter().map(|name| name.to_string()).collect::<Vec<_>>())
-                .unwrap();
+        let params = rcgen::CertificateParams::new(
+            names
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         let key = rcgen::KeyPair::generate().unwrap();
         let cert = params.signed_by(&key, &ca.cert, &ca.key).unwrap();
         (cert.pem(), key.serialize_pem())
@@ -319,9 +425,9 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = server_builder(tls).unwrap().add_service(reflection);
-        tokio::spawn(server.serve_with_incoming(
-            tokio_stream::wrappers::TcpListenerStream::new(listener),
-        ));
+        tokio::spawn(
+            server.serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        );
         addr
     }
 
@@ -339,7 +445,11 @@ mod tests {
                 .await
                 .map_err(|status| status.to_string())?
                 .into_inner();
-            match stream.message().await.map_err(|status| status.to_string())? {
+            match stream
+                .message()
+                .await
+                .map_err(|status| status.to_string())?
+            {
                 Some(_) => Ok(()),
                 None => Err("reflection stream closed".to_owned()),
             }
@@ -349,7 +459,12 @@ mod tests {
             .map_err(|_| "gRPC call timed out".to_owned())?
     }
 
-    fn server_config(dir: &Path, ca_file: &str, identity: &(String, String), client_auth: bool) -> TlsConfig {
+    fn server_config(
+        dir: &Path,
+        ca_file: &str,
+        identity: &(String, String),
+        client_auth: bool,
+    ) -> TlsConfig {
         TlsConfig {
             enabled: true,
             cert_file: write(dir, "server-cert.pem", &identity.0),
@@ -400,11 +515,71 @@ mod tests {
             ..Default::default()
         };
         assert!(server_tls(&mismatched).is_err());
+        let malformed = TlsConfig {
+            enabled: true,
+            cert_file: write(dir.path(), "malformed-cert.pem", "not a certificate"),
+            key_file: write(dir.path(), "malformed-key.pem", "not a private key"),
+            ..Default::default()
+        };
+        assert!(server_tls(&malformed).is_err());
+        let unreadable_pair = TlsConfig {
+            enabled: true,
+            cert_file: "/missing/server-cert.pem".into(),
+            key_file: "/missing/server-key.pem".into(),
+            ..Default::default()
+        };
+        assert!(server_tls(&unreadable_pair).is_err());
         let missing = TlsConfig {
             enabled: true,
             ..Default::default()
         };
         assert!(server_tls(&missing).is_err());
+    }
+
+    #[test]
+    fn missing_server_identity_keeps_tls_enabled_without_a_certificate() {
+        let dir = tempfile::tempdir().unwrap();
+        let invalid_ca = dir.path().join("invalid-ca.pem");
+        std::fs::write(&invalid_ca, b"not a PEM certificate").unwrap();
+        let valid_ca = new_ca();
+        let valid_ca_file = write(dir.path(), "valid-ca.pem", &valid_ca.cert.pem());
+        for config in [
+            TlsConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                cert_file: "/ignored/cert.pem".into(),
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                key_file: "/ignored/key.pem".into(),
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                ca_file: invalid_ca.to_string_lossy().into_owned(),
+                require_client_auth: true,
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                ca_file: valid_ca_file,
+                require_client_auth: true,
+                ..Default::default()
+            },
+        ] {
+            let server = server_tls_custom_incoming(&config).unwrap().unwrap();
+            assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
+        }
+        let missing_ca = TlsConfig {
+            enabled: true,
+            ca_file: "/missing/cadence-ca.pem".into(),
+            ..Default::default()
+        };
+        assert!(server_tls_custom_incoming(&missing_ca).is_err());
     }
 
     #[tokio::test]
@@ -441,9 +616,71 @@ mod tests {
             .unwrap()
         };
 
-        assert_eq!(call(addr, Some(&client(Some(&client_identity)))).await, Ok(()));
+        assert_eq!(
+            call(addr, Some(&client(Some(&client_identity)))).await,
+            Ok(())
+        );
         assert!(call(addr, Some(&client(None))).await.is_err());
-        assert!(call(addr, Some(&client(Some(&rogue_identity)))).await.is_err());
+        assert!(call(addr, Some(&client(Some(&rogue_identity))))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn server_ca_and_client_auth_matrix_matches_go_startup_and_handshakes() {
+        install_tls_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let ca = new_ca();
+        let server_identity = issue(&ca, &["localhost", "127.0.0.1"]);
+        let ca_file = write(dir.path(), "matrix-ca.pem", &ca.cert.pem());
+        let empty_ca_file = write(dir.path(), "matrix-empty-ca.pem", "not PEM");
+
+        for ca_file in [None, Some(empty_ca_file.as_str()), Some(ca_file.as_str())] {
+            let config = TlsConfig {
+                enabled: true,
+                cert_file: write(dir.path(), "matrix-server-cert.pem", &server_identity.0),
+                key_file: write(dir.path(), "matrix-server-key.pem", &server_identity.1),
+                ca_file: ca_file.unwrap_or_default().to_owned(),
+                ..Default::default()
+            };
+            let server = server_tls(&config).unwrap().unwrap();
+            let addr = serve_reflection(Some(server)).await;
+            let peer = client_tls(&TlsConfig {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(call(addr, Some(&peer)).await, Ok(()));
+        }
+
+        // Without an explicit CA Go uses system roots; with an invalid PEM CA
+        // Go keeps an empty pool. Both start successfully and reject a client
+        // that presents no certificate. The valid-CA case (accept, reject
+        // missing and rogue clients) is covered by the test above.
+        for ca_file in [None, Some(empty_ca_file.as_str())] {
+            let config = TlsConfig {
+                enabled: true,
+                cert_file: write(dir.path(), "auth-server-cert.pem", &server_identity.0),
+                key_file: write(dir.path(), "auth-server-key.pem", &server_identity.1),
+                ca_file: ca_file.unwrap_or_default().to_owned(),
+                require_client_auth: true,
+                ..Default::default()
+            };
+            if ca_file.is_some() {
+                assert!(server_tls_custom_incoming(&config).unwrap().is_some());
+                continue;
+            }
+            let server = server_tls(&config).unwrap().unwrap();
+            let addr = serve_reflection(Some(server)).await;
+            let peer = client_tls(&TlsConfig {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap()
+            .unwrap();
+            assert!(call(addr, Some(&peer)).await.is_err());
+        }
     }
 
     #[tokio::test]
@@ -455,9 +692,14 @@ mod tests {
         let server_identity = issue(&ca, &["localhost", "127.0.0.1"]);
         let ca_file = write(dir.path(), "ca.pem", &ca.cert.pem());
         let other_ca_file = write(dir.path(), "other-ca.pem", &other.cert.pem());
-        let server = server_tls(&server_config(dir.path(), &ca_file, &server_identity, false))
-            .unwrap()
-            .unwrap();
+        let server = server_tls(&server_config(
+            dir.path(),
+            &ca_file,
+            &server_identity,
+            false,
+        ))
+        .unwrap()
+        .unwrap();
         let addr = serve_reflection(Some(server)).await;
 
         let verified = |ca_file: &str, server_name: &str, enable_host_verification: bool| {
@@ -473,13 +715,27 @@ mod tests {
         };
 
         // The IP address is covered by the certificate's SAN.
-        assert_eq!(call(addr, Some(&verified(&ca_file, "", true))).await, Ok(()));
-        assert_eq!(call(addr, Some(&verified(&ca_file, "localhost", true))).await, Ok(()));
-        assert!(call(addr, Some(&verified(&ca_file, "wrong.example", true))).await.is_err());
-        assert!(call(addr, Some(&verified(&other_ca_file, "", true))).await.is_err());
+        assert_eq!(
+            call(addr, Some(&verified(&ca_file, "", true))).await,
+            Ok(())
+        );
+        assert_eq!(
+            call(addr, Some(&verified(&ca_file, "localhost", true))).await,
+            Ok(())
+        );
+        assert!(call(addr, Some(&verified(&ca_file, "wrong.example", true)))
+            .await
+            .is_err());
+        assert!(call(addr, Some(&verified(&other_ca_file, "", true)))
+            .await
+            .is_err());
         // Go's InsecureSkipVerify accepts the same server with an untrusted CA and wrong name.
         assert_eq!(
-            call(addr, Some(&verified(&other_ca_file, "wrong.example", false))).await,
+            call(
+                addr,
+                Some(&verified(&other_ca_file, "wrong.example", false))
+            )
+            .await,
             Ok(())
         );
     }

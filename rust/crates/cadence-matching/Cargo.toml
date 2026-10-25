@@ -27,6 +27,7 @@ rustls-native-certs = "0.8"
 crc32fast = "1"
 crc32c = "0.6"
 anyhow = "1"
+futures-util = "0.3"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

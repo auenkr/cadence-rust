@@ -117,7 +117,10 @@ const ISOLATION_GROUP_KEY: &str = "isolation-group";
 /// `context.DeadlineExceeded`, which `handleErr` turns into InternalServiceError.
 pub(crate) fn check_poll_context(deadline: Option<tokio::time::Instant>) -> Result<(), Status> {
     match deadline {
-        Some(deadline) if deadline.saturating_duration_since(tokio::time::Instant::now()) < std::time::Duration::from_millis(10) => {
+        Some(deadline)
+            if deadline.saturating_duration_since(tokio::time::Instant::now())
+                < std::time::Duration::from_millis(10) =>
+        {
             Err(Status::internal("context deadline exceeded"))
         }
         _ => Ok(()),
@@ -369,15 +372,21 @@ pub type TaskListOwnershipCheck = Arc<
 impl Matching {
     pub fn new(state: crate::handlers::AppState) -> Self {
         // Go builds the semaphore registry on the configured default datastore.
-        let semaphore_store: Arc<dyn cadence_persistence::SemaphorePersistence> = match &state.semaphore_persistence {
-            Some(store) => store.clone(),
-            None => Arc::new(state.executions.clone()),
-        };
+        let semaphore_store: Arc<dyn cadence_persistence::SemaphorePersistence> =
+            match &state.semaphore_persistence {
+                Some(store) => store.clone(),
+                None => Arc::new(state.executions.clone()),
+            };
         let semaphores = crate::matching_semaphore::Registry::new(semaphore_store);
         let rpc_quota = Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
-            state.admin.dynamic_config.clone(), Arc::new(|_| {}),
+            state.admin.dynamic_config.clone(),
+            Arc::new(|_| {}),
         ));
-        let throttled_logger = Arc::new(crate::matching_throttled_logger::MatchingThrottledLogger::new(state.admin.dynamic_config.clone()));
+        let throttled_logger = Arc::new(
+            crate::matching_throttled_logger::MatchingThrottledLogger::new(
+                state.admin.dynamic_config.clone(),
+            ),
+        );
         Self {
             frontend: Frontend { state },
             polls: Arc::new(Mutex::new(HashMap::new())),
@@ -968,7 +977,10 @@ impl Matching {
     }
     pub(crate) async fn wait_started(&self) {
         let mut started = self.started.subscribe();
-        started.wait_for(|ready| *ready).await.expect("Matching startup sender lives with handler");
+        started
+            .wait_for(|ready| *ready)
+            .await
+            .expect("Matching startup sender lives with handler");
     }
     pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
         self.queues = self
@@ -1116,42 +1128,44 @@ impl Matching {
         F: std::future::Future<Output = ()> + Send,
     {
         crate::matching_panic::capture::<(), Status>("membership change loop", async move {
-        let Some(membership) = &self.membership else {
-            return Ok(());
-        };
-        let mut changes = membership.subscribe();
-        tokio::pin!(shutdown);
-        loop {
-            let queues = match &self.queues {
-                Some(queues) => queues.unload_non_owned(matching_now()).await.map(|_| ()),
-                None => Ok(()),
+            let Some(membership) = &self.membership else {
+                return Ok(());
             };
-            // Do not let a SQL cleanup failure prevent semaphore cleanup.
-            for manager in self.semaphores.all_managers() {
-                match membership.owns(&manager.identifier().ring_key()) {
-                    Ok(false) => {
-                        let stopped = crate::matching_panic::capture_sync("semaphore manager stop", || manager.stop());
-                        self.semaphores.unregister(&manager);
-                        if let Err(message) = stopped {
-                            eprintln!("Matching semaphore unload failed: {message}");
+            let mut changes = membership.subscribe();
+            tokio::pin!(shutdown);
+            loop {
+                let queues = match &self.queues {
+                    Some(queues) => queues.unload_non_owned(matching_now()).await.map(|_| ()),
+                    None => Ok(()),
+                };
+                // Do not let a SQL cleanup failure prevent semaphore cleanup.
+                for manager in self.semaphores.all_managers() {
+                    match membership.owns(&manager.identifier().ring_key()) {
+                        Ok(false) => {
+                            let stopped = crate::matching_panic::capture_sync(
+                                "semaphore manager stop",
+                                || manager.stop(),
+                            );
+                            self.semaphores.unregister(&manager);
+                            if let Err(message) = stopped {
+                                eprintln!("Matching semaphore unload failed: {message}");
+                            }
+                        }
+                        Ok(true) => {}
+                        Err(error) => {
+                            eprintln!("Matching semaphore membership lookup failed: {error}");
+                            break;
                         }
                     }
-                    Ok(true) => {}
-                    Err(error) => {
-                        eprintln!("Matching semaphore membership lookup failed: {error}");
-                        break;
-                    }
+                }
+                if let Err(error) = queues {
+                    eprintln!("Matching membership cleanup failed: {error}");
+                }
+                tokio::select! {
+                    _ = &mut shutdown => return Ok(()),
+                    result = changes.changed() => if result.is_err() { return Ok(()); },
                 }
             }
-            if let Err(error) = queues {
-                eprintln!("Matching membership cleanup failed: {error}");
-            }
-            tokio::select! {
-                _ = &mut shutdown => return Ok(()),
-                result = changes.changed() => if result.is_err() { return Ok(()); },
-            }
-        }
-
         })
         .await
         .unwrap_or(Ok(()))
@@ -1508,7 +1522,10 @@ impl Matching {
         let mut handle = entry.clone();
         let mut ancestor = false;
         let mut permits = Vec::new();
-        let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
+        let mut in_process_forward_metrics: Vec<(
+            tokio::time::Instant,
+            crate::matching_metrics::PollMetricContext,
+        )> = Vec::new();
         loop {
             let outcome = if ancestor || forwarded {
                 if handle
@@ -1553,10 +1570,7 @@ impl Matching {
                     accepted.then(|| entry.partitions.get().map(partition_config_to_internal))
                 );
             }
-            if name.is_root()
-                || list.kind == 2
-                || tokio::time::Instant::now() >= deadline
-            {
+            if name.is_root() || list.kind == 2 || tokio::time::Instant::now() >= deadline {
                 for (started, context) in in_process_forward_metrics.drain(..) {
                     self.metrics
                         .forward_task_latency(&context, started.elapsed());
@@ -1654,7 +1668,10 @@ impl Matching {
                     .forward_task_latency(&forward_context, forward_started.elapsed());
                 // Go matcher.Offer counts a parent ServiceBusy (ErrForwarderSlowDown) on the child.
                 if let Err(status) = &result {
-                    if matches!(crate::matching_forward::ForwardError::classify(status.clone()), crate::matching_forward::ForwardError::SlowDown) {
+                    if matches!(
+                        crate::matching_forward::ForwardError::classify(status.clone()),
+                        crate::matching_forward::ForwardError::SlowDown
+                    ) {
                         self.metrics.sync_forward_throttled(&forward_context);
                     }
                 }
@@ -1703,13 +1720,19 @@ impl Matching {
         domain_id: Option<&str>,
         domain_name: Option<&str>,
     ) -> Result<(), Status> {
-        let resolved = domain_name.map(str::to_owned).or_else(|| domain_id.map(|id| self.domain_name(id).unwrap_or_default()));
-        if self.rpc_quota.allow(method, resolved.as_deref()) { Ok(()) } else {
+        let resolved = domain_name
+            .map(str::to_owned)
+            .or_else(|| domain_id.map(|id| self.domain_name(id).unwrap_or_default()));
+        if self.rpc_quota.allow(method, resolved.as_deref()) {
+            Ok(())
+        } else {
             Err(crate::grpc::detailed_status(
                 tonic::Code::ResourceExhausted,
                 "Matching host rps exceeded",
                 "ServiceBusyError",
-                cadence_proto::api::ServiceBusyError { reason: String::new() },
+                cadence_proto::api::ServiceBusyError {
+                    reason: String::new(),
+                },
             ))
         }
     }
@@ -2624,271 +2647,303 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::QueryWorkflowRequest>,
     ) -> Result<Response<m::QueryWorkflowResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>("query_workflow", async move {
-        self.metrics
-            .matching_request(
-                "QueryWorkflow",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::QueryWorkflow, Some(&request.get_ref().domain_id), None)?;
-                    let incoming_deadline = crate::matching_sync::request_deadline(&request);
-                    let r = request.get_ref().clone();
-                    let mut payload = r
-                        .request
-                        .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-                    payload.domain = self.domain_name(&r.domain_id)?;
-                    if !r.forwarded_from.is_empty() {
-                        self.metrics.forwarded_per_task_list(
-                            &crate::matching_metrics::PollMetricContext {
-                                domain: payload.domain.clone(),
-                                task_list: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.name.clone())
-                                    .unwrap_or_default(),
-                                task_list_kind: r
-                                    .task_list
-                                    .as_ref()
-                                    .map(|task_list| task_list.kind)
-                                    .unwrap_or_default(),
-                                task_type: "decision_task",
-                                poller_isolation_group: String::new(),
-                            },
-                        );
-                    }
-                    // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
-                    // strong-consistency gate only applies to the local durable path.
-                    let strong =
-                        payload.query_consistency_level == p::QueryConsistencyLevel::Strong as i32;
-                    if self.queues.is_some() {
-                        // Go `matcher.OfferQuery`: offer to a waiting local decision
-                        // poller, else forward up the partition chain with a forward-task
-                        // token (no rate limit, unlike `ForwardTask`). Sticky lists and the
-                        // root never forward and wait for a local poller until the deadline
-                        // (Go has no fail-fast here). Permits are held until the query
-                        // resolves, like Go releasing the token when `ForwardQueryTask` returns.
-                        let task_list = r
+        crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>(
+            "query_workflow",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "QueryWorkflow",
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .as_deref(),
+                        request
+                            .get_ref()
                             .task_list
-                            .clone()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let name = task_list_name(&task_list.name)?;
-                        let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
-                        check_sticky_poller(&queue, &task_list)?;
-                        let task_id = uuid::Uuid::new_v4().to_string();
-                        let root = name.root().to_owned();
-                        let degree = {
-                            let config = self
-                                .frontend
-                                .state
-                                .admin
-                                .dynamic_config
-                                .lock()
-                                .expect("admin lock");
-                            cadence_persistence::dynamic_config::task_list_integer(
-                                config.property_values("matching.forwarderMaxChildrenPerNode"),
-                                domain_name_for(&self.frontend.state.domains, &r.domain_id)
-                                    .as_deref(),
-                                root.as_str(),
-                                0,
-                                20,
-                            )
-                            // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
-                            .max(1)
-                        };
-                        let deadline = incoming_deadline
-                            .unwrap_or_else(|| tokio::time::Instant::now() + self.poll_expiration);
-                        let mut list = task_list.clone();
-                        // Go `resp.PartitionConfig = tlMgr.TaskListPartitionConfig()` on the
-                        // task list the caller asked for, not on the partition it forwards to.
-                        let partitions = queue.partitions.clone();
-                        let mut handle = queue;
-                        let mut permits = Vec::new();
-                        let mut in_process_forward_metrics: Vec<(tokio::time::Instant, crate::matching_metrics::PollMetricContext)> = Vec::new();
-                        let mut force_local = false;
-                        loop {
-                            let query = crate::matching_query::PendingQuery {
-                                task_id: task_id.clone(),
-                                domain_id: r.domain_id.clone(),
-                                task_list: list.name.clone(),
-                                request: payload.clone(),
-                            };
-                            let receiver = handle.queries.register_waiter(&task_id);
-                            let _registration = handle.queries.registration(&task_id);
-                            let offered = if force_local {
-                                handle.queries.offer(query);
-                                true
-                            } else {
-                                handle.queries.try_offer(query)
-                            };
-                            if offered {
-                                let result = match tokio::time::timeout_at(deadline, receiver).await
-                                {
-                                    Ok(Ok(result)) => {
-                                        crate::matching_query::query_outcome(result, strong)
-                                            .map(|response| {
-                                                Response::new(m::QueryWorkflowResponse {
-                                                    partition_config: partitions
-                                                        .get()
-                                                        .map(partition_config_to_proto),
-                                                    ..response
-                                                })
-                                            })
-                                    }
-                                    Ok(Err(_)) => {
-                                        Err(Status::unavailable("Matching query channel closed."))
-                                    }
-                                    // Go ctx expiry in waitForQueryResult/OfferQuery is a raw
-                                    // ctx error, which handleErr maps to InternalServiceError.
-                                    Err(_) => Err(Status::internal("context deadline exceeded")),
+                            .as_ref()
+                            .map(|t| (t.name.as_str(), Some(t.kind))),
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::QueryWorkflow,
+                                Some(&request.get_ref().domain_id),
+                                None,
+                            )?;
+                            let incoming_deadline =
+                                crate::matching_sync::request_deadline(&request);
+                            let r = request.get_ref().clone();
+                            let mut payload = r
+                                .request
+                                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+                            payload.domain = self.domain_name(&r.domain_id)?;
+                            if !r.forwarded_from.is_empty() {
+                                self.metrics.forwarded_per_task_list(
+                                    &crate::matching_metrics::PollMetricContext {
+                                        domain: payload.domain.clone(),
+                                        task_list: r
+                                            .task_list
+                                            .as_ref()
+                                            .map(|task_list| task_list.name.clone())
+                                            .unwrap_or_default(),
+                                        task_list_kind: r
+                                            .task_list
+                                            .as_ref()
+                                            .map(|task_list| task_list.kind)
+                                            .unwrap_or_default(),
+                                        task_type: "decision_task",
+                                        poller_isolation_group: String::new(),
+                                    },
+                                );
+                            }
+                            // Go `waitForQueryResult(..., consistencyLevel == Strong, ...)`: the
+                            // strong-consistency gate only applies to the local durable path.
+                            let strong = payload.query_consistency_level
+                                == p::QueryConsistencyLevel::Strong as i32;
+                            if self.queues.is_some() {
+                                // Go `matcher.OfferQuery`: offer to a waiting local decision
+                                // poller, else forward up the partition chain with a forward-task
+                                // token (no rate limit, unlike `ForwardTask`). Sticky lists and the
+                                // root never forward and wait for a local poller until the deadline
+                                // (Go has no fail-fast here). Permits are held until the query
+                                // resolves, like Go releasing the token when `ForwardQueryTask` returns.
+                                let task_list = r.task_list.clone().ok_or_else(|| {
+                                    Status::invalid_argument("TaskList is not set.")
+                                })?;
+                                let name = task_list_name(&task_list.name)?;
+                                let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+                                check_sticky_poller(&queue, &task_list)?;
+                                let task_id = uuid::Uuid::new_v4().to_string();
+                                let root = name.root().to_owned();
+                                let degree = {
+                                    let config = self
+                                        .frontend
+                                        .state
+                                        .admin
+                                        .dynamic_config
+                                        .lock()
+                                        .expect("admin lock");
+                                    cadence_persistence::dynamic_config::task_list_integer(
+                                        config.property_values(
+                                            "matching.forwarderMaxChildrenPerNode",
+                                        ),
+                                        domain_name_for(&self.frontend.state.domains, &r.domain_id)
+                                            .as_deref(),
+                                        root.as_str(),
+                                        0,
+                                        20,
+                                    )
+                                    // Go task_list_manager clamps ForwarderMaxChildrenPerNode to >= 1.
+                                    .max(1)
                                 };
-                                for (started, context) in in_process_forward_metrics {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return result;
-                            }
-                            // `_registration` withdraws the unoffered entry; Go's
-                            // unbuffered send likewise leaves nothing behind on failure.
-                            let current = TaskListName::parse(&list.name)
-                                .map_err(|_| Status::invalid_argument("TaskList is not valid."))?;
-                            // Go has no forwarder for root or sticky lists, so OfferQuery
-                            // blocks on the unbuffered queryTaskC send until a poller takes
-                            // the query or the RPC context ends. Wait on this level instead.
-                            if list.kind == 2 || current.is_root() {
-                                force_local = true;
-                                continue;
-                            }
-                            if tokio::time::Instant::now() >= deadline {
-                                for (started, context) in in_process_forward_metrics.drain(..) {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return Err(Status::internal("context deadline exceeded"));
-                            }
-                            let parent = current.parent(degree);
-                            if parent.is_empty() {
-                                for (started, context) in in_process_forward_metrics.drain(..) {
-                                    self.metrics
-                                        .forward_query_latency(&context, started.elapsed());
-                                }
-                                return Err(Status::internal(
-                                    "cannot find parent task list for forwarding",
-                                ));
-                            }
-                            match handle.try_forward_query() {
-                                Some(permit) => {
-                                    permits.push(permit);
-                                    let forwarded_from = list.name.clone();
-                                    let forwarded_from_name = forwarded_from.clone();
-                                    let forward_context =
-                                        crate::matching_metrics::PollMetricContext {
-                                            domain: payload.domain.clone(),
-                                            task_list: forwarded_from.clone(),
-                                            task_list_kind: list.kind,
-                                            task_type: "decision_task",
-                                            poller_isolation_group: String::new(),
-                                        };
-                                    list.name = parent.clone();
-                                    if let Some(channel) =
-                                        self.remote_channel_for_task_list(&list.name).await?
-                                    {
-                                        let mut request = Request::new(m::QueryWorkflowRequest {
-                                            domain_id: r.domain_id.clone(),
-                                            request: Some(payload.clone()),
-                                            task_list: Some(list.clone()),
-                                            forwarded_from,
-                                        });
-                                        request.set_timeout(
-                                            deadline.saturating_duration_since(
-                                                tokio::time::Instant::now(),
-                                            ),
-                                        );
-                                        let forward_started = tokio::time::Instant::now();
-                                        let result =
-                                            m::matching_api_client::MatchingApiClient::new(channel)
-                                                .query_workflow(request)
-                                                .await;
-                                        self.metrics.forward_query_latency(
-                                            &forward_context,
-                                            forward_started.elapsed(),
-                                        );
-                                        // Go forwarder.handleErr maps a parent ServiceBusy to
-                                        // ErrForwarderSlowDown: keep waiting for a local poller.
-                                        if result.as_ref().err().is_some_and(crate::matching_query::query_forward_slow_down) {
-                                            permits.pop();
-                                            force_local = true;
-                                            list.name = forwarded_from_name;
-                                            continue;
-                                        }
-                                        // Go overwrites the forwarded response's config with the local one.
-                                        return result.map(|mut response| {
-                                            response.get_mut().partition_config = partitions
-                                                .get()
-                                                .map(partition_config_to_proto);
-                                            response
-                                        });
-                                    }
-                                    in_process_forward_metrics.push((
-                                        tokio::time::Instant::now(),
-                                        crate::matching_metrics::PollMetricContext {
-                                            domain: payload.domain.clone(),
-                                            task_list: forwarded_from,
-                                            task_list_kind: list.kind,
-                                            task_type: "decision_task",
-                                            poller_isolation_group: String::new(),
-                                        },
-                                    ));
-                                    list.name = parent.clone();
-                                    handle = match self.durable_queue(&r.domain_id, &list, 0).await
-                                    {
-                                        Ok(handle) => handle,
-                                        Err(error) => {
-                                            for (started, context) in
-                                                in_process_forward_metrics.drain(..)
-                                            {
-                                                self.metrics.forward_query_latency(
-                                                    &context,
-                                                    started.elapsed(),
-                                                );
-                                            }
-                                            return Err(error);
-                                        }
+                                let deadline = incoming_deadline.unwrap_or_else(|| {
+                                    tokio::time::Instant::now() + self.poll_expiration
+                                });
+                                let mut list = task_list.clone();
+                                // Go `resp.PartitionConfig = tlMgr.TaskListPartitionConfig()` on the
+                                // task list the caller asked for, not on the partition it forwards to.
+                                let partitions = queue.partitions.clone();
+                                let mut handle = queue;
+                                let mut permits = Vec::new();
+                                let mut in_process_forward_metrics: Vec<(
+                                    tokio::time::Instant,
+                                    crate::matching_metrics::PollMetricContext,
+                                )> = Vec::new();
+                                let mut force_local = false;
+                                loop {
+                                    let query = crate::matching_query::PendingQuery {
+                                        task_id: task_id.clone(),
+                                        domain_id: r.domain_id.clone(),
+                                        task_list: list.name.clone(),
+                                        request: payload.clone(),
                                     };
+                                    let receiver = handle.queries.register_waiter(&task_id);
+                                    let _registration = handle.queries.registration(&task_id);
+                                    let offered = if force_local {
+                                        handle.queries.offer(query);
+                                        true
+                                    } else {
+                                        handle.queries.try_offer(query)
+                                    };
+                                    if offered {
+                                        let result =
+                                            match tokio::time::timeout_at(deadline, receiver).await
+                                            {
+                                                Ok(Ok(result)) => {
+                                                    crate::matching_query::query_outcome(
+                                                        result, strong,
+                                                    )
+                                                    .map(|response| {
+                                                        Response::new(m::QueryWorkflowResponse {
+                                                            partition_config: partitions
+                                                                .get()
+                                                                .map(partition_config_to_proto),
+                                                            ..response
+                                                        })
+                                                    })
+                                                }
+                                                Ok(Err(_)) => Err(Status::unavailable(
+                                                    "Matching query channel closed.",
+                                                )),
+                                                // Go ctx expiry in waitForQueryResult/OfferQuery is a raw
+                                                // ctx error, which handleErr maps to InternalServiceError.
+                                                Err(_) => Err(Status::internal(
+                                                    "context deadline exceeded",
+                                                )),
+                                            };
+                                        for (started, context) in in_process_forward_metrics {
+                                            self.metrics
+                                                .forward_query_latency(&context, started.elapsed());
+                                        }
+                                        return result;
+                                    }
+                                    // `_registration` withdraws the unoffered entry; Go's
+                                    // unbuffered send likewise leaves nothing behind on failure.
+                                    let current =
+                                        TaskListName::parse(&list.name).map_err(|_| {
+                                            Status::invalid_argument("TaskList is not valid.")
+                                        })?;
+                                    // Go has no forwarder for root or sticky lists, so OfferQuery
+                                    // blocks on the unbuffered queryTaskC send until a poller takes
+                                    // the query or the RPC context ends. Wait on this level instead.
+                                    if list.kind == 2 || current.is_root() {
+                                        force_local = true;
+                                        continue;
+                                    }
+                                    if tokio::time::Instant::now() >= deadline {
+                                        for (started, context) in
+                                            in_process_forward_metrics.drain(..)
+                                        {
+                                            self.metrics
+                                                .forward_query_latency(&context, started.elapsed());
+                                        }
+                                        return Err(Status::internal("context deadline exceeded"));
+                                    }
+                                    let parent = current.parent(degree);
+                                    if parent.is_empty() {
+                                        for (started, context) in
+                                            in_process_forward_metrics.drain(..)
+                                        {
+                                            self.metrics
+                                                .forward_query_latency(&context, started.elapsed());
+                                        }
+                                        return Err(Status::internal(
+                                            "cannot find parent task list for forwarding",
+                                        ));
+                                    }
+                                    match handle.try_forward_query() {
+                                        Some(permit) => {
+                                            permits.push(permit);
+                                            let forwarded_from = list.name.clone();
+                                            let forwarded_from_name = forwarded_from.clone();
+                                            let forward_context =
+                                                crate::matching_metrics::PollMetricContext {
+                                                    domain: payload.domain.clone(),
+                                                    task_list: forwarded_from.clone(),
+                                                    task_list_kind: list.kind,
+                                                    task_type: "decision_task",
+                                                    poller_isolation_group: String::new(),
+                                                };
+                                            list.name = parent.clone();
+                                            if let Some(channel) = self
+                                                .remote_channel_for_task_list(&list.name)
+                                                .await?
+                                            {
+                                                let mut request =
+                                                    Request::new(m::QueryWorkflowRequest {
+                                                        domain_id: r.domain_id.clone(),
+                                                        request: Some(payload.clone()),
+                                                        task_list: Some(list.clone()),
+                                                        forwarded_from,
+                                                    });
+                                                request.set_timeout(
+                                                    deadline.saturating_duration_since(
+                                                        tokio::time::Instant::now(),
+                                                    ),
+                                                );
+                                                let forward_started = tokio::time::Instant::now();
+                                                let result =
+                                                    m::matching_api_client::MatchingApiClient::new(
+                                                        channel,
+                                                    )
+                                                    .query_workflow(request)
+                                                    .await;
+                                                self.metrics.forward_query_latency(
+                                                    &forward_context,
+                                                    forward_started.elapsed(),
+                                                );
+                                                // Go forwarder.handleErr maps a parent ServiceBusy to
+                                                // ErrForwarderSlowDown: keep waiting for a local poller.
+                                                if result.as_ref().err().is_some_and(
+                                                    crate::matching_query::query_forward_slow_down,
+                                                ) {
+                                                    permits.pop();
+                                                    force_local = true;
+                                                    list.name = forwarded_from_name;
+                                                    continue;
+                                                }
+                                                // Go overwrites the forwarded response's config with the local one.
+                                                return result.map(|mut response| {
+                                                    response.get_mut().partition_config =
+                                                        partitions
+                                                            .get()
+                                                            .map(partition_config_to_proto);
+                                                    response
+                                                });
+                                            }
+                                            in_process_forward_metrics.push((
+                                                tokio::time::Instant::now(),
+                                                crate::matching_metrics::PollMetricContext {
+                                                    domain: payload.domain.clone(),
+                                                    task_list: forwarded_from,
+                                                    task_list_kind: list.kind,
+                                                    task_type: "decision_task",
+                                                    poller_isolation_group: String::new(),
+                                                },
+                                            ));
+                                            list.name = parent.clone();
+                                            handle = match self
+                                                .durable_queue(&r.domain_id, &list, 0)
+                                                .await
+                                            {
+                                                Ok(handle) => handle,
+                                                Err(error) => {
+                                                    for (started, context) in
+                                                        in_process_forward_metrics.drain(..)
+                                                    {
+                                                        self.metrics.forward_query_latency(
+                                                            &context,
+                                                            started.elapsed(),
+                                                        );
+                                                    }
+                                                    return Err(error);
+                                                }
+                                            };
+                                        }
+                                        // Go blocks on the token while racing a local match; with
+                                        // an exhausted pool wait on the current level instead.
+                                        None => force_local = true,
+                                    }
                                 }
-                                // Go blocks on the token while racing a local match; with
-                                // an exhausted pool wait on the current level instead.
-                                None => force_local = true,
                             }
-                        }
-                    }
-                    let v = p::workflow_api_server::WorkflowApi::query_workflow(
-                        &self.frontend,
-                        Request::new(payload),
+                            let v = p::workflow_api_server::WorkflowApi::query_workflow(
+                                &self.frontend,
+                                Request::new(payload),
+                            )
+                            .await?
+                            .into_inner();
+                            Ok(Response::new(m::QueryWorkflowResponse {
+                                query_result: v.query_result,
+                                query_rejected: v.query_rejected,
+                                partition_config: None,
+                            }))
+                        },
                     )
-                    .await?
-                    .into_inner();
-                    Ok(Response::new(m::QueryWorkflowResponse {
-                        query_result: v.query_result,
-                        query_rejected: v.query_rejected,
-                        partition_config: None,
-                    }))
-                },
-            )
-            .await
-
-        })
+                    .await
+            },
+        )
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -2896,58 +2951,64 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::GetTaskListsByDomainRequest>,
     ) -> Result<Response<m::GetTaskListsByDomainResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::GetTaskListsByDomainResponse>, Status>("get_task_lists_by_domain", async move {
-        self.metrics
-            .matching_request(
-                "GetTaskListsByDomain",
-                Some(request.get_ref().domain.as_str()),
-                None,
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::GetTaskListsByDomain, None, Some(&request.get_ref().domain))?;
-                    let r = request.get_ref().clone();
-                    let domain = self
-                        .frontend
-                        .state
-                        .domains
-                        .domain_id(&r.domain)
-                        .map_err(|error| crate::grpc::domain_not_found(error.message))?;
-                    if let Some(queues) = &self.queues {
-                        let domain = uuid::Uuid::parse_str(&domain)
-                            .map_err(|_| Status::internal("Invalid domain ID."))?;
-                        let all_kinds = {
-                            let config = self
-                                .frontend
-                                .state
-                                .admin
-                                .dynamic_config
-                                .lock()
-                                .expect("admin lock");
-                            cadence_persistence::dynamic_config::boolean(
-                                config.property_values("matching.matchingReturnAllTaskListKinds"),
+        crate::matching_panic::capture::<Response<m::GetTaskListsByDomainResponse>, Status>(
+            "get_task_lists_by_domain",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "GetTaskListsByDomain",
+                        Some(request.get_ref().domain.as_str()),
+                        None,
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::GetTaskListsByDomain,
                                 None,
-                                false,
-                            )
-                        };
-                        return Ok(Response::new(queues.describe_by_domain(
-                            domain,
-                            all_kinds,
-                            matching_now(),
-                        )));
-                    }
-                    // Go enumerates loaded Matching managers, not frontend workflow
-                    // state. Without a registry there are no loaded managers.
-                    Ok(Response::new(m::GetTaskListsByDomainResponse::default()))
-                },
-            )
-            .await
-
-        })
+                                Some(&request.get_ref().domain),
+                            )?;
+                            let r = request.get_ref().clone();
+                            let domain =
+                                self.frontend.state.domains.domain_id(&r.domain).map_err(
+                                    |error| crate::grpc::domain_not_found(error.message),
+                                )?;
+                            if let Some(queues) = &self.queues {
+                                let domain = uuid::Uuid::parse_str(&domain)
+                                    .map_err(|_| Status::internal("Invalid domain ID."))?;
+                                let all_kinds = {
+                                    let config = self
+                                        .frontend
+                                        .state
+                                        .admin
+                                        .dynamic_config
+                                        .lock()
+                                        .expect("admin lock");
+                                    cadence_persistence::dynamic_config::boolean(
+                                        config.property_values(
+                                            "matching.matchingReturnAllTaskListKinds",
+                                        ),
+                                        None,
+                                        false,
+                                    )
+                                };
+                                return Ok(Response::new(queues.describe_by_domain(
+                                    domain,
+                                    all_kinds,
+                                    matching_now(),
+                                )));
+                            }
+                            // Go enumerates loaded Matching managers, not frontend workflow
+                            // state. Without a registry there are no loaded managers.
+                            Ok(Response::new(m::GetTaskListsByDomainResponse::default()))
+                        },
+                    )
+                    .await
+            },
+        )
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -2955,55 +3016,62 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::ListTaskListPartitionsResponse>, Status>("list_task_list_partitions", async move {
-        self.metrics
-            .matching_request(
-                "ListTaskListPartitions",
-                Some(request.get_ref().domain.as_str()),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::ListTaskListPartitions, None, Some(&request.get_ref().domain))?;
-                    let r = request.get_ref().clone();
-                    let task_list = r.task_list.unwrap_or_default();
-                    // Go resolves `request.GetDomain()` through the domain cache; the
-                    // single-process store is keyed by name and yields the UUID.
-                    let domain_id = self
-                        .frontend
-                        .state
-                        .domains
-                        .domain_id(&r.domain)
-                        .map_err(|e| crate::grpc::domain_not_found(e.message))?;
-                    // Go Identifier returns an untyped error, wrapped by handleErr.
-                    let name = TaskListName::parse(&task_list.name).map_err(Status::internal)?;
-                    #[cfg(test)]
-                    self.injected_engine_fault("ListTaskListPartitions")?;
-                    // Go getAllPartitions returns root first, then numbered write
-                    // partitions, regardless of whether those managers are loaded.
-                    let activity_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 1)
-                        .await?;
-                    let decision_task_list_partitions = self
-                        .task_list_partition_metadata(&domain_id, &name, 0)
-                        .await?;
-                    Ok(Response::new(m::ListTaskListPartitionsResponse {
-                        activity_task_list_partitions,
-                        decision_task_list_partitions,
-                    }))
-                },
-            )
-            .await
-
-        })
+        crate::matching_panic::capture::<Response<m::ListTaskListPartitionsResponse>, Status>(
+            "list_task_list_partitions",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "ListTaskListPartitions",
+                        Some(request.get_ref().domain.as_str()),
+                        request
+                            .get_ref()
+                            .task_list
+                            .as_ref()
+                            .map(|t| (t.name.as_str(), Some(t.kind))),
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::ListTaskListPartitions,
+                                None,
+                                Some(&request.get_ref().domain),
+                            )?;
+                            let r = request.get_ref().clone();
+                            let task_list = r.task_list.unwrap_or_default();
+                            // Go resolves `request.GetDomain()` through the domain cache; the
+                            // single-process store is keyed by name and yields the UUID.
+                            let domain_id = self
+                                .frontend
+                                .state
+                                .domains
+                                .domain_id(&r.domain)
+                                .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+                            // Go Identifier returns an untyped error, wrapped by handleErr.
+                            let name =
+                                TaskListName::parse(&task_list.name).map_err(Status::internal)?;
+                            #[cfg(test)]
+                            self.injected_engine_fault("ListTaskListPartitions")?;
+                            // Go getAllPartitions returns root first, then numbered write
+                            // partitions, regardless of whether those managers are loaded.
+                            let activity_task_list_partitions = self
+                                .task_list_partition_metadata(&domain_id, &name, 1)
+                                .await?;
+                            let decision_task_list_partitions = self
+                                .task_list_partition_metadata(&domain_id, &name, 0)
+                                .await?;
+                            Ok(Response::new(m::ListTaskListPartitionsResponse {
+                                activity_task_list_partitions,
+                                decision_task_list_partitions,
+                            }))
+                        },
+                    )
+                    .await
+            },
+        )
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -3359,61 +3427,81 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::CancelOutstandingPollRequest>,
     ) -> Result<Response<m::CancelOutstandingPollResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>("cancel_outstanding_poll", async move {
-        self.metrics
-            .matching_request(
-                "CancelOutstandingPoll",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .task_list
-                    .as_ref()
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::CancelOutstandingPoll, Some(&request.get_ref().domain_id), None)?;
-                    let r = request.get_ref().clone();
-                    self.domain_name(&r.domain_id)?;
-                    let list = r
-                        .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    let task_list = list.name.clone();
-                    task_list_name(&task_list)?;
-                    // Go getOrCreateTaskListManager: a non-owner gets an error and
-                    // an unloaded list is loaded before the cancel.
-                    if self.queues.is_some() {
-                        let queue = self.durable_queue(&r.domain_id, &list, crate::matching_config::persistence_task_list_type(r.task_list_type)).await?;
-                        queue.pollers.lock().expect("poller history lock").cancel(&r.poller_id);
-                        return Ok(Response::new(m::CancelOutstandingPollResponse {}));
-                    }
-                    let key = PollKey {
-                        domain: r.domain_id,
-                        task_list,
-                        task_type: crate::matching_config::persistence_task_list_type(r.task_list_type) + 1,
-                        poller: r.poller_id,
-                    };
-                    let cancel = self
-                        .polls
-                        .lock()
-                        .expect("poll cancellation lock")
-                        .get(&key)
-                        .cloned();
-                    // Go CancelPoller returns nil whether or not a poll matched.
-                    if let Some(cancel) = cancel {
-                        cancel.notify_one();
-                    }
-                    Ok(Response::new(m::CancelOutstandingPollResponse {}))
-                },
-            )
-            .await
-
-        })
+        crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>(
+            "cancel_outstanding_poll",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "CancelOutstandingPoll",
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .as_deref(),
+                        request
+                            .get_ref()
+                            .task_list
+                            .as_ref()
+                            .map(|t| (t.name.as_str(), Some(t.kind))),
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::CancelOutstandingPoll,
+                                Some(&request.get_ref().domain_id),
+                                None,
+                            )?;
+                            let r = request.get_ref().clone();
+                            self.domain_name(&r.domain_id)?;
+                            let list = r
+                                .task_list
+                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let task_list = list.name.clone();
+                            task_list_name(&task_list)?;
+                            // Go getOrCreateTaskListManager: a non-owner gets an error and
+                            // an unloaded list is loaded before the cancel.
+                            if self.queues.is_some() {
+                                let queue = self
+                                    .durable_queue(
+                                        &r.domain_id,
+                                        &list,
+                                        crate::matching_config::persistence_task_list_type(
+                                            r.task_list_type,
+                                        ),
+                                    )
+                                    .await?;
+                                queue
+                                    .pollers
+                                    .lock()
+                                    .expect("poller history lock")
+                                    .cancel(&r.poller_id);
+                                return Ok(Response::new(m::CancelOutstandingPollResponse {}));
+                            }
+                            let key = PollKey {
+                                domain: r.domain_id,
+                                task_list,
+                                task_type: crate::matching_config::persistence_task_list_type(
+                                    r.task_list_type,
+                                ) + 1,
+                                poller: r.poller_id,
+                            };
+                            let cancel = self
+                                .polls
+                                .lock()
+                                .expect("poll cancellation lock")
+                                .get(&key)
+                                .cloned();
+                            // Go CancelPoller returns nil whether or not a poll matched.
+                            if let Some(cancel) = cancel {
+                                cancel.notify_one();
+                            }
+                            Ok(Response::new(m::CancelOutstandingPollResponse {}))
+                        },
+                    )
+                    .await
+            },
+        )
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -3421,25 +3509,42 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::RespondQueryTaskCompletedRequest>,
     ) -> Result<Response<m::RespondQueryTaskCompletedResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>("respond_query_task_completed", async move {
-        self.metrics.matching_request(
-            "RespondQueryTaskCompleted",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
-            request.get_ref().task_list.as_ref().map(|t| (t.name.as_str(), Some(t.kind))),
-            Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
-            async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted, Some(&request.get_ref().domain_id), None)?;
-        use crate::grpc_convert as cv;
-        let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
-        // The internal request carries the authoritative domain/task routing;
-        // the embedded worker token must agree with it, like Go's domain-cache
-        // lookup by UUID before delivering to the query channel.
-        let domain = self.domain_name(&r.domain_id)?;
-        if !r.task_id.is_empty() && !payload.task_token.is_empty() {
-            if let Ok(token) =
+        crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>(
+            "respond_query_task_completed",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "RespondQueryTaskCompleted",
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .as_deref(),
+                        request
+                            .get_ref()
+                            .task_list
+                            .as_ref()
+                            .map(|t| (t.name.as_str(), Some(t.kind))),
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::RespondQueryTaskCompleted,
+                                Some(&request.get_ref().domain_id),
+                                None,
+                            )?;
+                            use crate::grpc_convert as cv;
+                            let r = request.get_ref().clone();
+                            let mut payload = r
+                                .request
+                                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+                            // The internal request carries the authoritative domain/task routing;
+                            // the embedded worker token must agree with it, like Go's domain-cache
+                            // lookup by UUID before delivering to the query channel.
+                            let domain = self.domain_name(&r.domain_id)?;
+                            if !r.task_id.is_empty() && !payload.task_token.is_empty() {
+                                if let Ok(token) =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
                     &payload.task_token,
                 )
@@ -3450,67 +3555,68 @@ impl m::matching_api_server::MatchingApi for Matching {
                     ));
                 }
             }
-        }
-        if payload.task_token.is_empty() {
-            // A missing embedded token is rebuilt from the routing fields so
-            // direct matching callers do not need to mint query tokens.
-            let token = cadence_api::tasktoken::QueryTaskToken {
-                domain_id: r.domain_id.clone(),
-                workflow_id: String::new(),
-                run_id: String::new(),
-                task_list: r
-                    .task_list
-                    .as_ref()
-                    .map(|t| t.name.clone())
-                    .unwrap_or_default(),
-                task_id: r.task_id.clone(),
-            };
-            payload.task_token =
+                            }
+                            if payload.task_token.is_empty() {
+                                // A missing embedded token is rebuilt from the routing fields so
+                                // direct matching callers do not need to mint query tokens.
+                                let token = cadence_api::tasktoken::QueryTaskToken {
+                                    domain_id: r.domain_id.clone(),
+                                    workflow_id: String::new(),
+                                    run_id: String::new(),
+                                    task_list: r
+                                        .task_list
+                                        .as_ref()
+                                        .map(|t| t.name.clone())
+                                        .unwrap_or_default(),
+                                    task_id: r.task_id.clone(),
+                                };
+                                payload.task_token =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
                     .map_err(|_| Status::internal("Failed to encode query task token."))?;
-        }
-        if self.queues.is_some() {
-            // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
-            // worker's result to the waiting `QueryWorkflow` call.
-            let task_list = r
-                .task_list
-                .clone()
-                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-            let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
-            let result = payload.result.clone().unwrap_or_default();
-            let answer = crate::matching_query::WorkerAnswer {
-                result,
-                worker_version_info: payload.worker_version_info.clone(),
-            };
-            let completed = queue.queries.complete(
-                &r.task_id,
-                crate::matching_query::QueryOutcome::Worker(answer),
-            );
-            if completed.is_err() {
-                self.metrics.task_list_counter_event(
-                    crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
-                    &crate::matching_metrics::PollMetricContext {
-                        domain: domain.clone(),
-                        task_list: task_list.name.clone(),
-                        task_list_kind: task_list.kind,
-                        task_type: "decision_task",
-                        poller_isolation_group: String::new(),
-                    },
-                );
-            }
-            completed?;
-            return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
-        }
-        let input = cv::query_completed(payload)?;
-        let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(
-            &self.frontend,
-            Request::new(cv::query_completed_out(input)),
+                            }
+                            if self.queues.is_some() {
+                                // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
+                                // worker's result to the waiting `QueryWorkflow` call.
+                                let task_list = r.task_list.clone().ok_or_else(|| {
+                                    Status::invalid_argument("TaskList is not set.")
+                                })?;
+                                let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
+                                let result = payload.result.clone().unwrap_or_default();
+                                let answer = crate::matching_query::WorkerAnswer {
+                                    result,
+                                    worker_version_info: payload.worker_version_info.clone(),
+                                };
+                                let completed = queue.queries.complete(
+                                    &r.task_id,
+                                    crate::matching_query::QueryOutcome::Worker(answer),
+                                );
+                                if completed.is_err() {
+                                    self.metrics.task_list_counter_event(
+                                        crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
+                                        &crate::matching_metrics::PollMetricContext {
+                                            domain: domain.clone(),
+                                            task_list: task_list.name.clone(),
+                                            task_list_kind: task_list.kind,
+                                            task_type: "decision_task",
+                                            poller_isolation_group: String::new(),
+                                        },
+                                    );
+                                }
+                                completed?;
+                                return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
+                            }
+                            let input = cv::query_completed(payload)?;
+                            let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(
+                                &self.frontend,
+                                Request::new(cv::query_completed_out(input)),
+                            )
+                            .await?;
+                            Ok(Response::new(m::RespondQueryTaskCompletedResponse {}))
+                        },
+                    )
+                    .await
+            },
         )
-        .await?;
-        Ok(Response::new(m::RespondQueryTaskCompletedResponse {}))
-            }).await
-
-        })
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -3518,163 +3624,180 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::DescribeTaskListRequest>,
     ) -> Result<Response<m::DescribeTaskListResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>("describe_task_list", async move {
-        self.metrics
-            .matching_request(
-                "DescribeTaskList",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
-                    .as_deref(),
-                request
-                    .get_ref()
-                    .request
-                    .as_ref()
-                    .and_then(|r| r.task_list.as_ref())
-                    .map(|t| (t.name.as_str(), Some(t.kind))),
-                Some(
-                    crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                        request.metadata(),
-                        "grpc",
-                    ),
-                ),
-                async {
-            self.check_rpc_quota(crate::matching_quota::MatchingRpc::DescribeTaskList, Some(&request.get_ref().domain_id), None)?;
-                    let r = request.get_ref().clone();
-                    let mut payload = r.request.unwrap_or_default();
-                    let task_list = payload.task_list.clone();
-                    let task_list_type =
-                        crate::matching_config::persistence_task_list_type(payload.task_list_type) + 1;
-                    payload.task_list_type = task_list_type;
-                    let task_list_name = task_list.clone().map(|t| t.name).unwrap_or_default();
-                    // Go validates the identifier before domain-cache/manager lookup;
-                    // untyped identifier errors become InternalServiceError.
-                    TaskListName::parse(&task_list_name).map_err(Status::internal)?;
-                    payload.domain = self.domain_name(&r.domain_id)?;
-                    #[cfg(test)]
-                    self.injected_engine_fault("DescribeTaskList")?;
-                    if self.queues.is_some() {
-                        let queue = self
-                            .durable_queue(
-                                &r.domain_id,
-                                &task_list.clone().unwrap_or_default(),
-                                crate::matching_config::persistence_task_list_type(task_list_type),
-                            )
-                            .await?;
-                        let pollers = queue
-                            .pollers
-                            .lock()
-                            .expect("poller history lock")
-                            .list(matching_now())
-                            .into_iter()
-                            .map(|poller| p::PollerInfo {
-                                identity: poller.identity,
-                                rate_per_second: poller.rate_per_second,
-                                last_access_time: Some(prost_types::Timestamp {
-                                    seconds: poller.last_access_time.div_euclid(1_000_000_000),
-                                    nanos: poller.last_access_time.rem_euclid(1_000_000_000) as i32,
-                                }),
-                            })
-                            .collect();
-                        let task_list_status = if payload.include_task_list_status {
-                            let (
-                                read_level,
-                                ack_level,
-                                backlog_count_hint,
-                                start_id,
-                                end_id,
-                                empty,
-                            ) = queue.queue.status();
-                            // Go reads the configured group universe and the live poller
-                            // history window on every Describe, even with isolation off.
-                            let (groups, window) = {
-                                let config = self
-                                    .frontend
-                                    .state
-                                    .admin
-                                    .dynamic_config
+        crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>(
+            "describe_task_list",
+            async move {
+                self.metrics
+                    .matching_request(
+                        "DescribeTaskList",
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .as_deref(),
+                        request
+                            .get_ref()
+                            .request
+                            .as_ref()
+                            .and_then(|r| r.task_list.as_ref())
+                            .map(|t| (t.name.as_str(), Some(t.kind))),
+                        Some(
+                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                                request.metadata(),
+                                "grpc",
+                            ),
+                        ),
+                        async {
+                            self.check_rpc_quota(
+                                crate::matching_quota::MatchingRpc::DescribeTaskList,
+                                Some(&request.get_ref().domain_id),
+                                None,
+                            )?;
+                            let r = request.get_ref().clone();
+                            let mut payload = r.request.unwrap_or_default();
+                            let task_list = payload.task_list.clone();
+                            let task_list_type = crate::matching_config::persistence_task_list_type(
+                                payload.task_list_type,
+                            ) + 1;
+                            payload.task_list_type = task_list_type;
+                            let task_list_name =
+                                task_list.clone().map(|t| t.name).unwrap_or_default();
+                            // Go validates the identifier before domain-cache/manager lookup;
+                            // untyped identifier errors become InternalServiceError.
+                            TaskListName::parse(&task_list_name).map_err(Status::internal)?;
+                            payload.domain = self.domain_name(&r.domain_id)?;
+                            #[cfg(test)]
+                            self.injected_engine_fault("DescribeTaskList")?;
+                            if self.queues.is_some() {
+                                let queue = self
+                                    .durable_queue(
+                                        &r.domain_id,
+                                        &task_list.clone().unwrap_or_default(),
+                                        crate::matching_config::persistence_task_list_type(
+                                            task_list_type,
+                                        ),
+                                    )
+                                    .await?;
+                                let pollers = queue
+                                    .pollers
                                     .lock()
-                                    .expect("admin lock");
-                                (
-                                    cadence_persistence::dynamic_config::string_list(
-                                        config.property_values("system.allIsolationGroups"),
-                                    ),
-                                    cadence_persistence::dynamic_config::task_list_duration(
-                                        config
-                                            .property_values("matching.taskIsolationPollerWindow"),
-                                        Some(&payload.domain),
-                                        &task_list_name,
-                                        crate::matching_config::persistence_task_list_type(task_list_type),
-                                        2_000_000_000,
-                                    ),
-                                )
-                            };
-                            let now = matching_now();
-                            let counts = queue
-                                .pollers
-                                .lock()
-                                .expect("poller history lock")
-                                .count_by_group(now, now.saturating_sub(window));
-                            let isolation_group_metrics = groups
-                                .into_iter()
-                                .map(|group| {
-                                    let metrics = p::IsolationGroupMetrics {
-                                        new_tasks_per_second: queue.qps.group_qps(&group),
-                                        poller_count: counts
-                                            .get(&group)
-                                            .copied()
-                                            .unwrap_or_default()
-                                            as i64,
+                                    .expect("poller history lock")
+                                    .list(matching_now())
+                                    .into_iter()
+                                    .map(|poller| p::PollerInfo {
+                                        identity: poller.identity,
+                                        rate_per_second: poller.rate_per_second,
+                                        last_access_time: Some(prost_types::Timestamp {
+                                            seconds: poller
+                                                .last_access_time
+                                                .div_euclid(1_000_000_000),
+                                            nanos: poller.last_access_time.rem_euclid(1_000_000_000)
+                                                as i32,
+                                        }),
+                                    })
+                                    .collect();
+                                let task_list_status = if payload.include_task_list_status {
+                                    let (
+                                        read_level,
+                                        ack_level,
+                                        backlog_count_hint,
+                                        start_id,
+                                        end_id,
+                                        empty,
+                                    ) = queue.queue.status();
+                                    // Go reads the configured group universe and the live poller
+                                    // history window on every Describe, even with isolation off.
+                                    let (groups, window) = {
+                                        let config = self
+                                            .frontend
+                                            .state
+                                            .admin
+                                            .dynamic_config
+                                            .lock()
+                                            .expect("admin lock");
+                                        (
+                                            cadence_persistence::dynamic_config::string_list(
+                                                config.property_values("system.allIsolationGroups"),
+                                            ),
+                                            cadence_persistence::dynamic_config::task_list_duration(
+                                                config.property_values(
+                                                    "matching.taskIsolationPollerWindow",
+                                                ),
+                                                Some(&payload.domain),
+                                                &task_list_name,
+                                                crate::matching_config::persistence_task_list_type(
+                                                    task_list_type,
+                                                ),
+                                                2_000_000_000,
+                                            ),
+                                        )
                                     };
-                                    (group, metrics)
-                                })
-                                .collect();
-                            Some(p::TaskListStatus {
-                                read_level,
-                                ack_level,
-                                backlog_count_hint,
-                                task_id_block: Some(p::TaskIdBlock { start_id, end_id }),
-                                empty,
-                                rate_per_second: queue.limiter.limit(),
-                                new_tasks_per_second: queue.qps.qps(),
-                                isolation_group_metrics,
-                            })
-                        } else {
-                            None
-                        };
-                        let partition_config =
-                            queue.partitions.get().map(partition_config_to_proto);
-                        return Ok(Response::new(m::DescribeTaskListResponse {
-                            pollers,
-                            task_list_status,
-                            task_list: Some(p::TaskList {
-                                name: task_list_name.clone(),
-                                kind: i32::from(queue.queue.task_list_kind()) + 1,
-                                ..Default::default()
-                            }),
-                            partition_config,
-                        }));
-                    }
-                    let v = p::workflow_api_server::WorkflowApi::describe_task_list(
-                        &self.frontend,
-                        Request::new(payload),
+                                    let now = matching_now();
+                                    let counts = queue
+                                        .pollers
+                                        .lock()
+                                        .expect("poller history lock")
+                                        .count_by_group(now, now.saturating_sub(window));
+                                    let isolation_group_metrics = groups
+                                        .into_iter()
+                                        .map(|group| {
+                                            let metrics = p::IsolationGroupMetrics {
+                                                new_tasks_per_second: queue.qps.group_qps(&group),
+                                                poller_count: counts
+                                                    .get(&group)
+                                                    .copied()
+                                                    .unwrap_or_default()
+                                                    as i64,
+                                            };
+                                            (group, metrics)
+                                        })
+                                        .collect();
+                                    Some(p::TaskListStatus {
+                                        read_level,
+                                        ack_level,
+                                        backlog_count_hint,
+                                        task_id_block: Some(p::TaskIdBlock { start_id, end_id }),
+                                        empty,
+                                        rate_per_second: queue.limiter.limit(),
+                                        new_tasks_per_second: queue.qps.qps(),
+                                        isolation_group_metrics,
+                                    })
+                                } else {
+                                    None
+                                };
+                                let partition_config =
+                                    queue.partitions.get().map(partition_config_to_proto);
+                                return Ok(Response::new(m::DescribeTaskListResponse {
+                                    pollers,
+                                    task_list_status,
+                                    task_list: Some(p::TaskList {
+                                        name: task_list_name.clone(),
+                                        kind: i32::from(queue.queue.task_list_kind()) + 1,
+                                        ..Default::default()
+                                    }),
+                                    partition_config,
+                                }));
+                            }
+                            let v = p::workflow_api_server::WorkflowApi::describe_task_list(
+                                &self.frontend,
+                                Request::new(payload),
+                            )
+                            .await?
+                            .into_inner();
+                            let partition_config = self
+                                .frontend
+                                .state
+                                .executions
+                                .partition_config(&r.domain_id, &task_list_name, task_list_type)
+                                .map(partition_config_to_proto);
+                            Ok(Response::new(m::DescribeTaskListResponse {
+                                pollers: v.pollers,
+                                task_list_status: v.task_list_status,
+                                task_list,
+                                partition_config,
+                            }))
+                        },
                     )
-                    .await?
-                    .into_inner();
-                    let partition_config = self
-                        .frontend
-                        .state
-                        .executions
-                        .partition_config(&r.domain_id, &task_list_name, task_list_type)
-                        .map(partition_config_to_proto);
-                    Ok(Response::new(m::DescribeTaskListResponse {
-                        pollers: v.pollers,
-                        task_list_status: v.task_list_status,
-                        task_list,
-                        partition_config,
-                    }))
-                },
-            )
-            .await
-        })
+                    .await
+            },
+        )
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
@@ -3696,9 +3819,15 @@ pub async fn serve_with(addr: std::net::SocketAddr, matching: Matching) -> anyho
 
 #[tonic::async_trait]
 impl p::meta_api_server::MetaApi for Matching {
-    async fn health(&self, _: Request<p::HealthRequest>) -> Result<Response<p::HealthResponse>, Status> {
+    async fn health(
+        &self,
+        _: Request<p::HealthRequest>,
+    ) -> Result<Response<p::HealthResponse>, Status> {
         self.wait_started().await;
-        Ok(Response::new(p::HealthResponse { ok: true, message: "matching good".into() }))
+        Ok(Response::new(p::HealthResponse {
+            ok: true,
+            message: "matching good".into(),
+        }))
     }
 }
 
@@ -3727,6 +3856,34 @@ pub async fn serve_with_listener_tls(
     matching: Matching,
     tls: Option<tonic::transport::ServerTlsConfig>,
 ) -> anyhow::Result<()> {
+    serve_with_listener_tls_inner(listener, matching, tls, None).await
+}
+
+pub async fn serve_with_listener_tls_or_no_identity(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
+    serve_with_listener_tls_inner(listener, matching, tls, no_identity).await
+}
+
+pub async fn serve_with_tls_or_no_identity(
+    addr: std::net::SocketAddr,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_with_listener_tls_inner(listener, matching, tls, no_identity).await
+}
+
+async fn serve_with_listener_tls_inner(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
     // Go runs a per-bucket liveness timer; a shared ticker unloads idle
     // semaphore buckets so a quiet host does not keep them forever.
@@ -3745,16 +3902,136 @@ pub async fn serve_with_listener_tls(
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
         .with_service_name("uber.cadence.api.v1.MetaAPI")
         .build_v1()?;
-    crate::grpc_tls::server_builder(tls)?
+    let server = crate::grpc_tls::server_builder(tls)?
         .add_service(reflection)
-        .add_service(p::meta_api_server::MetaApiServer::new(matching.clone()).max_decoding_message_size(limit))
+        .add_service(
+            p::meta_api_server::MetaApiServer::new(matching.clone())
+                .max_decoding_message_size(limit),
+        )
         .add_service(
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
-        )
-        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-        .await?;
+        );
+    if let Some(config) = no_identity {
+        let acceptor = tokio_rustls::TlsAcceptor::from(config);
+        let incoming = no_identity_tls_incoming(listener, acceptor);
+        server.serve_with_incoming(incoming).await?;
+    } else {
+        server
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await?;
+    }
     Ok(())
+}
+
+fn no_identity_tls_incoming(
+    listener: tokio::net::TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+) -> impl tokio_stream::Stream<Item = std::io::Result<NoIdentityTlsStream>> + Send + 'static {
+    use futures_util::{stream::FuturesUnordered, StreamExt as _};
+    use std::{future::Future, pin::Pin};
+
+    type Handshake = Pin<
+        Box<
+            dyn Future<
+                    Output = std::io::Result<
+                        tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+                    >,
+                > + Send,
+        >,
+    >;
+
+    let handshakes = FuturesUnordered::<Handshake>::new();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    futures_util::stream::unfold(
+        (incoming, handshakes),
+        move |(mut listener, mut handshakes)| {
+            let acceptor = acceptor.clone();
+            async move {
+                loop {
+                    tokio::select! {
+                        accepted = listener.next() => match accepted {
+                            Some(Ok(socket)) => {
+                                let acceptor = acceptor.clone();
+                                handshakes.push(Box::pin(async move {
+                                    tokio::time::timeout(
+                                        std::time::Duration::from_secs(120),
+                                        acceptor.accept(socket),
+                                    )
+                                    .await
+                                    .map_err(|_| {
+                                        std::io::Error::new(
+                                            std::io::ErrorKind::TimedOut,
+                                            "TLS handshake timed out",
+                                        )
+                                    })
+                                    .and_then(|stream| stream.map_err(std::io::Error::other))
+                                }));
+                            }
+                            Some(Err(_)) => {
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            }
+                            None => return None,
+                        },
+                        result = handshakes.next(), if !handshakes.is_empty() => {
+                            if let Some(Ok(stream)) = result {
+                                return Some((
+                                    Ok(NoIdentityTlsStream(stream)),
+                                    (listener, handshakes),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
+impl tokio::io::AsyncRead for NoIdentityTlsStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncRead::poll_read(std::pin::Pin::new(&mut self.0), cx, buf)
+    }
+}
+impl tokio::io::AsyncWrite for NoIdentityTlsStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(&mut self.0), cx, buf)
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncWrite::poll_flush(std::pin::Pin::new(&mut self.0), cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(&mut self.0), cx)
+    }
+    fn is_write_vectored(&self) -> bool {
+        self.0.is_write_vectored()
+    }
+    fn poll_write_vectored(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        tokio::io::AsyncWrite::poll_write_vectored(std::pin::Pin::new(&mut self.0), cx, bufs)
+    }
+}
+impl tonic::transport::server::Connected for NoIdentityTlsStream {
+    type ConnectInfo = ();
+    fn connect_info(&self) {}
 }
 
 /// Go `tag.WorkflowTaskListKind` is the Go enum (Normal=0); proto kinds are +1.
@@ -3776,23 +4053,25 @@ fn log_received_add_task(
         domain_id,
         message,
         &[
-            ("wf-task-list-name", task_list.map(|t| t.name.clone()).unwrap_or_default()),
+            (
+                "wf-task-list-name",
+                task_list.map(|t| t.name.clone()).unwrap_or_default(),
+            ),
             ("wf-id", execution.workflow_id),
             ("wf-run-id", execution.run_id),
             ("wf-domain-id", domain_id.to_owned()),
             ("wf-task-list-type", task_type.to_string()),
             ("wf-schedule-id", schedule_id.to_string()),
-            ("wf-task-list-kind", go_task_list_kind(task_list.map_or(0, |t| t.kind)).to_string()),
+            (
+                "wf-task-list-kind",
+                go_task_list_kind(task_list.map_or(0, |t| t.kind)).to_string(),
+            ),
         ],
     );
 }
 
 /// Go `engine.go` "Emitting tasklist counter on ..." event.
-fn log_tasklist_counter(
-    message: &str,
-    domain_id: &str,
-    task_list: Option<&p::TaskList>,
-) {
+fn log_tasklist_counter(message: &str, domain_id: &str, task_list: Option<&p::TaskList>) {
     let name = task_list.map(|t| t.name.clone()).unwrap_or_default();
     let root = cadence_common::task_list::TaskListName::parse(&name)
         .map(|n| n.root().to_owned())
