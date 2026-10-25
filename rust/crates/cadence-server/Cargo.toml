@@ -49,6 +49,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+cadence-proto = { path = "../cadence-proto" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 base64 = "0.22"
 tempfile = "3"
