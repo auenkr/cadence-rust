@@ -73,6 +73,12 @@ fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     message
 }
 
+/// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
+/// built without unwinding so the guard has no process side effects.
+pub(crate) fn captured_panic_status(operation: &str, text: String) -> tonic::Status {
+    tonic::Status::unknown(panic_message(operation, Box::new(text)))
+}
+
 #[cfg(test)]
 thread_local! {
     /// Operations armed by tests, with the number of captures still to panic. Thread-local so each
