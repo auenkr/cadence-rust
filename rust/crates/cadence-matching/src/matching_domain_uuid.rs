@@ -61,6 +61,7 @@ pub fn go_uuid_parse_error(input: &str) -> Option<String> {
 }
 
 /// Pre-handler lookup equivalent. `Err` is the captured-panic status Go returns; `Ok` means
+#[allow(clippy::result_large_err)]
 /// continue (empty, valid, or lenient backend). It performs no lookup and has no side effects.
 pub fn domain_lookup_guard(
     mode: DomainIdParse,
