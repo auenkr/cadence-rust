@@ -13,17 +13,21 @@ import (
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
+	sqloracle "github.com/uber/cadence/common/persistence/sql"
 	"github.com/uber/cadence/common/persistence/sql/sqlplugin"
 	"github.com/uber/cadence/service/matching/config"
-	sqloracle "github.com/uber/cadence/common/persistence/sql"
 )
 
 const oracleDomainID = "00000000-0000-4000-8000-000000000001"
 
 type oracleDB struct{ sqlplugin.DB }
 
-func (oracleDB) SupportsTTL() bool       { return false }
+func (oracleDB) SupportsTTL() bool        { return false }
 func (oracleDB) GetTotalNumDBShards() int { return 1 }
+func (oracleDB) IsDupEntryError(error) bool   { return false }
+func (oracleDB) IsNotFoundError(error) bool   { return false }
+func (oracleDB) IsTimeoutError(error) bool    { return false }
+func (oracleDB) IsThrottlingError(error) bool { return false }
 func (oracleDB) BeginTx(context.Context, int) (sqlplugin.Tx, error) {
 	return nil, errors.New("oracle reached SQL transaction boundary")
 }
