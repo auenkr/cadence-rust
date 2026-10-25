@@ -6,3 +6,5 @@
 - Fix: only the PollForActivityTask routing case now sends an inner PollRequest with a domain and task list. This keeps the routing assertion meaningful. Dedicated nil-request behavior tests remain unchanged (`matching_rpc_tests.rs`, `go_activity_poll_absent_request_*`).
 - Validation policy: no local Cargo, Go, or formatting commands. `git diff --check` passed locally; CI is dispatched on the public ubuntu runner as requested.
 - Follow-up CI URL/head/conclusion: to be recorded after dispatch below.
+- Commit: `45aa5223c` (`test(matching): provide poll request in thrift routing fixture`), pushed to `origin/t3/matching-go-error-parity`.
+- CI was not dispatched: the pause instruction arrived before the requested workflow launch. The change remains unverified by Cargo/Actions; dispatch `gh workflow run rust-ci.yml --ref t3/matching-go-error-parity -f package=cadence-matching` after resuming.
