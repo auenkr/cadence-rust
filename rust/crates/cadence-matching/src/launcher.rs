@@ -1695,7 +1695,7 @@ pub async fn run(
                     (Some(Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)))), None)
                 },
             };
-            let fatal_writer = serving_result
+            let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
                 .and_then(|error| error.downcast_ref::<SqlMatchingWriterFatal>())
@@ -1743,6 +1743,13 @@ pub async fn run(
             if let Some(task) = matching_tchannel_task.take() {
                 task.abort();
                 let _ = task.await;
+            }
+            // A shutdown signal or listener failure can win `select!` while
+            // the typed writer notification is concurrently becoming ready.
+            // Writers are stopped by runtime shutdown; sample the channel
+            // again after listener teardown so that race cannot hide exit 2.
+            if fatal_writer.is_none() {
+                fatal_writer = fatal_writer_rx.try_recv().ok().map(|cause| cause.to_string());
             }
             let mut shutdown_errors = Vec::new();
             if let Some(Err(error)) = serving_result {

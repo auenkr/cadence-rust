@@ -19,7 +19,10 @@
 - The launcher selects the fatal channel alongside listener completion and
   shutdown signals, completes normal runtime/membership cleanup, then returns
   `SqlMatchingWriterFatal`; `main.rs` maps that typed error to exit status 2.
-  Cleanup errors do not mask the fatal marker.
+  Cleanup errors do not mask a captured fatal marker. Review found a
+  simultaneous graceful-signal/listener-failure vs fatal-channel-ready race;
+  the launcher now checks for a queued fatal marker after runtime and listener
+  teardown, so the graceful path cannot mask it.
 - Existing persistence regressions cover empty RunID (stored absent), canonical,
   uppercase, simple, 38-byte arbitrary-wrapper, and case-insensitive 45-byte
   URN forms; malformed SQL conversion is typed. Existing Matching tests cover
@@ -47,8 +50,9 @@
 - Current branch's follow-up focused Matching CI:
   <https://github.com/auenkr/cadence-rust/actions/runs/40221421999>, head
   `ae699c9bd1a0fef096f9f86d1e6ffb3ee42aec5d`, status **in progress** at the
-  one-time status check. No conclusion or binary SHA is available yet; do not
-  treat it as passed.
+  one-time status check before the lifecycle-race follow-up. A source push may
+  cancel/supersede it. No conclusion or binary SHA was available then; do not
+  treat it as passed. Dispatch and record a focused run for the race fix.
 
 ## Remaining limits
 
