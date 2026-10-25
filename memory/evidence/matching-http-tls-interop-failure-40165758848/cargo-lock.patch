@@ -1,0 +1,26 @@
+diff --git a/rust/Cargo.lock b/rust/Cargo.lock
+index 2665ef6..156b30e 100644
+--- a/rust/Cargo.lock
++++ b/rust/Cargo.lock
+@@ -583,10 +583,10 @@ dependencies = [
+  "rustls",
+  "rustls-native-certs",
+  "rustls-pemfile",
++ "semver",
+  "serde",
+  "serde_json",
+  "serde_yaml",
+- "semver",
+  "tempfile",
+  "thiserror 2.0.21",
+  "tokio",
+@@ -650,7 +650,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+ dependencies = [
+  "iana-time-zone",
++ "js-sys",
+  "num-traits",
++ "wasm-bindgen",
+  "windows-link",
+ ]
+ 

@@ -216,7 +216,10 @@ subprocess.run(['openssl', 'genrsa', '-out', str(wrong_key), '2048'], check=True
 mismatched_path = artifacts / 'mismatched-key.yaml'
 mismatched_path.write_text(tls_config_path.read_text().replace(str(artifacts / 'tls-key.pem'), str(wrong_key)))
 assert_start_fails(mismatched_path, 'loading Matching HTTP TLS certificate/key')
-assert_start_fails(root / 'rust/config/development.yaml', 'does not support configured NoSQL')
+unsupported_nosql_path = artifacts / 'unsupported-nosql.yaml'
+unsupported_nosql_path.write_text((root / 'rust/config/development.yaml').read_text().replace(
+    'pluginName: "cassandra"', 'pluginName: "unsupported-test"', 1))
+assert_start_fails(unsupported_nosql_path, 'does not support plugin "unsupported-test"')
 assert_embedded_start_succeeds()
 assert_runtime_listener_failure_cleans_up()
 assert_matching_grpc_bind_fails_before_membership_startup()

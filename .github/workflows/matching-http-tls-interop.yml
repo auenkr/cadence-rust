@@ -28,16 +28,16 @@ jobs:
         run: |
           mkdir -p out/interop
           git rev-parse HEAD > out/source-sha.txt
-          printf '%s\n' 'cargo build --manifest-path rust/Cargo.toml -p cadence-server' > out/build-command.txt
+          printf '%s\n' 'cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server' > out/build-command.txt
           printf '%s\n' 'python3 tests/run-matching-thrift-compat.py --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" --artifacts-dir out/interop' > out/interop-command.txt
       - name: Build fresh Rust server
         run: |
           set +e
-          cargo build --manifest-path rust/Cargo.toml -p cadence-server > out/build.log 2>&1
+          cargo build --locked --manifest-path rust/Cargo.toml -p cadence-server > out/build.log 2>&1
           result=$?
           echo "$result" > out/build.exit
           if [ "$result" != 0 ]; then tail -80 out/build.log; exit "$result"; fi
-          git diff --binary -- rust/Cargo.lock > out/cargo-lock.patch
+          git diff --binary HEAD -- rust/Cargo.lock > out/cargo-lock.patch
           sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" > out/binary.sha256
       - name: Run standalone Go HTTP TLS interop
         run: |
