@@ -657,7 +657,7 @@ mod tests {
     fn strong_consistency_requires_a_supported_worker() {
         assert!(supports_consistent_query("uber-go", "1.5.0"));
         assert!(supports_consistent_query("uber-java", "1.9.3"));
-        // An older client that omits clientImpl is treated as supported.
+        // Go rejects a client that omits clientImpl (empty switch arm falls through).
         assert!(!supports_consistent_query("", ""));
         assert!(!supports_consistent_query("uber-go", "1.4.9"));
         assert!(!supports_consistent_query("uber-java", "1.0.0"));
