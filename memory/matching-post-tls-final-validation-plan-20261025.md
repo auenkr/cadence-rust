@@ -556,3 +556,15 @@ mock errors for ordinary unknown-domain requests are explicitly not production
 error-mapping evidence. Preserve domain lookup/precedence. This integration
 does not close HTTP TLS interop, gRPC TLS gaps, or Matching parity; Matching
 remains INCOMPLETE and the existing eligibility labels stay unchanged.
+
+Integration record: the reviewed branch terminal tip
+`d04ee7492a3744c92adc9e8b118351a25303bfe7` was merged with the routine plan
+overlap resolved in merge commit
+`80bddb3e94e5871b6da9a1a1f07cc423422b27e9` and pushed to master. The push
+automatically started `rust-ci` run
+[40172228720](https://github.com/auenkr/cadence-rust/actions/runs/40172228720)
+on that exact merge SHA; it was in progress at the last status read. No manual
+workflow dispatch or mixed gate was started. The stable validation branch
+still pins `fade09c501e23212d4d86e64c653057d589d1910`; do not move it based on
+this docs/test-harness integration. No worker branch/worktree cleanup was
+performed.
