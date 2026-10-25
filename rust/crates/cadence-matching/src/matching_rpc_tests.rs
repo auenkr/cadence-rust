@@ -8849,6 +8849,19 @@ async fn go_oracle_absent_optional_payloads_on_valid_domain() {
         err.message(),
         "Task list partition config is not set in the request."
     );
+    // update-absent-tasklist with an empty config: BadRequestError "read partitions < 1".
+    let err = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                partition_config: Some(Default::default()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(err.message(), "read partitions < 1");
     // cancel-poll-absent-tasklist: nil error.
     matching
         .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {

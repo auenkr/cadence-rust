@@ -50,3 +50,11 @@ TaskList/Execution, Cancel/Refresh absent TaskList => nil error; Update absent l
 BadRequest "Task list partition config is not set in the request."; activity poll absent PollRequest => plain `runtime error: invalid memory address or
 nil pointer dereference`. Unknown-domain results are synthetic mock errors ("oracle unknown domain") and NOT used as contracts. Query absent payload: not yet covered.
 Implemented in b6d6b1b2 (CI 40175927357 pending): captured-panic helper accepts the nil-deref message; Add* nil-safe; refresh test renamed to _is_internal.
+
+## Wire trace for activity poll with absent PollRequest (source-verified)
+`handler.go` PollForActivityTask defers `log.CapturePanic(recover(), ...)` (panic.go sets `*retError = err` for an error panic value), and the
+engine panic (engine.go:915) skips `hCtx.handleErr`, so the handler returns the plain `runtime error: invalid memory address or nil pointer dereference`.
+gRPC wrapper: `proto.FromError` falls through every typed converter to `protobuf.NewError(CodeUnknown, err.Error())` (mapper/proto/errors.go:~60), so the wire
+status is Unknown with the bare text (no `panic:` prefix; that comes only from YARPC recovery of panics escaping the handler). Thrift wrapper:
+`thrift.FromError` returns an unconverted error unchanged (mapper/thrift/errors.go:56) => unexpected/unknown transport error, modelled by `is_captured_panic`.
+Unknown-domain real-cache class for polls is not asserted (mock error synthetic). Go Add* with a present invalid run UUID: not traced; Rust still strict.
