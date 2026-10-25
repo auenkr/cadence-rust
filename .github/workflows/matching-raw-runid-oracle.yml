@@ -31,7 +31,7 @@ jobs:
 
           root = Path(os.environ["GITHUB_WORKSPACE"])
           overlay = {
-              str(root / "go/common/persistence/sql/oracle_export_test.go"):
+              str(root / "go/common/persistence/sql/raw_runid_oracle_export.go"):
                   str(root / "tests/matching-taskwriter-oracle/sql_task_store_oracle.go"),
               str(root / "go/service/matching/tasklist/raw_runid_sql_oracle_test.go"):
                   str(root / "tests/matching-taskwriter-oracle/task_writer_oracle_test.go"),
