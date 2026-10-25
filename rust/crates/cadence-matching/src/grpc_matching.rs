@@ -364,6 +364,7 @@ pub struct Matching {
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
     domain_name_resolver: Option<DomainNameResolver>,
+    domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
     /// Test-only engine failure seam: `(rpc name, message)` makes that RPC's engine
     /// call fail with `message`. See `injected_engine_fault`.
     #[cfg(test)]
@@ -416,6 +417,7 @@ impl Matching {
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
             domain_name_resolver: None,
+            domain_id_parse: Default::default(),
             #[cfg(test)]
             engine_fault: Default::default(),
         }
@@ -449,8 +451,20 @@ impl Matching {
         mut self,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> Self {
+        self.domain_id_parse = cache.domain_id_parse();
         self.domain_name_resolver = Some(Arc::new(move |id| cache.cached_domain_name(id)));
         self
+    }
+    #[cfg(test)]
+    pub(crate) fn with_domain_id_parse(mut self, mode: crate::matching_domain_uuid::DomainIdParse) -> Self {
+        self.domain_id_parse = mode;
+        self
+    }
+    /// Go handler `h.domainName` (metrics lookup) runs first and, on SQL, panics for a
+    /// malformed ID. Ordinary lookup errors stay swallowed here; the real validation in
+    /// `domain_name` below keeps returning its typed errors.
+    fn domain_lookup_guard(&self, domain_id: &str, operation: &'static str) -> Result<(), Status> {
+        crate::matching_domain_uuid::domain_lookup_guard(self.domain_id_parse, domain_id, operation)
     }
     fn metric_domain_name(&self, id: &str) -> Option<String> {
         self.domain_name_resolver
@@ -1776,6 +1790,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::PollForDecisionTaskResponse>, Status>("poll_for_decision_task", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_decision_task")?;
         self.metrics.matching_request(
             "PollForDecisionTask",
             self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
@@ -2011,6 +2026,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::PollForActivityTaskResponse>, Status>("poll_for_activity_task", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_activity_task")?;
         self.metrics.matching_request(
             "PollForActivityTask",
             self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
@@ -2224,6 +2240,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AddDecisionTaskResponse>, Status>("add_decision_task", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "add_decision_task")?;
         self.metrics
             .matching_request(
                 "AddDecisionTask",
@@ -2455,6 +2472,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AddActivityTaskResponse>, Status>("add_activity_task", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "add_activity_task")?;
         self.metrics
             .matching_request(
                 "AddActivityTask",
@@ -2682,6 +2700,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>(
             "query_workflow",
             async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "query_workflow")?;
                 self.metrics
                     .matching_request(
                         "QueryWorkflow",
@@ -3112,6 +3131,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AcquireSemaphoreRequest>,
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AcquireSemaphoreResponse>, Status>("acquire_semaphore", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "acquire_semaphore")?;
         self.metrics
             .matching_request(
                 "AcquireSemaphore",
@@ -3224,6 +3244,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::UpdateTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::UpdateTaskListPartitionConfigResponse>, Status> {
         crate::matching_panic::capture::<Response<m::UpdateTaskListPartitionConfigResponse>, Status>("update_task_list_partition_config", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "update_task_list_partition_config")?;
         self.metrics
             .matching_request(
                 "UpdateTaskListPartitionConfig",
@@ -3367,6 +3388,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::RefreshTaskListPartitionConfigRequest>,
     ) -> Result<Response<m::RefreshTaskListPartitionConfigResponse>, Status> {
         crate::matching_panic::capture::<Response<m::RefreshTaskListPartitionConfigResponse>, Status>("refresh_task_list_partition_config", async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "refresh_task_list_partition_config")?;
         self.metrics
             .matching_request(
                 "RefreshTaskListPartitionConfig",
@@ -3453,6 +3475,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>(
             "cancel_outstanding_poll",
             async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
                 self.metrics
                     .matching_request(
                         "CancelOutstandingPoll",
@@ -3533,6 +3556,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>(
             "respond_query_task_completed",
             async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "respond_query_task_completed")?;
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",
@@ -3648,6 +3672,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>(
             "describe_task_list",
             async move {
+        self.domain_lookup_guard(&request.get_ref().domain_id, "describe_task_list")?;
                 self.metrics
                     .matching_request(
                         "DescribeTaskList",

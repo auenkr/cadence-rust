@@ -8998,3 +8998,96 @@ async fn go_add_task_empty_domain_is_typed_bad_request_after_identifier() {
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::Internal);
 }
+
+// Go handler `h.domainName` runs first. On SQL a malformed non-empty DomainUUID panics in
+// MustParseUUID, so the captured plain error wins over throttle, the missing deadline, a nil
+// PollRequest and a malformed task list. Cassandra (Lenient) never panics there.
+const SQL_MALFORMED_DOMAIN_ERROR: &str =
+    r#"panic object is not error: "uuid: Parse(abc): invalid UUID length: 3""#;
+
+fn sql_mode(matching: &Matching) -> Matching {
+    matching
+        .clone()
+        .with_domain_id_parse(crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic)
+}
+
+#[tokio::test]
+async fn sql_malformed_domain_precedes_deadline_nil_poll_and_bad_tasklist() {
+    let (_dir, _store, matching, _key) = fixture();
+    let sql = sql_mode(&matching);
+    let decision = |malformed_list: bool| m::PollForDecisionTaskRequest {
+        domain_id: "abc".into(),
+        poller_id: "poller".into(),
+        request: malformed_list.then(|| p::PollForDecisionTaskRequest {
+            task_list: Some(p::TaskList { name: String::new(), ..Default::default() }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for malformed_list in [false, true] {
+        let err = sql.poll_for_decision_task(Request::new(decision(malformed_list))).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unknown);
+        assert_eq!(err.message(), SQL_MALFORMED_DOMAIN_ERROR);
+        assert!(crate::matching_panic::is_captured_panic(&err));
+        // Lenient (Cassandra/default) continues to the ordinary no-deadline error.
+        let lenient = matching.poll_for_decision_task(Request::new(decision(malformed_list))).await.unwrap_err();
+        assert_eq!(lenient.code(), tonic::Code::InvalidArgument);
+        assert_eq!(lenient.message(), "Context timeout is not set.");
+    }
+    let err = sql
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: "abc".into(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.message(), SQL_MALFORMED_DOMAIN_ERROR);
+    let err = sql
+        .add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: "abc".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.message(), SQL_MALFORMED_DOMAIN_ERROR);
+}
+
+// Empty and well-formed unknown IDs are ordinary lookup results: the handler lookup swallows
+// them, and the later engine/manager errors (typed BadRequest, nil dereference) are preserved.
+#[tokio::test]
+async fn sql_empty_and_unknown_domain_keep_ordinary_errors() {
+    let (_dir, _store, matching, _key) = fixture();
+    let sql = sql_mode(&matching);
+    let err = sql
+        .poll_for_decision_task(Request::new(m::PollForDecisionTaskRequest {
+            poller_id: "poller".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.message(), "Context timeout is not set.");
+    let err = sql
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.message(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE);
+    let err = sql
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: String::new(),
+            task_list: list(),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        err.message(),
+        "GetDomain operation failed.  Both ID and Name are empty."
+    );
+}

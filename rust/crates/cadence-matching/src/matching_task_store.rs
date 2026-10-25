@@ -21,6 +21,8 @@ const GO_DEFAULT_TIME_FORMAT: &str = "2006-01-02T15:04:05.000000000Z07:00";
 pub struct ConfiguredMatchingStores {
     pub task_store: Arc<dyn MatchingTaskStore>,
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
+    /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
+    pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -153,6 +155,7 @@ pub fn open_configured_default_store(
         let driver =
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
         return Ok(ConfiguredMatchingStores {
+            domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             task_store: Arc::new(
                 cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
                     driver.clone(),
@@ -178,6 +181,7 @@ pub fn open_configured_default_store(
             let task_store: Arc<dyn MatchingTaskStore> =
                 SqliteTaskStoreConfig::from_default_store(persistence)?.open_store()?;
             Ok(ConfiguredMatchingStores {
+                domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 task_store,
                 domain_metadata_source: None,
             })
@@ -234,6 +238,7 @@ pub fn open_configured_default_store(
             )?;
             let store = store.with_encoding_source(encoding_source);
             Ok(ConfiguredMatchingStores {
+                domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 task_store: Arc::new(store),
                 domain_metadata_source: Some(Arc::new(metadata)),
             })
@@ -288,6 +293,7 @@ pub fn open_configured_default_store(
             )?;
             let store = store.with_encoding_source(encoding_source);
             Ok(ConfiguredMatchingStores {
+                domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 task_store: Arc::new(store),
                 domain_metadata_source: Some(Arc::new(metadata)),
             })
