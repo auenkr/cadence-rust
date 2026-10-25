@@ -500,19 +500,28 @@ async fn go_thrift_handler_routes_each_tested_method() {
                     // PollForActivityTask dereferences its inner request before routing.
                     // Keep this as a valid poll so this test checks procedure dispatch,
                     // while nil transport behavior is covered by dedicated contract tests.
+                    // Thrift args carry the request struct at field 1; the inner PollRequest is field 20.
                     Struct {
                         fields: vec![(
-                            20,
+                            1,
                             Value::Struct(Struct {
-                                fields: vec![
-                                    (10, Value::Bytes(b"domain".to_vec())),
-                                    (
-                                        20,
-                                        Value::Struct(Struct {
-                                            fields: vec![(10, Value::Bytes(b"task-list".to_vec()))],
-                                        }),
-                                    ),
-                                ],
+                                fields: vec![(
+                                    20,
+                                    Value::Struct(Struct {
+                                        fields: vec![
+                                            (10, Value::Bytes(b"domain".to_vec())),
+                                            (
+                                                20,
+                                                Value::Struct(Struct {
+                                                    fields: vec![(
+                                                        10,
+                                                        Value::Bytes(b"task-list".to_vec()),
+                                                    )],
+                                                }),
+                                            ),
+                                        ],
+                                    }),
+                                )],
                             }),
                         )],
                     }
