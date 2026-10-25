@@ -1,0 +1,58 @@
+name: Matching Go HTTP TLS interop
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: matching-http-tls-interop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/matching-http-tls-cargo-target
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize Go IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/go-sdk/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Record source identity
+        run: |
+          mkdir -p out/interop
+          git rev-parse HEAD > out/source-sha.txt
+          printf '%s\n' 'cargo build --manifest-path rust/Cargo.toml --locked -p cadence-server' > out/build-command.txt
+          printf '%s\n' 'python3 tests/run-matching-thrift-compat.py --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" --artifacts-dir out/interop' > out/interop-command.txt
+      - name: Build fresh Rust server
+        run: |
+          set +e
+          cargo build --manifest-path rust/Cargo.toml --locked -p cadence-server > out/build.log 2>&1
+          result=$?
+          echo "$result" > out/build.exit
+          if [ "$result" != 0 ]; then tail -80 out/build.log; exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" > out/binary.sha256
+      - name: Run standalone Go HTTP TLS interop
+        run: |
+          set +e
+          python3 tests/run-matching-thrift-compat.py \
+            --server-bin "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --artifacts-dir "$PWD/out/interop" > out/interop.log 2>&1
+          result=$?
+          echo "$result" > out/interop.exit
+          tail -100 out/interop.log
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matching-http-tls-interop
+          path: |
+            out/
+            !out/interop/matching-drain.test
+          retention-days: 3
