@@ -138,6 +138,20 @@ jobs:
           echo "$result" > tls-format.exit
           cat tls-format.log
           exit 0
+      - name: Check query-touched Rust files formatting
+        working-directory: rust
+        run: |
+          set +e
+          rustfmt --edition 2021 --config skip_children=true --check \
+            crates/cadence-matching/src/matching_query.rs \
+            crates/cadence-matching/src/matching_registry.rs \
+            crates/cadence-matching/src/grpc_matching.rs \
+            crates/cadence-matching/src/matching_rpc_tests.rs \
+            > query-format.log 2>&1
+          result=$?
+          echo "$result" > query-format.exit
+          cat query-format.log
+          exit 0
       - name: Check changed Matching runtime formatting
         working-directory: rust
         run: |
@@ -212,5 +226,7 @@ jobs:
             rust/format.log
             rust/tls-format.log
             rust/tls-format.exit
+            rust/query-format.log
+            rust/query-format.exit
             rust/Cargo.lock
             ${{ runner.temp }}/cadence-matching-owner-order.json
