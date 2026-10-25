@@ -43,3 +43,10 @@ unknown-domain behaviour in task-list manager creation (item 2) is inferred, not
 - Finding 5: Update scaler check now first (TaskList-not-set pre-check removed).
 - Finding 3 (RespondQueryTaskCompleted) intentionally untouched (other worker).
 - Tests: `go_malformed_reserved_task_list_name_is_internal_for_every_rpc`; refresh-missing-tasklist test updated.
+
+## Oracle results (Go run 40175488464, source 50d9dad0; lines in memory/evidence/matching-optional-payload-go-oracle-40175488464/)
+Proven: malformed => Internal (decision poll wrapped, activity poll bare); refresh-malformed Internal; absent decision/activity-empty polls, Add* absent
+TaskList/Execution, Cancel/Refresh absent TaskList => nil error; Update absent list + `{}` config => BadRequest "read partitions < 1", absent config =>
+BadRequest "Task list partition config is not set in the request."; activity poll absent PollRequest => plain `runtime error: invalid memory address or
+nil pointer dereference`. Unknown-domain results are synthetic mock errors ("oracle unknown domain") and NOT used as contracts. Query absent payload: not yet covered.
+Implemented in b6d6b1b2 (CI 40175927357 pending): captured-panic helper accepts the nil-deref message; Add* nil-safe; refresh test renamed to _is_internal.

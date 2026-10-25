@@ -1,0 +1,20 @@
+GO_OPTIONAL_ORACLE case=decision-poll-absent-pollrequest response=*types.MatchingPollForDecisionTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=decision-poll-empty-tasklist response=*types.MatchingPollForDecisionTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=decision-poll-malformed-unknown-domain response=*types.MatchingPollForDecisionTaskResponse error_type=*types.InternalServiceError error=couldn't create new decision tasklist invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=activity-poll-absent-pollrequest response=*types.MatchingPollForActivityTaskResponse error_type=runtime.errorString error=runtime error: invalid memory address or nil pointer dereference
+GO_OPTIONAL_ORACLE case=activity-poll-empty-tasklist response=*types.MatchingPollForActivityTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=activity-poll-malformed response=*types.MatchingPollForActivityTaskResponse error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=add-decision-malformed-unknown-domain response=*types.AddDecisionTaskResponse error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=decision-poll-valid-name-unknown-domain response=*types.MatchingPollForDecisionTaskResponse error_type=*types.InternalServiceError error=couldn't load tasklist manager: oracle unknown domain
+GO_OPTIONAL_ORACLE case=activity-poll-valid-name-unknown-domain response=*types.MatchingPollForActivityTaskResponse error_type=*types.InternalServiceError error=couldn't load tasklist manager: oracle unknown domain
+GO_OPTIONAL_ORACLE case=add-decision-absent-tasklist response=*types.AddDecisionTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=add-activity-absent-tasklist response=*types.AddActivityTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=add-decision-absent-execution response=*types.AddDecisionTaskResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=cancel-poll-absent-tasklist response=<nil> error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=cancel-poll-malformed response=<nil> error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=update-absent-tasklist response=*types.MatchingUpdateTaskListPartitionConfigResponse error_type=*types.BadRequestError error=read partitions < 1
+GO_OPTIONAL_ORACLE case=update-absent-tasklist-absent-config response=*types.MatchingUpdateTaskListPartitionConfigResponse error_type=*types.BadRequestError error=Task list partition config is not set in the request.
+GO_OPTIONAL_ORACLE case=update-malformed response=*types.MatchingUpdateTaskListPartitionConfigResponse error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=refresh-absent-tasklist response=*types.MatchingRefreshTaskListPartitionConfigResponse error_type=<nil> error=<nil>
+GO_OPTIONAL_ORACLE case=refresh-malformed response=*types.MatchingRefreshTaskListPartitionConfigResponse error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
+GO_OPTIONAL_ORACLE case=query-malformed response=*types.MatchingQueryWorkflowResponse error_type=*types.InternalServiceError error=invalid partitioned task list name /__cadence_sys//0
