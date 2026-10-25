@@ -271,3 +271,16 @@ issue, and source-only final review remains active. See
 `memory/evidence/matching-tls-final-ci-20261025/README.md` for compact extracted
 proof, artifacts, and formatting limits. The implementation fix requires new
 source-pinned CI and review; no workflow was dispatched for it in this task.
+
+### Invalid-DER fix candidate rerun
+
+Run 40161660335 succeeded on exact source
+`4b8a6060b341ace8987e73f25e0d146429410950`; it used a fresh target and passed
+workspace Clippy then tests (both exit 0), including the production missing-
+identity listener test and the server CA/client-auth matrix covering invalid
+DER and mixed valid/invalid PEM. The TLS-touched-file format marker is 1 and
+the workspace-format advisory is also 1; neither is a pass. The earlier
+`ad997b07f` invalid-DER blocker is addressed in this candidate only subject to
+the independent final review, which remains active. Do not integrate or begin
+mixed validation until that review approves the source and formatting state.
+Compact evidence is in `memory/evidence/matching-tls-fix-ci-20261025/`.
