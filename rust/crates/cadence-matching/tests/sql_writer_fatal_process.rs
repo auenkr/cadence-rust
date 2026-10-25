@@ -3,6 +3,25 @@ use cadence_proto::{api as p, matching as m};
 use std::{net::TcpListener, process::{Command, Stdio}, time::{Duration, Instant}};
 use tonic::{transport::Channel, Request};
 
+struct ChildGuard(Option<std::process::Child>);
+
+impl ChildGuard {
+    fn new(child: std::process::Child) -> Self { Self(Some(child)) }
+    fn child_mut(&mut self) -> &mut std::process::Child { self.0.as_mut().expect("child still owned") }
+    fn finish(mut self) -> std::process::Output { self.0.take().expect("child still owned").wait_with_output().expect("collect Matching child output") }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            if !matches!(child.try_wait(), Ok(Some(_))) {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
 fn free_port() -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     listener.local_addr().unwrap().port()
@@ -36,7 +55,7 @@ async fn configured_standalone_sqlite_malformed_run_id_exits_process_with_two() 
     let grpc_port = free_port();
     let http_port = free_port();
     let tchannel_port = free_port();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_cadence-matching"))
+    let child = Command::new(env!("CARGO_BIN_EXE_cadence-matching"))
         .args(["start", "--data-dir"])
         .arg(directory.path())
         .args(["--port", &http_port.to_string(), "--matching-grpc-port", &grpc_port.to_string(), "--matching-tchannel-port", &tchannel_port.to_string()])
@@ -45,6 +64,7 @@ async fn configured_standalone_sqlite_malformed_run_id_exits_process_with_two() 
         .stderr(Stdio::piped())
         .spawn()
         .expect("launch actual cadence-matching binary");
+    let mut child = ChildGuard::new(child);
 
     let mut client = matching_client(grpc_port).await;
     let response = client.add_decision_task(Request::new(add_request("malformed-run-id".into()))).await;
@@ -52,11 +72,11 @@ async fn configured_standalone_sqlite_malformed_run_id_exits_process_with_two() 
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let status = loop {
-        if let Some(status) = child.try_wait().expect("wait for Matching child") { break status; }
+        if let Some(status) = child.child_mut().try_wait().expect("wait for Matching child") { break status; }
         assert!(Instant::now() < deadline, "fatal writer notification did not terminate process");
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     assert_eq!(status.code(), Some(2), "actual launcher must map typed SQL writer failure to exit 2");
-    let output = child.wait_with_output().expect("collect Matching child output");
+    let output = child.finish();
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid SQL Matching RunID"), "fatal typed error marker must be visible");
 }
