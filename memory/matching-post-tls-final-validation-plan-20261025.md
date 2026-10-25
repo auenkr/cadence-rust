@@ -476,3 +476,27 @@ necessarily failed. Follow-up branch
 `!embedded_development`. This leaves explicit-config production setup intact.
 No local Cargo/Go/rustfmt validation or mixed gate has been run; parent review
 and CI validation are pending.
+
+### Reviewer correction for DescribeTaskList probe
+
+HTTP TLS run 40168201737 (source
+`fade09c501e23212d4d86e64c653057d589d1910`) failed in the malformed
+`DescribeTaskList` assertion after embedded startup, health and domain calls
+passed. The build passed with binary SHA256
+`500e4ee26df85af47f0182a34c568ae13c29377590628a05a56c5e55547997a7`; lock
+diff was empty. Exact artifact and harness review are preserved in
+`memory/evidence/matching-http-tls-interop-failure-40168201737/`.
+
+Review rejected the proposed Rust missing/empty TaskList guard in
+`84cadec2d83e1dfa92651c718c145117946c29d5`; do not merge that candidate.
+Original Go source resolves domain name in the outer handler before engine
+dispatch (`handler.go:388`), uses nil-safe getters in the engine
+(`engine.go:1137`), and `NewIdentifier` accepts empty names
+(`identifier.go:65,137`). The mapper preserves an absent nested request as nil
+(`matching.go:181`). The Go client's expectation alone does not establish Go
+server behavior. Rust CI run 40168671087 was cancelled. Branch
+`t3/http-tls-go-oracle-correction-20261025` adds an Actions-only test overlay
+that executes the original handler and engine for absent outer request, absent
+nested request, empty task-list name, and invalid domain combinations. Use its
+recorded Go error types/messages and ordering to correct the compatibility
+probe, then run focused CI. No local Cargo/Go/rustfmt or mixed gate was run.
