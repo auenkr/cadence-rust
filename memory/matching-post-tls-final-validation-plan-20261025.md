@@ -743,3 +743,11 @@ PostgreSQL/MySQL/HTTP runs use original Go Frontend/History/Worker, no Go Matchi
 - [ ] configstore, shard-distributor, Cassandra, active-offer dispatched serially on
       the final pin; archive URL, headSha, conclusion, binary SHA256, exits.
 - [ ] Final pin SHA recorded.
+
+## Combined validation pin (2026-10-25)
+Merged into master: approved SDK replay test fix `a51939fd1` (tests/matching-service-compat.cjs only) and
+Thrift pacing trace diagnostics `71c7e9f5c` (trace + evidence only; the pacing assertion is unchanged,
+the trace is written before it). The `rust/` tree is byte-identical to candidate `29bdd2b04`
+(empty `git diff 29bdd2b04 HEAD -- rust`). Past PostgreSQL 40173134481 and MySQL 40173683827
+evidence stays bound to its named source `29bdd`; not relabeled. Ref `t3/matching-validation-thrift-pacing-20261025`. Only Thrift lane
+dispatched first to diagnose pacing; MySQL GC restart test follows the Thrift result.
