@@ -15,8 +15,8 @@ candidate's acceptance and parity audit complete.
 | Cassandra | https://github.com/auenkr/cadence-rust/actions/runs/40153493941 | success |
 | MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40155956238 | success with corrected harness; failed40153901033 preserved |
 | Configstore | https://github.com/auenkr/cadence-rust/actions/runs/40155523508 | success |
-| Real shard distributor | https://github.com/auenkr/cadence-rust/actions/runs/40156296140 | running |
-| Active offer with Go History, zero inserts | pending | not started |
+| Real shard distributor | https://github.com/auenkr/cadence-rust/actions/runs/40156296140 | success |
+| Active offer with Go History, zero inserts | https://github.com/auenkr/cadence-rust/actions/runs/40156718234 | running |
 
 Run mixed lanes serially. Preserve source, binary SHA256, command, exit files
 and compact probe output for each. Earlier successes remain scenario evidence
