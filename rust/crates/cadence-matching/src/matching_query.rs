@@ -5,7 +5,10 @@
 use cadence_proto::{api as p, history as h, matching as m};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use tokio::sync::{oneshot, Notify};
 use tonic::Status;
@@ -16,6 +19,22 @@ const EMPTY_EVENT_ID: i64 = -23;
 /// both 1.0.0.
 const STICKY_QUERY_MIN_MAJOR: u64 = 1;
 
+/// Which request fields Go received as nil. Runtime metadata only: never
+/// persisted or sent on the wire. Go's poller dereferences `TaskList.Name` and
+/// `QueryRequest.Query` while building the response and fails with a nil
+/// dereference, so a shape with either absent can never be delivered.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct QueryShape {
+    pub task_list_absent: bool,
+    pub query_absent: bool,
+}
+
+impl QueryShape {
+    pub fn is_valid(&self) -> bool {
+        !self.task_list_absent && !self.query_absent
+    }
+}
+
 /// A query offered by `QueryWorkflow` and awaiting a decision poller.
 #[derive(Clone)]
 pub struct PendingQuery {
@@ -23,6 +42,7 @@ pub struct PendingQuery {
     pub domain_id: String,
     pub task_list: String,
     pub request: p::QueryWorkflowRequest,
+    pub shape: QueryShape,
 }
 
 /// What a waiting `QueryWorkflow` call receives.
@@ -56,49 +76,187 @@ impl WorkerAnswer {
 #[derive(Default)]
 pub struct QueryChannel {
     pending: Mutex<VecDeque<PendingQuery>>,
-    waiting: Mutex<HashMap<String, oneshot::Sender<QueryOutcome>>>,
+    waiting: Mutex<HashMap<String, (u64, oneshot::Sender<QueryOutcome>)>>,
+    /// Engine-wide task-ID index (Go `lockableQueryTaskMap`), shared by every
+    /// owner of one registry. `None` for standalone channels.
+    index: Option<Arc<QueryIndex>>,
     notify: Notify,
     /// Decision polls parked in `next`, used by `try_offer` to mirror Go's
     /// non-blocking `queryTaskC` send (succeeds only with a waiting poller).
     waiters: std::sync::atomic::AtomicUsize,
 }
+/// Go `lockableQueryTaskMap`: task ID -> the channel holding its waiter. The
+/// index owns an `Arc` of the channel, so a result can still be delivered after
+/// the owning task list was unloaded or replaced. A later `put` of the same ID
+/// wins; each entry carries a generation so an older registration's cleanup
+/// cannot remove the newer one.
+#[derive(Default)]
+pub struct QueryIndex {
+    entries: Mutex<HashMap<String, (u64, Arc<QueryChannel>)>>,
+    next_generation: AtomicU64,
+}
+
+impl QueryIndex {
+    /// Go `deliverQueryResult`: O(1) lookup by task ID alone.
+    pub fn deliver(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {
+        let not_found = || Status::not_found("query task not found, or already expired");
+        let entry = self
+            .entries
+            .lock()
+            .expect("matching query index lock")
+            .get(task_id)
+            .cloned();
+        let Some((generation, channel)) = entry else {
+            return Err(not_found());
+        };
+        match channel.take_waiter(task_id, Some(generation)) {
+            Some(sender) => {
+                // The waiter may have timed out; dropping the send is Go's
+                // buffered-channel behaviour after the deferred delete.
+                let _ = sender.send(outcome);
+                Ok(())
+            }
+            None => {
+                // Stale entry (waiter already gone): drop it and report missing.
+                self.remove(task_id, generation);
+                Err(not_found())
+            }
+        }
+    }
+
+    fn remove(&self, task_id: &str, generation: u64) {
+        let mut entries = self.entries.lock().expect("matching query index lock");
+        if entries.get(task_id).is_some_and(|(g, _)| *g == generation) {
+            entries.remove(task_id);
+        }
+    }
+}
+
 /// Mirror Go's deferred query-map deletion on completion, timeout, and RPC
 /// cancellation (not only on the explicit timeout branch).
 pub struct Registration {
     channel: std::sync::Arc<QueryChannel>,
     task_id: String,
+    generation: u64,
 }
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.channel.withdraw(&self.task_id);
+        self.channel
+            .withdraw_generation(&self.task_id, self.generation);
     }
 }
 
 impl QueryChannel {
-    pub fn registration(self: &std::sync::Arc<Self>, task_id: &str) -> Registration {
-        Registration { channel: self.clone(), task_id: task_id.into() }
-    }
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A channel whose waiters are also indexed engine-wide.
+    pub fn with_index(index: Arc<QueryIndex>) -> Self {
+        Self {
+            index: Some(index),
+            ..Self::default()
+        }
+    }
+
+    /// Install the result waiter and return a guard that removes exactly this
+    /// registration (waiter, index entry, pending offer) when dropped.
+    pub fn register_guarded(
+        self: &Arc<Self>,
+        task_id: &str,
+    ) -> (oneshot::Receiver<QueryOutcome>, Registration) {
+        let (generation, receiver) = self.install_waiter(task_id);
+        let registration = Registration {
+            channel: self.clone(),
+            task_id: task_id.into(),
+            generation,
+        };
+        (receiver, registration)
+    }
+
+    fn install_waiter(self: &Arc<Self>, task_id: &str) -> (u64, oneshot::Receiver<QueryOutcome>) {
+        let (sender, receiver) = oneshot::channel();
+        let generation = match &self.index {
+            Some(index) => index.next_generation.fetch_add(1, Ordering::SeqCst) + 1,
+            None => 0,
+        };
+        self.waiting
+            .lock()
+            .expect("matching query lock")
+            .insert(task_id.into(), (generation, sender));
+        if let Some(index) = &self.index {
+            index
+                .entries
+                .lock()
+                .expect("matching query index lock")
+                .insert(task_id.into(), (generation, self.clone()));
+        }
+        (generation, receiver)
+    }
+
+    /// Remove the waiter for `task_id`; with `generation` only if it matches.
+    fn take_waiter(
+        &self,
+        task_id: &str,
+        generation: Option<u64>,
+    ) -> Option<oneshot::Sender<QueryOutcome>> {
+        let mut waiting = self.waiting.lock().expect("matching query lock");
+        if let Some(wanted) = generation {
+            if waiting.get(task_id).is_none_or(|(g, _)| *g != wanted) {
+                return None;
+            }
+        }
+        let (taken, sender) = waiting.remove(task_id)?;
+        drop(waiting);
+        if let Some(index) = &self.index {
+            index.remove(task_id, taken);
+        }
+        Some(sender)
+    }
+
+    fn withdraw_generation(&self, task_id: &str, generation: u64) {
+        let replaced = {
+            let mut waiting = self.waiting.lock().expect("matching query lock");
+            match waiting.get(task_id) {
+                Some((g, _)) if *g != generation => true,
+                Some(_) => {
+                    waiting.remove(task_id);
+                    false
+                }
+                None => false,
+            }
+        };
+        if replaced {
+            // A newer registration owns this ID; leave its waiter and offer.
+            return;
+        }
+        if let Some(index) = &self.index {
+            index.remove(task_id, generation);
+        }
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .retain(|query| query.task_id != task_id);
     }
 
     /// Go `QueryWorkflow`: install the result waiter, then offer the task. The
     /// waiter is registered first so a poller cannot pick up the offer before
     /// the result channel exists.
-    pub fn register(&self, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
+    pub fn register(self: &Arc<Self>, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
         let receiver = self.register_waiter(&query.task_id);
         self.offer(query);
         receiver
     }
 
-    pub fn register_waiter(&self, task_id: &str) -> oneshot::Receiver<QueryOutcome> {
-        let (sender, receiver) = oneshot::channel();
-        self.waiting.lock().expect("matching query lock").insert(task_id.into(), sender);
-        receiver
+    pub fn register_waiter(self: &Arc<Self>, task_id: &str) -> oneshot::Receiver<QueryOutcome> {
+        self.install_waiter(task_id).1
     }
 
     pub fn offer(&self, query: PendingQuery) {
-        self.pending.lock().expect("matching query lock").push_back(query);
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .push_back(query);
         self.notify.notify_waiters();
     }
 
@@ -122,49 +280,49 @@ impl QueryChannel {
     pub async fn next(&self) -> PendingQuery {
         struct Waiter<'a>(&'a std::sync::atomic::AtomicUsize);
         impl Drop for Waiter<'_> {
-            fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
         }
-        self.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.waiters
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _waiter = Waiter(&self.waiters);
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(query) = self.take() { return query; }
+            if let Some(query) = self.take() {
+                return query;
+            }
             notified.await;
         }
     }
 
     fn take(&self) -> Option<PendingQuery> {
-        self.pending.lock().expect("matching query lock").pop_front()
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .pop_front()
     }
 
     /// Go `deliverQueryResult`. A missing waiter means the caller already gave
     /// up or the task expired.
     pub fn complete(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {
-        let sender = self
-            .waiting
-            .lock()
-            .expect("matching query lock")
-            .remove(task_id);
-        match sender {
+        match self.take_waiter(task_id, None) {
             Some(sender) => {
-                // The waiter may have timed out; dropping the send is Go's
-                // buffered-channel behaviour after the deferred delete.
                 let _ = sender.send(outcome);
                 Ok(())
             }
-            None => Err(Status::not_found("query task not found, or already expired")),
+            None => Err(Status::not_found(
+                "query task not found, or already expired",
+            )),
         }
     }
 
     /// Withdraw an offer whose caller gave up (Go's deferred
     /// `lockableQueryTaskMap.delete` plus matcher cleanup).
     pub fn withdraw(&self, task_id: &str) {
-        self.waiting
-            .lock()
-            .expect("matching query lock")
-            .remove(task_id);
+        let _ = self.take_waiter(task_id, None);
         self.pending
             .lock()
             .expect("matching query lock")
@@ -197,9 +355,8 @@ pub fn query_response(
         task_list: query.task_list.clone(),
         task_id: query.task_id.clone(),
     };
-    let task_token =
-        cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
-            .unwrap_or_default();
+    let task_token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
+        .unwrap_or_default();
     let sticky_task_list_configured = state
         .sticky_task_list
         .as_ref()
@@ -229,9 +386,8 @@ pub fn query_response(
 /// consistentQuery:` fallthrough; a known impl with no feature version, an
 /// unknown impl, or the CLI is not.
 fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
-    if client_impl.is_empty() {
-        return true;
-    }
+    // Go `featureSupported`: the empty-impl `consistentQuery` case is an empty
+    // switch arm, so it falls through to the impl/version lookup and fails.
     if !matches!(client_impl, "uber-go" | "uber-java") {
         return false;
     }
@@ -244,13 +400,36 @@ fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
 /// once all numeric components and build metadata have been validated.
 fn released_feature_at_least(value: &str, major: u64, minor: u64) -> bool {
     let value = value.strip_prefix('v').unwrap_or(value);
-    let (numbers, metadata) = value.split_once('+').map_or((value, None), |(numbers, metadata)| (numbers, Some(metadata)));
-    if metadata.is_some_and(|metadata| metadata.split('.').any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'~')))) { return false; }
-    let segments = numbers.split('.').map(|part| {
-        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) { return None; }
-        part.parse::<i64>().ok()
-    }).collect::<Option<Vec<_>>>();
-    segments.is_some_and(|segments| (segments[0] as u64, segments.get(1).copied().unwrap_or_default() as u64) >= (major, minor))
+    let (numbers, metadata) = value
+        .split_once('+')
+        .map_or((value, None), |(numbers, metadata)| {
+            (numbers, Some(metadata))
+        });
+    if metadata.is_some_and(|metadata| {
+        metadata.split('.').any(|part| {
+            part.is_empty()
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'~'))
+        })
+    }) {
+        return false;
+    }
+    let segments = numbers
+        .split('.')
+        .map(|part| {
+            if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            part.parse::<i64>().ok()
+        })
+        .collect::<Option<Vec<_>>>();
+    segments.is_some_and(|segments| {
+        (
+            segments[0] as u64,
+            segments.get(1).copied().unwrap_or_default() as u64,
+        ) >= (major, minor)
+    })
 }
 
 /// Go `waitForQueryResult`: an answered query returns the payload, a failed
@@ -334,11 +513,16 @@ mod tests {
     #[test]
     fn matching_query_registration_drop_withdraws_cancelled_offer() {
         let channel = std::sync::Arc::new(QueryChannel::new());
-        let receiver = channel.register(query("cancelled"));
-        let registration = channel.registration("cancelled");
+        let (receiver, registration) = channel.register_guarded("cancelled");
+        channel.offer(query("cancelled"));
         drop(registration);
         assert!(channel.take().is_none());
-        assert!(channel.complete("cancelled", QueryOutcome::Internal(Status::cancelled("cancelled"))).is_err());
+        assert!(channel
+            .complete(
+                "cancelled",
+                QueryOutcome::Internal(Status::cancelled("cancelled"))
+            )
+            .is_err());
         assert!(receiver.blocking_recv().is_err());
     }
 
@@ -359,6 +543,7 @@ mod tests {
                 }),
                 ..Default::default()
             },
+            shape: QueryShape::default(),
         }
     }
 
@@ -390,7 +575,16 @@ mod tests {
         for value in ["1", "v1.5", "01.05.0", "1.5.0+build.42", "2.0.0.1"] {
             assert!(supports_sticky_query("uber-go", value), "{value}");
         }
-        for value in ["1.5.0-alpha", "2.0.0-rc1", "1.invalid", "1.5.bad", "1.5.0+", "1.5.0+bad..build", "1.5.0+build!", "1.5.9223372036854775808"] {
+        for value in [
+            "1.5.0-alpha",
+            "2.0.0-rc1",
+            "1.invalid",
+            "1.5.bad",
+            "1.5.0+",
+            "1.5.0+bad..build",
+            "1.5.0+build!",
+            "1.5.9223372036854775808",
+        ] {
             assert!(!supports_sticky_query("uber-go", value), "{value}");
             assert!(!supports_consistent_query("uber-go", value), "{value}");
         }
@@ -400,9 +594,12 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_query_poll_removes_waiter_and_cannot_accept_an_offer() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let mut next = Box::pin(channel.next());
-        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(matches!(
+            futures_poll(next.as_mut()),
+            std::task::Poll::Pending
+        ));
         assert!(channel.has_waiters());
         drop(next);
         assert!(!channel.has_waiters());
@@ -411,20 +608,28 @@ mod tests {
         assert!(channel.take().is_none());
     }
 
-    fn futures_poll<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
+    fn futures_poll<F: std::future::Future>(
+        future: std::pin::Pin<&mut F>,
+    ) -> std::task::Poll<F::Output> {
         let waker = std::task::Waker::noop();
         future.poll(&mut std::task::Context::from_waker(waker))
     }
 
     #[tokio::test]
     async fn registered_query_is_offered_exactly_once_to_a_parked_poller() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let _receiver = channel.register_waiter("task");
         assert!(channel.take().is_none());
         let mut next = Box::pin(channel.next());
-        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(matches!(
+            futures_poll(next.as_mut()),
+            std::task::Poll::Pending
+        ));
         assert!(channel.try_offer(query("task")));
-        assert!(!channel.try_offer(query("second")), "one parked poll cannot accept two queries");
+        assert!(
+            !channel.try_offer(query("second")),
+            "one parked poll cannot accept two queries"
+        );
         assert_eq!(next.await.task_id, "task");
         assert!(channel.take().is_none());
         assert!(!channel.has_waiters());
@@ -432,18 +637,17 @@ mod tests {
 
     #[tokio::test]
     async fn offer_is_delivered_once_and_completed_by_task_id() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let receiver = channel.register(query("task-1"));
         let offered = channel.next().await;
         assert_eq!(offered.task_id, "task-1");
         // The query response carries a decodable query token, the query, and
         // the mutable state the frontend uses to load history.
         let response = query_response(offered, &mutable_state());
-        let token =
-            cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
-                &response.task_token,
-            )
-            .unwrap();
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+            &response.task_token,
+        )
+        .unwrap();
         assert_eq!(token.task_id, "task-1");
         assert_eq!(token.workflow_id, "workflow");
         assert_eq!(token.task_list, "queue");
@@ -483,11 +687,14 @@ mod tests {
 
     #[tokio::test]
     async fn internal_error_fails_the_waiting_query() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let receiver = channel.register(query("task-3"));
         let _ = channel.next().await;
         channel
-            .complete("task-3", QueryOutcome::Internal(Status::internal("history down")))
+            .complete(
+                "task-3",
+                QueryOutcome::Internal(Status::internal("history down")),
+            )
             .unwrap();
         let error = query_outcome(receiver.await.unwrap(), false).unwrap_err();
         assert!(error.message().contains("history down"));
@@ -495,20 +702,26 @@ mod tests {
 
     #[tokio::test]
     async fn completing_an_unknown_task_reports_not_found() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         assert!(channel
-            .complete("missing", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "missing",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_err());
     }
 
     #[tokio::test]
     async fn withdraw_removes_an_abandoned_offer() {
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         let _receiver = channel.register(query("task-2"));
         channel.withdraw("task-2");
         // No offer remains, and a late completion is rejected.
         assert!(channel
-            .complete("task-2", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "task-2",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_err());
     }
 
@@ -530,8 +743,8 @@ mod tests {
     fn strong_consistency_requires_a_supported_worker() {
         assert!(supports_consistent_query("uber-go", "1.5.0"));
         assert!(supports_consistent_query("uber-java", "1.9.3"));
-        // An older client that omits clientImpl is treated as supported.
-        assert!(supports_consistent_query("", ""));
+        // Go rejects a client that omits clientImpl (empty switch arm falls through).
+        assert!(!supports_consistent_query("", ""));
         assert!(!supports_consistent_query("uber-go", "1.4.9"));
         assert!(!supports_consistent_query("uber-java", "1.0.0"));
         assert!(!supports_consistent_query("cli", "9.9.9"));
@@ -574,7 +787,7 @@ mod tests {
     #[tokio::test]
     async fn sync_match_queued_query_is_returned_to_next() {
         // Go Test_poll_QueryTask: a query already on the query channel is the poll result.
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         channel.offer(query("query-1"));
         let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
             .await
@@ -594,7 +807,10 @@ mod tests {
         let received = poll.await.unwrap();
         assert_eq!(received.task_id, "query-1");
         assert!(channel
-            .complete("query-1", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "query-1",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_ok());
         assert!(receiver.await.is_ok());
     }
@@ -602,14 +818,44 @@ mod tests {
     async fn sync_match_non_blocking_query_poll_returns_queued_query_once() {
         // Go Test_pollNonBlocking_QueryTask: a queued query is returned with no
         // wait, and once taken the query channel is empty again.
-        let channel = QueryChannel::new();
+        let channel = std::sync::Arc::new(QueryChannel::new());
         channel.offer(query("query-1"));
         let received = tokio::time::timeout(std::time::Duration::from_millis(100), channel.next())
             .await
             .expect("queued query is returned without waiting");
         assert_eq!(received.task_id, "query-1");
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
+                .await
+                .is_err()
+        );
+    }
+
+    fn empty_answer() -> QueryOutcome {
+        QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+    }
+
+    #[test]
+    fn matching_query_index_delivers_after_owner_channel_detached() {
+        let index = std::sync::Arc::new(QueryIndex::default());
+        let channel = std::sync::Arc::new(QueryChannel::with_index(index.clone()));
+        let (mut receiver, registration) = channel.register_guarded("task-a");
+        drop(channel); // the owner lost its handle; the index keeps the channel
+        index.deliver("task-a", empty_answer()).unwrap();
+        assert!(receiver.try_recv().is_ok());
+        drop(registration);
+        let error = index.deliver("task-a", empty_answer()).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::NotFound);
+    }
+
+    #[test]
+    fn matching_query_older_registration_drop_keeps_newer_duplicate() {
+        let index = std::sync::Arc::new(QueryIndex::default());
+        let channel = std::sync::Arc::new(QueryChannel::with_index(index.clone()));
+        let (_old_receiver, old) = channel.register_guarded("dup");
+        let (mut new_receiver, _new) = channel.register_guarded("dup");
+        drop(old);
+        index.deliver("dup", empty_answer()).unwrap();
+        assert!(new_receiver.try_recv().is_ok());
     }
 }
