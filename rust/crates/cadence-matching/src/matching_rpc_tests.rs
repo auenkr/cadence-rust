@@ -8925,9 +8925,26 @@ async fn go_handler_update_task_list_partition_config_engine_error_is_internal_s
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Rust Matching has no injectable engine failure, so the Go mock error (errors.New(msg) -> InternalServiceError{Message: msg}) cannot be reproduced for refresh_task_list_partition_config"]
 async fn go_handler_refresh_partition_config_engine_error_is_internal_service_error() {
-    panic!("parity gap: no injectable engine failure seam");
+    let (_dir, _store, matching, key) = fixture();
+    *matching.engine_fault.lock().unwrap() = Some((
+        "RefreshTaskListPartitionConfig",
+        "refresh-tasklist-error".into(),
+    ));
+    let status = matching
+        .refresh_task_list_partition_config(Request::new(
+            m::RefreshTaskListPartitionConfigRequest {
+                domain_id: key.domain_id.to_string(),
+                task_list: list(),
+                task_list_type: 1,
+                partition_config: None,
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "refresh-tasklist-error");
+    assert!(status.details().is_empty());
 }
 
 // engine_integration_test.go AddTasksTest (non-forwarded): 111 adds all persist.
