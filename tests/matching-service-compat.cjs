@@ -978,7 +978,34 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   };
-  const restartState = { taskList: null, watermark: null };
+  // Completes the first decision task of a workflow by scheduling exactly the
+  // activity the existing SDK's EchoWorkflow schedules, so the activity row is
+  // persisted and undelivered while its watermark is read. The SDK then
+  // replays the same history and drains the activity.
+  const scheduleEchoActivityAndObserve = async (listName, runId, label) => {
+    const taskList = { name: listName };
+    let decision;
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      decision = await call('WorkerAPI', 'PollForDecisionTask', { domain, taskList, identity: 'gc-probe' });
+      if (decision.taskToken?.length > 0) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert(decision?.taskToken?.length > 0, `${label}: no decision task was delivered on ${listName}`);
+    assert.equal(decision.workflowExecution?.runId, runId, `${label}: decision task belongs to a different run`);
+    await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+      taskToken: decision.taskToken, identity: 'gc-probe', decisions: [{ scheduleActivityTaskDecisionAttributes: {
+        activityId: '0', activityType: { name: 'main.EchoActivity' }, taskList,
+        input: payload('"restart-proof"\n'),
+        scheduleToCloseTimeout: { seconds: '120' }, scheduleToStartTimeout: { seconds: '60' },
+        startToCloseTimeout: { seconds: '60' }, heartbeatTimeout: { seconds: '0' },
+      } }],
+    });
+    const watermark = await awaitPersistedTask(listName, 1);
+    assert(watermark && watermark.maxTaskId !== null, `${label}: the activity task row was not observed before delivery`);
+    return watermark;
+  };
+  const restartState = { taskList: null, watermark: null, activityWatermark: null };
   let restartEvidence;
   if (restartMode) {
     const restartID = `restart-${id}`, restartTaskList = `restart-tasks-${id}`;
@@ -1013,6 +1040,7 @@ async function run() {
       await sdAssertHeartbeat('after-sigkill-restart', { excludeIds: [] });
       await sdReassign('after-sigkill-restart', restartTaskList);
     }
+    if (process.env.CADENCE_MATCHING_MYSQL) restartState.activityWatermark = await scheduleEchoActivityAndObserve(restartTaskList, restartStarted.runId, 'restart');
     const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_RESTART_WORKFLOW_ID: restartID, CADENCE_MIXED_RESTART_TASK_LIST: restartTaskList }, encoding: 'utf8', timeout: 120000 });
     fs.writeFileSync(path.join(work, 'restart-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
     if (sdk.status !== 0) throw new Error(`Existing SDK did not complete pre-restart workflow/activity: ${sdk.error || sdk.status}; see ${work}/restart-sdk.log`);
@@ -1498,6 +1526,7 @@ async function run() {
     const backlogWatermark = await awaitPersistedTask(backlogList.name, 0);
     assert(backlogWatermark && backlogWatermark.maxTaskId !== null,
       'Go History did not persist the dedicated garbage collection backlog task');
+    const backlogActivityWatermark = await scheduleEchoActivityAndObserve(backlogList.name, backlogStarted.runId, 'backlog');
     const backlogSdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'), env: {
       ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain, CADENCE_TCHANNEL_PEER: process.argv[6],
       CADENCE_MIXED_RESTART_WORKFLOW_ID: backlogWorkflowId, CADENCE_MIXED_RESTART_TASK_LIST: backlogList.name,
@@ -1522,21 +1551,13 @@ async function run() {
     const mainDecisionMax = Math.max(mainDecisionWatermark?.maxTaskId ?? 0, finalWatermark?.maxTaskId ?? 0);
     const gateExpectations = [
       { label: 'backlogDecision', name: backlogList.name, taskType: 0, observedMaxTaskId: backlogWatermark.maxTaskId },
-      // The activity row of the backlog was created and completed by the SDK
-      // without an observation, so this queue has no durable task id. Go
-      // persists the acknowledgement 0 for a queue that never acknowledged a
-      // task, so 0 is the valid lower bound and the queue carries no durable
-      // garbage collection evidence.
-      { label: 'backlogActivity', name: backlogList.name, taskType: 1, minAck: 0, durableGcEvidence: false },
+      { label: 'backlogActivity', name: backlogList.name, taskType: 1, observedMaxTaskId: backlogActivityWatermark.maxTaskId },
       { label: 'mainDecision', name: taskList.name, taskType: 0, observedMaxTaskId: mainDecisionMax },
       { label: 'mainActivity', name: taskList.name, taskType: 1, observedMaxTaskId: mainActivityWatermark?.maxTaskId ?? 1 },
     ];
     if (restartMode && restartState.watermark && restartState.watermark.maxTaskId !== null) {
       gateExpectations.push({ label: 'restartDecision', name: restartState.taskList, taskType: 0, observedMaxTaskId: restartState.watermark.maxTaskId });
-      // The restart activity row was created and completed by the SDK without
-      // an observation, so this queue carries no durable garbage collection
-      // evidence and the valid lower bound of its acknowledgement is 0.
-      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, minAck: 0, durableGcEvidence: false });
+      gateExpectations.push({ label: 'restartActivity', name: restartState.taskList, taskType: 1, observedMaxTaskId: restartState.activityWatermark.maxTaskId });
     }
     const taskGarbageCollection = await verifyProductionMySqlTaskGc({
       query: mysqlRows,
