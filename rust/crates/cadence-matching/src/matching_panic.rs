@@ -41,6 +41,10 @@ pub fn capture_sync<T>(operation: &'static str, call: impl FnOnce() -> T) -> Res
 /// Prefix Go's `CapturePanic` gives every captured non-error panic.
 pub const CAPTURED_PANIC_PREFIX: &str = "panic object is not error: ";
 
+/// Go runtime error a nil dereference panic carries; `CapturePanic` hands it back as a plain error.
+pub const NIL_DEREFERENCE_MESSAGE: &str =
+    "runtime error: invalid memory address or nil pointer dereference";
+
 /// True for the plain Go error a captured panic becomes. Go's Thrift mapper passes a
 /// plain error through unchanged, so Thrift and TChannel send it as an unexpected
 /// system error, not a declared `InternalServiceError`. Other untyped statuses (for
@@ -53,7 +57,7 @@ pub fn is_captured_panic(status: &tonic::Status) -> bool {
 
 /// Same check on a message that already crossed the dispatch boundary as a string.
 pub fn is_captured_panic_message(message: &str) -> bool {
-    message.starts_with(CAPTURED_PANIC_PREFIX)
+    message.starts_with(CAPTURED_PANIC_PREFIX) || message == NIL_DEREFERENCE_MESSAGE
 }
 
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {

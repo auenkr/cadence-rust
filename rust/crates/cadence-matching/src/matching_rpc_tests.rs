@@ -8817,3 +8817,87 @@ async fn go_malformed_reserved_task_list_name_is_internal_for_every_rpc() {
     assert_eq!(activity.code(), tonic::Code::Internal);
     assert_eq!(activity.message(), want);
 }
+
+// Go oracle run 40175488464 (`GO_OPTIONAL_ORACLE` lines, original handler): absent optional
+// payloads on valid domains.
+#[tokio::test]
+async fn go_oracle_absent_optional_payloads_on_valid_domain() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    // refresh-absent-tasklist: nil error.
+    matching
+        .refresh_task_list_partition_config(Request::new(
+            m::RefreshTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap();
+    // update-absent-tasklist-absent-config: BadRequestError.
+    let err = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        err.message(),
+        "Task list partition config is not set in the request."
+    );
+    // cancel-poll-absent-tasklist: nil error.
+    matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    // add-decision-absent-tasklist / absent-execution: nil error.
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            workflow_execution: execution(),
+            schedule_id: 1,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: list(),
+            schedule_id: 1,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+}
+
+// Go oracle: activity-poll-absent-pollrequest => plain `runtime.errorString` (nil
+// dereference at engine.go:915 after the context check and manager load), which the
+// handler's CapturePanic returns as-is; unknown domain fails earlier on manager load.
+#[tokio::test]
+async fn go_oracle_activity_poll_absent_request_is_captured_nil_dereference() {
+    let (_dir, _store, matching, key) = fixture();
+    let err = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: key.domain_id.to_string(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unknown);
+    assert_eq!(
+        err.message(),
+        "runtime error: invalid memory address or nil pointer dereference"
+    );
+    assert!(crate::matching_panic::is_captured_panic(&err));
+}

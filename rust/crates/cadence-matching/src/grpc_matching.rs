@@ -2018,9 +2018,15 @@ impl m::matching_api_server::MatchingApi for Matching {
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let Some(mut payload) = r.request else {
+            // Go PollForActivityTask reads `request.GetTaskList()` nil-safely, loads the empty
+            // list's manager, then dereferences `request.TaskListMetadata` (engine.go:915). The
+            // runtime panic is captured by the handler as a plain error (Go oracle run
+            // 40175488464: `runtime error: invalid memory address or nil pointer dereference`).
+            self.domain_name(&r.domain_id)?;
+            check_poll_context(incoming_deadline)?;
+            return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE));
+        };
         // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
         // identifier is validated before any domain lookup.
         poll_task_list_name("activity", payload.task_list.as_ref().map_or("", |t| t.name.as_str()))?;
@@ -2278,15 +2284,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                         log_tasklist_counter("Emitting tasklist counter on decision task", &r.domain_id, r.task_list.as_ref());
                     }
                     if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                        // Go Add* use nil-safe getters: an absent TaskList or Execution is
+                        // empty and still accepted (Go oracle run 40175488464).
+                        let default_list = p::TaskList::default();
+                        let list = r.task_list.as_ref().unwrap_or(&default_list);
+                        let default_execution = p::WorkflowExecution::default();
+                        let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
+                        let run = if r.workflow_execution.is_none() {
+                            None
+                        } else {
+                            Some(
+                                uuid::Uuid::parse_str(&execution.run_id)
+                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
+                                    .as_bytes()
+                                    .to_vec(),
+                            )
+                        };
                         let source = uuid::Uuid::parse_str(&r.domain_id).expect("domain validated");
                         let queue = self.durable_queue(&r.domain_id, list, 0).await?;
                         if queue.stop_if_isolation_changed() {
@@ -2296,7 +2309,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         check_sticky_poller(&queue, list)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
+                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
@@ -2502,15 +2515,22 @@ impl m::matching_api_server::MatchingApi for Matching {
                         log_tasklist_counter("Emitting tasklist counter on activity task", &r.domain_id, r.task_list.as_ref());
                     }
                     if self.queues.is_some() {
-                        let list = r
-                            .task_list
-                            .as_ref()
-                            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                        let execution = r.workflow_execution.as_ref().ok_or_else(|| {
-                            Status::invalid_argument("WorkflowExecution is not set.")
-                        })?;
-                        let run = uuid::Uuid::parse_str(&execution.run_id)
-                            .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?;
+                        // Go Add* use nil-safe getters: an absent TaskList or Execution is
+                        // empty and still accepted (Go oracle run 40175488464).
+                        let default_list = p::TaskList::default();
+                        let list = r.task_list.as_ref().unwrap_or(&default_list);
+                        let default_execution = p::WorkflowExecution::default();
+                        let execution = r.workflow_execution.as_ref().unwrap_or(&default_execution);
+                        let run = if r.workflow_execution.is_none() {
+                            None
+                        } else {
+                            Some(
+                                uuid::Uuid::parse_str(&execution.run_id)
+                                    .map_err(|_| Status::invalid_argument("Run UUID is not valid."))?
+                                    .as_bytes()
+                                    .to_vec(),
+                            )
+                        };
                         self.domain_name(&r.source_domain_id)?;
                         let source = uuid::Uuid::parse_str(&r.source_domain_id).map_err(|_| {
                             Status::invalid_argument("Source domain UUID is not valid.")
@@ -2522,7 +2542,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         self.check_write_partition(&r.domain_id, list, 1, &queue)?;
                         let data = cadence_persistence::matching_blob::TaskData {
                             workflow_id: execution.workflow_id.clone(),
-                            run_id: Some(run.as_bytes().to_vec()),
+                            run_id: run,
                             schedule_id: r.schedule_id,
                             partition_config: if r.partition_config.is_empty() {
                                 None
