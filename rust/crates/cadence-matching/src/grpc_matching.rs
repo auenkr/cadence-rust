@@ -2759,8 +2759,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                                         task_list: list.name.clone(),
                                         request: payload.clone(),
                                     };
-                                    let receiver = handle.queries.register_waiter(&task_id);
-                                    let _registration = handle.queries.registration(&task_id);
+                                    let (receiver, _registration) =
+                                        handle.queries.register_guarded(&task_id);
                                     let offered = if force_local {
                                         handle.queries.offer(query);
                                         true
@@ -3512,6 +3512,20 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::RespondQueryTaskCompletedResponse>, Status>(
             "respond_query_task_completed",
             async move {
+                // Go's generated gRPC wrapper runs the proto mapper before the handler:
+                // `ToRespondQueryTaskCompletedRequest` dereferences a nil `Result` when
+                // the nested request is present. YARPC recovers it as a plain error that
+                // gRPC reports as Unknown, before any domain, quota or metric side effect.
+                if request
+                    .get_ref()
+                    .request
+                    .as_ref()
+                    .is_some_and(|nested| nested.result.is_none())
+                {
+                    return Err(Status::unknown(
+                        "panic: runtime error: invalid memory address or nil pointer dereference",
+                    ));
+                }
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",
@@ -3536,13 +3550,47 @@ impl m::matching_api_server::MatchingApi for Matching {
                             )?;
                             use crate::grpc_convert as cv;
                             let r = request.get_ref().clone();
+                            if let Some(queues) = self.queues.as_ref() {
+                                // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: the
+                                // engine-wide query map is keyed by task ID only. Domain, task
+                                // list and the embedded token are not validated, and a missing
+                                // nested request is delivered as an empty completion.
+                                let payload = r.request.clone().unwrap_or_default();
+                                let result = payload.result.clone().unwrap_or_default();
+                                let answer = crate::matching_query::WorkerAnswer {
+                                    result,
+                                    worker_version_info: payload.worker_version_info.clone(),
+                                };
+                                let completed = queues.deliver_query_result(
+                                    &r.task_id,
+                                    crate::matching_query::QueryOutcome::Worker(answer),
+                                );
+                                if completed.is_err() {
+                                    let task_list = r.task_list.clone().unwrap_or_default();
+                                    self.metrics.task_list_counter_event(
+                                        crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
+                                        &crate::matching_metrics::PollMetricContext {
+                                            domain: self
+                                                .domain_name(&r.domain_id)
+                                                .unwrap_or_default(),
+                                            task_list: task_list.name.clone(),
+                                            task_list_kind: task_list.kind,
+                                            task_type: "decision_task",
+                                            poller_isolation_group: String::new(),
+                                        },
+                                    );
+                                }
+                                completed?;
+                                return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
+                            }
                             let mut payload = r
                                 .request
+                                .clone()
                                 .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
                             // The internal request carries the authoritative domain/task routing;
                             // the embedded worker token must agree with it, like Go's domain-cache
                             // lookup by UUID before delivering to the query channel.
-                            let domain = self.domain_name(&r.domain_id)?;
+                            self.domain_name(&r.domain_id)?;
                             if !r.task_id.is_empty() && !payload.task_token.is_empty() {
                                 if let Ok(token) =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
@@ -3573,37 +3621,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 payload.task_token =
                 cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
                     .map_err(|_| Status::internal("Failed to encode query task token."))?;
-                            }
-                            if self.queues.is_some() {
-                                // Go `RespondQueryTaskCompleted` -> `deliverQueryResult`: hand the
-                                // worker's result to the waiting `QueryWorkflow` call.
-                                let task_list = r.task_list.clone().ok_or_else(|| {
-                                    Status::invalid_argument("TaskList is not set.")
-                                })?;
-                                let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
-                                let result = payload.result.clone().unwrap_or_default();
-                                let answer = crate::matching_query::WorkerAnswer {
-                                    result,
-                                    worker_version_info: payload.worker_version_info.clone(),
-                                };
-                                let completed = queue.queries.complete(
-                                    &r.task_id,
-                                    crate::matching_query::QueryOutcome::Worker(answer),
-                                );
-                                if completed.is_err() {
-                                    self.metrics.task_list_counter_event(
-                                        crate::matching_metrics::RESPOND_QUERY_TASK_FAILED,
-                                        &crate::matching_metrics::PollMetricContext {
-                                            domain: domain.clone(),
-                                            task_list: task_list.name.clone(),
-                                            task_list_kind: task_list.kind,
-                                            task_type: "decision_task",
-                                            poller_isolation_group: String::new(),
-                                        },
-                                    );
-                                }
-                                completed?;
-                                return Ok(Response::new(m::RespondQueryTaskCompletedResponse {}));
                             }
                             let input = cv::query_completed(payload)?;
                             let _ = p::worker_api_server::WorkerApi::respond_query_task_completed(
