@@ -4,6 +4,7 @@
 use crate::{grpc::Frontend, grpc_internal::History};
 use cadence_common::task_list::TaskListName;
 use cadence_proto::{api as p, matching as m, shared};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub(crate) fn matching_now() -> i64 {
     std::time::SystemTime::now()
@@ -3727,6 +3728,34 @@ pub async fn serve_with_listener_tls(
     matching: Matching,
     tls: Option<tonic::transport::ServerTlsConfig>,
 ) -> anyhow::Result<()> {
+    serve_with_listener_tls_inner(listener, matching, tls, None).await
+}
+
+pub async fn serve_with_listener_tls_or_no_identity(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
+    serve_with_listener_tls_inner(listener, matching, tls, no_identity).await
+}
+
+pub async fn serve_with_tls_or_no_identity(
+    addr: std::net::SocketAddr,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_with_listener_tls_inner(listener, matching, tls, no_identity).await
+}
+
+async fn serve_with_listener_tls_inner(
+    listener: tokio::net::TcpListener,
+    matching: Matching,
+    tls: Option<tonic::transport::ServerTlsConfig>,
+    no_identity: Option<std::sync::Arc<rustls::ServerConfig>>,
+) -> anyhow::Result<()> {
     let limit = matching.frontend.state.grpc_max_message_size;
     // Go runs a per-bucket liveness timer; a shared ticker unloads idle
     // semaphore buckets so a quiet host does not keep them forever.
@@ -3745,17 +3774,53 @@ pub async fn serve_with_listener_tls(
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
         .with_service_name("uber.cadence.api.v1.MetaAPI")
         .build_v1()?;
-    crate::grpc_tls::server_builder(tls)?
+    let server = crate::grpc_tls::server_builder(tls)?
         .add_service(reflection)
         .add_service(p::meta_api_server::MetaApiServer::new(matching.clone()).max_decoding_message_size(limit))
         .add_service(
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
         )
-        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-        .await?;
+        ;
+    if let Some(config) = no_identity {
+        let acceptor = tokio_rustls::TlsAcceptor::from(config);
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(64));
+        tokio::spawn(async move {
+            loop {
+                let (socket, _) = match listener.accept().await { Ok(value) => value, Err(_) => continue };
+                let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
+                let acceptor = acceptor.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    if let Ok(stream) = acceptor.accept(socket).await {
+                        let _ = tx.send(Ok(NoIdentityTlsStream(stream))).await;
+                    }
+                });
+            }
+        });
+        server.serve_with_incoming(tokio_stream::wrappers::ReceiverStream::new(rx)).await?;
+    } else {
+        server.serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await?;
+    }
     Ok(())
 }
+
+struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
+impl tokio::io::AsyncRead for NoIdentityTlsStream {
+    fn poll_read(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+}
+impl tokio::io::AsyncWrite for NoIdentityTlsStream {
+    fn poll_write(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> { std::pin::Pin::new(&mut self.0).poll_write(cx, buf) }
+    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> { std::pin::Pin::new(&mut self.0).poll_flush(cx) }
+    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> { std::pin::Pin::new(&mut self.0).poll_shutdown(cx) }
+    fn is_write_vectored(&self) -> bool { self.0.is_write_vectored() }
+    fn poll_write_vectored(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, bufs: &[std::io::IoSlice<'_>]) -> std::task::Poll<std::io::Result<usize>> { std::pin::Pin::new(&mut self.0).poll_write_vectored(cx, bufs) }
+}
+impl tonic::transport::server::Connected for NoIdentityTlsStream { type ConnectInfo = (); fn connect_info(&self) {} }
 
 /// Go `tag.WorkflowTaskListKind` is the Go enum (Normal=0); proto kinds are +1.
 fn go_task_list_kind(proto_kind: i32) -> i32 {

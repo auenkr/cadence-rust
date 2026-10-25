@@ -50,6 +50,54 @@ pub fn server_tls(tls: &TlsConfig) -> anyhow::Result<Option<ServerTlsConfig>> {
     Ok(Some(server))
 }
 
+/// Build rustls server TLS for Go's valid enabled configuration where either
+/// identity path is absent. Go starts in this case and fails each handshake
+/// because it has no certificate to present.
+pub fn server_tls_without_identity(tls: &TlsConfig) -> anyhow::Result<Option<Arc<ServerConfig>>> {
+    if !tls.enabled || (!tls.cert_file.is_empty() && !tls.key_file.is_empty()) {
+        return Ok(None);
+    }
+    install_tls_crypto_provider();
+    let ca_certs = ca_certs(tls)?;
+    let builder = ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()?;
+    let builder = if tls.require_client_auth {
+        let mut roots = RootCertStore::empty();
+        for cert in ca_certs {
+            let _ = roots.add(cert);
+        }
+        let verifier: Arc<dyn rustls::server::danger::ClientCertVerifier> = if roots.is_empty() {
+            Arc::new(EmptyClientCaPool)
+        } else {
+            rustls::server::WebPkiClientVerifier::builder(Arc::new(roots)).build()?
+        };
+        builder.with_client_cert_verifier(verifier)
+    } else {
+        builder.with_no_client_auth()
+    };
+    let mut server = builder.with_cert_resolver(Arc::new(NoServerCertificate));
+    server.alpn_protocols = vec![b"h2".to_vec()];
+    Ok(Some(Arc::new(server)))
+}
+
+#[derive(Debug)]
+struct NoServerCertificate;
+impl rustls::server::ResolvesServerCert for NoServerCertificate {
+    fn resolve(&self, _: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        None
+    }
+}
+
+#[derive(Debug)]
+struct EmptyClientCaPool;
+impl rustls::server::danger::ClientCertVerifier for EmptyClientCaPool {
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] { &[] }
+    fn verify_client_cert(&self, _: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: UnixTime) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> { Err(rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)) }
+    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> { Err(rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)) }
+    fn verify_tls13_signature(&self, m: &[u8], c: &CertificateDer<'_>, s: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> { self.verify_tls12_signature(m, c, s) }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { provider().signature_verification_algorithms.supported_schemes() }
+}
+
 /// Outbound TLS for a gRPC peer, built from the target service's `rpc.tls`.
 #[derive(Clone)]
 pub struct ClientTls {
@@ -405,6 +453,15 @@ mod tests {
             ..Default::default()
         };
         assert!(server_tls(&missing).is_err());
+    }
+
+    #[test]
+    fn missing_server_identity_keeps_tls_enabled_without_a_certificate() {
+        let config = TlsConfig { enabled: true, ..Default::default() };
+        let server = server_tls_without_identity(&config).unwrap().unwrap();
+        assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
+        let missing_ca = TlsConfig { enabled: true, ca_file: "/missing/cadence-ca.pem".into(), ..Default::default() };
+        assert!(server_tls_without_identity(&missing_ca).is_err());
     }
 
     #[tokio::test]

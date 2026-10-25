@@ -10,6 +10,35 @@ use std::{num::NonZeroU32, time::Duration};
 use uuid::Uuid;
 
 #[tokio::test]
+async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_without_stopping() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let tls = cadence_service_core::config::TlsConfig { enabled: true, ..Default::default() };
+    let config = cadence_service_core::grpc_tls::server_tls_without_identity(&tls).unwrap().unwrap();
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let server = tokio::spawn(crate::grpc_matching::serve_with_listener_tls_or_no_identity(
+        listener, matching, None, Some(config),
+    ));
+
+    // A TLS record reaches the real acceptor, which rejects the handshake for
+    // lack of a server certificate; it is never forwarded as plaintext.
+    let mut tls_client = tokio::net::TcpStream::connect(addr).await.unwrap();
+    tls_client.write_all(&[22, 3, 1, 0, 0]).await.unwrap();
+    let mut response = [0; 8];
+    assert!(tokio::time::timeout(Duration::from_secs(2), tls_client.read(&mut response)).await.unwrap().unwrap() <= response.len());
+
+    let mut plain_client = tokio::net::TcpStream::connect(addr).await.unwrap();
+    plain_client.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response)).await.unwrap().unwrap() <= response.len());
+
+    // Another TCP connection is accepted after both failed handshakes.
+    let _after_failures = tokio::net::TcpStream::connect(addr).await.unwrap();
+    assert!(!server.is_finished());
+    server.abort();
+}
+
+#[tokio::test]
 async fn engine_partition_owners_and_order_match_executable_go_handler_oracle() {
     use crate::matching_membership::Membership;
     use cadence_common::membership::Host;

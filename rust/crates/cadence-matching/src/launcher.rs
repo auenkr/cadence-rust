@@ -1003,11 +1003,20 @@ pub async fn run(
             let matching_service_config = cfg.services.get("matching");
             // Go's rpc.NewParams: the listener uses Matching's own rpc.tls, and
             // Matching-to-Matching peers use the same block as their target.
-            let matching_server_tls = matching_rpc
+            let matching_server_tls_without_identity = matching_rpc
                 .as_ref()
-                .map(|rpc| crate::grpc_tls::server_tls(&rpc.tls))
+                .map(|rpc| crate::grpc_tls::server_tls_without_identity(&rpc.tls))
                 .transpose()?
                 .flatten();
+            let matching_server_tls = if matching_server_tls_without_identity.is_some() {
+                None
+            } else {
+                matching_rpc
+                    .as_ref()
+                    .map(|rpc| crate::grpc_tls::server_tls(&rpc.tls))
+                    .transpose()?
+                    .flatten()
+            };
             let matching_peer_tls = matching_rpc
                 .as_ref()
                 .map(|rpc| crate::grpc_tls::client_tls(&rpc.tls))
@@ -1599,17 +1608,19 @@ pub async fn run(
                 let matching_grpc_service = matching_service.clone();
                 serving.spawn(async move {
                     let result = if let Some(listener) = matching_grpc_listener.take() {
-                        crate::grpc_matching::serve_with_listener_tls(
+                        crate::grpc_matching::serve_with_listener_tls_or_no_identity(
                             listener,
                             matching_grpc_service,
                             matching_server_tls,
+                            matching_server_tls_without_identity,
                         )
                         .await
                     } else {
-                        crate::grpc_matching::serve_with_tls(
+                        crate::grpc_matching::serve_with_tls_or_no_identity(
                             matching_addr,
                             matching_grpc_service,
                             matching_server_tls,
+                            matching_server_tls_without_identity,
                         )
                         .await
                     };
