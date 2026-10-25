@@ -56,7 +56,7 @@ jobs:
         working-directory: rust
         run: |
           set -euo pipefail
-          rustfmt --edition 2021 \
+          rustfmt --edition 2021 --config skip_children=true \
             crates/cadence-matching/src/grpc_matching.rs \
             crates/cadence-matching/src/launcher.rs \
             crates/cadence-matching/src/matching_rpc_tests.rs \
@@ -101,7 +101,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          rustfmt --edition 2021 --check \
+          rustfmt --edition 2021 --config skip_children=true --check \
             crates/cadence-matching/src/grpc_matching.rs \
             crates/cadence-matching/src/launcher.rs \
             crates/cadence-matching/src/matching_rpc_tests.rs \
