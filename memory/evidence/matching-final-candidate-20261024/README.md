@@ -46,3 +46,12 @@ source; new runs must record their own source and binary hash. Configstore
 40155523508 is currently running on the original candidate. After it ends,
 rerun MySQL using the corrected validation branch before the remaining lanes.
 See `memory/mysql-final-40153901033-restart-diagnosis.md`.
+
+## Typed refresh test supplement
+
+Master merge `a568bcae1` adds only the two real-wire typed History refresh
+error tests and their evidence note. No production source changed. Fresh
+Matching package run40155206531 passed strict clippy and tests on worker code
+`4cabb9cecee5a177a2a9462a9e8838ed9fb13324`. Workspace formatting remains
+advisory debt as described in the note. This supplement does not alter the
+production candidate or the corrected mixed-gate validation branch.

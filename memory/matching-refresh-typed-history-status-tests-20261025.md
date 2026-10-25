@@ -65,7 +65,7 @@ https://github.com/auenkr/cadence-rust/actions/runs/40155206531
   527 at the validated revision). The workflow currently treats that step as
   non-blocking; its output is in the run's `rust-ci-logs` artifact.
 
-An earlier run on `bff92083ba0148ccc0375e46ce26a3d63091a248` failed to compile
+The initial run40153942456 on `18ede4bbdc175029f759f6cbdf938c7838c66c9a` failed to compile
 because the test incorrectly expected generated detail messages to have a
 `message` field. The fixture was corrected to use the actual generated shape,
 then the final revision above passed clippy and tests.
