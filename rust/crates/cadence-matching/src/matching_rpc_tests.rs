@@ -191,8 +191,14 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
         server.abort();
         let _ = server.await;
         if let Some(client) = slow_handshake.as_mut() {
-            assert_eq!(tokio::time::timeout(Duration::from_secs(2), client.read(&mut response)).await.unwrap().unwrap(), 0,
-                "pending TLS handshake survived cancellation of the serving task");
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(2), client.read(&mut response))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                0,
+                "pending TLS handshake survived cancellation of the serving task"
+            );
         }
         assert!(
             tokio::net::TcpStream::connect(addr).await.is_err(),
