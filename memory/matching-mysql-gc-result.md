@@ -10,3 +10,5 @@ Harness fix (tests/matching-mysql-gate.cjs): record MAX(task_id) of remaining ro
 ack that stay unchanged for 5s count as throttled residue (reported as throttledResidue in evidence). A row above
 the ack level still fails, and the failure output now includes maxRowId so a real defect is visible.
 Validation: see run URL appended below after the single configstore dispatch.
+
+Validation: configstore lane run https://github.com/auenkr/cadence-rust/actions/runs/40193208554 head 1d68b28d84b48326bd909068511305fbfe0e5d37 (pre-memory-commit) concluded success. Note it may have passed without residue (timing dependent); this single run does not prove the residue path was hit.
