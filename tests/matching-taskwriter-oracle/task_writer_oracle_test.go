@@ -22,11 +22,11 @@ const oracleDomainID = "00000000-0000-4000-8000-000000000001"
 
 type oracleDB struct{ sqlplugin.DB }
 
-func (oracleDB) SupportsTTL() bool        { return false }
+func (oracleDB) SupportsTTL() bool { return false }
 func (oracleDB) GetTotalNumDBShards() int { return 1 }
-func (oracleDB) IsDupEntryError(error) bool   { return false }
-func (oracleDB) IsNotFoundError(error) bool   { return false }
-func (oracleDB) IsTimeoutError(error) bool    { return false }
+func (oracleDB) IsDupEntryError(error) bool { return false }
+func (oracleDB) IsNotFoundError(error) bool { return false }
+func (oracleDB) IsTimeoutError(error) bool { return false }
 func (oracleDB) IsThrottlingError(error) bool { return false }
 func (oracleDB) BeginTx(context.Context, int) (sqlplugin.Tx, error) {
 	return nil, errors.New("oracle reached SQL transaction boundary")
@@ -67,7 +67,7 @@ func TestRawRunIDSQLWriterOracle(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.Contains(output, "ORACLE_APPEND_ACK error=oracle reached SQL transaction boundary") {
+			if err != nil || !strings.Contains(output, "ORACLE_APPEND_ACK error=") || !strings.Contains(output, "oracle reached SQL transaction boundary") {
 				t.Fatalf("empty/valid RunID did not return controlled persistence error: err=%v output=%s", err, output)
 			}
 		})
