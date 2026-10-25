@@ -8935,7 +8935,7 @@ async fn go_handler_refresh_partition_config_engine_error_is_internal_service_er
         .refresh_task_list_partition_config(Request::new(
             m::RefreshTaskListPartitionConfigRequest {
                 domain_id: key.domain_id.to_string(),
-                task_list: Some(list()),
+                task_list: list(),
                 task_list_type: 1,
                 partition_config: None,
             },
