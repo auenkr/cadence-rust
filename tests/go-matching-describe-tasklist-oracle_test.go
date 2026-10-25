@@ -80,6 +80,15 @@ func (s *matchingEngineSuite) TestMalformedDescribeTaskListOracle() {
 	}
 	for _, tc := range cases {
 		response, err := handler.DescribeTaskList(context.Background(), tc.req)
-		s.T().Logf("GO_DESCRIBE_ORACLE case=%s response_nil=%t error_type=%T error=%v", tc.name, response == nil, err, err)
+		pollerCount := -1
+		if response != nil {
+			pollerCount = len(response.GetPollers())
+		}
+		s.T().Logf("GO_DESCRIBE_ORACLE case=%s response_nil=%t pollers=%d error_type=%T error=%v", tc.name, response == nil, pollerCount, err, err)
+		if tc.name == "absent-nested" || tc.name == "empty-task-list" {
+			if err != nil || pollerCount != 0 {
+				s.T().Fatalf("Go DescribeTaskList empty-shape contract: case=%s response=%v pollers=%d error=%T %v", tc.name, response, pollerCount, err, err)
+			}
+		}
 	}
 }
