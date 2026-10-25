@@ -330,8 +330,12 @@ The evidence summary is
 
 ### First serial gate dispatch
 
-Pending dispatch after the pinned ref is pushed. No workflow dispatch is
-recorded in this checkpoint.
+Run https://github.com/auenkr/cadence-rust/actions/runs/40165433074 was
+dispatched on pinned ref `t3/matching-validation-tls-e3c79b3-20261025` at head
+`4b5d90458471c36ab8064bb69c695854ffc23de5`; it is `in_progress`. At dispatch,
+no mixed gate was active. Master workspace run 40165304531 was still running.
+This is the only mixed gate dispatched; do not dispatch the next lane until it
+finishes and its artifacts are reviewed.
 
 The initial dispatch request was rejected by GitHub before run creation with
 HTTP 422: `runner.temp` is unavailable in job-level `env` for
