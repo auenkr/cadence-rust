@@ -456,7 +456,10 @@ impl Matching {
         self
     }
     #[cfg(test)]
-    pub(crate) fn with_domain_id_parse(mut self, mode: crate::matching_domain_uuid::DomainIdParse) -> Self {
+    pub(crate) fn with_domain_id_parse(
+        mut self,
+        mode: crate::matching_domain_uuid::DomainIdParse,
+    ) -> Self {
         self.domain_id_parse = mode;
         self
     }
@@ -2681,7 +2684,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::QueryWorkflowResponse>, Status>(
             "query_workflow",
             async move {
-        self.domain_lookup_guard(&request.get_ref().domain_id, "query_workflow")?;
+                self.domain_lookup_guard(&request.get_ref().domain_id, "query_workflow")?;
                 self.metrics
                     .matching_request(
                         "QueryWorkflow",
@@ -3463,7 +3466,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::CancelOutstandingPollResponse>, Status>(
             "cancel_outstanding_poll",
             async move {
-        self.domain_lookup_guard(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
+                self.domain_lookup_guard(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
                 self.metrics
                     .matching_request(
                         "CancelOutstandingPoll",
@@ -3558,7 +3561,10 @@ impl m::matching_api_server::MatchingApi for Matching {
                         "panic: runtime error: invalid memory address or nil pointer dereference",
                     ));
                 }
-        self.domain_lookup_guard(&request.get_ref().domain_id, "respond_query_task_completed")?;
+                self.domain_lookup_guard(
+                    &request.get_ref().domain_id,
+                    "respond_query_task_completed",
+                )?;
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",
@@ -3677,7 +3683,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         crate::matching_panic::capture::<Response<m::DescribeTaskListResponse>, Status>(
             "describe_task_list",
             async move {
-        self.domain_lookup_guard(&request.get_ref().domain_id, "describe_task_list")?;
+                self.domain_lookup_guard(&request.get_ref().domain_id, "describe_task_list")?;
                 self.metrics
                     .matching_request(
                         "DescribeTaskList",

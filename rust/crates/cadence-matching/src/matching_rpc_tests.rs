@@ -1134,7 +1134,11 @@ async fn matching_rpc_durable_add_does_not_require_local_workflow_state() {
         .0
         .is_empty());
 }
-fn run_id_decision(key: &TaskListKey, run_id: &str, schedule_id: i64) -> Request<m::AddDecisionTaskRequest> {
+fn run_id_decision(
+    key: &TaskListKey,
+    run_id: &str,
+    schedule_id: i64,
+) -> Request<m::AddDecisionTaskRequest> {
     Request::new(m::AddDecisionTaskRequest {
         domain_id: key.domain_id.to_string(),
         workflow_execution: Some(p::WorkflowExecution {
@@ -1152,14 +1156,32 @@ async fn matching_rpc_add_decision_accepts_noncanonical_and_empty_run_ids_like_g
     // other google/uuid forms are stored as the parsed 16 bytes.
     let (_dir, store, matching, key) = fixture();
     let id = Uuid::from_u128(0xabcdef);
-    matching.add_decision_task(run_id_decision(&key, &id.to_string().to_uppercase(), 1)).await.unwrap();
-    matching.add_decision_task(run_id_decision(&key, &id.simple().to_string(), 2)).await.unwrap();
-    matching.add_decision_task(run_id_decision(&key, "", 3)).await.unwrap();
+    matching
+        .add_decision_task(run_id_decision(&key, &id.to_string().to_uppercase(), 1))
+        .await
+        .unwrap();
+    matching
+        .add_decision_task(run_id_decision(&key, &id.simple().to_string(), 2))
+        .await
+        .unwrap();
+    matching
+        .add_decision_task(run_id_decision(&key, "", 3))
+        .await
+        .unwrap();
     let tasks = store.get_tasks(&key, 0, 100, 10).unwrap();
     assert_eq!(tasks.len(), 3);
-    assert_eq!(tasks[0].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
-    assert_eq!(tasks[1].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
-    assert_eq!(tasks[2].data.run_id, None, "empty RunID is absent, not the nil UUID");
+    assert_eq!(
+        tasks[0].data.run_id.as_deref(),
+        Some(id.as_bytes().as_slice())
+    );
+    assert_eq!(
+        tasks[1].data.run_id.as_deref(),
+        Some(id.as_bytes().as_slice())
+    );
+    assert_eq!(
+        tasks[2].data.run_id, None,
+        "empty RunID is absent, not the nil UUID"
+    );
     assert!(tasks.iter().all(|t| t.data.raw_run_id.is_none()));
 }
 #[tokio::test]
@@ -1168,7 +1190,9 @@ async fn matching_rpc_add_decision_malformed_run_id_is_not_rejected_up_front() {
     // refuses the malformed row (Go's writer goroutine panics instead), so the
     // error comes from persistence, not from request validation.
     let (_dir, store, matching, key) = fixture();
-    let result = matching.add_decision_task(run_id_decision(&key, "not-a-uuid", 1)).await;
+    let result = matching
+        .add_decision_task(run_id_decision(&key, "not-a-uuid", 1))
+        .await;
     let status = result.expect_err("malformed RunID must fail at durable SQL conversion");
     assert_ne!(status.message(), "Run UUID is not valid.");
     assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
@@ -3183,12 +3207,14 @@ impl h::history_api_server::HistoryApi for RunIdRecordingHistory {
             .push(request.workflow_execution.unwrap().run_id);
         Ok(Response::new(h::RecordActivityTaskStartedResponse {
             scheduled_event: Some(p::HistoryEvent {
-                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    p::ActivityTaskScheduledEventAttributes {
-                        activity_id: request.schedule_id.to_string(),
-                        ..Default::default()
-                    },
-                )),
+                attributes: Some(
+                    p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                        p::ActivityTaskScheduledEventAttributes {
+                            activity_id: request.schedule_id.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             }),
             ..Default::default()
@@ -3254,7 +3280,11 @@ async fn matching_rpc_sync_match_passes_raw_run_id_to_history_without_persisting
             .unwrap();
         assert_eq!(started.started_event_id, 32);
         assert_eq!(seen.lock().unwrap().as_slice(), [raw.to_owned()]);
-        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "no durable write for {raw:?}");
+        assert_eq!(
+            store.task_list_size(&key, 0).unwrap(),
+            0,
+            "no durable write for {raw:?}"
+        );
         matching
             .queues
             .as_ref()
@@ -3330,9 +3360,16 @@ async fn matching_rpc_activity_sync_match_passes_raw_run_id_to_history_without_p
             .await
             .unwrap()
             .unwrap();
-        assert!(!started.task_token.is_empty(), "poller got the activity for {raw:?}");
+        assert!(
+            !started.task_token.is_empty(),
+            "poller got the activity for {raw:?}"
+        );
         assert_eq!(seen.lock().unwrap().as_slice(), [raw.to_owned()]);
-        assert_eq!(store.task_list_size(&key, 0).unwrap(), 0, "no durable write for {raw:?}");
+        assert_eq!(
+            store.task_list_size(&key, 0).unwrap(),
+            0,
+            "no durable write for {raw:?}"
+        );
         matching
             .queues
             .as_ref()
@@ -9265,14 +9302,12 @@ async fn go_malformed_reserved_task_list_name_is_internal_for_every_rpc() {
         .unwrap_err();
     assert_eq!(refresh.code(), tonic::Code::Internal);
     let update = matching
-        .update_task_list_partition_config(Request::new(
-            m::UpdateTaskListPartitionConfigRequest {
-                domain_id: domain.clone(),
-                task_list: bad(),
-                partition_config: Some(Default::default()),
-                ..Default::default()
-            },
-        ))
+        .update_task_list_partition_config(Request::new(m::UpdateTaskListPartitionConfigRequest {
+            domain_id: domain.clone(),
+            task_list: bad(),
+            partition_config: Some(Default::default()),
+            ..Default::default()
+        }))
         .await
         .unwrap_err();
     assert_eq!(update.code(), tonic::Code::Internal);
@@ -9330,12 +9365,10 @@ async fn go_oracle_absent_optional_payloads_on_valid_domain() {
         .unwrap();
     // update-absent-tasklist-absent-config: BadRequestError.
     let err = matching
-        .update_task_list_partition_config(Request::new(
-            m::UpdateTaskListPartitionConfigRequest {
-                domain_id: domain.clone(),
-                ..Default::default()
-            },
-        ))
+        .update_task_list_partition_config(Request::new(m::UpdateTaskListPartitionConfigRequest {
+            domain_id: domain.clone(),
+            ..Default::default()
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -9345,13 +9378,11 @@ async fn go_oracle_absent_optional_payloads_on_valid_domain() {
     );
     // update-absent-tasklist with an empty config: BadRequestError "read partitions < 1".
     let err = matching
-        .update_task_list_partition_config(Request::new(
-            m::UpdateTaskListPartitionConfigRequest {
-                domain_id: domain.clone(),
-                partition_config: Some(Default::default()),
-                ..Default::default()
-            },
-        ))
+        .update_task_list_partition_config(Request::new(m::UpdateTaskListPartitionConfigRequest {
+            domain_id: domain.clone(),
+            partition_config: Some(Default::default()),
+            ..Default::default()
+        }))
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
@@ -9423,7 +9454,10 @@ async fn go_activity_poll_absent_request_deadline_precedence_and_wire_code() {
             ..Default::default()
         })
     };
-    let no_deadline = matching.poll_for_activity_task(request()).await.unwrap_err();
+    let no_deadline = matching
+        .poll_for_activity_task(request())
+        .await
+        .unwrap_err();
     assert_eq!(no_deadline.code(), tonic::Code::InvalidArgument);
     assert_eq!(no_deadline.message(), "Context timeout is not set.");
     let mut expired = request();
@@ -9432,9 +9466,7 @@ async fn go_activity_poll_absent_request_deadline_precedence_and_wire_code() {
     assert_eq!(expired.code(), tonic::Code::Internal);
     assert_eq!(expired.message(), "context deadline exceeded");
     assert_eq!(
-        crate::thrift_matching::tchannel_error_code(
-            crate::matching_panic::NIL_DEREFERENCE_MESSAGE
-        ),
+        crate::thrift_matching::tchannel_error_code(crate::matching_panic::NIL_DEREFERENCE_MESSAGE),
         0x05
     );
 }
@@ -9513,18 +9545,27 @@ async fn sql_malformed_domain_precedes_deadline_nil_poll_and_bad_tasklist() {
         domain_id: "abc".into(),
         poller_id: "poller".into(),
         request: malformed_list.then(|| p::PollForDecisionTaskRequest {
-            task_list: Some(p::TaskList { name: String::new(), ..Default::default() }),
+            task_list: Some(p::TaskList {
+                name: String::new(),
+                ..Default::default()
+            }),
             ..Default::default()
         }),
         ..Default::default()
     };
     for malformed_list in [false, true] {
-        let err = sql.poll_for_decision_task(Request::new(decision(malformed_list))).await.unwrap_err();
+        let err = sql
+            .poll_for_decision_task(Request::new(decision(malformed_list)))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unknown);
         assert_eq!(err.message(), SQL_MALFORMED_DOMAIN_ERROR);
         assert!(crate::matching_panic::is_captured_panic(&err));
         // Lenient (Cassandra/default) continues to the ordinary no-deadline error.
-        let lenient = matching.poll_for_decision_task(Request::new(decision(malformed_list))).await.unwrap_err();
+        let lenient = matching
+            .poll_for_decision_task(Request::new(decision(malformed_list)))
+            .await
+            .unwrap_err();
         assert_eq!(lenient.code(), tonic::Code::InvalidArgument);
         assert_eq!(lenient.message(), "Context timeout is not set.");
     }
@@ -9569,7 +9610,10 @@ async fn sql_empty_and_unknown_domain_keep_ordinary_errors() {
         })))
         .await
         .unwrap_err();
-    assert_eq!(err.message(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE);
+    assert_eq!(
+        err.message(),
+        crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+    );
     let err = sql
         .add_decision_task(Request::new(m::AddDecisionTaskRequest {
             domain_id: String::new(),
