@@ -11,5 +11,11 @@ async fn main() -> anyhow::Result<()> {
         .with_ansi(false)
         .compact()
         .init();
-    cadence_matching::launcher::run("cadence-matching", Some(&[ServiceName::Matching])).await
+    match cadence_matching::launcher::run("cadence-matching", Some(&[ServiceName::Matching])).await {
+        Err(error) if error.downcast_ref::<cadence_matching::launcher::SqlMatchingWriterFatal>().is_some() => {
+            eprintln!("{error:#}");
+            std::process::exit(2);
+        }
+        result => result,
+    }
 }

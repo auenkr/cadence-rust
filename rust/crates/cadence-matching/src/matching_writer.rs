@@ -118,6 +118,7 @@ struct Inner {
     // Go deliberately leaves appendCh open on stop. Keep the receiver alive
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
+    fatal: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
 }
 #[derive(Clone)]
 pub struct TaskWriter {
@@ -173,6 +174,13 @@ impl TaskWriter {
         queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
     ) -> Self {
+        Self::new_with_fatal_channel(queue, notify, config, live_config, None)
+    }
+    pub(crate) fn new_with_fatal_channel(
+        queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
+        live_config: Option<crate::matching_registry::WriterLiveConfig>,
+    fatal: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
+    ) -> Self {
         let capacity = live_config.as_ref().map(|provider| provider().2)
             .unwrap_or(config.outstanding_appends);
         let capacity = usize::try_from(capacity)
@@ -192,6 +200,7 @@ impl TaskWriter {
             config,
             live_config: live_config.clone(),
             parked: Mutex::new(None),
+            fatal: fatal.clone(),
         });
         let stop_signal = inner.stop.clone();
         queue.set_stop_waker(Arc::new(move || {
@@ -254,6 +263,9 @@ impl TaskWriter {
                                 (&error, kind),
                                 (QueueError::Storage(StorageError::ConditionFailed(_)), 1)
                             );
+                        if let QueueError::Storage(StorageError::MalformedSqlMatchingRunId(cause)) = &error {
+                            if let Some(fatal) = &fatal { let _ = fatal.send(cause.clone()); }
+                        }
                         let status = match (&error, kind) {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
                                 Status::internal("StickyTaskConditionFailedError")
@@ -385,6 +397,25 @@ mod tests {
     };
     use std::num::NonZeroU32;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn standalone_fatal_channel_receives_typed_sql_run_id_failure_before_append_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("fatal.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain = Uuid::from_u128(9);
+        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "fatal".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
+        let writer = TaskWriter::new_with_fatal_channel(queue, Arc::new(Notify::new()), WriterConfig::default(), None, Some(fatal_tx));
+        let error = writer.append(WriteTask {
+            data: TaskData::default().with_request_run_id("malformed-run-id"),
+            source_domain: domain,
+            schedule_to_start_seconds: 0,
+        }).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        let fatal = tokio::time::timeout(Duration::from_secs(1), fatal_rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(fatal, cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "malformed-run-id"));
+        writer.stop();
+    }
 
     #[tokio::test]
     async fn zero_capacity_handoffs_are_fifo_and_never_overwrite_waiters() {
@@ -656,6 +687,7 @@ mod tests {
                 },
                 live_config: None,
                 parked: Mutex::new(Some(receiver)),
+                fatal: None,
             }),
         };
         let task = WriteTask {
@@ -699,7 +731,7 @@ mod tests {
         let (stop, _) = watch::channel(false);
         let writer = TaskWriter { inner: Arc::new(Inner {
             sender, rendezvous: None, stop, queue, config: WriterConfig::default(), live_config: Some(live),
-            parked: Mutex::new(Some(receiver)),
+            parked: Mutex::new(Some(receiver)), fatal: None,
         }) };
         let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
         assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::Internal,
