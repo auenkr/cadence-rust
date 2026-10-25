@@ -751,3 +751,12 @@ the trace is written before it). The `rust/` tree is byte-identical to candidate
 (empty `git diff 29bdd2b04 HEAD -- rust`). Past PostgreSQL 40173134481 and MySQL 40173683827
 evidence stays bound to its named source `29bdd`; not relabeled. Ref `t3/matching-validation-thrift-pacing-20261025`. Only Thrift lane
 dispatched first to diagnose pacing; MySQL GC restart test follows the Thrift result.
+
+## Thrift result on pin 0bef6d183 (2026-10-25)
+Run 40174974248 SUCCESS (binary 826b5949…da115; evidence
+`memory/evidence/matching-thrift-mixed-success-40174974248/`). Production Rust
+source equals `29bdd`. Original failure 40174280100 cause remains unresolved (no
+trace was produced); pacing passing is not a claimed fix. The remaining four lanes
+(configstore, shard-distributor, Cassandra, active-offer) are NOT run on this pin:
+two RPC production branches are under focused CI/review and the pin will change.
+Final candidate requires a fresh exact workspace gate plus all lanes after the RPC fixes.
