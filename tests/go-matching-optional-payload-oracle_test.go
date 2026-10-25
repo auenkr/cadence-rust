@@ -79,6 +79,21 @@ func (s *matchingEngineSuite) TestOptionalPayloadErrorOracle() {
 		{"add-decision-malformed-unknown-domain", func(ctx context.Context) (interface{}, error) {
 			return handler.AddDecisionTask(ctx, &types.AddDecisionTaskRequest{DomainUUID: "missing-domain", Execution: exec, TaskList: bad})
 		}},
+		{"decision-poll-valid-name-unknown-domain", func(ctx context.Context) (interface{}, error) {
+			return handler.PollForDecisionTask(ctx, &types.MatchingPollForDecisionTaskRequest{DomainUUID: "missing-domain", PollRequest: &types.PollForDecisionTaskRequest{TaskList: &types.TaskList{Name: "oracle-tl"}}})
+		}},
+		{"activity-poll-valid-name-unknown-domain", func(ctx context.Context) (interface{}, error) {
+			return handler.PollForActivityTask(ctx, &types.MatchingPollForActivityTaskRequest{DomainUUID: "missing-domain", PollRequest: &types.PollForActivityTaskRequest{TaskList: &types.TaskList{Name: "oracle-tl"}}})
+		}},
+		{"add-decision-absent-tasklist", func(ctx context.Context) (interface{}, error) {
+			return handler.AddDecisionTask(ctx, &types.AddDecisionTaskRequest{DomainUUID: valid, Execution: exec, ScheduleID: 1})
+		}},
+		{"add-activity-absent-tasklist", func(ctx context.Context) (interface{}, error) {
+			return handler.AddActivityTask(ctx, &types.AddActivityTaskRequest{DomainUUID: valid, SourceDomainUUID: valid, Execution: exec, ScheduleID: 1})
+		}},
+		{"add-decision-absent-execution", func(ctx context.Context) (interface{}, error) {
+			return handler.AddDecisionTask(ctx, &types.AddDecisionTaskRequest{DomainUUID: valid, TaskList: &types.TaskList{Name: "oracle-tl"}, ScheduleID: 1})
+		}},
 		{"cancel-poll-absent-tasklist", func(ctx context.Context) (interface{}, error) {
 			return nil, handler.CancelOutstandingPoll(ctx, &types.CancelOutstandingPollRequest{DomainUUID: valid})
 		}},

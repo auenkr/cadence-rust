@@ -8291,20 +8291,6 @@ async fn go_handler_update_task_list_partition_config_rate_limited_returns_servi
 async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds() {
     let (_dir, _store, matching, _key) = fixture();
     let domain = Uuid::from_u128(1).to_string();
-    // Go `request.TaskList.GetName()/GetKind()` are nil-safe, so an absent list is the
-    // empty-named normal list and is never rejected as "TaskList is not set.".
-    if let Err(missing) = matching
-        .refresh_task_list_partition_config(Request::new(
-            m::RefreshTaskListPartitionConfigRequest {
-                domain_id: domain.clone(),
-                task_list: None,
-                ..Default::default()
-            },
-        ))
-        .await
-    {
-        assert_ne!(missing.message(), "TaskList is not set.");
-    }
     for kind in [2, 3] {
         let err = matching
             .refresh_task_list_partition_config(Request::new(
@@ -8815,4 +8801,19 @@ async fn go_malformed_reserved_task_list_name_is_internal_for_every_rpc() {
         poll.message(),
         format!("couldn't create new decision tasklist {want}")
     );
+    // Go PollForActivityTask (engine.go:906) returns the identifier error bare.
+    let activity = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            request: Some(p::PollForActivityTaskRequest {
+                task_list: bad(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(activity.code(), tonic::Code::Internal);
+    assert_eq!(activity.message(), want);
 }

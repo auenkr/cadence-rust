@@ -132,8 +132,12 @@ fn task_list_name(name: &str) -> Result<TaskListName, Status> {
     TaskListName::parse(name).map_err(Status::internal)
 }
 
-/// Go poll engines wrap the identifier error as `couldn't create new <kind> tasklist %w`.
+/// Go `PollForDecisionTask` (engine.go:704) wraps the identifier error as
+/// `couldn't create new decision tasklist %w`; `PollForActivityTask` (engine.go:906) returns it bare.
 fn poll_task_list_name(kind: &str, name: &str) -> Result<TaskListName, Status> {
+    if kind == "activity" {
+        return task_list_name(name);
+    }
     TaskListName::parse(name)
         .map_err(|e| Status::internal(format!("couldn't create new {kind} tasklist {e}")))
 }
