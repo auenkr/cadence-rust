@@ -439,7 +439,7 @@ impl SqliteTaskStore {
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for (domain, task) in tasks {
             let data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
-            let bytes = self.encoding.encode(&blob::encode_task(&data))?;
+            let bytes = self.encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             tx.execute("INSERT INTO tasks (domain_id,task_list_name,task_type,task_id,data,data_encoding) VALUES (?,?,?,?,?,?)",
                 params![domain.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
         }

@@ -1169,9 +1169,8 @@ async fn matching_rpc_add_decision_malformed_run_id_is_not_rejected_up_front() {
     // error comes from persistence, not from request validation.
     let (_dir, store, matching, key) = fixture();
     let result = matching.add_decision_task(run_id_decision(&key, "not-a-uuid", 1)).await;
-    if let Err(status) = result {
-        assert_ne!(status.message(), "Run UUID is not valid.");
-    }
+    let status = result.expect_err("malformed RunID must fail at durable SQL conversion");
+    assert_ne!(status.message(), "Run UUID is not valid.");
     assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
 }
 #[tokio::test]

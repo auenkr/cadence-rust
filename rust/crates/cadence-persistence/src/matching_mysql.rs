@@ -902,7 +902,7 @@ impl MatchingTaskStore for MySqlTaskStore {
             // Go stamps CreatedTimestamp with the CreateTasks request time.
             let mut data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
             data.created_nanos = now_nanos;
-            let bytes = encoding.encode(&blob::encode_task(&data))?;
+            let bytes = encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             transaction
                 .exec_drop(
                     INSERT_TASK,
