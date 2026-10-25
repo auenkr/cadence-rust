@@ -146,7 +146,7 @@ pub fn adjust_read_partitions(
     let mut result = old_read.clone();
     let mut changed = false;
     for (id, groups) in new_write {
-        if result.get(id) != Some(groups) {
+        if !result.contains_key(id) {
             changed = true;
         }
         result.insert(*id, groups.clone());
@@ -883,6 +883,17 @@ mod tests {
         assert_eq!(map[&2], vec!["b".to_string()]);
         let (_, changed) = adjust_write_partitions(&map, 3);
         assert!(!changed);
+    }
+    #[test]
+    fn matching_scaler_read_changed_only_for_new_partition_ids() {
+        // Go adaptive_scaler.go:282-286: changed only when the id is absent
+        // from the old read map; group reassignment alone is not a change.
+        let old = HashMap::from([(0, vec![])]);
+        let new = HashMap::from([(0, vec!["a".to_string()])]);
+        let (map, changed) =
+            adjust_read_partitions(&AggregateMetrics::default(), &old, &new, |_| None);
+        assert!(!changed);
+        assert_eq!(map[&0], vec!["a".to_string()]);
     }
     #[test]
     fn matching_scaler_read_drain_stops_at_first_live_partition() {
