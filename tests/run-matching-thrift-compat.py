@@ -88,6 +88,7 @@ overlay = artifacts / 'overlay.json'
 overlay.write_text(json.dumps({'Replace': {
     str(root / 'go/service/matching/wrappers/thrift/rust_native_test.go'): str(root / 'tests/matching-thrift-go_test.go'),
     str(root / 'go/common/persistence/sql/rust_matching_sqlite_test.go'): str(root / 'tests/matching-sqlite-go_test.go'),
+    str(root / 'go/common/peerprovider/ringpopprovider/rust_history_stub_test.go'): str(root / 'tests/matching-history-ring-stub-go_test.go'),
 }}))
 oracle_sql_env = {**os.environ, 'CADENCE_MATCHING_SQLITE_DB': str(oracle_database),
                   'CADENCE_MATCHING_SQLITE_PHASE': 'seed'}
@@ -222,9 +223,47 @@ unsupported_nosql_path = artifacts / 'unsupported-nosql.yaml'
 unsupported_nosql_path.write_text((root / 'rust/config/development.yaml').read_text().replace(
     'pluginName: "cassandra"', 'pluginName: "unsupported-test"', 1))
 assert_start_fails(unsupported_nosql_path, 'does not support plugin "unsupported-test"')
+import contextlib
+
+
+@contextlib.contextmanager
+def history_ring_member(tag):
+    """Join the Rust Matching ring as a real Go cadence-history member.
+
+    Explicit-config Matching resolves History through ringpop (serviceName label
+    cadence-history + grpc port label), as in a real cluster; a one-node ring has
+    no History host and polls would fail with "Not enough hosts to serve the request".
+    """
+    ready, release = artifacts / f'history-stub-{tag}.ready', artifacts / f'history-stub-{tag}.release'
+    ready.unlink(missing_ok=True)
+    release.unlink(missing_ok=True)
+    with (artifacts / f'history-stub-{tag}.log').open('w') as stub_log:
+        stub = subprocess.Popen(
+            ['go', 'test', '-overlay', str(overlay.resolve()), './common/peerprovider/ringpopprovider',
+             '-run', '^TestRustMatchingHistoryRingStub$', '-count=1', '-v'],
+            cwd=root / 'go', stdout=stub_log, stderr=subprocess.STDOUT,
+            env={**os.environ, 'CADENCE_RINGPOP_BOOTSTRAP': f'127.0.0.1:{matching_tchannel}',
+                 'CADENCE_HISTORY_GRPC_PORT': str(history),
+                 'RINGPOP_STUB_READY_FILE': str(ready), 'RINGPOP_STUB_RELEASE_FILE': str(release)})
+        try:
+            deadline = time.monotonic() + 150
+            while not ready.exists():
+                if stub.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError(f'Go cadence-history ring stub did not join: {artifacts / f"history-stub-{tag}.log"}')
+                time.sleep(0.2)
+            yield
+        finally:
+            release.write_text('release\n')
+            try:
+                stub.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                stub.kill()
+
+
 assert_embedded_start_succeeds()
 assert_runtime_listener_failure_cleans_up()
 assert_matching_grpc_bind_fails_before_membership_startup()
+main_ring = contextlib.ExitStack()
 with (artifacts / 'server.log').open('w') as log:
     server = subprocess.Popen(command, cwd=root, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -242,6 +281,7 @@ with (artifacts / 'server.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError(f'Rust service listeners did not all start: {ready_ports}')
                 time.sleep(0.1)
+        main_ring.enter_context(history_ring_member('main'))
         verify_task_list = artifacts / 'rust-configured-task-list.txt'
         verify_task_list.unlink(missing_ok=True)
         subprocess.run(['go', 'test', '-overlay', str(overlay.resolve()), './service/matching/wrappers/thrift',
@@ -420,6 +460,7 @@ with (artifacts / 'server.log').open('w') as log:
             pass  # Aborting the connection task may produce TCP RST rather than FIN.
         shutdown_probe.close()
     finally:
+        main_ring.close()
         server.terminate()
         try:
             server.wait(timeout=10)
@@ -467,6 +508,7 @@ with (artifacts / 'server-tls.log').open('w') as log:
 
 permissive_path = artifacts / 'server-permissive.yaml'
 permissive_path.write_text(tls_config_path.read_text().replace('TLSMode: enforced', 'TLSMode: permissive'))
+permissive_ring = contextlib.ExitStack()
 with (artifacts / 'server-permissive.log').open('w') as log:
     permissive_command = command.copy()
     permissive_command[permissive_command.index('--config') + 1] = str(permissive_path)
@@ -483,6 +525,7 @@ with (artifacts / 'server-permissive.log').open('w') as log:
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Rust permissive Matching listener did not start')
                 time.sleep(0.1)
+        permissive_ring.enter_context(history_ring_member('permissive'))
         # A silent connection must not hold up the listener while a different
         # client completes a request.
         silent = socket.create_connection(('127.0.0.1', matching_http), timeout=3)
@@ -589,6 +632,7 @@ with (artifacts / 'server-permissive.log').open('w') as log:
                             'CADENCE_FRONTEND_TCHANNEL': f'127.0.0.1:{tchannel}',
                             'CADENCE_MATCHING_TLS_CERT': str(artifacts / 'tls-cert.pem')})
     finally:
+        permissive_ring.close()
         permissive_server.terminate()
         try:
             permissive_server.wait(timeout=10)
