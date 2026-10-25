@@ -13,6 +13,10 @@ on:
         description: "Use a fresh uncached target for final validation"
         type: boolean
         default: false
+      format_tls_files:
+        description: "Apply rustfmt to the four Matching TLS-touched Rust files and upload the patch"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -47,6 +51,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Format TLS-touched Rust files
+        if: inputs.format_tls_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 \
+            crates/cadence-matching/src/grpc_matching.rs \
+            crates/cadence-matching/src/launcher.rs \
+            crates/cadence-matching/src/matching_rpc_tests.rs \
+            crates/cadence-service-core/src/grpc_tls.rs
+          git -C "$GITHUB_WORKSPACE" diff --binary -- \
+            rust/crates/cadence-matching/src/grpc_matching.rs \
+            rust/crates/cadence-matching/src/launcher.rs \
+            rust/crates/cadence-matching/src/matching_rpc_tests.rs \
+            rust/crates/cadence-service-core/src/grpc_tls.rs \
+            > "$RUNNER_TEMP/tls-format.patch"
+      - name: Upload TLS formatting patch
+        if: inputs.format_tls_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: tls-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/tls-format.patch
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
