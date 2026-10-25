@@ -53,8 +53,12 @@ pub fn is_captured_panic(status: &tonic::Status) -> bool {
 
 /// Same check on a message that already crossed the dispatch boundary as a string.
 pub fn is_captured_panic_message(message: &str) -> bool {
-    message.starts_with(CAPTURED_PANIC_PREFIX)
+    message.starts_with(CAPTURED_PANIC_PREFIX) || message == NIL_DEREF_MESSAGE
 }
+
+/// Go's raw nil-dereference `runtime.Error` text. `CapturePanic` returns a runtime
+/// error as-is, so it has no `panic: ` or `panic object is not error` prefix.
+pub const NIL_DEREF_MESSAGE: &str = "runtime error: invalid memory address or nil pointer dereference";
 
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     let value = if let Some(text) = payload.downcast_ref::<&str>() {

@@ -19,6 +19,22 @@ const EMPTY_EVENT_ID: i64 = -23;
 /// both 1.0.0.
 const STICKY_QUERY_MIN_MAJOR: u64 = 1;
 
+/// Which request fields Go received as nil. Runtime metadata only: never
+/// persisted or sent on the wire. Go's poller dereferences `TaskList.Name` and
+/// `QueryRequest.Query` while building the response and fails with a nil
+/// dereference, so a shape with either absent can never be delivered.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct QueryShape {
+    pub task_list_absent: bool,
+    pub query_absent: bool,
+}
+
+impl QueryShape {
+    pub fn is_valid(&self) -> bool {
+        !self.task_list_absent && !self.query_absent
+    }
+}
+
 /// A query offered by `QueryWorkflow` and awaiting a decision poller.
 #[derive(Clone)]
 pub struct PendingQuery {
@@ -26,6 +42,7 @@ pub struct PendingQuery {
     pub domain_id: String,
     pub task_list: String,
     pub request: p::QueryWorkflowRequest,
+    pub shape: QueryShape,
 }
 
 /// What a waiting `QueryWorkflow` call receives.
@@ -526,6 +543,7 @@ mod tests {
                 }),
                 ..Default::default()
             },
+            shape: QueryShape::default(),
         }
     }
 

@@ -1881,6 +1881,12 @@ impl m::matching_api_server::MatchingApi for Matching {
                         query_lifecycle.metrics.poll_success(context, true);
                         query_lifecycle.metrics.poll_match(context, false, false, None);
                     }
+                    // Go builds the response from `TaskList.Name` / `Query.Request.Query`;
+                    // a nil field panics the poller with a plain runtime error. The
+                    // query is consumed, never completed, and its waiter keeps waiting.
+                    if !query.shape.is_valid() {
+                        return Err(Status::unknown(crate::matching_panic::NIL_DEREF_MESSAGE));
+                    }
                     let execution=query.request.workflow_execution.clone().unwrap_or_default();
                     let query_state = queue
                         .dispatcher
@@ -2675,9 +2681,15 @@ impl m::matching_api_server::MatchingApi for Matching {
                             let incoming_deadline =
                                 crate::matching_sync::request_deadline(&request);
                             let r = request.get_ref().clone();
-                            let mut payload = r
-                                .request
-                                .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+                            // Go getters are nil-safe: an absent QueryRequest, Query or
+                            // TaskList dispatches normally and only the poller's response
+                            // builder dereferences them. Keep the shape as runtime metadata.
+                            let mut shape = crate::matching_query::QueryShape {
+                                task_list_absent: r.task_list.is_none(),
+                                query_absent: false,
+                            };
+                            let mut payload = r.request.unwrap_or_default();
+                            shape.query_absent = payload.query.is_none();
                             payload.domain = self.domain_name(&r.domain_id)?;
                             if !r.forwarded_from.is_empty() {
                                 self.metrics.forwarded_per_task_list(
@@ -2709,9 +2721,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 // root never forward and wait for a local poller until the deadline
                                 // (Go has no fail-fast here). Permits are held until the query
                                 // resolves, like Go releasing the token when `ForwardQueryTask` returns.
-                                let task_list = r.task_list.clone().ok_or_else(|| {
-                                    Status::invalid_argument("TaskList is not set.")
-                                })?;
+                                let task_list = r.task_list.clone().unwrap_or_default();
                                 let name = task_list_name(&task_list.name)?;
                                 let queue = self.durable_queue(&r.domain_id, &task_list, 0).await?;
                                 check_sticky_poller(&queue, &task_list)?;
@@ -2758,6 +2768,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                         domain_id: r.domain_id.clone(),
                                         task_list: list.name.clone(),
                                         request: payload.clone(),
+                                        shape,
                                     };
                                     let (receiver, _registration) =
                                         handle.queries.register_guarded(&task_id);
@@ -2847,6 +2858,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                                                     poller_isolation_group: String::new(),
                                                 };
                                             list.name = parent.clone();
+                                            // The forwarder builds a fresh TaskList for the parent.
+                                            shape.task_list_absent = false;
                                             if let Some(channel) = self
                                                 .remote_channel_for_task_list(&list.name)
                                                 .await?

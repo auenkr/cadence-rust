@@ -440,3 +440,86 @@ async fn query_forward_family_expired_deadline_never_forwards() {
     );
     shut_down(&child, server).await;
 }
+
+/// Go nil-safe getters: an absent TaskList / QueryRequest / Query dispatches the
+/// query, and the poller's response builder then fails with a plain nil
+/// dereference (Unknown). The query is consumed but never completed, so the
+/// caller keeps waiting until its own deadline.
+async fn absent_query_case(
+    shaped: impl FnOnce(&mut m::QueryWorkflowRequest),
+    poll_list: p::TaskList,
+) {
+    let peer = start_fake_history(mutable_state()).await;
+    let (_dir, _store, matching, key) = fixture_with_history(&peer);
+    let domain = key.domain_id.to_string();
+    let parent = FamilyQueryParent::new(FamilyParentMode::Recording);
+    let (child, server) = child_with_parent(matching, parent.clone()).await;
+    let mut query = family_query(
+        domain.clone(),
+        poll_list.clone(),
+        Duration::from_millis(1500),
+    );
+    shaped(query.get_mut());
+    let started = tokio::time::Instant::now();
+    let caller = async {
+        let result = child.query_workflow(query).await;
+        (result, started.elapsed())
+    };
+    let poller = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let poll_error = child
+            .poll_for_decision_task(decision_poll(
+                domain,
+                "poller",
+                poll_list,
+                Duration::from_secs(1),
+            ))
+            .await
+            .expect_err("poll of an absent-field query must fail");
+        assert_eq!(poll_error.code(), tonic::Code::Unknown);
+        assert_eq!(
+            poll_error.message(),
+            "runtime error: invalid memory address or nil pointer dereference"
+        );
+    };
+    let ((result, elapsed), ()) = tokio::join!(caller, poller);
+    let error = result.expect_err("query ends only at its deadline");
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert_eq!(error.message(), "context deadline exceeded");
+    assert!(
+        elapsed >= Duration::from_millis(1400),
+        "query must not complete when the poller fails: {elapsed:?}"
+    );
+    shut_down(&child, server).await;
+}
+
+#[tokio::test]
+async fn absent_query_fields_absent_task_list_poller_fails_and_query_waits() {
+    absent_query_case(|r| r.task_list = None, p::TaskList::default()).await;
+}
+
+#[tokio::test]
+async fn absent_query_fields_absent_query_poller_fails_and_query_waits() {
+    absent_query_case(
+        |r| r.request.as_mut().unwrap().query = None,
+        child_list(0),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn absent_query_fields_absent_query_request_poller_fails_and_query_waits() {
+    absent_query_case(|r| r.request = None, child_list(0)).await;
+}
+
+#[tokio::test]
+async fn absent_query_fields_both_absent_poller_fails_and_query_waits() {
+    absent_query_case(
+        |r| {
+            r.task_list = None;
+            r.request = None;
+        },
+        p::TaskList::default(),
+    )
+    .await;
+}
