@@ -73,8 +73,8 @@ pub fn server_tls_custom_incoming(tls: &TlsConfig) -> anyhow::Result<Option<Arc<
     if !missing_identity && !empty_client_ca && !needs_compatible_ca_filter {
         return Ok(None);
     }
-    let builder = ServerConfig::builder_with_provider(provider())
-        .with_safe_default_protocol_versions()?;
+    let builder =
+        ServerConfig::builder_with_provider(provider()).with_safe_default_protocol_versions()?;
     let builder = if tls.require_client_auth {
         let verifier: Arc<dyn rustls::server::danger::ClientCertVerifier> = if roots.is_empty() {
             Arc::new(EmptyClientCaPool)

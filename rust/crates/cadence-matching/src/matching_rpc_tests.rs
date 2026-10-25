@@ -22,8 +22,7 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     let ca_key = rcgen::KeyPair::generate().unwrap();
     let ca = ca_params.self_signed(&ca_key).unwrap();
-    let mut server_params =
-        rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
+    let mut server_params = rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
     server_params
         .subject_alt_names
         .push(rcgen::SanType::IpAddress("127.0.0.1".parse().unwrap()));
@@ -148,15 +147,21 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
             };
             let result = tokio::time::timeout(
                 Duration::from_secs(3),
-                client.server_reflection_info(tokio_stream::once(request))
+                client.server_reflection_info(tokio_stream::once(request)),
             )
             .await
             .unwrap()
             .map(|_| ());
             if index == 10 {
-                assert_eq!(result, Ok(()), "mixed valid/invalid CA should retain the valid root");
+                assert!(
+                    result.is_ok(),
+                    "mixed valid/invalid CA should retain the valid root: {result:?}"
+                );
             } else {
-                assert!(result.is_err(), "TLS handshake unexpectedly succeeded for case {index}");
+                assert!(
+                    result.is_err(),
+                    "TLS handshake unexpectedly succeeded for case {index}"
+                );
             }
         }
 
