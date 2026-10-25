@@ -2,6 +2,12 @@ name: Matching raw RunID SQL writer oracle
 
 on:
   workflow_dispatch:
+    inputs:
+      format_oracle_files:
+        description: Format the two oracle Go files and publish the patch
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: matching-raw-runid-oracle-${{ github.ref }}
@@ -17,12 +23,39 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
-      - name: Check overlay Go formatting
-        working-directory: go
+      - name: Initialize oracle evidence
+        shell: bash
         run: |
-          test -z "$(gofmt -l ../tests/matching-taskwriter-oracle/*.go)"
-      - name: Run isolated SQL writer subprocess oracle
+          mkdir -p "$RUNNER_TEMP/matching-oracle-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/matching-oracle-evidence/commit.txt"
+      - name: Format or check overlay Go files
         working-directory: go
+        continue-on-error: true
+        shell: bash
+        env:
+          FORMAT_ORACLE_FILES: ${{ inputs.format_oracle_files }}
+        run: |
+          set +e
+          if [ "$FORMAT_ORACLE_FILES" = "true" ]; then
+            gofmt -w ../tests/matching-taskwriter-oracle/*.go \
+              > "$RUNNER_TEMP/matching-oracle-evidence/format.log" 2>&1
+            format_status=$?
+            git -C "$GITHUB_WORKSPACE" diff --binary HEAD -- tests/matching-taskwriter-oracle/*.go \
+              > "$RUNNER_TEMP/matching-oracle-evidence/oracle-format.patch"
+          else
+            gofmt -l ../tests/matching-taskwriter-oracle/*.go \
+              > "$RUNNER_TEMP/matching-oracle-evidence/format.log" 2>&1
+            format_status=$?
+            if [ "$format_status" -eq 0 ] && [ -s "$RUNNER_TEMP/matching-oracle-evidence/format.log" ]; then
+              format_status=1
+            fi
+          fi
+          printf '%s\n' "$format_status" > "$RUNNER_TEMP/matching-oracle-evidence/format.exit"
+          exit 0
+      - name: Prepare overlay and run SQL writer oracle
+        working-directory: go
+        continue-on-error: true
+        shell: bash
         run: |
           python3 - <<'PY'
           import json
@@ -36,7 +69,21 @@ jobs:
               str(root / "go/service/matching/tasklist/raw_runid_sql_oracle_test.go"):
                   str(root / "tests/matching-taskwriter-oracle/task_writer_oracle_test.go"),
           }
-          Path(os.environ["RUNNER_TEMP"], "matching-oracle-overlay.json").write_text(
-              json.dumps({"Replace": overlay}), encoding="utf-8")
+          Path(os.environ["RUNNER_TEMP"], "matching-oracle-evidence", "overlay.json").write_text(
+              json.dumps({"Replace": overlay}, sort_keys=True, indent=2) + "\n", encoding="utf-8")
           PY
-          go test -overlay="$RUNNER_TEMP/matching-oracle-overlay.json" ./service/matching/tasklist -run '^TestRawRunIDSQLWriterOracle$' -count=1 -timeout=2m
+          set +e
+          go test -overlay="$RUNNER_TEMP/matching-oracle-evidence/overlay.json" \
+            ./service/matching/tasklist -run '^TestRawRunIDSQLWriterOracle$' -count=1 -timeout=2m \
+            > "$RUNNER_TEMP/matching-oracle-evidence/go-test.log" 2>&1
+          test_status=$?
+          printf '%s\n' "$test_status" > "$RUNNER_TEMP/matching-oracle-evidence/go-test.exit"
+          exit 0
+      - name: Upload oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-raw-runid-oracle-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/matching-oracle-evidence/
+          if-no-files-found: error
+          retention-days: 3
