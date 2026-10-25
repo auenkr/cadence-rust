@@ -466,6 +466,7 @@ async function run() {
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
     let lastReadinessError;
+    const primaryReadinessClient = productionMode ? directMatchingClient(`127.0.0.1:${rustGrpcPort}`) : null;
     while (Date.now() < deadline) {
       if (productionMode) {
         try {
@@ -475,6 +476,11 @@ async function run() {
             domain, taskList: { name: `discovery-ready-${id}` },
             taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
           });
+          // A secondary Matching node can satisfy the Frontend probe while the
+          // restarted primary is still binding its listener. Verify the exact
+          // process endpoint before callers use its direct client.
+          await directPartitionOwner(primaryReadinessClient, domain, `primary-ready-${id}`);
+          primaryReadinessClient.close();
           return;
         } catch (error) {
           lastReadinessError = error;
@@ -484,10 +490,14 @@ async function run() {
       } else if (fs.existsSync(ready)) {
         return;
       }
-      if (rust.exitCode !== null || rust.signalCode !== null) throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
+      if (rust.exitCode !== null || rust.signalCode !== null) {
+        primaryReadinessClient?.close();
+        throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
+      }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    throw new Error(`Rust Matching ${label} did not become discoverable through Go Frontend; last readiness error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; see ${work}/rust-server-${label}.log`);
+    primaryReadinessClient?.close();
+    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last readiness error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; see ${work}/rust-server-${label}.log`);
   }
   let exited;
   let rust = startRust('before-restart');
