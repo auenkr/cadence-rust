@@ -1,0 +1,26 @@
+# Matching raw RunID and DescribeTaskList boundary — 2026-10-25
+
+Source-only audit on master `61d510302` (Rust tree includes implementation `6af476941`). No Cargo, Go, formatter, CI, oracle, or mixed-cluster command was run.
+
+## Raw SQL RunID: actual Go wrapper behavior
+
+The previous `matching-runid-raw-parity.md` conclusion that Add acknowledges before persistence is incorrect. `go/service/matching/tasklist/task_writer.go` starts `taskWriterLoop` in a goroutine (`Start`), but `appendTask` creates a buffered response channel, enqueues the request, and then waits for either the writer response, append timeout, or stop (`appendTask`, lines 151–178). The writer calls `w.db.CreateTasks`, applies `handleErr`, and sends that result to every request (`taskWriterLoop` lines 241–300; `sendWriteResponse` lines 333–343). Thus this is asynchronous execution with synchronous acknowledgement: a successful Add waits for persistence; a CreateTasks failure is returned to the Add caller.
+
+On SQL, `go/common/persistence/sql/sql_task_store.go` calls `serialization.MustParseUUID(v.Data.RunID)` while constructing each task blob (around line 444). `MustParseUUID` panics for malformed non-empty UUIDs. The writer goroutine has no deferred `recover`; the `CapturePanic` seen in `task_list_manager.go` is scoped to another goroutine/manager operation, not this writer. Therefore malformed SQL RunID reaches an unrecovered panic in a Go goroutine. Go's runtime treats an unrecovered goroutine panic as process-fatal. The writer cannot send the normal response after the panic; this is not a returned persistence error nor a successful async acknowledgement. This is source proof of the wrapper path; an executable Go oracle is still needed to confirm observed process exit and exact caller behavior under the selected SQL backend.
+
+For valid and empty RunIDs, Add can sync-match before persistence. Go's `task_list_manager.go` Add path first attempts matcher dispatch and only calls `appendTask` when it does not sync-match (around lines 596–623). Consequently malformed RunID on a sync match bypasses SQL serialization; it proceeds through History with the original string. Rust's existing history-backed decision/activity regressions assert that sync-matched tasks pass the raw value to History and write no durable task. This is an actual boundary condition, not a different Add acknowledgement mode.
+
+Rust deliberately returns a permanent persistence error for malformed SQL RunID rather than crashing the process. No portable correctness fix is established: reproducing Go's process-fatal panic would be harmful and is not justified merely by source inference. Exact compatibility requirement remains unsatisfied until the product requirement chooses whether fatal Go behavior is contractual. Do not reclassify it as an accepted parity difference without authorization.
+
+## DescribeTaskList no-durable path
+
+Rust's `grpc_matching.rs::describe_task_list` uses durable queue status whenever `self.queues.is_some()`; its no-queue branch forwards to Frontend `WorkflowApi::describe_task_list`. The production launcher selects `ConfiguredDefaultStore` whenever an explicit config is supplied (`launcher.rs` around lines 530–535 and 1289–1315) and constructs `MatchingRuntime::with_durable_queues_and_domain_cache` from the configured store. The no-config CLI is explicitly classified as embedded development and selects in-memory/data-dir stores. Thus the no-durable Describe fallback is an embedded/test mode path, not demonstrated reachable from the production configured CLI. Production behavior should expose allocated durable task ID block data; the fallback must not fabricate such a block. Existing no-durable tests are useful embedded-mode coverage only.
+
+## Source-boundary classification and evidence still needed
+
+- **Sync match:** RPC/manager matcher path; preserves raw RunID and does not enter SQL. Compare Go and Rust mocked-History call arguments and Add response.
+- **Async/non-sync Add:** writer enqueue is asynchronous internally, but caller waits for the `CreateTasks` result. Go malformed SQL input panics before response; Rust returns a persistence error. Validate Go runtime fatality in an isolated subprocess (never the shared test process), using the production SQL task-store serialization path; capture exit status, stderr, and whether the RPC client observes a response versus connection loss. Run the same malformed request against Rust and capture its RPC error with process still alive. Dispatch this oracle through Actions only.
+- **Cassandra:** separate gocql UUID parser/error mapping; do not infer SQL panic behavior applies.
+- **DescribeTaskList:** run configured production CLI with a real supported persistence backend and assert durable queue status/task ID block; separately run explicit no-config embedded mode and assert Frontend fallback has no fabricated block. This establishes the CLI reachability boundary.
+
+The user-referenced `matching-ignored-rpc-audit-20261025.md` is not present in this checkout (searched `memory/` and repository). This note therefore does not claim a reconciliation of that audit's ignored-RPC findings. Recover that named source/audit before declaring the requested three-document review complete. No implementation change is warranted by the verified source alone.
