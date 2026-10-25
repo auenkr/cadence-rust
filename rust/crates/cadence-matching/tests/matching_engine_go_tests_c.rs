@@ -31,6 +31,7 @@ use cadence_persistence::{
     matching_task_store::AllocatedTask,
 };
 use cadence_proto::{api as p, history as h, matching as m};
+use prost::Message;
 use cadence_service_core::handlers::AppState;
 use m::matching_api_server::MatchingApi;
 use std::{
@@ -239,6 +240,36 @@ struct ScriptedHistory {
     seen: Arc<Mutex<Vec<h::RefreshWorkflowTasksRequest>>>,
 }
 
+/// `google.rpc.Status`, encoded as the wire format tonic reads from
+/// `grpc-status-details-bin`. Build this in the integration test so it covers
+/// the client boundary without reaching into Matching's private status mapper.
+#[derive(Clone, PartialEq, Message)]
+struct GoogleRpcStatus {
+    #[prost(int32, tag = "1")]
+    code: i32,
+    #[prost(string, tag = "2")]
+    message: String,
+    #[prost(message, repeated, tag = "3")]
+    details: Vec<prost_types::Any>,
+}
+
+fn typed_history_status<M: Message>(type_name: &str, message: &str, detail: M) -> Status {
+    let status = GoogleRpcStatus {
+        // google.rpc.Code.NOT_FOUND
+        code: Code::NotFound as i32,
+        message: message.into(),
+        details: vec![prost_types::Any {
+            type_url: format!("type.googleapis.com/uber.cadence.api.v1.{type_name}"),
+            value: detail.encode_to_vec(),
+        }],
+    };
+    Status::with_details(
+        Code::NotFound,
+        message,
+        status.encode_to_vec().into(),
+    )
+}
+
 #[tonic::async_trait]
 impl h::history_api_server::HistoryApi for ScriptedHistory {
     async fn refresh_workflow_tasks(
@@ -313,9 +344,21 @@ async fn refresh_workflow_tasks_success_sends_domain_and_execution() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go returns a typed EntityNotExistsError from the history mock and expects nil; Rust recognizes it only from a wire detail, and the crate-private grpc::detailed_status helper that builds that detail cannot be called from tests/"]
 async fn refresh_workflow_tasks_entity_not_exists_returns_ok() {
-    unimplemented!("needs the typed EntityNotExistsError wire detail");
+    let status = typed_history_status(
+        "EntityNotExistsError",
+        "workflow not found",
+        p::EntityNotExistsError {
+            message: "workflow not found".into(),
+            ..Default::default()
+        },
+    );
+    let (client, seen) = refresh_history_client(Some(status)).await;
+    client
+        .refresh_workflow_tasks("test-domain-id", &allocated_task())
+        .await
+        .unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 1, "terminal miss is not retried");
 }
 
 #[tokio::test]
@@ -342,9 +385,35 @@ async fn refresh_workflow_tasks_generic_error_is_propagated() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go returns a typed WorkflowExecutionAlreadyCompletedError from the history mock; the typed wire detail needs the crate-private grpc::detailed_status helper, which tests/ cannot call"]
 async fn refresh_workflow_tasks_already_completed_is_propagated() {
-    unimplemented!("needs the typed WorkflowExecutionAlreadyCompletedError wire detail");
+    let status = typed_history_status(
+        "WorkflowExecutionAlreadyCompletedError",
+        "workflow already completed",
+        p::WorkflowExecutionAlreadyCompletedError {
+            message: "workflow already completed".into(),
+        },
+    );
+    let expected_status = status.clone();
+    let (client, seen) = refresh_history_client(Some(status)).await;
+    let err = client
+        .refresh_workflow_tasks("test-domain-id", &allocated_task())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), expected_status.code());
+    assert_eq!(err.message(), expected_status.message());
+    assert_eq!(err.details(), expected_status.details());
+    let decoded = GoogleRpcStatus::decode(err.details()).unwrap();
+    assert_eq!(decoded.details.len(), 1);
+    assert_eq!(
+        decoded.details[0].type_url,
+        "type.googleapis.com/uber.cadence.api.v1.WorkflowExecutionAlreadyCompletedError"
+    );
+    let typed = p::WorkflowExecutionAlreadyCompletedError::decode(
+        decoded.details[0].value.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(typed.message, "workflow already completed");
+    assert_eq!(seen.lock().unwrap().len(), 1, "terminal error is not retried");
 }
 
 #[tokio::test]
