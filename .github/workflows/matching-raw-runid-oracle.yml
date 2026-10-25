@@ -1,0 +1,42 @@
+name: Matching raw RunID SQL writer oracle
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: matching-raw-runid-oracle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Check overlay Go formatting
+        working-directory: go
+        run: |
+          test -z "$(gofmt -l ../tests/matching-taskwriter-oracle/*.go)"
+      - name: Run isolated SQL writer subprocess oracle
+        working-directory: go
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["GITHUB_WORKSPACE"])
+          overlay = {
+              str(root / "go/common/persistence/sql/oracle_export_test.go"):
+                  str(root / "tests/matching-taskwriter-oracle/sql_task_store_oracle.go"),
+              str(root / "go/service/matching/tasklist/raw_runid_sql_oracle_test.go"):
+                  str(root / "tests/matching-taskwriter-oracle/task_writer_oracle_test.go"),
+          }
+          Path(os.environ["RUNNER_TEMP"], "matching-oracle-overlay.json").write_text(
+              json.dumps({"Replace": overlay}), encoding="utf-8")
+          PY
+          go test -overlay="$RUNNER_TEMP/matching-oracle-overlay.json" ./service/matching/tasklist -run '^TestRawRunIDSQLWriterOracle$' -count=1 -timeout=2m
