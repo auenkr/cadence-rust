@@ -12,8 +12,8 @@ candidate's acceptance and parity audit complete.
 | Fresh uncached workspace clippy then tests, ownership/metric oracles | https://github.com/auenkr/cadence-rust/actions/runs/40108643448 | success |
 | PostgreSQL SDK, two-node recovery and extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40108645569 | success |
 | Thrift/TChannel | https://github.com/auenkr/cadence-rust/actions/runs/40153127238 | success |
-| Cassandra | https://github.com/auenkr/cadence-rust/actions/runs/40153493941 | running |
-| MySQL extended probes | pending | not started |
+| Cassandra | https://github.com/auenkr/cadence-rust/actions/runs/40153493941 | success |
+| MySQL extended probes | https://github.com/auenkr/cadence-rust/actions/runs/40153901033 | running |
 | Configstore | pending | not started |
 | Real shard distributor | pending | not started |
 | Active offer with Go History, zero inserts | pending | not started |

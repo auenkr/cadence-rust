@@ -1,0 +1,1 @@
+tests/gates/run-cassandra-lane.sh out/gate /tmp/cadence-cargo-target-cassandra-40153493941/debug/cadence-matching --matching-restart --matching-idle-check-seconds 3
