@@ -52,8 +52,9 @@ in the gate artifact without changing TLS source or assertions. The retry uses
 immutable ref `t3/matching-validation-tls-e3c79b3-r1-20261025` at
 `e787524851b06f0f9aab007ae645c5d9cf8c85e5`. Retry run
 https://github.com/auenkr/cadence-rust/actions/runs/40165758848 is
-`in_progress` on that exact head. Do not dispatch the next lane until the retry
-completes and its artifacts are reviewed.
+failed on that exact head because the unsupported NoSQL assertion attempted a
+Cassandra connection; preserve it as a harness setup failure. See the later
+lock/harness fix section below.
 
 Before retry dispatch, the active-run query was empty; automatic master
 workspace run 40165304531 had completed successfully on
@@ -68,3 +69,11 @@ unsupported NoSQL negative startup probe deterministic. It changes no TLS
 production code or TLS assertions. The retry uses stable candidate branch
 `t3/matching-validation-http-lockfix-20261025`; its exact SHA and dispatch
 status are in the final validation plan.
+
+The approved candidate is pinned at
+`5811c0d8bc14ff57e03004260a83843726ef1291`. HTTP TLS interop run
+https://github.com/auenkr/cadence-rust/actions/runs/40166507919 is
+`in_progress` on that exact head. No mixed gate was active at dispatch. Master
+automatic workspace run 40166476374 was active, so no duplicate workspace
+dispatch was issued. This is the sole mixed lane; review its artifacts before
+starting another.

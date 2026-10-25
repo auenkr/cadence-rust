@@ -404,12 +404,18 @@ evidence is retained at
 Push of the lockfile change is expected to trigger automatic `rust-ci`; record
 that run if it occurs and do not manually duplicate the workspace gate. The
 stable candidate ref is
-`t3/matching-validation-http-lockfix-20261025`; its exact head SHA is recorded
-after creation. Only the first serial workflow is eligible for dispatch:
+`t3/matching-validation-http-lockfix-20261025`, pinned at
+`5811c0d8bc14ff57e03004260a83843726ef1291`. Only the first serial workflow is eligible for dispatch:
 `matching-http-tls-interop.yml`. Before dispatch, confirm no other mixed gate
 is active. Do not dispatch another lane until that run finishes and its
 artifact is reviewed.
 
 ### Corrected first-lane run
 
-Pending pinned-ref dispatch and initial status.
+Run https://github.com/auenkr/cadence-rust/actions/runs/40166507919 is
+`in_progress` on exact pinned branch
+`t3/matching-validation-http-lockfix-20261025`, head
+`5811c0d8bc14ff57e03004260a83843726ef1291`. No mixed gate was active at
+dispatch. Master automatic `rust-ci` run 40166476374 was in progress; it is not
+duplicated. This is the only mixed lane dispatched. Do not start another lane
+until this run completes and its artifact is reviewed.
