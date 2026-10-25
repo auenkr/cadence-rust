@@ -968,6 +968,7 @@ mod interop_tests {
             data: TaskData {
                 workflow_id: "rust-workflow".into(),
                 run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                raw_run_id: None,
                 schedule_id: 5,
                 created_nanos: now + 2000,
                 expiry_nanos: -6_795_364_578_871_345_152,

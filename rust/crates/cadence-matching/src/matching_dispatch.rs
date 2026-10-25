@@ -255,13 +255,7 @@ fn log_task_event(
     task: &AllocatedTask,
     error: Option<&str>,
 ) {
-    let run_id = task
-        .data
-        .run_id
-        .as_deref()
-        .and_then(|id| uuid::Uuid::from_slice(id).ok())
-        .map(|id| id.to_string())
-        .unwrap_or_default();
+    let run_id = task.data.run_id_string();
     let mut fields = vec![
         ("wf-domain-id", poll_domain_id.to_owned()),
         ("wf-id", task.data.workflow_id.clone()),
@@ -356,9 +350,7 @@ impl ForwardState {
         }
         let (parent, parent_name) = (self.resolve)().await.ok_or_else(||
             crate::matching_forward::ForwardError::Remote(Status::unavailable("cannot resolve parent task list for forwarding")))?;
-        let run_id = task.data.run_id.as_deref()
-            .and_then(|id| uuid::Uuid::from_slice(id).ok())
-            .map(|id| id.to_string()).unwrap_or_default();
+        let run_id = task.data.run_id_string();
         let execution = Some(p::WorkflowExecution { workflow_id: task.data.workflow_id.clone(), run_id });
         let partition_config = task.data.partition_config.clone().unwrap_or_default().into_iter().collect();
         // Go persistence GetTasks leaves ScheduleToStartTimeoutSeconds at
