@@ -236,7 +236,10 @@ impl QueryChannel {
     }
 
     pub fn offer(&self, query: PendingQuery) {
-        self.pending.lock().expect("matching query lock").push_back(query);
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .push_back(query);
         self.notify.notify_waiters();
     }
 
@@ -260,21 +263,29 @@ impl QueryChannel {
     pub async fn next(&self) -> PendingQuery {
         struct Waiter<'a>(&'a std::sync::atomic::AtomicUsize);
         impl Drop for Waiter<'_> {
-            fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
         }
-        self.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.waiters
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _waiter = Waiter(&self.waiters);
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(query) = self.take() { return query; }
+            if let Some(query) = self.take() {
+                return query;
+            }
             notified.await;
         }
     }
 
     fn take(&self) -> Option<PendingQuery> {
-        self.pending.lock().expect("matching query lock").pop_front()
+        self.pending
+            .lock()
+            .expect("matching query lock")
+            .pop_front()
     }
 
     /// Go `deliverQueryResult`. A missing waiter means the caller already gave
@@ -285,7 +296,9 @@ impl QueryChannel {
                 let _ = sender.send(outcome);
                 Ok(())
             }
-            None => Err(Status::not_found("query task not found, or already expired")),
+            None => Err(Status::not_found(
+                "query task not found, or already expired",
+            )),
         }
     }
 
@@ -325,9 +338,8 @@ pub fn query_response(
         task_list: query.task_list.clone(),
         task_id: query.task_id.clone(),
     };
-    let task_token =
-        cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
-            .unwrap_or_default();
+    let task_token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize_query_token(&token)
+        .unwrap_or_default();
     let sticky_task_list_configured = state
         .sticky_task_list
         .as_ref()
@@ -371,13 +383,36 @@ fn supports_consistent_query(client_impl: &str, feature_version: &str) -> bool {
 /// once all numeric components and build metadata have been validated.
 fn released_feature_at_least(value: &str, major: u64, minor: u64) -> bool {
     let value = value.strip_prefix('v').unwrap_or(value);
-    let (numbers, metadata) = value.split_once('+').map_or((value, None), |(numbers, metadata)| (numbers, Some(metadata)));
-    if metadata.is_some_and(|metadata| metadata.split('.').any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'~')))) { return false; }
-    let segments = numbers.split('.').map(|part| {
-        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) { return None; }
-        part.parse::<i64>().ok()
-    }).collect::<Option<Vec<_>>>();
-    segments.is_some_and(|segments| (segments[0] as u64, segments.get(1).copied().unwrap_or_default() as u64) >= (major, minor))
+    let (numbers, metadata) = value
+        .split_once('+')
+        .map_or((value, None), |(numbers, metadata)| {
+            (numbers, Some(metadata))
+        });
+    if metadata.is_some_and(|metadata| {
+        metadata.split('.').any(|part| {
+            part.is_empty()
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'~'))
+        })
+    }) {
+        return false;
+    }
+    let segments = numbers
+        .split('.')
+        .map(|part| {
+            if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            part.parse::<i64>().ok()
+        })
+        .collect::<Option<Vec<_>>>();
+    segments.is_some_and(|segments| {
+        (
+            segments[0] as u64,
+            segments.get(1).copied().unwrap_or_default() as u64,
+        ) >= (major, minor)
+    })
 }
 
 /// Go `waitForQueryResult`: an answered query returns the payload, a failed
@@ -465,7 +500,12 @@ mod tests {
         channel.offer(query("cancelled"));
         drop(registration);
         assert!(channel.take().is_none());
-        assert!(channel.complete("cancelled", QueryOutcome::Internal(Status::cancelled("cancelled"))).is_err());
+        assert!(channel
+            .complete(
+                "cancelled",
+                QueryOutcome::Internal(Status::cancelled("cancelled"))
+            )
+            .is_err());
         assert!(receiver.blocking_recv().is_err());
     }
 
@@ -517,7 +557,16 @@ mod tests {
         for value in ["1", "v1.5", "01.05.0", "1.5.0+build.42", "2.0.0.1"] {
             assert!(supports_sticky_query("uber-go", value), "{value}");
         }
-        for value in ["1.5.0-alpha", "2.0.0-rc1", "1.invalid", "1.5.bad", "1.5.0+", "1.5.0+bad..build", "1.5.0+build!", "1.5.9223372036854775808"] {
+        for value in [
+            "1.5.0-alpha",
+            "2.0.0-rc1",
+            "1.invalid",
+            "1.5.bad",
+            "1.5.0+",
+            "1.5.0+bad..build",
+            "1.5.0+build!",
+            "1.5.9223372036854775808",
+        ] {
             assert!(!supports_sticky_query("uber-go", value), "{value}");
             assert!(!supports_consistent_query("uber-go", value), "{value}");
         }
@@ -529,7 +578,10 @@ mod tests {
     async fn cancelled_query_poll_removes_waiter_and_cannot_accept_an_offer() {
         let channel = std::sync::Arc::new(QueryChannel::new());
         let mut next = Box::pin(channel.next());
-        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(matches!(
+            futures_poll(next.as_mut()),
+            std::task::Poll::Pending
+        ));
         assert!(channel.has_waiters());
         drop(next);
         assert!(!channel.has_waiters());
@@ -538,7 +590,9 @@ mod tests {
         assert!(channel.take().is_none());
     }
 
-    fn futures_poll<F: std::future::Future>(future: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
+    fn futures_poll<F: std::future::Future>(
+        future: std::pin::Pin<&mut F>,
+    ) -> std::task::Poll<F::Output> {
         let waker = std::task::Waker::noop();
         future.poll(&mut std::task::Context::from_waker(waker))
     }
@@ -549,9 +603,15 @@ mod tests {
         let _receiver = channel.register_waiter("task");
         assert!(channel.take().is_none());
         let mut next = Box::pin(channel.next());
-        assert!(matches!(futures_poll(next.as_mut()), std::task::Poll::Pending));
+        assert!(matches!(
+            futures_poll(next.as_mut()),
+            std::task::Poll::Pending
+        ));
         assert!(channel.try_offer(query("task")));
-        assert!(!channel.try_offer(query("second")), "one parked poll cannot accept two queries");
+        assert!(
+            !channel.try_offer(query("second")),
+            "one parked poll cannot accept two queries"
+        );
         assert_eq!(next.await.task_id, "task");
         assert!(channel.take().is_none());
         assert!(!channel.has_waiters());
@@ -566,11 +626,10 @@ mod tests {
         // The query response carries a decodable query token, the query, and
         // the mutable state the frontend uses to load history.
         let response = query_response(offered, &mutable_state());
-        let token =
-            cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
-                &response.task_token,
-            )
-            .unwrap();
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+            &response.task_token,
+        )
+        .unwrap();
         assert_eq!(token.task_id, "task-1");
         assert_eq!(token.workflow_id, "workflow");
         assert_eq!(token.task_list, "queue");
@@ -614,7 +673,10 @@ mod tests {
         let receiver = channel.register(query("task-3"));
         let _ = channel.next().await;
         channel
-            .complete("task-3", QueryOutcome::Internal(Status::internal("history down")))
+            .complete(
+                "task-3",
+                QueryOutcome::Internal(Status::internal("history down")),
+            )
             .unwrap();
         let error = query_outcome(receiver.await.unwrap(), false).unwrap_err();
         assert!(error.message().contains("history down"));
@@ -624,7 +686,10 @@ mod tests {
     async fn completing_an_unknown_task_reports_not_found() {
         let channel = std::sync::Arc::new(QueryChannel::new());
         assert!(channel
-            .complete("missing", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "missing",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_err());
     }
 
@@ -635,7 +700,10 @@ mod tests {
         channel.withdraw("task-2");
         // No offer remains, and a late completion is rejected.
         assert!(channel
-            .complete("task-2", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "task-2",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_err());
     }
 
@@ -721,7 +789,10 @@ mod tests {
         let received = poll.await.unwrap();
         assert_eq!(received.task_id, "query-1");
         assert!(channel
-            .complete("query-1", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
+            .complete(
+                "query-1",
+                QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+            )
             .is_ok());
         assert!(receiver.await.is_ok());
     }
@@ -735,9 +806,11 @@ mod tests {
             .await
             .expect("queued query is returned without waiting");
         assert_eq!(received.task_id, "query-1");
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
+                .await
+                .is_err()
+        );
     }
 
     fn empty_answer() -> QueryOutcome {
