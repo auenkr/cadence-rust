@@ -372,7 +372,11 @@ fn respond_query_request(task_id: &str) -> Request<m::RespondQueryTaskCompletedR
             ..Default::default()
         }),
         task_id: task_id.into(),
-        request: Some(p::RespondQueryTaskCompletedRequest::default()),
+        // A present nested request must carry a result: Go's mapper dereferences it.
+        request: Some(p::RespondQueryTaskCompletedRequest {
+            result: Some(p::WorkflowQueryResult::default()),
+            ..Default::default()
+        }),
     })
 }
 

@@ -17,6 +17,10 @@ on:
         description: "Apply rustfmt to the four Matching TLS-touched Rust files and upload the patch"
         type: boolean
         default: false
+      format_query_files:
+        description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -94,6 +98,29 @@ jobs:
             rust/crates/cadence-matching/src/matching_rpc_tests.rs \
             rust/crates/cadence-service-core/src/grpc_tls.rs \
             > "$RUNNER_TEMP/tls-format.patch"
+      - name: Format query-touched Rust files
+        if: inputs.format_query_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --config skip_children=true \
+            crates/cadence-matching/src/matching_query.rs \
+            crates/cadence-matching/src/matching_registry.rs \
+            crates/cadence-matching/src/grpc_matching.rs \
+            crates/cadence-matching/src/matching_rpc_tests.rs
+          git -C "$GITHUB_WORKSPACE" diff --binary -- \
+            rust/crates/cadence-matching/src/matching_query.rs \
+            rust/crates/cadence-matching/src/matching_registry.rs \
+            rust/crates/cadence-matching/src/grpc_matching.rs \
+            rust/crates/cadence-matching/src/matching_rpc_tests.rs \
+            > "$RUNNER_TEMP/query-format.patch"
+      - name: Upload query formatting patch
+        if: inputs.format_query_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: query-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/query-format.patch
       - name: Upload TLS formatting patch
         if: inputs.format_tls_files == true
         uses: actions/upload-artifact@v4
