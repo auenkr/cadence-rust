@@ -723,9 +723,23 @@ limited: [8,6,7]). Compact evidence: `memory/evidence/matching-thrift-mixed-fail
 PostgreSQL/MySQL/HTTP runs use original Go Frontend/History/Worker, no Go Matching
 (HTTP run is a fixture, not the full mixed cluster). Matching remains INCOMPLETE.
 
-### Remaining checklist / exact pins needed
-- [ ] Thrift fix integrated; Thrift rerun green on the new exact SHA.
-- [ ] After any Rust change: fresh workspace gate (clippy then tests, fresh target) on that exact SHA, plus rerun PostgreSQL and MySQL on it (current binaries are bound to 29bdd).
-- [ ] configstore, shard-distributor, Cassandra, active-offer dispatched serially on the same pin; archive URL, headSha, conclusion, binary SHA256, exits.
-- [ ] gRPC TLS missing-identity production-path coverage confirmed (see item 9 above).
-- [ ] Parity audit rows reconciled; keep `preliminary-passed`/`acceptanceEligible:false` labels as emitted.
+### Closed items (user-confirmed, current 29bdd2b04)
+- gRPC TLS missing/lone identity: production launcher TLS tests (missing/lone
+  identity, real handshake, CA, abort 65 stalled) covered; approved at
+  `e3c79b301` with fresh CI 40164484146; same Rust tree as fresh workspace
+  40168414544. Closed; no further TLS work.
+- Final sign-off review `7bc5fbb90` incorporated into master; confirmed:
+  root startup `4e88d`, watch `11f13b`, raw batch `944e`, owner oracle,
+  cancellation, `matching_engine_go_tests_c` full `4cabb9cecee5a177a2a9462a9e8838ed9fb13324`
+  ancestry. All remaining parity-audit rows closed.
+
+### Pending only
+- [ ] Thrift run 40174280100 failure cause (pending, other worker). If the fix is
+      harness-only (production Rust tree unchanged), prior PostgreSQL 40173134481
+      and MySQL 40173683827 scenario evidence stays bound to its named source SHA
+      (29bdd); the final exact-pin plan may rebind them via an explicit tree diff.
+      Do not assert a new Rust tree before the finding.
+- [ ] Thrift green rerun on the final pin (parent prefers one same final pin).
+- [ ] configstore, shard-distributor, Cassandra, active-offer dispatched serially on
+      the final pin; archive URL, headSha, conclusion, binary SHA256, exits.
+- [ ] Final pin SHA recorded.
