@@ -62,3 +62,10 @@ No production behavior gap was established by this narrow review. The blockers
 above are explicit runtime/evidence requirements, not claims that an adapter
 or behavior is absent. Do not treat this note or prior unit/oracle evidence as
 Matching completion.
+
+## Parent source-pin reconciliation
+
+`git diff --name-only 27d3ff5f60f0604553824420da0cf61026eda468 af0609dbe`
+contains only memory/evidence paths. The production source, tests and CI files
+are identical, so the reviewed production tree is the pinned candidate tree.
+This resolves item4 without treating source review as runtime proof.
