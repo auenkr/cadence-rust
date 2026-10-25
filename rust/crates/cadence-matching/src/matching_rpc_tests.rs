@@ -3698,7 +3698,11 @@ type QueryCall = tokio::task::JoinHandle<Result<tonic::Response<m::QueryWorkflow
 
 /// Offer a query through the real handler and let a decision poller receive it;
 /// returns the in-flight `QueryWorkflow` call and the delivered task ID.
-async fn deliver_query_to_poller(matching: &Matching, domain: &str, strong: bool) -> (QueryCall, String) {
+async fn deliver_query_to_poller(
+    matching: &Matching,
+    domain: &str,
+    strong: bool,
+) -> (QueryCall, String) {
     let worker = matching.clone();
     let poll_domain = domain.to_string();
     let poll = tokio::spawn(async move {
@@ -3769,7 +3773,9 @@ fn answered(data: &[u8]) -> Option<p::RespondQueryTaskCompletedRequest> {
         task_token: b"not-a-token".to_vec(),
         result: Some(p::WorkflowQueryResult {
             result_type: p::QueryResultType::Answered as i32,
-            answer: Some(p::Payload { data: data.to_vec() }),
+            answer: Some(p::Payload {
+                data: data.to_vec(),
+            }),
             error_message: String::new(),
         }),
         worker_version_info: None,

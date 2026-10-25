@@ -82,29 +82,29 @@ pub struct QueryIndex {
 impl QueryIndex {
     /// Go `deliverQueryResult`: O(1) lookup by task ID alone.
     pub fn deliver(&self, task_id: &str, outcome: QueryOutcome) -> Result<(), Status> {
-        loop {
-            let entry = self
-                .entries
-                .lock()
-                .expect("matching query index lock")
-                .get(task_id)
-                .cloned();
-            let Some((generation, channel)) = entry else { break };
-            match channel.take_waiter(task_id, Some(generation)) {
-                Some(sender) => {
-                    // The waiter may have timed out; dropping the send is Go's
-                    // buffered-channel behaviour after the deferred delete.
-                    let _ = sender.send(outcome);
-                    return Ok(());
-                }
-                None => {
-                    // Stale entry (waiter already gone): drop it and report missing.
-                    self.remove(task_id, generation);
-                    break;
-                }
+        let not_found = || Status::not_found("query task not found, or already expired");
+        let entry = self
+            .entries
+            .lock()
+            .expect("matching query index lock")
+            .get(task_id)
+            .cloned();
+        let Some((generation, channel)) = entry else {
+            return Err(not_found());
+        };
+        match channel.take_waiter(task_id, Some(generation)) {
+            Some(sender) => {
+                // The waiter may have timed out; dropping the send is Go's
+                // buffered-channel behaviour after the deferred delete.
+                let _ = sender.send(outcome);
+                Ok(())
+            }
+            None => {
+                // Stale entry (waiter already gone): drop it and report missing.
+                self.remove(task_id, generation);
+                Err(not_found())
             }
         }
-        Err(Status::not_found("query task not found, or already expired"))
     }
 
     fn remove(&self, task_id: &str, generation: u64) {
@@ -124,7 +124,8 @@ pub struct Registration {
 }
 impl Drop for Registration {
     fn drop(&mut self) {
-        self.channel.withdraw_generation(&self.task_id, self.generation);
+        self.channel
+            .withdraw_generation(&self.task_id, self.generation);
     }
 }
 
@@ -461,8 +462,8 @@ mod tests {
     #[test]
     fn matching_query_registration_drop_withdraws_cancelled_offer() {
         let channel = std::sync::Arc::new(QueryChannel::new());
-        let receiver = channel.register(query("cancelled"));
-        let registration = channel.registration("cancelled");
+        let (receiver, registration) = channel.register_guarded("cancelled");
+        channel.offer(query("cancelled"));
         drop(registration);
         assert!(channel.take().is_none());
         assert!(channel.complete("cancelled", QueryOutcome::Internal(Status::cancelled("cancelled"))).is_err());
@@ -740,24 +741,21 @@ mod tests {
             .is_err());
     }
 
+    fn empty_answer() -> QueryOutcome {
+        QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default()))
+    }
+
     #[test]
     fn matching_query_index_delivers_after_owner_channel_detached() {
         let index = std::sync::Arc::new(QueryIndex::default());
         let channel = std::sync::Arc::new(QueryChannel::with_index(index.clone()));
         let (mut receiver, registration) = channel.register_guarded("task-a");
         drop(channel); // the owner lost its handle; the index keeps the channel
-        index
-            .deliver("task-a", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
-            .unwrap();
+        index.deliver("task-a", empty_answer()).unwrap();
         assert!(receiver.try_recv().is_ok());
         drop(registration);
-        assert_eq!(
-            index
-                .deliver("task-a", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
-                .unwrap_err()
-                .code(),
-            tonic::Code::NotFound
-        );
+        let error = index.deliver("task-a", empty_answer()).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::NotFound);
     }
 
     #[test]
@@ -767,9 +765,7 @@ mod tests {
         let (_old_receiver, old) = channel.register_guarded("dup");
         let (mut new_receiver, _new) = channel.register_guarded("dup");
         drop(old);
-        index
-            .deliver("dup", QueryOutcome::Worker(WorkerAnswer::new(p::WorkflowQueryResult::default())))
-            .unwrap();
+        index.deliver("dup", empty_answer()).unwrap();
         assert!(new_receiver.try_recv().is_ok());
     }
 }

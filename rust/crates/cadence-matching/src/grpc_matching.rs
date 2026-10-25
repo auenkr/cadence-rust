@@ -2759,7 +2759,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                                         task_list: list.name.clone(),
                                         request: payload.clone(),
                                     };
-                                    let (receiver, _registration) = handle.queries.register_guarded(&task_id);
+                                    let (receiver, _registration) =
+                                        handle.queries.register_guarded(&task_id);
                                     let offered = if force_local {
                                         handle.queries.offer(query);
                                         true
