@@ -367,3 +367,24 @@ https://github.com/auenkr/cadence-rust/actions/runs/40165758848 is currently
 `in_progress` on that exact head; only the same first interop lane was
 dispatched. Do not dispatch another lane until this run completes and its
 artifacts are inspected.
+
+Run 40165758848 completed with failure on source
+`e787524851b06f0f9aab007ae645c5d9cf8c85e5`. Its fresh server build succeeded
+with exit 0 and SHA256
+`ec2582601d96e73cbaf7650b67afeffe0aebeeefa2181ef772f8b12fbe444351`; the
+standalone Go interop harness exited 1 before its TLS requests. A negative
+startup assertion passed the unmodified Rust development config, which selects
+Cassandra; server assembly attempted `127.0.0.1:9042` and failed connection
+before reaching the expected domain-cache NoSQL rejection. This is a harness
+setup/assertion failure, not evidence of TLS behavior. The CI-generated lock
+patch reordered one workspace dependency entry and added `js-sys` and
+`wasm-bindgen` to chrono, with no package version/checksum change. Exact
+downloaded logs, exits, SHA and patch are saved at
+`memory/evidence/matching-http-tls-interop-failure-40165758848/`.
+
+Follow-up branch `t3/http-tls-lockfix-20261025` applies that exact lock delta,
+restores `--locked`, and records the lock diff against HEAD. The negative
+NoSQL assertion now uses an unsupported plugin name in the same development
+config, giving a deterministic startup rejection before any database
+connection. No production code or TLS assertions changed. Mixed validation
+has not been rerun.
