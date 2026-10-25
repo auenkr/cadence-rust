@@ -3413,6 +3413,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                             "PartitionConfig must be nil for root partition.",
                         ));
                     }
+                    #[cfg(test)]
+                    self.injected_engine_fault("RefreshTaskListPartitionConfig")?;
                     if let Some(registry) = &self.queues {
                         let queue = self
                             .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
