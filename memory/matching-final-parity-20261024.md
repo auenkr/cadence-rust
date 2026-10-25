@@ -1,5 +1,30 @@
 # Matching final parity audit (2026-10-24)
 
+> Historical audit: its original blockers below are not the current backlog.
+> The 2026-10-25 reconciliation table immediately below supersedes stale claims;
+> final acceptance status lives in
+> `memory/evidence/matching-final-candidate-20261024/README.md`.
+
+## 2026-10-25 blocker reconciliation
+
+| Original item | Current evidence / disposition |
+| --- | --- |
+| OpenFeature startup unsupported | Implemented: provider registration, typed live reader, Unleash repository/evaluator/lifecycle/backoff. Candidate workspace run40108643448 passed; see runtime and Unleash evidence notes. |
+| Semaphore validation/paging/startup | Implemented and active tests, including acquire-during-load deadline, paginated scans and shutdown admission. Final Cassandra lane40153493941 remains running for candidate backend acceptance. |
+| matching.errorInjectionRate alias | Original claim incorrect: canonical Go Matching client key, distinct from persistence injection. See source correction below. |
+| Legacy non-durable Describe | Test-helper limitation; deployed Matching uses durable queues. Candidate PostgreSQL recovery/status probes passed; other backend lanes pending. |
+| TLS modes | Original TChannel concern incorrect; Go has plain TChannel and separate gRPC/HTTP TLS. Candidate workspace includes listener TLS tests; candidate Thrift/TChannel lane40153127238 passed. |
+| Owner ordering after membership changes | Closed by executable production Go handler/resolver versus Rust handler oracle, including add/remove/identity/address/empty-ring snapshots. Final candidate run40108643448 and generated artifact preserved. |
+| Metrics source and live comparison | Source/rollup audit and actual Go tally/Rust metric comparisons pass on final candidate. Representative shared emitters and actual GetTasks metered-wrapper success/error paths covered; limits remain explicit in comparison report, with no invented coverage of every sampled value. |
+| Current-source mixed acceptance | In progress on pinned27d3ff5f: fresh workspace, PostgreSQL and Thrift passed; Cassandra and remaining lanes tracked in candidate README. No completion sign-off yet. |
+
+Root startup notification and file reload now have passing production-path tests.
+Active offer has a real Go History/zero-insert mixed probe. Two typed History
+refresh error integration placeholders are being replaced with actual wire tests.
+All local Cargo/Go validation remains prohibited. The candidate stays pinned;
+master adds evidence and test-only supplements while its production tree remains
+identical unless an actual bug is found.
+
 Scope: current Matching service only. Read-only code/evidence audit; no Cargo or runtime gate was run in this checkout. This is not a completion sign-off. Matching remains incomplete until the blockers below are closed and reproducible mixed-cluster evidence is bound to the then-current source and binary.
 
 ## Branches and stale inventories reconciled
