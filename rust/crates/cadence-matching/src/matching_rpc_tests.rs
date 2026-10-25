@@ -208,6 +208,101 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
 }
 
 #[tokio::test]
+async fn stalled_custom_tls_handshakes_do_not_cap_matching_accepts_and_close_on_abort() {
+    use base64::Engine as _;
+    use tokio::io::AsyncReadExt;
+    use tonic_reflection::pb::v1::{
+        server_reflection_client::ServerReflectionClient,
+        server_reflection_request::MessageRequest, ServerReflectionRequest,
+    };
+
+    const STALLED_CONNECTIONS: usize = 65;
+    let dir = tempfile::tempdir().unwrap();
+    let mut ca_params = rcgen::CertificateParams::new(Vec::new()).unwrap();
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let ca = ca_params.self_signed(&ca_key).unwrap();
+    let server_params = rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
+    let server_key = rcgen::KeyPair::generate().unwrap();
+    let server_cert = server_params.signed_by(&server_key, &ca, &ca_key).unwrap();
+
+    let cert_file = dir.path().join("server-cert.pem");
+    let key_file = dir.path().join("server-key.pem");
+    let ca_file = dir.path().join("mixed-ca.pem");
+    let invalid_der = format!(
+        "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+        base64::engine::general_purpose::STANDARD.encode(b"invalid DER")
+    );
+    std::fs::write(&cert_file, server_cert.pem()).unwrap();
+    std::fs::write(&key_file, server_key.serialize_pem()).unwrap();
+    std::fs::write(&ca_file, format!("{}{}", ca.pem(), invalid_der)).unwrap();
+
+    let tls = cadence_service_core::config::TlsConfig {
+        enabled: true,
+        cert_file: cert_file.to_string_lossy().into_owned(),
+        key_file: key_file.to_string_lossy().into_owned(),
+        ca_file: ca_file.to_string_lossy().into_owned(),
+        require_client_auth: true,
+        ..Default::default()
+    };
+    let config = cadence_service_core::grpc_tls::server_tls_custom_incoming(&tls)
+        .unwrap()
+        .expect("mixed valid/invalid CA requires the compatibility accept path");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let matching = Matching::new(crate::handlers::AppState::default());
+    let server = tokio::spawn(
+        crate::grpc_matching::serve_with_listener_tls_or_no_identity(
+            listener,
+            matching,
+            None,
+            Some(config),
+        ),
+    );
+
+    // Keep more incomplete TLS handshakes open than the former hard cap. The
+    // later authenticated gRPC connection must still be accepted promptly.
+    let mut stalled = Vec::with_capacity(STALLED_CONNECTIONS);
+    for _ in 0..STALLED_CONNECTIONS {
+        stalled.push(tokio::net::TcpStream::connect(addr).await.unwrap());
+        tokio::task::yield_now().await;
+    }
+
+    let client_tls = cadence_service_core::grpc_tls::client_tls(&tls).unwrap().unwrap();
+    let channel = cadence_service_core::grpc_tls::endpoint_channel(&addr.to_string(), Some(&client_tls)).unwrap();
+    let mut client = ServerReflectionClient::new(channel);
+    let request = ServerReflectionRequest {
+        host: String::new(),
+        message_request: Some(MessageRequest::ListServices(String::new())),
+    };
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.server_reflection_info(tokio_stream::once(request)),
+    )
+    .await
+    .expect("stalled connections blocked a valid client-authenticated gRPC request")
+    .expect("valid CA-signed client should complete the gRPC request");
+    let mut response_stream = response.into_inner();
+    assert!(response_stream.message().await.unwrap().is_some());
+    drop(response_stream);
+    drop(client);
+
+    server.abort();
+    let _ = server.await;
+    for stream in &mut stalled {
+        let mut byte = [0; 1];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), stream.read(&mut byte))
+                .await
+                .unwrap()
+                .unwrap(),
+            0,
+            "a pending handshake survived listener shutdown"
+        );
+    }
+}
+
+#[tokio::test]
 async fn engine_partition_owners_and_order_match_executable_go_handler_oracle() {
     use crate::matching_membership::Membership;
     use cadence_common::membership::Host;

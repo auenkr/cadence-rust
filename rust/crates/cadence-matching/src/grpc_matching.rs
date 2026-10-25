@@ -3914,18 +3914,47 @@ async fn serve_with_listener_tls_inner(
         );
     if let Some(config) = no_identity {
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
-        let incoming = futures_util::StreamExt::filter_map(
-            futures_util::StreamExt::buffer_unordered(
-                futures_util::StreamExt::map(
-                    tokio_stream::wrappers::TcpListenerStream::new(listener),
-                    move |accepted| {
-                        let acceptor = acceptor.clone();
-                        async move {
-                            match accepted {
-                                Err(error) => Err(error),
-                                Ok(stream) => Ok(tokio::time::timeout(
+        let incoming = no_identity_tls_incoming(listener, acceptor);
+        server.serve_with_incoming(incoming).await?;
+    } else {
+        server
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await?;
+    }
+    Ok(())
+}
+
+fn no_identity_tls_incoming(
+    listener: tokio::net::TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+) -> impl tokio_stream::Stream<Item = std::io::Result<NoIdentityTlsStream>> + Send + 'static {
+    use futures_util::{stream::FuturesUnordered, StreamExt as _};
+    use std::{future::Future, pin::Pin};
+
+    type Handshake = Pin<
+        Box<
+            dyn Future<
+                    Output = std::io::Result<
+                        tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
+                    >,
+                > + Send,
+        >,
+    >;
+
+    let handshakes = FuturesUnordered::<Handshake>::new();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    futures_util::stream::unfold((incoming, handshakes), move |(mut listener, mut handshakes)| {
+        let acceptor = acceptor.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    accepted = listener.next() => match accepted {
+                        Some(Ok(socket)) => {
+                            let acceptor = acceptor.clone();
+                            handshakes.push(Box::pin(async move {
+                                tokio::time::timeout(
                                     std::time::Duration::from_secs(120),
-                                    acceptor.accept(stream),
+                                    acceptor.accept(socket),
                                 )
                                 .await
                                 .map_err(|_| {
@@ -3934,33 +3963,27 @@ async fn serve_with_listener_tls_inner(
                                         "TLS handshake timed out",
                                     )
                                 })
-                                .and_then(|stream| stream.map_err(std::io::Error::other))),
-                            }
+                                .and_then(|stream| stream.map_err(std::io::Error::other))
+                            }));
                         }
+                        Some(Err(_)) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                        None => return None,
                     },
-                ),
-                64,
-            ),
-            |result| async move {
-                match result {
-                    Ok(Ok(stream)) => Some(Ok::<NoIdentityTlsStream, std::io::Error>(
-                        NoIdentityTlsStream(stream),
-                    )),
-                    Ok(Err(_)) => None,
-                    Err(_) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        None
+                    result = handshakes.next(), if !handshakes.is_empty() => match result {
+                        Some(Ok(stream)) => {
+                            return Some((
+                                Ok(NoIdentityTlsStream(stream)),
+                                (listener, handshakes),
+                            ));
+                        }
+                        Some(Err(_)) | None => {}
                     }
                 }
-            },
-        );
-        server.serve_with_incoming(incoming).await?;
-    } else {
-        server
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
-            .await?;
-    }
-    Ok(())
+            }
+        }
+    })
 }
 
 struct NoIdentityTlsStream(tokio_rustls::server::TlsStream<tokio::net::TcpStream>);
