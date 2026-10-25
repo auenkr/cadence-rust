@@ -31,12 +31,14 @@ impl TaskData {
     /// boundary so UUIDs accepted by Go never trigger the writer fatal path.
     fn go_sql_uuid(raw: &str) -> std::result::Result<uuid::Uuid, String> {
         let bytes = raw.as_bytes();
-        let value = if bytes.len() >= 9 && bytes[..9].eq_ignore_ascii_case(b"urn:uuid:") {
-            std::str::from_utf8(&bytes[9..]).map_err(|error| error.to_string())?
-        } else if bytes.len() == 38 {
-            std::str::from_utf8(&bytes[1..37]).map_err(|error| error.to_string())?
-        } else {
-            raw
+        let value = match bytes.len() {
+            45 if bytes[..9].eq_ignore_ascii_case(b"urn:uuid:") => {
+                std::str::from_utf8(&bytes[9..]).map_err(|error| error.to_string())?
+            }
+            45 => return Err("invalid urn prefix".into()),
+            38 => std::str::from_utf8(&bytes[1..37]).map_err(|error| error.to_string())?,
+            32 | 36 => raw,
+            length => return Err(format!("invalid UUID length: {length}")),
         };
         uuid::Uuid::parse_str(value).map_err(|error| format!("invalid UUID {raw:?}: {error}"))
     }
@@ -414,6 +416,10 @@ mod tests {
         for accepted in [format!("x{canonical}y"), canonical.replace('-', ""), format!("URN:UUID:{canonical}")] {
             let decoded = TaskData::default().with_request_run_id(&accepted).for_sql().unwrap();
             assert_eq!(decoded.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()), "{accepted}");
+        }
+        // Go checks the complete input length before stripping the URN prefix.
+        for rejected in [format!("urn:uuid:{}", canonical.replace('-', "")), format!("urn:uuid:{{{canonical}}}")] {
+            assert!(TaskData::default().with_request_run_id(&rejected).for_sql().is_err(), "{rejected}");
         }
         assert_eq!(decode_task(&encode_task(&up).unwrap()).unwrap().raw_run_id, None);
     }
