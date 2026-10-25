@@ -56,6 +56,10 @@ function countTaskRows(query, domainHex, taskListName, taskType) {
   return Number(query(taskRowsSql(domainHex, taskListName, taskType))[0][0]);
 }
 
+function maxTaskRowId(query, domainHex, taskListName, taskType) {
+  return Number(query(`SELECT MAX(task_id) FROM tasks WHERE domain_id=UNHEX('${domainHex}') AND task_list_name='${sqlText(taskListName)}' AND task_type=${taskType}`)[0][0]);
+}
+
 // Bounded production GC verification against Go's real MySQL schema.
 //
 // Every task list is described by one expectation:
@@ -84,7 +88,7 @@ function countTaskRows(query, domainHex, taskListName, taskType) {
 // A lease renewal between the two reads moves the range by one, so the gate
 // reads both again inside the bounded retry instead of tolerating a
 // difference, and it records the temporal history of every snapshot.
-async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pendingListName, liveBlockProvider, rangeSize, deadlineMs = 90000, sleep }) {
+async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pendingListName, liveBlockProvider, rangeSize, deadlineMs = 90000, residueSettleMs = 5000, sleep }) {
   const domainHex = domainId.replace(/-/g, '').toLowerCase();
   assert(Array.isArray(taskLists) && taskLists.length > 0, 'the gate needs at least one task list to verify');
   for (const expectation of taskLists) {
@@ -108,6 +112,7 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
   statements.push(taskRowsSql(domainHex, pendingListName));
   const deadline = Date.now() + deadlineMs;
   const snapshots = [];
+  const residueSince = new Map();
   let observation = null;
   for (;;) {
     const state = {};
@@ -115,20 +120,33 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
       // A short idle-check interval can evict and re-lease a list between the
       // row read and the Describe, so re-read one list until both agree on the
       // range. Go's idle eviction reloads on the next Describe the same way.
-      let rows, taskRows, live;
+      let rows, taskRows, live, maxRowId;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         rows = readTaskListRows(query, domainHex, expectation.name)
           .filter(row => row.taskType === expectation.taskType);
         taskRows = countTaskRows(query, domainHex, expectation.name, expectation.taskType);
+        maxRowId = taskRows === 0 ? null : maxTaskRowId(query, domainHex, expectation.name, expectation.taskType);
         live = await liveBlockProvider(expectation.name, expectation.taskType);
         if (rows[0] && Math.floor((live.startId - 1) / rangeSize) + 1 === rows[0].rangeId) break;
       }
-      state[expectation.label] = { rows, taskRows, live };
+      // Go's taskGC is event driven and throttled by MaxTimeBetweenTaskDeletes
+      // (1s): a final ack inside that window leaves rows at or below the
+      // persisted ack level until the next ack or the list unloads (RunNow).
+      // Such throttled residue is Go behavior; a row above the ack level is a
+      // real defect and never counts as residue.
+      const ack = rows[0] ? rows[0].ackLevel : null;
+      const residue = taskRows > 0 && ack !== null && maxRowId !== null && maxRowId <= ack;
+      if (residue) {
+        const prior = residueSince.get(expectation.label);
+        if (!prior || prior.ack !== ack || prior.rows !== taskRows) residueSince.set(expectation.label, { since: Date.now(), ack, rows: taskRows });
+      } else residueSince.delete(expectation.label);
+      const settled = residue && Date.now() - residueSince.get(expectation.label).since >= residueSettleMs;
+      state[expectation.label] = { rows, taskRows, live, maxRowId, throttledResidue: settled };
     }
     const pendingTasks = countTaskRows(query, domainHex, pendingListName);
     const converged = Object.entries(state).every(([, entry]) => {
       const row = entry.rows[0];
-      if (entry.taskRows !== 0) return false;
+      if (entry.taskRows !== 0 && !entry.throttledResidue) return false;
       if (!row) return false;
       if (row.ackLevel === null) return false;
       const liveRange = Math.floor((entry.live.startId - 1) / rangeSize) + 1;
@@ -150,6 +168,7 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
       acksCoverRemovedRows,
       queues: Object.fromEntries(Object.entries(state).map(([label, entry]) => [label, {
         taskRows: entry.taskRows,
+        maxRowId: entry.maxRowId,
         ackLevel: entry.rows[0] ? entry.rows[0].ackLevel : null,
         persistedRange: entry.rows[0] ? entry.rows[0].rangeId : null,
         liveRange: Math.floor((entry.live.startId - 1) / rangeSize) + 1,
@@ -167,7 +186,7 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
   for (const expectation of taskLists) {
     const entry = observation.state[expectation.label];
     const row = entry.rows[0];
-    assert(entry.taskRows === 0, `the acknowledged task rows of ${expectation.label} must be removed from Go's tasks table`);
+    assert(entry.taskRows === 0 || entry.throttledResidue, `the acknowledged task rows of ${expectation.label} must be removed from Go's tasks table`);
     assert(row, `Go's task_lists table is missing the ${expectation.taskType} row for ${expectation.name}`);
     assert(row.dataEncoding === 'thriftrw', `unexpected task-list blob encoding ${row.dataEncoding}`);
     if (expectation.durableGcEvidence === false) {
@@ -191,6 +210,7 @@ async function verifyProductionMySqlTaskGc({ query, domainId, taskLists, pending
       taskList: expectation.name,
       taskType: expectation.taskType,
       remainingTaskRows: entry.taskRows,
+      throttledResidue: Boolean(entry.throttledResidue),
       ackLevel: row.ackLevel,
       observedMaxTaskId: expectation.observedMaxTaskId ?? null,
       minAck: expectation.minAck ?? null,
