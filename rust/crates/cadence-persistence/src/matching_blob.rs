@@ -21,13 +21,14 @@ pub struct TaskData {
 /// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
 pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
 impl TaskData {
-    /// Split a request RunID the way Go carries it: a valid UUID becomes the 16 stored
-    /// bytes, anything else (including empty) stays a raw string for sync match only.
+    /// Install the request RunID exactly as Go carries it (`TaskInfo.RunID` string),
+    /// for every value: valid, noncanonical, malformed or empty. `run_id` is a best-effort
+    /// parse for in-process readers only; stores must call `sql_run_id`/`cassandra_run_id`.
     pub fn with_request_run_id(mut self, run_id: &str) -> Self {
-        match uuid::Uuid::parse_str(run_id) {
-            Ok(id) => self.run_id = Some(id.as_bytes().to_vec()),
-            Err(_) => self.raw_run_id = Some(run_id.to_owned()),
-        }
+        self.raw_run_id = Some(run_id.to_owned());
+        self.run_id = uuid::Uuid::parse_str(run_id)
+            .ok()
+            .map(|id| id.as_bytes().to_vec());
         self
     }
     /// RunID string as Go's `TaskInfo.RunID`: raw request string, canonical UUID, or "".
@@ -41,18 +42,48 @@ impl TaskData {
             .map(|id| id.to_string())
             .unwrap_or_default()
     }
-    /// Persistence boundary. Go SQL stores an empty RunID as the nil UUID. A malformed
-    /// non-empty RunID makes Go's async writer goroutine panic (process crash); Rust
-    /// deliberately returns `Err` instead of reproducing the crash.
-    pub fn for_persistence(mut self) -> std::result::Result<Self, String> {
-        match self.raw_run_id.take() {
-            None => Ok(self),
-            Some(raw) if raw.is_empty() => {
-                self.run_id = Some(uuid::Uuid::nil().as_bytes().to_vec());
-                Ok(self)
-            }
-            Some(_) => Err("Run UUID is not valid.".into()),
+    /// Go SQL `serialization.MustParseUUID`: "" -> nil slice (field omitted from the blob,
+    /// i.e. absent, not the nil UUID); google/uuid `Parse` forms -> 16 bytes; else Go panics
+    /// (source-only inference: unrecovered in the task writer goroutine).
+    pub fn sql_run_id(&self) -> std::result::Result<Option<Vec<u8>>, String> {
+        match &self.raw_run_id {
+            None => Ok(self.run_id.clone()),
+            Some(raw) if raw.is_empty() => Ok(None),
+            Some(raw) => uuid::Uuid::parse_str(raw)
+                .map(|id| Some(id.as_bytes().to_vec()))
+                .map_err(|_| format!("invalid UUID {raw:?}")),
         }
+    }
+    /// Go Cassandra passes the string to gocql `marshalUUID` -> `ParseUUID`: hyphens are
+    /// skipped at even nibble offsets, exactly 32 hex digits, empty is rejected.
+    pub fn cassandra_run_id(&self) -> std::result::Result<Option<Vec<u8>>, String> {
+        let Some(raw) = &self.raw_run_id else {
+            return Ok(self.run_id.clone());
+        };
+        let mut out = [0u8; 16];
+        let mut j = 0usize;
+        for c in raw.chars() {
+            match c {
+                '-' if j & 1 == 0 => continue,
+                _ if j < 32 && c.is_ascii_hexdigit() => {
+                    let v = c.to_digit(16).unwrap() as u8;
+                    out[j / 2] |= v << (4 - (j & 1) * 4);
+                }
+                _ => return Err(format!("invalid UUID {raw:?}")),
+            }
+            j += 1;
+        }
+        if j != 32 {
+            return Err(format!("invalid UUID {raw:?}"));
+        }
+        Ok(Some(out.to_vec()))
+    }
+    /// Copy for a SQL row: raw RunID resolved per `sql_run_id` and cleared.
+    pub fn for_sql(&self) -> std::result::Result<Self, String> {
+        let mut data = self.clone();
+        data.run_id = self.sql_run_id()?;
+        data.raw_run_id = None;
+        Ok(data)
     }
     /// Go SQL CreateTasks computes expiry at persistence time, not enqueue time.
     /// Nonpositive schedule-to-start timeout means no expiry (Go zero time).
@@ -97,6 +128,7 @@ fn i32_field(w: &mut Writer, id: i16, value: i32) {
     w.write_i32(value);
 }
 pub fn encode_task(data: &TaskData) -> Vec<u8> {
+    debug_assert!(data.raw_run_id.is_none(), "resolve raw RunID with TaskData::for_sql first");
     let mut w = Writer::new();
     w.write_field_begin(TType::String, 10);
     w.write_string(&data.workflow_id);
@@ -316,27 +348,39 @@ impl std::fmt::Debug for EncodingSource {
 mod tests {
     use super::*;
     #[test]
-    fn request_run_id_keeps_raw_string_for_sync_match_only() {
+    fn request_run_id_keeps_every_raw_string() {
         let valid = uuid::Uuid::from_u128(9);
-        let ok = TaskData::default().with_request_run_id(&valid.to_string());
-        assert_eq!(ok.run_id.as_deref(), Some(valid.as_bytes().as_slice()));
-        assert_eq!(ok.run_id_string(), valid.to_string());
-        for raw in ["", "not-a-uuid", "0123"] {
-            let d = TaskData::default().with_request_run_id(raw);
-            assert!(d.run_id.is_none());
+        let upper = valid.to_string().to_uppercase();
+        for raw in [valid.to_string(), upper.clone(), valid.simple().to_string(), "".into(), "not-a-uuid".into()] {
+            let d = TaskData::default().with_request_run_id(&raw);
             assert_eq!(d.run_id_string(), raw);
-            // raw value never reaches the wire blob
-            assert_eq!(decode_task(&encode_task(&d)).unwrap().raw_run_id, None);
         }
+        assert_eq!(TaskData::default().with_request_run_id(&upper).run_id.as_deref(), Some(valid.as_bytes().as_slice()));
+        assert!(TaskData::default().with_request_run_id("bad").run_id.is_none());
     }
     #[test]
-    fn persistence_boundary_maps_empty_to_nil_and_rejects_malformed() {
-        let empty = TaskData::default().with_request_run_id("").for_persistence().unwrap();
-        assert_eq!(empty.run_id, Some(uuid::Uuid::nil().as_bytes().to_vec()));
+    fn sql_boundary_empty_is_absent_not_nil_uuid_and_malformed_errors() {
+        let empty = TaskData::default().with_request_run_id("").for_sql().unwrap();
+        assert_eq!(empty.run_id, None);
         assert_eq!(empty.raw_run_id, None);
-        assert!(TaskData::default().with_request_run_id("bad").for_persistence().is_err());
-        let valid = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(1).to_string());
-        assert_eq!(valid.clone().for_persistence().unwrap(), valid);
+        assert_eq!(decode_task(&encode_task(&empty)).unwrap().run_id, None);
+        assert!(TaskData::default().with_request_run_id("bad").for_sql().is_err());
+        let up = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(5).to_string().to_uppercase()).for_sql().unwrap();
+        assert_eq!(up.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()));
+        assert_eq!(decode_task(&encode_task(&up)).unwrap().raw_run_id, None);
+    }
+    #[test]
+    fn cassandra_boundary_follows_gocql_parse_uuid() {
+        let ok = |s: &str| TaskData::default().with_request_run_id(s).cassandra_run_id();
+        assert!(ok("").is_err());
+        assert!(ok("bad").is_err());
+        let id = uuid::Uuid::from_u128(0xabcdef).as_bytes().to_vec();
+        assert_eq!(ok(&uuid::Uuid::from_u128(0xabcdef).to_string().to_uppercase()).unwrap(), Some(id.clone()));
+        assert_eq!(ok(&uuid::Uuid::from_u128(0xabcdef).simple().to_string()).unwrap(), Some(id.clone()));
+        // gocql skips '-' at any even nibble offset, unlike google/uuid
+        assert_eq!(ok("00-00-00-00-00-00-00-00-00-00-00-00-00-ab-cd-ef").unwrap(), Some(id));
+        assert!(ok("0-000000000000000000000000000abcdef").is_err());
+        assert!(ok("00000000000000000000000000abcdef0").is_err());
     }
     #[test]
     fn dynamic_encoding_source_is_sampled_per_write_like_go_parser() {

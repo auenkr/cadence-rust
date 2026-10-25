@@ -1134,6 +1134,46 @@ async fn matching_rpc_durable_add_does_not_require_local_workflow_state() {
         .0
         .is_empty());
 }
+fn run_id_decision(key: &TaskListKey, run_id: &str, schedule_id: i64) -> Request<m::AddDecisionTaskRequest> {
+    Request::new(m::AddDecisionTaskRequest {
+        domain_id: key.domain_id.to_string(),
+        workflow_execution: Some(p::WorkflowExecution {
+            workflow_id: "run-id-workflow".into(),
+            run_id: run_id.into(),
+        }),
+        task_list: list(),
+        schedule_id,
+        ..Default::default()
+    })
+}
+#[tokio::test]
+async fn matching_rpc_add_decision_accepts_noncanonical_and_empty_run_ids_like_go_sql() {
+    // Go passes RunID raw; SQL MustParseUUID("") is a nil slice (blob field absent),
+    // other google/uuid forms are stored as the parsed 16 bytes.
+    let (_dir, store, matching, key) = fixture();
+    let id = Uuid::from_u128(0xabcdef);
+    matching.add_decision_task(run_id_decision(&key, &id.to_string().to_uppercase(), 1)).await.unwrap();
+    matching.add_decision_task(run_id_decision(&key, &id.simple().to_string(), 2)).await.unwrap();
+    matching.add_decision_task(run_id_decision(&key, "", 3)).await.unwrap();
+    let tasks = store.get_tasks(&key, 0, 100, 10).unwrap();
+    assert_eq!(tasks.len(), 3);
+    assert_eq!(tasks[0].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
+    assert_eq!(tasks[1].data.run_id.as_deref(), Some(id.as_bytes().as_slice()));
+    assert_eq!(tasks[2].data.run_id, None, "empty RunID is absent, not the nil UUID");
+    assert!(tasks.iter().all(|t| t.data.raw_run_id.is_none()));
+}
+#[tokio::test]
+async fn matching_rpc_add_decision_malformed_run_id_is_not_rejected_up_front() {
+    // Go's handler never validates RunID. Rust's deliberate divergence: the SQL store
+    // refuses the malformed row (Go's writer goroutine panics instead), so the
+    // error comes from persistence, not from request validation.
+    let (_dir, store, matching, key) = fixture();
+    let result = matching.add_decision_task(run_id_decision(&key, "not-a-uuid", 1)).await;
+    if let Err(status) = result {
+        assert_ne!(status.message(), "Run UUID is not valid.");
+    }
+    assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
+}
 #[tokio::test]
 async fn matching_rpc_durable_activity_preserves_source_domain_and_type() {
     let (_dir, store, matching, mut target) = fixture();

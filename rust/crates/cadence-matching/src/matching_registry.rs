@@ -448,7 +448,6 @@ impl QueueHandle {
         schedule_to_start_seconds: i32,
     ) -> Result<AllocatedTask, Status> {
         self.liveness.mark_alive(registry_now());
-        let data = data.for_persistence().map_err(Status::invalid_argument)?;
         self.writer
             .append(crate::matching_writer::WriteTask {
                 data,
