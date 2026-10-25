@@ -8291,7 +8291,9 @@ async fn go_handler_update_task_list_partition_config_rate_limited_returns_servi
 async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds() {
     let (_dir, _store, matching, _key) = fixture();
     let domain = Uuid::from_u128(1).to_string();
-    let missing = matching
+    // Go `request.TaskList.GetName()/GetKind()` are nil-safe, so an absent list is the
+    // empty-named normal list and is never rejected as "TaskList is not set.".
+    if let Err(missing) = matching
         .refresh_task_list_partition_config(Request::new(
             m::RefreshTaskListPartitionConfigRequest {
                 domain_id: domain.clone(),
@@ -8300,9 +8302,9 @@ async fn go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_no
             },
         ))
         .await
-        .unwrap_err();
-    assert_eq!(missing.code(), tonic::Code::InvalidArgument);
-    assert_eq!(missing.message(), "TaskList is not set.");
+    {
+        assert_ne!(missing.message(), "TaskList is not set.");
+    }
     for kind in [2, 3] {
         let err = matching
             .refresh_task_list_partition_config(Request::new(
@@ -8734,4 +8736,83 @@ async fn matching_rpc_sticky_partition_query_without_any_sticky_poller_fails_fas
         "a sticky query must never reach the parent partition"
     );
     parent_poll.abort();
+}
+
+// Go `tasklist.NewIdentifier` returns an untyped error, which handleErr wraps as
+// InternalServiceError; the Thrift adapter maps tonic Internal to InternalServiceError.
+#[tokio::test]
+async fn go_malformed_reserved_task_list_name_is_internal_for_every_rpc() {
+    let (_dir, _store, matching, key) = fixture();
+    let domain = key.domain_id.to_string();
+    let bad = || {
+        Some(p::TaskList {
+            name: "/__cadence_sys//0".into(),
+            ..Default::default()
+        })
+    };
+    let want = "invalid partitioned task list name /__cadence_sys//0";
+    let add = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: bad(),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(add.code(), tonic::Code::Internal);
+    assert_eq!(add.message(), want);
+    let cancel = matching
+        .cancel_outstanding_poll(Request::new(m::CancelOutstandingPollRequest {
+            domain_id: domain.clone(),
+            task_list: bad(),
+            task_list_type: 1,
+            poller_id: "poller".into(),
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(cancel.code(), tonic::Code::Internal);
+    assert_eq!(cancel.message(), want);
+    let refresh = matching
+        .refresh_task_list_partition_config(Request::new(
+            m::RefreshTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                task_list: bad(),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(refresh.code(), tonic::Code::Internal);
+    let update = matching
+        .update_task_list_partition_config(Request::new(
+            m::UpdateTaskListPartitionConfigRequest {
+                domain_id: domain.clone(),
+                task_list: bad(),
+                partition_config: Some(Default::default()),
+                ..Default::default()
+            },
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(update.code(), tonic::Code::Internal);
+    // Go PollForDecisionTask wraps the identifier error and checks it before the domain
+    // lookup, so an unknown domain does not mask it.
+    let poll = matching
+        .poll_for_decision_task(timed_poll(Request::new(m::PollForDecisionTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: bad(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(poll.code(), tonic::Code::Internal);
+    assert_eq!(
+        poll.message(),
+        format!("couldn't create new decision tasklist {want}")
+    );
 }

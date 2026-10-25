@@ -126,8 +126,16 @@ pub(crate) fn check_poll_context(deadline: Option<tokio::time::Instant>) -> Resu
         _ => Ok(()),
     }
 }
+/// Go `tasklist.NewIdentifier` returns an untyped `fmt.Errorf`, which the handler's
+/// `handleErr` turns into an `InternalServiceError` (never BadRequest).
 fn task_list_name(name: &str) -> Result<TaskListName, Status> {
-    TaskListName::parse(name).map_err(Status::invalid_argument)
+    TaskListName::parse(name).map_err(Status::internal)
+}
+
+/// Go poll engines wrap the identifier error as `couldn't create new <kind> tasklist %w`.
+fn poll_task_list_name(kind: &str, name: &str) -> Result<TaskListName, Status> {
+    TaskListName::parse(name)
+        .map_err(|e| Status::internal(format!("couldn't create new {kind} tasklist {e}")))
 }
 /// Go `_stickyPollerUnavailableWindow`.
 const STICKY_POLLER_UNAVAILABLE_WINDOW: i64 = 10_000_000_000;
@@ -1771,9 +1779,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.get_ref().clone();
-        let mut payload = r
-            .request
-            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let mut payload = r.request.unwrap_or_default();
+        // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
+        // identifier is validated before any domain lookup.
+        poll_task_list_name("decision", payload.task_list.as_ref().map_or("", |t| t.name.as_str()))?;
+        payload.task_list.get_or_insert_with(Default::default);
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         check_poll_context(incoming_deadline)?;
@@ -1786,13 +1796,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 poller_isolation_group: r.isolation_group.clone(),
             });
         }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
+        let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -2013,6 +2017,10 @@ impl m::matching_api_server::MatchingApi for Matching {
         let mut payload = r
             .request
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
+        // identifier is validated before any domain lookup.
+        poll_task_list_name("activity", payload.task_list.as_ref().map_or("", |t| t.name.as_str()))?;
+        payload.task_list.get_or_insert_with(Default::default);
         let mut failover = self.frontend.state.domains.subscribe_failover(&r.domain_id);
         payload.domain = self.domain_name(&r.domain_id)?;
         check_poll_context(incoming_deadline)?;
@@ -2025,13 +2033,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 poller_isolation_group: r.isolation_group.clone(),
             });
         }
-        let task_list = payload
-            .task_list
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?
-            .name
-            .clone();
-        task_list_name(&task_list)?;
+        let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -3213,13 +3215,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let caller_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
-                        .task_list
-                        .clone()
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
+                    // Go `request.TaskList.GetName()/GetKind()` are nil-safe: an absent list is the
+                    // empty-named normal list and goes through the same checks.
+                    let task_list = r.task_list.clone().unwrap_or_default();
                     // Go rejects manual updates while the scaler owns the config, before
                     // the kind checks.
                     if let Some(scaler) = &self.scaler_config {
@@ -3359,12 +3357,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
-                    let task_list = r
-                        .task_list
-                        .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
-                    if task_list.name.is_empty() {
-                        return Err(Status::invalid_argument("TaskList is not set."));
-                    }
+                    let task_list = r.task_list.unwrap_or_default();
                     // Same Go `ToTaskListKind` mapping as UpdateTaskListPartitionConfig.
                     if matches!(task_list.kind, 2 | 3) {
                         return Err(Status::invalid_argument(
@@ -3454,9 +3447,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             )?;
                             let r = request.get_ref().clone();
                             self.domain_name(&r.domain_id)?;
-                            let list = r
-                                .task_list
-                                .ok_or_else(|| Status::invalid_argument("TaskList is not set."))?;
+                            let list = r.task_list.unwrap_or_default();
                             let task_list = list.name.clone();
                             task_list_name(&task_list)?;
                             // Go getOrCreateTaskListManager: a non-owner gets an error and

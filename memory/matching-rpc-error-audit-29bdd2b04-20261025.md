@@ -31,3 +31,15 @@ Update/Refresh BadRequest texts, Describe/ListPartitions Internal for bad names,
 ## Limits
 Source-only; not executed. Line numbers refer to `git show 29bdd2b04:rust/crates/cadence-matching/src/grpc_matching.rs`. Go PollForDecisionTask
 unknown-domain behaviour in task-list manager creation (item 2) is inferred, not oracle-verified.
+
+## Implementation (branch t3/matching-go-error-parity, based on master 0bef6d183) — status: UNVALIDATED, CI pending
+- Finding 1: `task_list_name()` now `Status::internal` (all callers are Go `NewIdentifier` equivalents; Go `handleErr` wraps raw error as Internal).
+  Polls use `poll_task_list_name()` => `couldn't create new decision|activity tasklist <err>`, checked before the domain lookup (Go order).
+- Finding 4 (proven by Go getters, `engine.go` poll/cancel/update/refresh): absent decision-poll `Request`, absent `TaskList` (polls, Update,
+  Refresh, Cancel) is the empty-named list instead of BadRequest. NOT changed (unproven / Go may panic): activity poll with absent
+  `PollRequest` (Go derefs `request.TaskListMetadata` => runtime panic), Add*/Query absent TaskList/Execution/Request, Cancel/Refresh unknown domain
+  (Go ignores domain-cache errors there). New Go oracle `tests/go-matching-optional-payload-oracle_test.go` logs `GO_OPTIONAL_ORACLE` lines for these
+  cases; read them from the Go oracle step before closing the open items.
+- Finding 5: Update scaler check now first (TaskList-not-set pre-check removed).
+- Finding 3 (RespondQueryTaskCompleted) intentionally untouched (other worker).
+- Tests: `go_malformed_reserved_task_list_name_is_internal_for_every_rpc`; refresh-missing-tasklist test updated.

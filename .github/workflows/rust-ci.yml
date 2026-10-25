@@ -48,13 +48,13 @@ jobs:
           mkdir -p "$evidence"
           git rev-parse HEAD > "$evidence/source-sha.txt"
           cat > "$RUNNER_TEMP/describe-tasklist-overlay.json" <<EOF
-          {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/handler/describe_tasklist_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-describe-tasklist-oracle_test.go"}}
+          {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/handler/describe_tasklist_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-describe-tasklist-oracle_test.go","$GITHUB_WORKSPACE/go/service/matching/handler/optional_payload_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-matching-optional-payload-oracle_test.go"}}
           EOF
           cp "$RUNNER_TEMP/describe-tasklist-overlay.json" "$evidence/overlay.json"
-          printf '%s\n' 'go test -overlay $RUNNER_TEMP/describe-tasklist-overlay.json ./service/matching/handler -run ^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$ -count=1 -v' > "$evidence/command.txt"
+          printf '%s\n' 'go test -overlay $RUNNER_TEMP/describe-tasklist-overlay.json ./service/matching/handler -run ^TestMatchingEngineSuite/(TestMalformedDescribeTaskListOracle|TestOptionalPayloadErrorOracle)$ -count=1 -v' > "$evidence/command.txt"
           set +e
           go test -overlay "$RUNNER_TEMP/describe-tasklist-overlay.json" ./service/matching/handler \
-            -run '^TestMatchingEngineSuite/TestMalformedDescribeTaskListOracle$' -count=1 -v \
+            -run '^TestMatchingEngineSuite/(TestMalformedDescribeTaskListOracle|TestOptionalPayloadErrorOracle)$' -count=1 -v \
             > "$evidence/go-oracle.log" 2>&1
           result=$?
           echo "$result" > "$evidence/go-oracle.exit"
