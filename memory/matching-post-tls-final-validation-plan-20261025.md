@@ -611,11 +611,24 @@ workspace rerun is needed here. The uncached final workspace run on production
 source `fade09c501e23212d4d86e64c653057d589d1910` remains the named fresh
 evidence. Keep workspace-wide format advisory `1` visible.
 
-The required mixed-lane sequence below puts PostgreSQL before MySQL extended;
-therefore PostgreSQL is next. The MySQL-probes lane remains queued. The
-History-ring fixture does not change the production Rust source from
-`fade09c5…`. Matching remains INCOMPLETE; retain `preliminary-passed` and
-`acceptanceEligible:false`.
+The required mixed-lane sequence puts PostgreSQL before MySQL extended. After
+confirming no mixed gate was active, dispatched PostgreSQL only:
+[40173134481](https://github.com/auenkr/cadence-rust/actions/runs/40173134481)
+is in progress on exact head `29bdd2b04b573309112286c57f1c347f0ba0b60c` at
+`t3/matching-validation-history-ring-20261025`, with input `lane=postgres`.
+This lane's configured command includes the original Go Frontend/History/Worker
+with no Go Matching, PostgreSQL probes, restart/failure recovery, query standby,
+partition listing, durable restart and AutoConfigHint. Its Matching binary
+SHA256 and artifact evidence are pending completion. No second lane was
+dispatched; MySQL-probes remains queued.
+
+The exact `rust/` tree diff from `fade09c501e23212d4d86e64c653057d589d1910`
+to `29bdd2b04b573309112286c57f1c347f0ba0b60c` is empty. Thus fresh workspace
+run 40168414544 is reusable as a documented production-tree-equivalence
+inference; it was not run on exact 29bdd. Its workspace-format advisory stays
+exit 1 and is not a format pass. The History-ring fixture does not change the
+production Rust source from `fade09c5…`. Matching remains INCOMPLETE; retain
+`preliminary-passed` and `acceptanceEligible:false`.
 
 Earlier integration record (before the History ring stub follow-up): the
 reviewed branch terminal tip
