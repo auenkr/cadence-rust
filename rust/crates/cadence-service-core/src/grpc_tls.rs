@@ -59,8 +59,8 @@ pub fn server_tls_without_identity(tls: &TlsConfig) -> anyhow::Result<Option<Arc
     }
     install_tls_crypto_provider();
     let ca_certs = ca_certs(tls)?;
-    let builder = ServerConfig::builder_with_provider(provider())
-        .with_safe_default_protocol_versions()?;
+    let builder =
+        ServerConfig::builder_with_provider(provider()).with_safe_default_protocol_versions()?;
     let builder = if tls.require_client_auth {
         let mut roots = RootCertStore::empty();
         for cert in ca_certs {
@@ -83,7 +83,10 @@ pub fn server_tls_without_identity(tls: &TlsConfig) -> anyhow::Result<Option<Arc
 #[derive(Debug)]
 struct NoServerCertificate;
 impl rustls::server::ResolvesServerCert for NoServerCertificate {
-    fn resolve(&self, _: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
+    fn resolve(
+        &self,
+        _: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
         None
     }
 }
@@ -91,11 +94,42 @@ impl rustls::server::ResolvesServerCert for NoServerCertificate {
 #[derive(Debug)]
 struct EmptyClientCaPool;
 impl rustls::server::danger::ClientCertVerifier for EmptyClientCaPool {
-    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] { &[] }
-    fn verify_client_cert(&self, _: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: UnixTime) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> { Err(rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)) }
-    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> { Err(rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)) }
-    fn verify_tls13_signature(&self, m: &[u8], c: &CertificateDer<'_>, s: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> { self.verify_tls12_signature(m, c, s) }
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { provider().signature_verification_algorithms.supported_schemes() }
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+    fn verify_client_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::InvalidCertificate(
+            rustls::CertificateError::UnknownIssuer,
+        ))
+    }
+    fn verify_tls13_signature(
+        &self,
+        m: &[u8],
+        c: &CertificateDer<'_>,
+        s: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.verify_tls12_signature(m, c, s)
+    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 /// Outbound TLS for a gRPC peer, built from the target service's `rpc.tls`.
@@ -448,6 +482,20 @@ mod tests {
             ..Default::default()
         };
         assert!(server_tls(&mismatched).is_err());
+        let malformed = TlsConfig {
+            enabled: true,
+            cert_file: write(dir.path(), "malformed-cert.pem", "not a certificate"),
+            key_file: write(dir.path(), "malformed-key.pem", "not a private key"),
+            ..Default::default()
+        };
+        assert!(server_tls(&malformed).is_err());
+        let unreadable_pair = TlsConfig {
+            enabled: true,
+            cert_file: "/missing/server-cert.pem".into(),
+            key_file: "/missing/server-key.pem".into(),
+            ..Default::default()
+        };
+        assert!(server_tls(&unreadable_pair).is_err());
         let missing = TlsConfig {
             enabled: true,
             ..Default::default()
@@ -460,16 +508,44 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let invalid_ca = dir.path().join("invalid-ca.pem");
         std::fs::write(&invalid_ca, b"not a PEM certificate").unwrap();
+        let valid_ca = new_ca();
+        let valid_ca_file = write(dir.path(), "valid-ca.pem", &valid_ca.cert.pem());
         for config in [
-            TlsConfig { enabled: true, ..Default::default() },
-            TlsConfig { enabled: true, cert_file: "/ignored/cert.pem".into(), ..Default::default() },
-            TlsConfig { enabled: true, key_file: "/ignored/key.pem".into(), ..Default::default() },
-            TlsConfig { enabled: true, ca_file: invalid_ca.to_string_lossy().into_owned(), require_client_auth: true, ..Default::default() },
+            TlsConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                cert_file: "/ignored/cert.pem".into(),
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                key_file: "/ignored/key.pem".into(),
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                ca_file: invalid_ca.to_string_lossy().into_owned(),
+                require_client_auth: true,
+                ..Default::default()
+            },
+            TlsConfig {
+                enabled: true,
+                ca_file: valid_ca_file,
+                require_client_auth: true,
+                ..Default::default()
+            },
         ] {
             let server = server_tls_without_identity(&config).unwrap().unwrap();
             assert_eq!(server.alpn_protocols, vec![b"h2".to_vec()]);
         }
-        let missing_ca = TlsConfig { enabled: true, ca_file: "/missing/cadence-ca.pem".into(), ..Default::default() };
+        let missing_ca = TlsConfig {
+            enabled: true,
+            ca_file: "/missing/cadence-ca.pem".into(),
+            ..Default::default()
+        };
         assert!(server_tls_without_identity(&missing_ca).is_err());
     }
 

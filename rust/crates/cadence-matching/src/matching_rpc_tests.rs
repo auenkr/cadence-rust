@@ -14,42 +14,134 @@ async fn missing_rpc_identity_starts_tls_listener_and_rejects_tls_and_plaintext_
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tonic_reflection::pb::v1::{
         server_reflection_client::ServerReflectionClient,
-        server_reflection_request::MessageRequest,
-        ServerReflectionRequest,
+        server_reflection_request::MessageRequest, ServerReflectionRequest,
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let tls = cadence_service_core::config::TlsConfig { enabled: true, ..Default::default() };
-    let config = cadence_service_core::grpc_tls::server_tls_without_identity(&tls).unwrap().unwrap();
-    let matching = Matching::new(crate::handlers::AppState::default());
-    let server = tokio::spawn(crate::grpc_matching::serve_with_listener_tls_or_no_identity(
-        listener, matching, None, Some(config),
-    ));
+    let dir = tempfile::tempdir().unwrap();
+    let mut ca_params = rcgen::CertificateParams::new(Vec::new()).unwrap();
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let ca = ca_params.self_signed(&ca_key).unwrap();
+    let ca_file = dir.path().join("ca.pem");
+    std::fs::write(&ca_file, ca.pem()).unwrap();
+    let empty_ca_file = dir.path().join("empty-ca.pem");
+    std::fs::write(&empty_ca_file, b"not PEM").unwrap();
+    let configs = [
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            cert_file: "/ignored/cert.pem".into(),
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            key_file: "/ignored/key.pem".into(),
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            ca_file: ca_file.to_string_lossy().into_owned(),
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            ca_file: empty_ca_file.to_string_lossy().into_owned(),
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            require_client_auth: true,
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            ca_file: empty_ca_file.to_string_lossy().into_owned(),
+            require_client_auth: true,
+            ..Default::default()
+        },
+        cadence_service_core::config::TlsConfig {
+            enabled: true,
+            cert_file: "/ignored/cert.pem".into(),
+            ca_file: ca_file.to_string_lossy().into_owned(),
+            require_client_auth: true,
+            ..Default::default()
+        },
+    ];
 
-    // Real TLS ClientHellos reach the rustls acceptor, which rejects the
-    // handshake because it has no certificate to present.
-    let client_tls = cadence_service_core::grpc_tls::client_tls(&tls).unwrap().unwrap();
-    for _ in 0..3 {
-        let channel = cadence_service_core::grpc_tls::endpoint_channel(&addr.to_string(), Some(&client_tls)).unwrap();
-        let mut client = ServerReflectionClient::new(channel);
-        let request = ServerReflectionRequest {
-            host: String::new(),
-            message_request: Some(MessageRequest::ListServices(String::new())),
+    // Exercise the production serve path for missing-both, lone-cert, lone-key
+    // and CA-backed client-auth configurations.
+    for (index, tls) in configs.into_iter().enumerate() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let config = cadence_service_core::grpc_tls::server_tls_without_identity(&tls)
+            .unwrap()
+            .unwrap();
+        let matching = Matching::new(crate::handlers::AppState::default());
+        let server = tokio::spawn(
+            crate::grpc_matching::serve_with_listener_tls_or_no_identity(
+                listener,
+                matching,
+                None,
+                Some(config),
+            ),
+        );
+        let client_tls = cadence_service_core::grpc_tls::client_tls(&tls)
+            .unwrap()
+            .unwrap();
+        let failures = if index == 0 { 3 } else { 1 };
+        for _ in 0..failures {
+            let channel = cadence_service_core::grpc_tls::endpoint_channel(
+                &addr.to_string(),
+                Some(&client_tls),
+            )
+            .unwrap();
+            let mut client = ServerReflectionClient::new(channel);
+            let request = ServerReflectionRequest {
+                host: String::new(),
+                message_request: Some(MessageRequest::ListServices(String::new())),
+            };
+            assert!(tokio::time::timeout(
+                Duration::from_secs(3),
+                client.server_reflection_info(tokio_stream::once(request))
+            )
+            .await
+            .unwrap()
+            .is_err());
+        }
+
+        let mut plain_client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        plain_client
+            .write_all(b"GET / HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = [0; 64];
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        let _after_failures = tokio::net::TcpStream::connect(addr).await.unwrap();
+        assert!(!server.is_finished());
+        let mut slow_handshake = if index == 0 {
+            Some(tokio::net::TcpStream::connect(addr).await.unwrap())
+        } else {
+            None
         };
-        assert!(tokio::time::timeout(Duration::from_secs(3), client.server_reflection_info(tokio_stream::once(request))).await.unwrap().is_err());
+        server.abort();
+        let _ = server.await;
+        if let Some(client) = slow_handshake.as_mut() {
+            assert_eq!(tokio::time::timeout(Duration::from_secs(2), client.read(&mut response)).await.unwrap().unwrap(), 0,
+                "pending TLS handshake survived cancellation of the serving task");
+        }
+        assert!(
+            tokio::net::TcpStream::connect(addr).await.is_err(),
+            "listener remained open after its serving task was aborted"
+        );
     }
-
-    let mut plain_client = tokio::net::TcpStream::connect(addr).await.unwrap();
-    plain_client.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
-    let mut response = [0; 64];
-    assert_eq!(tokio::time::timeout(Duration::from_secs(2), plain_client.read(&mut response)).await.unwrap().unwrap(), 0);
-
-    // Another TCP connection is accepted after both failed handshakes.
-    let _after_failures = tokio::net::TcpStream::connect(addr).await.unwrap();
-    assert!(!server.is_finished());
-    server.abort();
-    let _ = server.await;
-    assert!(tokio::net::TcpStream::connect(addr).await.is_err(), "listener remained open after its serving task was aborted");
 }
 
 #[tokio::test]
