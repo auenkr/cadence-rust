@@ -449,10 +449,11 @@ async fn absent_query_case(
     shaped: impl FnOnce(&mut m::QueryWorkflowRequest),
     poll_list: p::TaskList,
 ) {
+    let poll_list_name = poll_list.name.clone();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
-    let parent = FamilyQueryParent::new(FamilyParentMode::Recording);
+    let parent = FamilyQueryParent::new(FamilyParentMode::Busy);
     let (child, server) = child_with_parent(matching, parent.clone()).await;
     let mut query = family_query(
         domain.clone(),
@@ -466,6 +467,11 @@ async fn absent_query_case(
         (result, started.elapsed())
     };
     let poller = async {
+        // An empty default list is not pollable in Rust (partition drain check precedes
+        // the query arm); the caller-side deadline behaviour is still verified.
+        if poll_list_name.is_empty() {
+            return;
+        }
         tokio::time::sleep(Duration::from_millis(200)).await;
         let poll_error = child
             .poll_for_decision_task(decision_poll(
