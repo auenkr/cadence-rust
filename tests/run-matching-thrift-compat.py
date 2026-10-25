@@ -241,7 +241,7 @@ def history_ring_member(tag):
         stub = subprocess.Popen(
             ['go', 'test', '-overlay', str(overlay.resolve()), './common/peerprovider/ringpopprovider',
              '-run', '^TestRustMatchingHistoryRingStub$', '-count=1', '-v'],
-            cwd=root / 'go', stdout=stub_log, stderr=subprocess.STDOUT,
+            cwd=root / 'go', stdout=stub_log, stderr=subprocess.STDOUT, start_new_session=True,
             env={**os.environ, 'CADENCE_RINGPOP_BOOTSTRAP': f'127.0.0.1:{matching_tchannel}',
                  'CADENCE_HISTORY_GRPC_PORT': str(history),
                  'RINGPOP_STUB_READY_FILE': str(ready), 'RINGPOP_STUB_RELEASE_FILE': str(release)})
@@ -257,7 +257,12 @@ def history_ring_member(tag):
             try:
                 stub.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                stub.kill()
+                pass
+            finally:
+                # Reap the whole group so the compiled Go test child is never orphaned.
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(stub.pid, signal.SIGKILL)
+                stub.wait()
 
 
 assert_embedded_start_succeeds()

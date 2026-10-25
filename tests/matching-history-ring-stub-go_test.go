@@ -42,7 +42,7 @@ func TestRustMatchingHistoryRingStub(t *testing.T) {
 		BootstrapHosts:   []string{bootstrap},
 		MaxJoinDuration:  30 * time.Second,
 		BroadcastAddress: "127.0.0.1",
-	}, ch, membership.PortMap{membership.PortGRPC: uint16(grpcPort), membership.PortTchannel: uint16(grpcPort)}, log.NewNoop())
+	}, ch, membership.PortMap{membership.PortGRPC: uint16(grpcPort)}, log.NewNoop())
 	if err != nil {
 		t.Fatal(err)
 	}
