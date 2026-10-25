@@ -2378,6 +2378,27 @@ mod tests {
         )
     }
     #[tokio::test]
+    async fn matching_forward_preserves_raw_request_run_ids_like_go() {
+        // Go forwards TaskInfo.RunID as an unparsed string: empty, malformed and
+        // noncanonical (uppercase / simple) forms all reach the parent unchanged.
+        let upper = Uuid::from_u128(0xabcdef).to_string().to_uppercase();
+        let simple = Uuid::from_u128(0xabcdef).simple().to_string();
+        for raw in ["", "not-a-uuid", upper.as_str(), simple.as_str()] {
+            let (parent, channel, server) = recording_parent().await;
+            let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
+            let domain = Uuid::from_u128(5).to_string();
+            let task = AllocatedTask {
+                task_id: 1,
+                data: TaskData { workflow_id: "wf".into(), schedule_id: 91, ..Default::default() }
+                    .with_request_run_id(raw),
+            };
+            state.forward_backlog_task(task, &domain, &domain, 0, 0).await.unwrap();
+            let request = parent.add_decision.lock().unwrap().clone().unwrap();
+            assert_eq!(request.workflow_execution.unwrap().run_id, raw);
+            server.abort();
+        }
+    }
+    #[tokio::test]
     async fn matching_forward_decision_task_fields_match_go_forwarder() {
         // Go TestForwardDecisionTask: the decision add carries the workflow
         // execution, schedule, normal kind and forwarded-from partition. The Go
