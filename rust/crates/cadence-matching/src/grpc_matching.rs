@@ -1721,6 +1721,12 @@ impl Matching {
         }
     }
     fn domain_name(&self, id: &str) -> Result<String, Status> {
+        // Go cache miss -> sql/nosql_domain_store checkDomainExists: typed BadRequest, two spaces.
+        if id.is_empty() {
+            return Err(Status::invalid_argument(
+                "GetDomain operation failed.  Both ID and Name are empty.",
+            ));
+        }
         History {
             frontend: self.frontend.clone(),
         }
@@ -2019,12 +2025,12 @@ impl m::matching_api_server::MatchingApi for Matching {
         }
         let r = request.get_ref().clone();
         let Some(mut payload) = r.request else {
-            // Go PollForActivityTask reads `request.GetTaskList()` nil-safely, loads the empty
-            // list's manager, then dereferences `request.TaskListMetadata` (engine.go:915). The
+            // Go PollForActivityTask reads `request.GetTaskList()` nil-safely, validates the empty
+            // identifier, then dereferences `request.TaskListMetadata` (engine.go:915) before
+            // `getOrCreateTaskListManager` (engine.go:928), so a domain lookup never runs first. The
             // runtime panic is captured by the handler as a plain error (Go oracle run
             // 40175488464: `runtime error: invalid memory address or nil pointer dereference`).
             check_poll_context(incoming_deadline)?;
-            self.domain_name(&r.domain_id)?;
             return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE));
         };
         // Go getters are nil-safe: an absent TaskList is the empty-named list, and the

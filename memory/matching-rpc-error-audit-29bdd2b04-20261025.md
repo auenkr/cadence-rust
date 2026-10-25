@@ -66,3 +66,12 @@ typed inner error passes through, and mapper `ConvertError` (`errors.As`) rebuil
 unknown-domain poll is EntityNotExists with the inner message (NOT the wrapper text, NOT Internal); Rust `domain_name` NotFound is the same class. The oracle's
 "Internal ... oracle unknown domain" result came from the synthetic mock error and is not a contract. Empty-domain BadRequest text and Rust equality: untraced.
 Activity nil-request order fixed to Go order: IsValidContext (Internal) before manager load. Open and unproven: Query absent payload, Add present invalid run UUID.
+
+## Follow-up (after 416d6191)
+- Activity nil-PollRequest: engine.go order is IsValidContext(:903) -> NewIdentifier(:907) -> `request.TaskListMetadata` nil deref (:915) -> manager load (:928). The panic
+  precedes any domain lookup, so Rust no longer calls `domain_name` in that branch (valid-name unknown-domain oracle does NOT establish this order).
+- Empty DomainUUID on Add*: Go real cache/store returns typed BadRequest "GetDomain operation failed.  Both ID and Name are empty." (two spaces;
+  sql_domain_store.go:209-211, nosql_domain_store.go:130-132), after NewIdentifier. Rust matching `domain_name("")` now returns that InvalidArgument; malformed
+  non-empty UUID message ("Domain UUID is not valid.") unverified. Durable Update validates via `matching_partition::update` -> `validate` (matching_partition.rs:151).
+- Unresolved, deliberately unchanged: Add present invalid RunID (Go sync-match raw strings; SQL async MustParseUUID panics on malformed, accepts empty; Cassandra unverified);
+  Query absent payload (Go dispatch nil-safe but poll response engine.go:1405 derefs task.Query.Request.QueryRequest.Query).

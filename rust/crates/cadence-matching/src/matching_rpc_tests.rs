@@ -8944,3 +8944,57 @@ async fn go_activity_poll_absent_request_deadline_precedence_and_wire_code() {
         0x05
     );
 }
+
+// Go engine.go:915 dereferences `request.TaskListMetadata` before the manager (and domain)
+// load at :928, so an unknown domain does not mask the nil-request failure.
+#[tokio::test]
+async fn go_activity_poll_absent_request_precedes_domain_lookup() {
+    let (_dir, _store, matching, _key) = fixture();
+    let err = matching
+        .poll_for_activity_task(timed_poll(Request::new(m::PollForActivityTaskRequest {
+            domain_id: Uuid::from_u128(99).to_string(),
+            poller_id: "poller".into(),
+            ..Default::default()
+        })))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Unknown);
+    assert_eq!(
+        err.message(),
+        crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+    );
+}
+
+// Go GetDomainName("") -> checkDomainExists: typed BadRequest (two spaces), after the
+// NewIdentifier validation.
+#[tokio::test]
+async fn go_add_task_empty_domain_is_typed_bad_request_after_identifier() {
+    let (_dir, _store, matching, _key) = fixture();
+    let err = matching
+        .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+            domain_id: String::new(),
+            task_list: list(),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    assert_eq!(
+        err.message(),
+        "GetDomain operation failed.  Both ID and Name are empty."
+    );
+    let err = matching
+        .add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: String::new(),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys//0".into(),
+                ..Default::default()
+            }),
+            workflow_execution: execution(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), tonic::Code::Internal);
+}
