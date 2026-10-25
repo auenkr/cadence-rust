@@ -19,6 +19,8 @@ pub enum MatchingTaskStoreError {
     IncompatibleSchema(String),
     #[error("unsupported Matching task-store backend configuration: {0}")]
     BackendConfiguration(String),
+    #[error(transparent)]
+    MalformedSqlMatchingRunId(#[from] crate::matching_blob::SqlRunIdError),
     #[error("incompatible Matching task-store backend schema: {0}")]
     BackendSchema(String),
     #[error("{0}")]

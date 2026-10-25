@@ -621,7 +621,7 @@ impl MatchingTaskStore for PostgresTaskStore {
         let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         let write_encoding = self.write_encoding()?;
         for (domain, task) in tasks {
-            let mut data = task.data.for_sql().map_err(StorageError::BackendConfiguration)?;
+            let mut data = task.data.for_sql().map_err(StorageError::MalformedSqlMatchingRunId)?;
             data.created_nanos = now_nanos;
             let bytes = write_encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             let encoding = write_encoding.as_str();

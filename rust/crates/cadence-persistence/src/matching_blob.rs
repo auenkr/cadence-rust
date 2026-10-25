@@ -18,6 +18,11 @@ pub struct TaskData {
     pub created_nanos: i64,
     pub partition_config: Option<BTreeMap<String, String>>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SqlRunIdError {
+    #[error("invalid SQL Matching RunID {raw:?}: {message}")]
+    Malformed { raw: String, message: String },
+}
 /// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
 pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
 impl TaskData {
@@ -81,9 +86,15 @@ impl TaskData {
         Ok(Some(out.to_vec()))
     }
     /// Copy for a SQL row: raw RunID resolved per `sql_run_id` and cleared.
-    pub fn for_sql(&self) -> std::result::Result<Self, String> {
+    pub fn for_sql(&self) -> std::result::Result<Self, SqlRunIdError> {
         let mut data = self.clone();
-        data.run_id = self.sql_run_id()?;
+        data.run_id = match &self.raw_run_id {
+            None => self.run_id.clone(),
+            Some(raw) if raw.is_empty() => None,
+            Some(raw) => Some(uuid::Uuid::parse_str(raw).map_err(|error| SqlRunIdError::Malformed {
+                raw: raw.clone(), message: error.to_string(),
+            })?.as_bytes().to_vec()),
+        };
         data.raw_run_id = None;
         Ok(data)
     }
@@ -376,7 +387,15 @@ mod tests {
         assert_eq!(empty.run_id, None);
         assert_eq!(empty.raw_run_id, None);
         assert_eq!(decode_task(&encode_task(&empty).unwrap()).unwrap().run_id, None);
-        assert!(TaskData::default().with_request_run_id("bad").for_sql().is_err());
+        let error = TaskData::default().with_request_run_id("bad").for_sql().unwrap_err();
+        assert!(matches!(error, SqlRunIdError::Malformed { ref raw, .. } if raw == "bad"));
+        let store_error: crate::matching_task_store::MatchingTaskStoreError = error.into();
+        assert!(matches!(store_error, crate::matching_task_store::MatchingTaskStoreError::MalformedSqlMatchingRunId(_)));
+        let config_error = crate::matching_task_store::MatchingTaskStoreError::BackendConfiguration("bad config".into());
+        assert!(!matches!(config_error, crate::matching_task_store::MatchingTaskStoreError::MalformedSqlMatchingRunId(_)));
+        let cassandra_error = TaskData::default().with_request_run_id("bad").cassandra_run_id().unwrap_err();
+        assert!(cassandra_error.contains("invalid UUID"));
+        assert!(!cassandra_error.contains("SQL Matching"));
         let up = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(5).to_string().to_uppercase()).for_sql().unwrap();
         assert_eq!(up.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()));
         assert_eq!(decode_task(&encode_task(&up).unwrap()).unwrap().raw_run_id, None);
