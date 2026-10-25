@@ -449,7 +449,7 @@ async fn absent_query_case(
     shaped: impl FnOnce(&mut m::QueryWorkflowRequest),
     poll_list: p::TaskList,
 ) {
-    let poll_list_name = poll_list.name.clone();
+    let empty_list = poll_list.name.is_empty();
     let peer = start_fake_history(mutable_state()).await;
     let (_dir, _store, matching, key) = fixture_with_history(&peer);
     let domain = key.domain_id.to_string();
@@ -467,11 +467,6 @@ async fn absent_query_case(
         (result, started.elapsed())
     };
     let poller = async {
-        // An empty default list is not pollable in Rust (partition drain check precedes
-        // the query arm); the caller-side deadline behaviour is still verified.
-        if poll_list_name.is_empty() {
-            return;
-        }
         tokio::time::sleep(Duration::from_millis(200)).await;
         let poll_error = child
             .poll_for_decision_task(decision_poll(
@@ -482,6 +477,11 @@ async fn absent_query_case(
             ))
             .await
             .expect_err("poll of an absent-field query must fail");
+        if empty_list {
+            assert_eq!(poll_error.code(), tonic::Code::Aborted);
+            assert!(poll_error.message().ends_with("Tasklist: "), "{poll_error:?}");
+            return;
+        }
         assert_eq!(poll_error.code(), tonic::Code::Unknown);
         assert_eq!(
             poll_error.message(),
@@ -490,9 +490,12 @@ async fn absent_query_case(
     };
     let ((result, elapsed), ()) = tokio::join!(caller, poller);
     let error = result.expect_err("query ends only at its deadline");
-    if poll_list_name.is_empty() {
-        // Empty default list: the durable partition check rejects it (Aborted) before
-        // any poller; no nil-deref path is reachable. Not asserted as Go parity.
+    if empty_list {
+        // Go NewIdentifier accepts "" as an ordinary name; ownership then comes from the
+        // hash ring. The fixture ring assigns "" to the Go peer, so both calls are refused
+        // with TaskListNotOwnedByHost, exactly as Go answers a non-owner host.
+        assert_eq!(error.code(), tonic::Code::Aborted);
+        assert!(error.message().ends_with("Tasklist: "), "{error:?}");
         shut_down(&child, server).await;
         return;
     }
