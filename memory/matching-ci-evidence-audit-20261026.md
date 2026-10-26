@@ -46,3 +46,15 @@ For every run, capture run URL, dispatch event, exact `headSha`, conclusion, and
 These ten lanes still do not prove adaptive-scaler production registry-to-scaler wiring. Before calling Matching complete, include a mixed production probe with `matching.enableAdaptiveScaler=true`: generate load on a root normal queue, verify persisted adaptive partition configuration and version changes separately from `ListTaskListPartitions` (Go listing uses the filtered static write-partition property), verify SDK task delivery and completion of every generated load workflow on the scaled queue, then verify scaler shutdown on unload/drain. The rejected `ca64a5a9` listing change must not be included: it reads persisted adaptive configuration unlike Go and adds a persistence-read failure mode. Direct root/child read-routing evidence remains a separate coverage question; do not infer it solely from queue completion. This is an explicit uncovered requirement from the acceptance audit; neither the focused failed run nor the `aff3` in-progress snapshot supplies it.
 
 Prior green results on older SHAs remain preliminary and are not rebound: they cannot replace this serial final-pin sequence. Keep `preliminary-passed` and `acceptanceEligible:false` labels unchanged until the full parity audit and all final artifacts are reviewed.
+
+## Later master CI result
+
+[Run 40369794719](https://github.com/auenkr/cadence-rust/actions/runs/40369794719)
+concluded success on exact master source
+`4a66ba20c5b3a45e58ab643742ef982ae5dbc497`. GitHub step metadata confirms
+Clippy, Test and changed Matching runtime formatting succeeded. The
+`Select fresh final target` step was skipped: this is ordinary cached CI,
+not fresh final acceptance, and contains no mixed-cluster binary evidence.
+This observation is based on Actions step metadata; its artifact contents have
+not been independently reviewed in this note. The fresh workspace candidate
+run `40369559424` was still testing at the same observation.
