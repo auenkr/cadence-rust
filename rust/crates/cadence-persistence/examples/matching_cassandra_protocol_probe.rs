@@ -5,7 +5,7 @@
 //! errors are intentionally fatal; this probe never silently falls back.
 use anyhow::{bail, Context, Result};
 use cadence_persistence::cassandra::{CassandraSessionConfig, CassandraSessionOptions};
-use scylla::batch::{Batch, BatchType};
+use scylla::statement::batch::{Batch, BatchType};
 use std::{env, time::Duration};
 
 fn required(name: &str) -> Result<String> {
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
     println!("RUN schema-create");
     session.query_unpaged(
         "CREATE TABLE IF NOT EXISTS matching_protocol_oracle (id bigint PRIMARY KEY, payload blob)",
-        &[],
+        (),
     ).await.context("schema create result")?;
 
     const QUEUE_TYPE: i32 = 91;
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
     }
 
     println!("RUN schema-drop");
-    session.query_unpaged("DROP TABLE matching_protocol_oracle", &[]).await
+    session.query_unpaged("DROP TABLE matching_protocol_oracle", ()).await
         .context("schema drop result")?;
     println!("PASS rust-cadence-persistence protocol={protocol} operations=schema-change,cas,prepare,query,result,batch,range-delete,point-delete,server-error");
     Ok(())
