@@ -807,19 +807,18 @@ impl ControlConnection {
                     error,
                     table: "system.schema_keyspaces",
                 })
-                .and_then(|row| {
-                    let (name, class, options, durable_writes) = row?;
+                .map_ok(|(name, class, options, durable_writes)| {
                     // Preserve malformed replication data as an ordinary
                     // strategy validation error (missing class), rather than
                     // turning a bad row into a successful default strategy.
                     let replication = legacy_replication_map(&class, &options)
                         .unwrap_or_default();
-                    Ok((name, replication, durable_writes))
+                    (name, replication, durable_writes)
                 })
                 .try_collect()
                 .await
                 .map_err(MetadataError::from)
-                .map(|rows| (rows, true))?,
+                .map(|rows| (rows, true))?
             }
             Err(error) => return Err(MetadataError::from(error)),
         };
