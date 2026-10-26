@@ -22,6 +22,8 @@ pub enum CollectionProtocol {
 pub enum CollectionKind {
     /// List or set: each element is a byte string.
     List,
+    /// Set: each element is a byte string, using the same layout as a list.
+    Set,
     /// Map: alternating key and value byte strings.
     Map,
 }
@@ -66,7 +68,12 @@ pub fn encode_collection(
         return Err(CollectionCodecError::OddMapElementCount);
     }
     let mut out = Vec::new();
-    write_size(protocol, elements.len(), &mut out)?;
+    let count = if kind == CollectionKind::Map {
+        elements.len() / 2
+    } else {
+        elements.len()
+    };
+    write_size(protocol, count, &mut out)?;
     for element in elements {
         write_size(protocol, element.len(), &mut out)?;
         out.extend_from_slice(element);
@@ -82,8 +89,16 @@ pub fn decode_collection<'a>(
 ) -> Result<Vec<&'a [u8]>, CollectionCodecError> {
     let mut cursor = 0;
     let count = read_size(protocol, payload, &mut cursor)?;
-    if kind == CollectionKind::Map && count % 2 != 0 {
-        return Err(CollectionCodecError::OddMapElementCount);
+    let count = if kind == CollectionKind::Map {
+        count.checked_mul(2).ok_or(CollectionCodecError::SizeOverflow)?
+    } else {
+        count
+    };
+    // Every entry needs at least a length prefix. Bound allocation by the
+    // available payload before trusting a server-provided collection count.
+    let width = if protocol == CollectionProtocol::V2 { 2 } else { 4 };
+    if count > payload.len().saturating_sub(cursor) / width {
+        return Err(CollectionCodecError::Truncated);
     }
     let mut elements = Vec::with_capacity(count);
     for _ in 0..count {
@@ -139,11 +154,11 @@ mod tests {
         roundtrip(CollectionProtocol::V2, CollectionKind::List, &[], &[0, 0]);
         roundtrip(CollectionProtocol::V2, CollectionKind::List, &[b"a", b"bc"], &[0, 2, 0, 1, b'a', 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[], &[0, 0]);
-        roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", b"v", b"x", b"y"], &[0, 4, 0, 1, b'k', 0, 1, b'v', 0, 1, b'x', 0, 1, b'y']);
+        roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", b"v", b"x", b"y"], &[0, 2, 0, 1, b'k', 0, 1, b'v', 0, 1, b'x', 0, 1, b'y']);
         roundtrip(CollectionProtocol::V2, CollectionKind::Set, &[b"a", b"b"], &[0, 2, 0, 1, b'a', 0, 1, b'b']);
         let nested = encode_collection(CollectionProtocol::V2, CollectionKind::List, &[b"z"]).unwrap();
         roundtrip(CollectionProtocol::V2, CollectionKind::Set, &[&nested], &[0, 1, 0, 5, 0, 1, 0, 1, b'z']);
-        roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", &nested], &[0, 2, 0, 1, b'k', 0, 5, 0, 1, 0, 1, b'z']);
+        roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", &nested], &[0, 1, 0, 1, b'k', 0, 5, 0, 1, 0, 1, b'z']);
     }
 
     #[test]
@@ -151,11 +166,11 @@ mod tests {
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[], &[0, 0, 0, 0]);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b"a", b"bc"], &[0, 0, 0, 2, 0, 0, 0, 1, b'a', 0, 0, 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[], &[0, 0, 0, 0]);
-        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", b"v"], &[0, 0, 0, 2, 0, 0, 0, 1, b'k', 0, 0, 0, 1, b'v']);
+        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", b"v"], &[0, 0, 0, 1, 0, 0, 0, 1, b'k', 0, 0, 0, 1, b'v']);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Set, &[b"a", b"b"], &[0, 0, 0, 2, 0, 0, 0, 1, b'a', 0, 0, 0, 1, b'b']);
         let nested = encode_collection(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b"z"]).unwrap();
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Set, &[&nested], &[0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'z']);
-        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", &nested], &[0, 0, 0, 2, 0, 0, 0, 1, b'k', 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'z']);
+        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", &nested], &[0, 0, 0, 1, 0, 0, 0, 1, b'k', 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'z']);
     }
 
     #[test]
