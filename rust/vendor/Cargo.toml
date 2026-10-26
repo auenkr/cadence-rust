@@ -1,0 +1,9 @@
+# Dedicated unit-test workspace for patched Cassandra dependencies.
+[workspace]
+resolver = "2"
+members = ["scylla-1.9.0", "scylla-cql-2.0.0", "scylla-cql-core-1.9.0"]
+
+[patch.crates-io]
+scylla = { path = "scylla-1.9.0" }
+scylla-cql = { path = "scylla-cql-2.0.0" }
+scylla-cql-core = { path = "scylla-cql-core-1.9.0" }

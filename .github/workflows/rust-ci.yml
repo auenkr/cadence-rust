@@ -293,7 +293,7 @@ jobs:
       - name: Test vendored scylla-cql frame codecs directly
         run: |
           set +e
-          (cd rust && cargo test -p scylla-cql --lib frame::) > rust/cql-frame-test.log 2>&1
+          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql --lib frame::) > rust/cql-frame-test.log 2>&1
           result=$?
           echo "$result" > rust/cql-frame-test.exit
           cat rust/cql-frame-test.log
@@ -310,7 +310,7 @@ jobs:
             client::session_builder::tests::session_builder_selects_protocol_version_in_session_config \
             network::connection::tests::protocol_version_propagates_to_host_connection_and_startup_language_version \
             network::connection::tests::v2_stream_allocator_uses_only_nonnegative_i8_ids; do
-            cargo test -p scylla --lib "$test_name" -- --exact > cql-driver-case.log 2>&1
+            cargo test --manifest-path vendor/Cargo.toml -p scylla --lib "$test_name" -- --exact > cql-driver-case.log 2>&1
             case_result=$?
             cat cql-driver-case.log >> cql-driver-test.log
             if [ "$case_result" -ne 0 ]; then result="$case_result"; break; fi
@@ -323,7 +323,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          cargo test -p scylla --lib cluster::metadata::fetching::tests:: > cql-metadata-test.log 2>&1
+          cargo test --manifest-path vendor/Cargo.toml -p scylla --lib cluster::metadata::fetching::tests:: > cql-metadata-test.log 2>&1
           result=$?
           echo "$result" > cql-metadata-test.exit
           cat cql-metadata-test.log

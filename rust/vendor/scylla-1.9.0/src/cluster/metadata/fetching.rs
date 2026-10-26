@@ -2152,13 +2152,15 @@ fn consistency_mode_from_str(consistency: Option<&str>) -> ConsistencyMode {
 // For more information please refer to https://github.com/scylladb/scylla-rust-driver/pull/349#discussion_r762050262
 fn is_missing_modern_keyspace_schema(error: &MetadataFetchError) -> bool {
     let MetadataFetchError {
-        error: MetadataFetchErrorKind::NextRowError(NextRowError::NextPageError(
-            NextPageError::RequestFailure(RequestError::LastAttemptError(
-                RequestAttemptError::DbError(DbError::Invalid, message),
+        error:
+            MetadataFetchErrorKind::NextRowError(NextRowError::NextPageError(
+                NextPageError::RequestFailure(RequestError::LastAttemptError(
+                    RequestAttemptError::DbError(DbError::Invalid, message),
+                )),
             )),
-        )),
         table: "system_schema.keyspaces",
-    } = error else {
+    } = error
+    else {
         return false;
     };
     let message = message.to_ascii_lowercase();
@@ -2257,14 +2259,20 @@ mod tests {
             "unconfigured columnfamily keyspaces",
             "unconfigured table keyspaces",
         ] {
-            assert!(is_missing_modern_keyspace_schema(&error(message)), "{message}");
+            assert!(
+                is_missing_modern_keyspace_schema(&error(message)),
+                "{message}"
+            );
         }
         for message in [
             "Invalid consistency level",
             "Undefined column name replication",
             "unconfigured table application_table",
         ] {
-            assert!(!is_missing_modern_keyspace_schema(&error(message)), "{message}");
+            assert!(
+                !is_missing_modern_keyspace_schema(&error(message)),
+                "{message}"
+            );
         }
     }
 

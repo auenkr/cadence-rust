@@ -28,7 +28,7 @@ jobs:
           git rev-parse HEAD > out/commit.txt
           printf '%s\n' "$CARGO_TARGET_DIR" > out/target-dir.txt
           set +e
-          (cd rust && cargo test -p scylla-cql --lib versioned_header) > out/test.log 2>&1
+          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql --lib versioned_header) > out/test.log 2>&1
           result=$?
           echo "$result" > out/test.exit
           cat out/test.log
@@ -36,14 +36,16 @@ jobs:
       - name: Test actual vendored collection codec
         run: |
           set +e
-          (cd rust && cargo test -p scylla-cql-core --lib protocol_collections::) > out/collection-test.log 2>&1
+          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql-core --lib protocol_collections::) > out/collection-test.log 2>&1
           result=$?
           echo "$result" > out/collection-test.exit
           cat out/collection-test.log
           exit "$result"
       - name: Preserve runner-resolved lockfile
         if: always()
-        run: cp rust/Cargo.lock out/Cargo.lock
+        run: |
+          cp rust/Cargo.lock out/Cargo.lock
+          if [ -f rust/vendor/Cargo.lock ]; then cp rust/vendor/Cargo.lock out/vendor-Cargo.lock; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
