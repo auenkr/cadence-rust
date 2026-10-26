@@ -22,3 +22,26 @@ No Cargo, Go or rustfmt command was run on the development host. CI artifacts,
 exact head identity, terminal conclusion and fresh-target test exits still need
 to be reviewed. Evidence changes stay on this separate branch to preserve the
 candidate run's source identity.
+
+## Terminal artifact review
+
+Run concluded **success**. Downloaded `rust-ci-logs` and
+`matching-metrics-emission-evidence` to
+`/mnt/storage/service/ci-evidence/40409014196`.
+`commit.txt` matches `91c481a612eac48f786f208f4c2f4193864ed966` and
+`target-dir.txt` records `/home/runner/work/_temp/cargo-target-final`.
+Clippy, tests, scoped fmt and Matching runtime fmt exits are 0. The separate
+advisory workspace-format exit is 1; it is not a clean workspace-format result.
+Runner metadata confirms fresh-target selection succeeded and Rust cache restore
+was skipped. The real delayed-append runtime shutdown regression passed and the
+SQL fatal-process integration suite ran from that fresh target. The live
+Go/Rust metrics comparison step also passed; its hash identifies the metrics
+example executable, not a production Matching mixed-gate binary.
+
+SHA256 `test.log`:
+`52332ff343bd5712f99ce1d404137e114df886778c059a41f44cf4f195a83eb8`.
+
+This pass does not validate newer formatting/workflow source `eb6934853`, the
+pending deterministic wire-oracle repair, or the Cassandra v2/v3 port. The latter
+is an explicit remaining production parity requirement confirmed by audit
+`70edc8d8e`; v4-only mixed results cannot close it. Matching remains incomplete.
