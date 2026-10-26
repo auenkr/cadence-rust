@@ -56,4 +56,14 @@ commit.
 - CI now retains `generated.json` and `repeated.json`, runs generation twice,
   and compares the outputs. The updated checked-in fixture must be copied from
   the uploaded Go-generated artifact after review.
-- Fix commit and focused fresh-target Matching CI run: pending.
+- Artifact generation run: https://github.com/auenkr/cadence-rust/actions/runs/40409427799
+  at `3fe86e0d12466f433d3616358e464469bc86932f`. The run failed only because
+  the checked-in fixture still held the previous timestamps/map order. Both
+  generation outputs were byte-identical; `stability.exit` is `0` and their
+  SHA-256 is
+  `85b60a8d977f4d8db2b6ff2196c566b995a907588781a31e2adb84b21c1902d9`.
+- Reviewed and copied `generated.json` from that artifact verbatim to the
+  Rust fixture. It still has all 25 original names, all are
+  `thrift-binary-struct`, and none are empty. Rust consumer assertions were not
+  changed.
+- Fixture commit and final focused fresh-target Matching CI run: pending.
