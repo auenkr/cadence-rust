@@ -310,8 +310,9 @@ impl ControlConnection {
         // partitioner before interpreting either local or peer tokens.
         let partitioner_pager = self.query_iter(
             "SELECT partitioner FROM system.local WHERE key='local'", &()
-        ).await.map_err(|error| MetadataFetchError { error, table: "system.local" })?;
-        let partitioner_rows = partitioner_pager.rows_stream::<LocalPartitionerRow>()?;
+        ).await.map_err(|error| MetadataFetchError { error: error.into(), table: "system.local" })?;
+        let partitioner_rows = partitioner_pager.rows_stream::<LocalPartitionerRow>()
+            .map_err(|error| MetadataFetchError { error: error.into(), table: "system.local" })?;
         let partitioner_rows = partitioner_rows
             .map_err(MetadataFetchErrorKind::NextRowError)
             .try_collect::<Vec<_>>().await

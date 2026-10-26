@@ -15,7 +15,7 @@ fn required(name: &str) -> Result<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let protocol: i32 = required("CASSANDRA_PROTO_VERSION")?.parse()?;
-    if !matches!(protocol, 2 | 3 | 4) {
+    if !matches!(protocol, 2..=4) {
         bail!("probe only accepts explicitly selected protocol 2, 3 or 4, got {protocol}");
     }
     let host = required("CASSANDRA_HOST")?;
