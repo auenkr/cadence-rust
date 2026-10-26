@@ -26,8 +26,22 @@ primary-key DELETE with `Invalid operator`, while the Matching queue range
 SELECT succeeds. The v2 job preserves the strict `>` range DELETE and asserts
 that exact backend rejection before verifying point-delete support. The v3
 job runs the same strict-range operation against Cassandra 3.11.17 and must
-succeed. This separates wire protocol acceptance from server CQL semantics;
-the 3.11 runtime result is pending the focused Actions run.
+succeed. Run [40411377210](https://github.com/auenkr/cadence-rust/actions/runs/40411377210)
+passed at head `b7272bc68a811e93cfd159487ce62d715a22af62`:
+
+- protocol v2 / Cassandra 2.1.22 reached every tested operation and emitted
+  the expected `Invalid operator > for PRIMARY KEY part message_id`, then
+  passed point-delete, server-error and schema operations;
+- protocol v3 / Cassandra 3.11.17 passed the same operations including the
+  original strict-range DELETE;
+- both ran using the exact pinned Go gocql version and reported
+  `unset_value=not-used`.
+
+The earlier attempt [40410868673](https://github.com/auenkr/cadence-rust/actions/runs/40410868673)
+failed when the harness initially treated the Cassandra 2.2 range-DELETE
+rejection as a test failure. This passing evidence separates wire protocol
+acceptance from server CQL semantics; it does not claim Rust driver support or
+a Matching service gate.
 
 ## Wire contract to carry into Rust driver work
 
