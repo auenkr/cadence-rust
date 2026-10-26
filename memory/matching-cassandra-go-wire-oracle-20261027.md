@@ -6,13 +6,13 @@ Added `go/tools/matching-cassandra-protocol-oracle` and the independent
 `.github/workflows/matching-cassandra-protocol-oracle.yml` workflow. The runner
 uses `github.com/gocql/gocql v0.0.0-20211015133455-b225f9b53fa1` from `go/go.mod`
 and sets `ClusterConfig.ProtoVersion` explicitly. CI runs protocol v2 against
-the Cassandra 2.1.22 image and v3 against 2.2.19. Both are real database
+the Cassandra 2.1.22 image and v3 against 3.11.17. Both are real database
 containers with the project resource limits (1.5 CPU, 1800 MiB memory and
 swap, 2048 pids) on `ubuntu-latest`.
 
 The runner exercises the Matching Cassandra queue's CQL shape against a real
 server: CAS enqueue, bound SELECT/result decoding, automatic prepare/execute
-for bound statements, count, logged batch, point delete, and server
+for bound statements, count, logged batch, strict range delete, point delete, and server
 query errors. DDL requests produce schema-change results and exercise the
 control connection's schema event subscription. `gocql.UnsetValue` is
 intentionally never supplied: it is a v4+ query parameter feature and cannot
@@ -21,12 +21,13 @@ protocol, head SHA, command result and server log. This is backend runtime
 evidence for the pinned Go client; it is not Rust or service-gate evidence, and
 does not claim that Go's success proves Rust support.
 
-The Actions run showed Cassandra 2.1/2.2 reject both `>` and `>=` in a
-primary-key DELETE with `Invalid operator` (the same operators work in the
-Matching queue range SELECT). The oracle therefore covers point deletes only;
-it does not claim runtime validation of the Go queue's strict range-delete
-templates. That behavior needs separate investigation against the service's
-supported Cassandra/schema combination.
+The initial Actions runs showed Cassandra 2.1/2.2 reject `>` and `>=` in a
+primary-key DELETE with `Invalid operator`, while the Matching queue range
+SELECT succeeds. The v2 job preserves the strict `>` range DELETE and asserts
+that exact backend rejection before verifying point-delete support. The v3
+job runs the same strict-range operation against Cassandra 3.11.17 and must
+succeed. This separates wire protocol acceptance from server CQL semantics;
+the 3.11 runtime result is pending the focused Actions run.
 
 ## Wire contract to carry into Rust driver work
 

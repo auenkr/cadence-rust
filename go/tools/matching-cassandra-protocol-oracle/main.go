@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -70,8 +71,23 @@ func main() {
 	step("queue-batch")
 	batch.Query(`INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?)`, queueType, int64(1002), []byte("batch"), time.Now().UTC())
 	must(session.ExecuteBatch(batch))
-	step("queue-point-delete-batch-row")
-	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1002)).Exec())
+	step("queue-range-delete")
+	rangeDeleteErr := session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id > ? AND message_id <= ?`, queueType, int64(1001), int64(1002)).Exec()
+	expectReject := os.Getenv("CASSANDRA_EXPECT_RANGE_DELETE_REJECTION") == "true"
+	if expectReject && rangeDeleteErr == nil {
+		must(fmt.Errorf("server unexpectedly accepted Matching strict-range DELETE"))
+	}
+	if expectReject && !strings.Contains(rangeDeleteErr.Error(), "Invalid operator") {
+		must(fmt.Errorf("expected Cassandra unsupported-operator rejection, got: %w", rangeDeleteErr))
+	}
+	if !expectReject {
+		must(rangeDeleteErr)
+	}
+	if expectReject {
+		fmt.Printf("EXPECTED_SERVER_REJECTION range_delete=%q\n", rangeDeleteErr)
+		step("queue-point-delete-batch-row-cleanup")
+		must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1002)).Exec())
+	}
 	step("queue-point-delete-cas-row")
 	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1001)).Exec())
 	step("server-error")
@@ -80,5 +96,5 @@ func main() {
 	}
 	step("schema-drop")
 	must(session.Query(`DROP TABLE matching_protocol_oracle`).Exec())
-	fmt.Printf("PASS gocql=%s protocol=%d server=%s operations=schema-change,event-subscription,cas,query,result,prepared,batch,delete,error unset_value=not-used\n", "v0.0.0-20211015133455-b225f9b53fa1", version, os.Getenv("CASSANDRA_SERVER_VERSION"))
+	fmt.Printf("PASS gocql=%s protocol=%d server=%s operations=schema-change,event-subscription,cas,query,result,prepared,batch,range-delete,point-delete,error range_delete_rejected=%t unset_value=not-used\n", "v0.0.0-20211015133455-b225f9b53fa1", version, os.Getenv("CASSANDRA_SERVER_VERSION"), expectReject)
 }

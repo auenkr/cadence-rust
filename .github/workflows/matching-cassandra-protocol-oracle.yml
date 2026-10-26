@@ -22,8 +22,10 @@ jobs:
         include:
           - protocol: 2
             image: cassandra:2.1.22
+            expect_range_delete_rejection: true
           - protocol: 3
-            image: cassandra:2.2.19
+            image: cassandra:3.11.17
+            expect_range_delete_rejection: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -56,6 +58,7 @@ jobs:
           CASSANDRA_KEYSPACE: cadence_oracle
           CASSANDRA_PROTO_VERSION: ${{ matrix.protocol }}
           CASSANDRA_SERVER_VERSION: ${{ matrix.image }}
+          CASSANDRA_EXPECT_RANGE_DELETE_REJECTION: ${{ matrix.expect_range_delete_rejection }}
         run: |
           set -euo pipefail
           test -z "$(gofmt -d tools/matching-cassandra-protocol-oracle/main.go)"
