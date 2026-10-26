@@ -25,6 +25,7 @@ use crate::errors::{
     PagerExecutionError, PrepareError, RequestAttemptError, RequestError, SchemaAgreementError,
     TracingError, UseKeyspaceError,
 };
+use crate::frame::CqlProtocolVersion;
 use crate::frame::response::NonErrorResponseWithDeserializedMetadataV2 as NonErrorResponseWithDeserializedMetadata;
 use crate::frame::response::result;
 use crate::network::tls::TlsProvider;
@@ -237,6 +238,10 @@ pub struct SessionConfig {
     /// Preferred compression algorithm to use on connections.
     /// If it's not supported by database server Session will fall back to no compression.
     pub compression: Option<Compression>,
+
+    /// CQL native protocol version used for connection frames and STARTUP.
+    /// Defaults to V4.
+    pub protocol_version: CqlProtocolVersion,
 
     /// Whether to set the nodelay TCP flag.
     pub tcp_nodelay: bool,
@@ -471,6 +476,7 @@ impl SessionConfig {
             local_ip_address: None,
             shard_aware_local_port_range: ShardAwarePortRange::EPHEMERAL_PORT_RANGE,
             compression: None,
+            protocol_version: CqlProtocolVersion::V4,
             tcp_nodelay: true,
             tcp_keepalive_interval: None,
             tcp_recv_buffer_size: None,
@@ -1457,7 +1463,7 @@ impl Session {
             local_ip_address: config.local_ip_address,
             shard_aware_local_port_range: config.shard_aware_local_port_range,
             compression: config.compression,
-            protocol_version: crate::frame::versioned_header::CqlProtocolVersion::V4,
+            protocol_version: config.protocol_version,
             tcp_socket_options,
             timestamp_generator: config.timestamp_generator,
             tls_provider,

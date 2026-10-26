@@ -135,6 +135,7 @@ pub mod frame {
     pub use scylla_cql_core::frame::frame_errors;
     pub use scylla_cql_core::frame::protocol_features;
     pub use scylla_cql_core::frame::{Authenticator, Compression};
+    pub use scylla_cql::frame::versioned_header::CqlProtocolVersion;
 
     pub mod types {
         //! CQL binary protocol in-wire types.

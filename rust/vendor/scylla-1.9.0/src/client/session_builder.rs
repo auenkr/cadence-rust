@@ -7,6 +7,7 @@ use crate::authentication::{AuthenticatorProvider, PlainTextAuthenticator};
 use crate::client::session::TlsContext;
 use crate::cluster::metadata::PeriodicFetchMode;
 use crate::errors::NewSessionError;
+use crate::frame::CqlProtocolVersion;
 use crate::policies::address_translator::AddressTranslator;
 use crate::policies::host_filter::HostFilter;
 use crate::policies::timestamp_generator::TimestampGenerator;
@@ -165,6 +166,13 @@ impl SessionBuilderKindSupportsKnownNodes for DefaultMode {}
 impl SessionBuilderKindSupportsKnownNodes for ClientRoutesMode {}
 
 impl<K: SessionBuilderKindSupportsKnownNodes> GenericSessionBuilder<K> {
+    /// Selects the CQL native protocol version for connection frames and STARTUP.
+    /// Defaults to [`CqlProtocolVersion::V4`].
+    pub fn protocol_version(mut self, version: CqlProtocolVersion) -> Self {
+        self.config.protocol_version = version;
+        self
+    }
+
     /// Add a known node with a hostname
     /// # Examples
     /// ```
@@ -1599,6 +1607,7 @@ mod tests {
 
     use super::super::Compression;
     use super::SessionBuilder;
+    use crate::frame::CqlProtocolVersion;
     use crate::client::execution_profile::{ExecutionProfile, defaults};
     use crate::cluster::metadata::PeriodicFetchMode;
     use crate::cluster::node::KnownNode;
@@ -1614,6 +1623,15 @@ mod tests {
 
         assert!(builder.config.known_nodes.is_empty());
         assert_eq!(builder.config.compression, None);
+        assert_eq!(builder.config.protocol_version, CqlProtocolVersion::V4);
+    }
+
+    #[test]
+    fn session_builder_selects_protocol_version_in_session_config() {
+        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+            let builder = SessionBuilder::new().protocol_version(version);
+            assert_eq!(builder.config.protocol_version, version);
+        }
     }
 
     #[test]
