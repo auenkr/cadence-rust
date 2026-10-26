@@ -140,8 +140,10 @@ mod tests {
         roundtrip(CollectionProtocol::V2, CollectionKind::List, &[b"a", b"bc"], &[0, 2, 0, 1, b'a', 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[], &[0, 0]);
         roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", b"v", b"x", b"y"], &[0, 4, 0, 1, b'k', 0, 1, b'v', 0, 1, b'x', 0, 1, b'y']);
+        roundtrip(CollectionProtocol::V2, CollectionKind::Set, &[b"a", b"b"], &[0, 2, 0, 1, b'a', 0, 1, b'b']);
         let nested = encode_collection(CollectionProtocol::V2, CollectionKind::List, &[b"z"]).unwrap();
         roundtrip(CollectionProtocol::V2, CollectionKind::Set, &[&nested], &[0, 1, 0, 5, 0, 1, 0, 1, b'z']);
+        roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", &nested], &[0, 2, 0, 1, b'k', 0, 5, 0, 1, 0, 1, b'z']);
     }
 
     #[test]
@@ -150,8 +152,10 @@ mod tests {
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b"a", b"bc"], &[0, 0, 0, 2, 0, 0, 0, 1, b'a', 0, 0, 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[], &[0, 0, 0, 0]);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", b"v"], &[0, 0, 0, 2, 0, 0, 0, 1, b'k', 0, 0, 0, 1, b'v']);
+        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Set, &[b"a", b"b"], &[0, 0, 0, 2, 0, 0, 0, 1, b'a', 0, 0, 0, 1, b'b']);
         let nested = encode_collection(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b"z"]).unwrap();
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Set, &[&nested], &[0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'z']);
+        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", &nested], &[0, 0, 0, 2, 0, 0, 0, 1, b'k', 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'z']);
     }
 
     #[test]
