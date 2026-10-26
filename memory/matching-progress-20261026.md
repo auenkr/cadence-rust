@@ -32,3 +32,19 @@ Next: inspect repair and focused CI, assemble corrected candidate, run fresh
 workspace Clippy then tests, and run the exact-SHA serial mixed acceptance
 plan in `matching-final-gate-plan-20261025.md`, recording binary SHA256s.
 No current fatal-path passing test or final Matching acceptance is claimed.
+
+## Registry-clone repair, October 26 evening
+
+Fresh run 40223423001 on `62f068cf9a3e45d04ae57d3765a3c13d889804ec`
+reached the typed SQL writer error with the actual Matching-only binary and a
+seeded domain, but the child still did not exit. This establishes a wiring
+failure beyond the earlier fixture problem. `MatchingRuntime::with_fatal_writer`
+updated only its registry; the RPC handler retained a pre-installation clone.
+Commit `e69c7663392db4e2c356d38d2a4a42a4b35125b8` installs the sender on the
+handler registry as well. It is pushed on `t3/sqlite-writer-fatal-exit`, unmerged.
+
+Focused retry https://github.com/auenkr/cadence-rust/actions/runs/40357713048
+is pending at this record. This branch also restricts SQL UUID inputs to Go's
+exact 32/36/38/45-byte forms; compact or braced URN suffixes must be rejected.
+Two Luna workers are independently reviewing the fatal wiring and final mixed
+acceptance requirements. No final mixed run has started for this source.
