@@ -831,7 +831,7 @@ impl ControlConnection {
             match schema_metadata_fetch_level {
                 SchemaMetadataFetchLevel::Full => {
                     // Fetch full schema: columns, keys, UDTs
-                    let udts = self.query_user_defined_types(keyspaces_to_fetch).await?;
+                    let udts = self.query_user_defined_types(keyspaces_to_fetch, legacy_schema).await?;
                     let mut tables_schema =
                         self.query_tables_schema(keyspaces_to_fetch, &udts, legacy_schema).await?;
                     Ok((
@@ -992,18 +992,29 @@ impl ControlConnection {
     async fn query_user_defined_types(
         &self,
         keyspaces_to_fetch: &[String],
+        legacy_schema: bool,
     ) -> Result<
         PerKeyspaceResult<PerTable<Arc<UserDefinedType<'static>>>, MissingUserDefinedType>,
         MetadataError,
     > {
-        let rows = self.query_filter_keyspace_name::<UdtRow>(
-        "SELECT keyspace_name, type_name, field_names, field_types FROM system_schema.types",
-        keyspaces_to_fetch,
-    )
-    .map_err(|error| MetadataFetchError {
-        error,
-        table: "system_schema.types",
-    });
+        let (rows, table) = if legacy_schema {
+            (
+                self.query_filter_keyspace_name::<UdtRow>(
+                    "SELECT keyspace_name, type_name, field_names, field_types FROM system.schema_usertypes",
+                    keyspaces_to_fetch,
+                ),
+                "system.schema_usertypes",
+            )
+        } else {
+            (
+                self.query_filter_keyspace_name::<UdtRow>(
+                    "SELECT keyspace_name, type_name, field_names, field_types FROM system_schema.types",
+                    keyspaces_to_fetch,
+                ),
+                "system_schema.types",
+            )
+        };
+        let rows = rows.map_err(|error| MetadataFetchError { error, table });
 
         let mut udt_rows: Vec<UdtRowWithParsedFieldTypes> = rows
             .map(|row_result| {
@@ -1451,7 +1462,6 @@ impl ControlConnection {
         udts: &PerKeyspaceResult<PerTable<Arc<UserDefinedType<'static>>>, MissingUserDefinedType>,
         legacy_schema: bool,
     ) -> Result<PerKsTableResult<Table, SingleKeyspaceMetadataError>, MetadataError> {
-        let _ = legacy_schema; // Legacy column conversion remains tracked in memory/matching-cql-legacy-schema.md.
 
         // Upon migration from thrift to CQL, Cassandra internally creates a surrogate column "value" of
         // type EmptyType for dense tables. This resolves into this CQL type name.
@@ -1460,13 +1470,29 @@ impl ControlConnection {
 
         type RowType = (String, String, String, String, i32, String);
 
-        let rows = self.query_filter_keyspace_name::<RowType>(
-        "SELECT keyspace_name, table_name, column_name, kind, position, type FROM system_schema.columns",
-        keyspaces_to_fetch
-    ).map_err(|error| MetadataFetchError {
-        error,
-        table: "system_schema.columns",
-    });
+        let rows = if legacy_schema {
+            self.query_filter_keyspace_name::<(String, String, String, String, i32, String)>(
+                "SELECT keyspace_name, columnfamily_name, column_name, type, component_index, validator FROM system.schema_columns",
+                keyspaces_to_fetch,
+            )
+            .map(|row| row.map(|(ks, table, col, kind, position, validator)| {
+                let kind = match kind.as_str() {
+                    "partition_key" => "partition_key",
+                    "clustering_key" | "clustering" => "clustering",
+                    "static" => "static",
+                    _ => "regular",
+                };
+                let cql_type = legacy_validator_to_cql(&validator).unwrap_or(validator);
+                (ks, table, col, kind.to_owned(), position, cql_type)
+            }))
+            .map_err(|error| MetadataFetchError { error, table: "system.schema_columns" })
+        } else {
+            self.query_filter_keyspace_name::<RowType>(
+                "SELECT keyspace_name, table_name, column_name, kind, position, type FROM system_schema.columns",
+                keyspaces_to_fetch,
+            )
+            .map_err(|error| MetadataFetchError { error, table: "system_schema.columns" })
+        };
 
         let empty_ok_map = Ok(HashMap::new());
 
@@ -1712,7 +1738,7 @@ fn legacy_replication_map(
 /// scalar mapping is intentionally explicit so unknown marshal types remain
 /// visible as metadata errors instead of being guessed.
 fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
-    match validator.rsplit('.').next()? {
+    match validator.rsplit('.').next()?.split('(').next()? {
         "AsciiType" => Some("ascii"),
         "BooleanType" => Some("boolean"),
         "BytesType" => Some("blob"),
@@ -1736,6 +1762,46 @@ fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
         "EmptyType" => Some("empty"),
         _ => None,
     }
+}
+
+/// Convert Cassandra 2.x marshal validator strings (including nested
+/// collection wrappers) into the CQL type grammar consumed by this module.
+fn legacy_validator_to_cql(validator: &str) -> Option<String> {
+    let validator = validator.trim();
+    if let Some(inner) = validator.strip_prefix("org.apache.cassandra.db.marshal.ReversedType(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return legacy_validator_to_cql(inner);
+    }
+    for (marshal, cql) in [("ListType", "list"), ("SetType", "set"), ("MapType", "map")] {
+        let prefix = format!("org.apache.cassandra.db.marshal.{marshal}(");
+        if let Some(inner) = validator.strip_prefix(&prefix).and_then(|s| s.strip_suffix(')')) {
+            let args = split_legacy_marshal_args(inner)?;
+            if (cql == "map" && args.len() != 2) || (cql != "map" && args.len() != 1) {
+                return None;
+            }
+            let converted = args.iter().map(|arg| legacy_validator_to_cql(arg)).collect::<Option<Vec<_>>>()?;
+            return Some(format!("{cql}<{}>", converted.join(", ")));
+        }
+    }
+    legacy_scalar_validator_to_cql(validator).map(str::to_owned)
+}
+
+fn split_legacy_marshal_args(input: &str) -> Option<Vec<&str>> {
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let mut args = Vec::new();
+    for (i, ch) in input.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => { args.push(input[start..i].trim()); start = i + 1; }
+            _ => (),
+        }
+    }
+    if depth != 0 { return None; }
+    args.push(input[start..].trim());
+    Some(args)
 }
 
 fn parse_cql_type(p: ParserState<'_>) -> ParseResult<(PreColumnType, ParserState<'_>)> {
@@ -2217,6 +2283,22 @@ mod tests {
 
         assert_eq!(
             legacy_scalar_validator_to_cql("org.example.UnknownType"),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_collection_validators_are_recursively_converted() {
+        assert_eq!(
+            legacy_validator_to_cql("org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.Int32Type))"),
+            Some("map<text, list<int>>".to_owned())
+        );
+        assert_eq!(
+            legacy_validator_to_cql("org.apache.cassandra.db.marshal.ReversedType(org.apache.cassandra.db.marshal.UTF8Type)"),
+            Some("text".to_owned())
+        );
+        assert_eq!(
+            legacy_validator_to_cql("org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type)"),
             None
         );
     }
