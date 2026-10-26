@@ -25,10 +25,13 @@ const restartMode = process.argv[7] === 'restart';
 const goServicesPid = Number(process.argv[8] || 0);
 const productionMode = process.argv[9] === 'production';
 const failureRecoveryMode = process.env.CADENCE_MATCHING_FAILURE_RECOVERY === '1';
+const matchingCredentials = process.env.CADENCE_MATCHING_GRPC_CA_FILE
+  ? grpc.credentials.createSsl(fs.readFileSync(process.env.CADENCE_MATCHING_GRPC_CA_FILE))
+  : grpc.credentials.createInsecure();
 const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
 const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
-clients.Matching = new schema.matching.v1.MatchingAPI(peer, grpc.credentials.createInsecure());
+clients.Matching = new schema.matching.v1.MatchingAPI(peer, matchingCredentials);
 const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
 function cassandraCommand(args, label) {
   const result = spawnSync('go', ['run', './tests/matching-cassandra-interop', ...args], {
@@ -264,7 +267,7 @@ function clientsForTaskList(taskListName) {
   if (!port) return clients;
   if (!realOwnerClients.has(port)) {
     const owned = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](`127.0.0.1:${port}`, grpc.credentials.createInsecure())]));
-    owned.Matching = new schema.matching.v1.MatchingAPI(`127.0.0.1:${port}`, grpc.credentials.createInsecure());
+    owned.Matching = new schema.matching.v1.MatchingAPI(`127.0.0.1:${port}`, matchingCredentials);
     realOwnerClients.set(port, owned);
   }
   return realOwnerClients.get(port);
@@ -455,7 +458,7 @@ async function run() {
     return child;
   }
   function directMatchingClient(address) {
-    return new matchingApi.MatchingAPI(address, grpc.credentials.createInsecure());
+    return new matchingApi.MatchingAPI(address, matchingCredentials);
   }
   function directDecisionPoll(client, domainId, taskListName, suffix) {
     const metadata = new grpc.Metadata();
@@ -1369,7 +1372,7 @@ async function run() {
   // Real Go History start through an isolated Rust queue. Create a scheduled
   // activity normally, then reference that schedule from a second task list to
   // control its isolation metadata without changing Go History configuration.
-  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], grpc.credentials.createInsecure());
+  clients.Matching = new schema.matching.v1.MatchingAPI(process.argv[4], matchingCredentials);
   const isolatedList = { name: `isolated-${id}` };
   if (failureRecoveryMode) {
     // Two Rust instances share the ring: like Go's Matching, the non-owner answers

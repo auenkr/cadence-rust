@@ -47,6 +47,7 @@ parser.add_argument('--history-transport', choices=('grpc', 'tchannel'), default
     help='Rust Matching outbound History transport for --rust-production-binary (default: grpc)')
 parser.add_argument('--matching-transport', choices=('grpc', 'thrift'), default='grpc',
     help='transport the original Go services use for Matching calls: grpc (default) or thrift (TChannel/Thrift via system.enableGRPCOutbound=false in the Go dynamic config; also moves Go-to-Go History calls to TChannel)')
+parser.add_argument('--matching-rpc-tls', action='store_true', help='enable verified TLS on the production Rust Matching gRPC listener and Go Matching outbound using an ephemeral test CA')
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
@@ -357,6 +358,8 @@ if production_matching and args.go_mixed_server_bin:
     parser.error('Rust matching cannot use the Go test-binary discovery overlay (--go-mixed-server-bin)')
 if args.history_transport != 'grpc' and not production_matching:
     parser.error('--history-transport applies only with --rust-services matching')
+if args.matching_rpc_tls and not production_matching:
+    parser.error('--matching-rpc-tls requires --rust-services matching')
 if args.matching_transport != 'grpc' and not production_matching:
     parser.error('--matching-transport thrift requires --rust-services matching')
 if args.mysql and not production_matching:
@@ -579,6 +582,26 @@ if args.shard_distributor:
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
+# Go derives outbound Matching TLS from services.matching.rpc.tls. Keep the
+# test CA private to this run and enable chain plus DNS/IP verification.
+tls_files = None
+if args.matching_rpc_tls:
+    tls_dir = config / 'matching-tls'
+    tls_dir.mkdir(exist_ok=True)
+    ca_cert, ca_key = tls_dir / 'ca.crt', tls_dir / 'ca.key'
+    server_cert, server_key, server_csr = tls_dir / 'matching.crt', tls_dir / 'matching.key', tls_dir / 'matching.csr'
+    (tls_dir / 'matching.ext').write_text('subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n')
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Cadence Matching Gate CA', '-keyout', str(ca_key), '-out', str(ca_cert)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    subprocess.run(['openssl', 'req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost', '-keyout', str(server_key), '-out', str(server_csr)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    subprocess.run(['openssl', 'x509', '-req', '-in', str(server_csr), '-CA', str(ca_cert), '-CAkey', str(ca_key), '-CAcreateserial', '-days', '2', '-extfile', str(tls_dir / 'matching.ext'), '-out', str(server_cert)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    tls_files = (ca_cert, server_cert, server_key)
+    matching_go_tls = ('      tls:\n        enabled: true\n'
+        f'        caFile: {json.dumps(str(ca_cert))}\n'
+        '        enableHostVerification: true\n        serverName: localhost\n')
+    text, changed = re.subn(r'(?ms)(^  matching:\n    rpc:\n.*?)(?=^    metrics:)',
+        lambda m: m.group(1) + matching_go_tls, text, count=1)
+    if changed != 1:
+        raise RuntimeError('could not configure Go Matching outbound TLS')
 (config / 'development.yaml').write_text(text)
 if args.cassandra:
     go_config = text
@@ -623,6 +646,15 @@ if production_matching:
     )
     rust_dynamic_config.write_text(rust_dynamic_text)
     rust_text = (root / 'rust/config/development.yaml').read_text()
+    if tls_files:
+        _, server_cert, server_key = tls_files
+        matching_rust_tls = ('      tls:\n        enabled: true\n'
+            f'        certFile: {json.dumps(str(server_cert))}\n'
+            f'        keyFile: {json.dumps(str(server_key))}\n')
+        rust_text, changed = re.subn(r'(?ms)(^  matching:\n    rpc:\n.*?)(?=^    metrics:)',
+            lambda m: m.group(1) + matching_rust_tls, rust_text, count=1)
+        if changed != 1:
+            raise RuntimeError('could not configure Rust Matching listener TLS')
     exporter_address = None
     if args.matching_exporter:
         # Keep exporters confined to Matching. The original Go services remain
@@ -844,7 +876,9 @@ if args.dry_run:
         'goBinary': str(binary), 'rustMatchingBinary': str(rust_matching_binary) if production_matching else None,
         'rustMatchingBinaryIsPlanned': production_matching and not args.rust_production_binary,
         'serverCommand': command, 'rustCommandRecord': str(work / 'rust-matching-command.json') if production_matching else None,
-        'matchingTransport': args.matching_transport, 'cassandra': args.cassandra, 'shardDistributor': args.shard_distributor,
+        'matchingTransport': args.matching_transport, 'matchingRpcTls': args.matching_rpc_tls,
+        'matchingTlsHostVerification': bool(args.matching_rpc_tls),
+        'cassandra': args.cassandra, 'shardDistributor': args.shard_distributor,
         'probe': 'tests/matching-service-compat.cjs' if production_matching or args.rust_matching or args.matching_restart
                  else ('tests/matching-history-compat.cjs' if args.matching_delivery else 'tests/service-workflow-compat.cjs')}, indent=2) + '\n')
     print(f'Dry run planned without building or starting services: {work / "dry-run.json"}', flush=True)
@@ -1053,6 +1087,8 @@ try:
                         })
                         if os.environ.get('CADENCE_MYSQL_DOCKER_CONTAINER'):
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
+                    if tls_files:
+                        probe_environment['CADENCE_MATCHING_GRPC_CA_FILE'] = str(tls_files[0])
                     probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.matching_backlog_forward:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'

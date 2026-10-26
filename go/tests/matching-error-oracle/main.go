@@ -4,12 +4,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"go.uber.org/yarpc"
+	"go.uber.org/yarpc/peer"
+	"go.uber.org/yarpc/peer/hostport"
+	"google.golang.org/grpc/credentials"
 	ygrpc "go.uber.org/yarpc/transport/grpc"
 
 	matchingv1 "github.com/uber/cadence/.gen/proto/matching/v1"
@@ -35,10 +40,24 @@ func main() {
 	wantSelf := required("CADENCE_MATCHING_ERROR_EXPECTED_SELF")
 
 	transport := ygrpc.NewTransport()
+	outbound := transport.NewSingleOutbound(address)
+	if caFile := os.Getenv("CADENCE_MATCHING_GRPC_CA_FILE"); caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			panic(err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pem) {
+			panic("Matching TLS CA file contains no certificates")
+		}
+		tlsConfig := &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS12}
+		dialer := transport.NewDialer(ygrpc.DialerCredentials(credentials.NewTLS(tlsConfig)))
+		outbound = transport.NewOutbound(peer.NewSingle(hostport.Identify(address), dialer))
+	}
 	dispatcher := yarpc.NewDispatcher(yarpc.Config{
 		Name: "cadence-matching-error-oracle",
 		Outbounds: yarpc.Outbounds{
-			"cadence-matching": {Unary: transport.NewSingleOutbound(address)},
+			"cadence-matching": {Unary: outbound},
 		},
 	})
 	if err := dispatcher.Start(); err != nil {

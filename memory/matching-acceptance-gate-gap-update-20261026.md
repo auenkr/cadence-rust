@@ -75,3 +75,60 @@ failure wording: Actions run `40218022772`, source
 `5d9a60123b651e6cdd1fa3197a9955085351536a668daf8eb57085c8663d52e3`.
 This evidence is only for that exact source and binary; rerun against the final
 candidate SHA.
+
+## Production Matching verified TLS mixed gate (implemented 2026-10-26)
+
+Added `.github/workflows/matching-production-tls-mixed.yml`, a manual,
+standard `ubuntu-latest` gate (90-minute timeout, concurrency cancellation,
+three-day artifact retention). It builds `cadence-matching` in a fresh
+run-specific target and uses `tests/gates/run-mysql-lane.sh` to run the
+production Ringpop topology: Go Frontend/History/Worker, no Go Matching, and
+standalone Rust Matching. The harness's `--matching-rpc-tls` option makes a
+short-lived local CA and a matching server certificate with `localhost` and
+`127.0.0.1` SANs. It configures Go's Matching outbound with `caFile`,
+`enableHostVerification: true`, and `serverName: localhost`; Rust Matching
+loads the matching identity on its production gRPC listener. The Node direct
+Matching probe trusts that CA. No insecure certificate-verification bypass is
+used in this TLS lane. The Go TLS expectation comes from
+`go/common/rpc/params.go` using the target service's `RPC.TLS` as the direct
+outbound config and `go/common/config/tls.go` mapping
+`EnableHostVerification` to normal chain/name checking.
+
+The gate also requests `--matching-restart` and
+`--matching-failure-recovery`; both use the same TLS Rust config and the
+probe's direct Matching client uses CA-backed TLS during primary/secondary
+operations. SDK workflows continue through Go Frontend/History/Worker. Review
+the lane's `out/gate/run/results.json`, `probe.log`, `run.exit`,
+`rust-matching/matching-shutdown.json`, `rust-matching/rust-server-*.log`,
+and `config-redacted/` TLS settings alongside top-level `out/commit.txt`,
+`out/binary.sha256`, `out/build.exit`, `out/gate.exit`,
+`out/gate/lane.exit`, `out/gate/run/run.exit`, `out/gate/run/binaries.json`,
+and `out/gate/run/config-hashes.json`. Confirm result topology has only Rust
+Matching and the three Go services, and that restart and failure-recovery
+assertions completed. The workflow hashes the exact built Rust Matching
+binary before the mixed run.
+
+Dispatch only when the parent authorizes its serial mixed-gate slot:
+
+```sh
+gh workflow run matching-production-tls-mixed.yml --ref <branch>
+```
+
+No CI run was dispatched in this implementation turn. Lightweight checks
+passed: Python AST parse, Node `--check`, Bash `-n`, `git diff --check`, and a
+harness dry run that generated and inspected the Go/Rust TLS config. No Cargo,
+Go build, services, or mixed lane ran locally. There is therefore no binary
+SHA or runtime TLS acceptance evidence yet; obtain it from the Actions
+artifact (`out/binary.sha256`) and record the Actions run URL, head SHA and
+conclusion after the serialized dispatch. This is a gate implementation, not
+Matching service completion evidence.
+
+Independent TLS review found Matching CA credentials accidentally applied to
+all Node service clients. Corrected Domain/Workflow/Worker/Semaphore clients
+to retain plaintext credentials; only Matching clients use Matching TLS CA.
+Runtime acceptance remains pending.
+
+Second independent review found the Go typed ownership oracle still used
+plaintext. It now consumes CADENCE_MATCHING_GRPC_CA_FILE with a verified TLS
+dialer and localhost server name, matching gate certificate identity. No
+InsecureSkipVerify. Compilation/runtime validation remains Actions-only.
