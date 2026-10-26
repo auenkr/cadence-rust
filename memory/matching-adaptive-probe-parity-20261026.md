@@ -23,8 +23,9 @@ The runner exposes `--probe-adaptive-scaler`, applies scaler tuning only to the 
 ## CI and mixed-gate evidence
 
 - Obsolete mixed gate `40369759414` (head `ca64a5a934c6c04daf0f9385c00adbad09e788ea`) was cancelled; final status/conclusion: `completed` / `cancelled` ([run](https://github.com/auenkr/cadence-rust/actions/runs/40369759414)).
-- Focused `rust-ci.yml` run `40370761303` was dispatched for `cadence-matching` at source SHA `fb5f0ccac3450d549aad16d0c6fdc785302c9b12`; when last inspected it was `in_progress` ([run](https://github.com/auenkr/cadence-rust/actions/runs/40370761303)). This is the code revision before this evidence-only memory update.
-- Corrected adaptive mixed gate: pending dispatch until the focused CI run completes, so the gates remain serial.
+- Focused run `40370761303` for `cadence-matching` at `fb5f0ccac3450d549aad16d0c6fdc785302c9b12` was cancelled as stale after source inspection found the SDK worker did not honor the scaled queue ([run](https://github.com/auenkr/cadence-rust/actions/runs/40370761303), conclusion `cancelled`).
+- Replacement focused `rust-ci.yml` run `40371005274` targets corrected source SHA `ee5b080f8306bd9dd65030aa7ddfe513d54e8b23`; it was `in_progress` when last inspected ([run](https://github.com/auenkr/cadence-rust/actions/runs/40371005274)). The current branch head will be a documentation-only descendant recording this run.
+- Corrected adaptive mixed gate: pending dispatch until replacement focused CI completes, so the gates remain serial.
 - Fresh runner binary SHA256 and final run URLs/conclusions: pending.
 - Local checks are syntax-only (`node --check`, `python3 -m py_compile`, `git diff --check`). No Cargo, Go, formatting, or runtime validation was run locally.
 
