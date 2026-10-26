@@ -337,12 +337,12 @@ mod version_tests {
         batch
             .serialize_for_version(&mut v2, CqlProtocolVersion::V2)
             .unwrap();
-        assert_eq!(v2, [0, 0, 0, 6]);
+        assert_eq!(v2, [0, 0, 0, 0, 6]);
 
         let mut v3 = Vec::new();
         batch
             .serialize_for_version(&mut v3, CqlProtocolVersion::V3)
             .unwrap();
-        assert_eq!(v3, [0, 0, 0, 6, 0]);
+        assert_eq!(v3, [0, 0, 0, 0, 6, 0]);
     }
 }
