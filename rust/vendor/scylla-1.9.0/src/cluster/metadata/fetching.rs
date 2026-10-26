@@ -1628,6 +1628,54 @@ fn map_string_to_cql_type(typ: &str) -> Result<PreColumnType, InvalidCqlType> {
     }
 }
 
+/// Converts the two-column replication representation used by Cassandra 2.x
+/// (`strategy_class` plus JSON `strategy_options`) to the map consumed by the
+/// common keyspace strategy decoder.  Keeping this conversion independent of
+/// row decoding makes legacy schema handling usable by both Cassandra 2.1 and
+/// 2.2, whose metadata tables expose the same logical values.
+fn legacy_replication_map(
+    strategy_class: &str,
+    strategy_options_json: &str,
+) -> Result<HashMap<String, String>, serde_json::Error> {
+    let mut options: HashMap<String, String> = serde_json::from_str(strategy_options_json)?;
+    options.insert("class".to_owned(), strategy_class.to_owned());
+    Ok(options)
+}
+
+/// Maps the scalar Cassandra marshal names used in `system.schema_columns`
+/// onto CQL names understood by the regular schema type parser.
+///
+/// Cassandra 2.x reports validators rather than CQL types. Collection and
+/// composite validators are handled by the full legacy schema decoder; this
+/// scalar mapping is intentionally explicit so unknown marshal types remain
+/// visible as metadata errors instead of being guessed.
+fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
+    match validator.rsplit('.').next()? {
+        "AsciiType" => Some("ascii"),
+        "BooleanType" => Some("boolean"),
+        "BytesType" => Some("blob"),
+        "CounterColumnType" => Some("counter"),
+        "DecimalType" => Some("decimal"),
+        "DoubleType" => Some("double"),
+        "FloatType" => Some("float"),
+        "InetAddressType" => Some("inet"),
+        "Int32Type" => Some("int"),
+        "IntegerType" => Some("varint"),
+        "LongType" => Some("bigint"),
+        "UTF8Type" => Some("text"),
+        "UUIDType" => Some("uuid"),
+        "TimeUUIDType" => Some("timeuuid"),
+        "TimestampType" => Some("timestamp"),
+        "DateType" => Some("date"),
+        "SimpleDateType" => Some("date"),
+        "TimeType" => Some("time"),
+        "ShortType" => Some("smallint"),
+        "ByteType" => Some("tinyint"),
+        "EmptyType" => Some("empty"),
+        _ => None,
+    }
+}
+
 fn parse_cql_type(p: ParserState<'_>) -> ParseResult<(PreColumnType, ParserState<'_>)> {
     if let Ok(p) = p.accept("frozen<") {
         let (inner_type, p) = parse_cql_type(p)?;
@@ -2005,6 +2053,44 @@ mod tests {
     use crate::test_utils::setup_tracing;
 
     use super::*;
+
+    #[test]
+    fn legacy_replication_options_match_modern_strategy_input() {
+        let options = legacy_replication_map(
+            "org.apache.cassandra.locator.NetworkTopologyStrategy",
+            r#"{"dc1":"3","dc2":"2"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            strategy_from_string_map(options).unwrap(),
+            Strategy::NetworkTopologyStrategy {
+                datacenter_repfactors: HashMap::from([
+                    ("dc1".to_owned(), 3),
+                    ("dc2".to_owned(), 2),
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn legacy_scalar_validators_map_to_cql_types() {
+        for (validator, expected) in [
+            ("org.apache.cassandra.db.marshal.UTF8Type", "text"),
+            ("org.apache.cassandra.db.marshal.Int32Type", "int"),
+            ("org.apache.cassandra.db.marshal.LongType", "bigint"),
+            ("org.apache.cassandra.db.marshal.BytesType", "blob"),
+            ("org.apache.cassandra.db.marshal.TimeUUIDType", "timeuuid"),
+        ] {
+            assert_eq!(legacy_scalar_validator_to_cql(validator), Some(expected));
+            assert!(map_string_to_cql_type(expected).is_ok());
+        }
+
+        assert_eq!(
+            legacy_scalar_validator_to_cql("org.example.UnknownType"),
+            None
+        );
+    }
 
     #[test]
     fn test_consistency_mode_parsing() {
