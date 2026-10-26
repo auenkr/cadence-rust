@@ -56,3 +56,32 @@ The new regression is a deterministic actor-lifetime/delayed-write test rather
 than a second subprocess-level simultaneous SIGTERM and SQL-lock test. The
 existing seeded-domain subprocess test continues to verify the real malformed
 SQL path and process exit status.
+
+## Shutdown regression follow-up (2026-10-26)
+
+Review follow-up started from `origin/t3/matching-writer-shutdown-race` at
+`338665e4e`; implementation `7e435116e` remains in its ancestry. Commit
+`628234734e2db84b39e00876325e25801acd18e1` replaces the manually registered
+guard fixture with a real `TaskWriter` created with the fatal channel and
+tracker, performs a real SQLite-backed malformed RunID append, waits through the
+same tracker join used by runtime, and confirms the typed fatal notification is
+available after actor exit. This exercises automatic actor registration and the
+actual fatal append path.
+
+The follow-up is still narrower than the requested deterministic stalled-store
+regression: it does not pause an in-flight store call or drive the registry/runtime
+shutdown entry point. `QueueRegistry::wait_for_writers` is called by
+`MatchingRuntime::shutdown` only after registry owner shutdown; the focused test
+uses its underlying tracker join directly. A test-only controlled
+`MatchingTaskStore` wrapper is needed to gate `create_tasks_with_domains` while
+preserving actual actor/queue registration and then release the append into a
+typed RunID failure. Treat run `40364399938` as validation of the current narrower
+change only, not as evidence that the stronger requested regression is complete.
+
+Go `taskWriter.Stop` closes the stop channel and has no independent timeout
+around persistence already in progress. Rust runtime waits for tracked writer
+actors before launcher fatal-channel sampling, also without an arbitrary added
+shutdown timeout. Therefore a store operation that never returns can hold
+shutdown indefinitely; the effective bound is the persistence driver's own
+operation timeout, if configured. The existing process-level malformed RunID
+subprocess test remains unchanged and continues to cover exit status 2.
