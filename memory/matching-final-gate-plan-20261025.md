@@ -13,6 +13,7 @@ Source inputs: `.github/workflows/*`, `tests/gates/*`, and
 | `matching-mixed-gate.yml` | `extra_args` (default restart + failure-recovery + idle 3) | MySQL, two Rust Matching nodes | MySQL, gRPC | restart, failure recovery, idle |
 | `matching-cassandra-mixed-gate.yml` | `extra_args` (default `--matching-restart --matching-idle-check-seconds 3`) | Go services + Rust Matching, `run-cassandra-lane.sh` | Cassandra | restart, idle; lane itself adds two-node failure recovery |
 | `matching-active-offer-gate.yml` | none | Go History + Rust Matching, `run-mysql-lane.sh --probe-active-offer` | MySQL | restart, failure recovery, idle (flags present; inspect emitted scenarios) |
+| `matching-production-tls-mixed.yml` | none | Go Frontend/History/Worker + standalone Rust Matching, no Go Matching | MySQL, CA/hostname-verified gRPC TLS | restart and two-instance failure recovery requested; artifact assertions required |
 | `matching-http-tls-interop.yml` | none | NOT the full mixed cluster: Go YARPC/Thrift client, Go Ringpop stub + Rust History fixture, `tests/run-matching-thrift-compat.py` | SQLite / embedded | timeout recovery and drain only |
 
 Ignored: `ci-checks`, `breaking_change_reminder`, `fresh-go-deps-check`, `issue-validation`, `semantic-pr` (upstream Go, not gates).
@@ -42,9 +43,10 @@ confirm `headSha == EXPECTED_SHA`, download the artifact, record binary SHA256 (
    drain/restart, SIGKILL recovery, two-node owner takeover and active-offer
    scenario assertions. Its topology remains Go Frontend/History/Worker plus
    Rust Matching, with Go Matching absent.
-10. `gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"`
+10. `gh workflow run matching-production-tls-mixed.yml --ref "$BRANCH"` (real mixed topology; inspect CA/hostname verification, both nodes, typed Go ownership oracle, restart/recovery, SDK outcome and exact binary hash)
+11. `gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"` (separate HTTP/TLS fixture)
 
-Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/TChannel = 4 (+10 fixture); HTTP and TLS = 10 only
+Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/TChannel = 4 (+11 fixture); production gRPC TLS = 10; HTTP/TLS fixture = 11
 (plus workspace TLS unit tests in 1); SDK workflows = every mixed lane via the SDK probe.
 
 ## Lanes lacking a restart or failure-recovery check
@@ -53,15 +55,25 @@ Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/
 - `matching-cassandra-mixed-gate.yml`: default args omit `--matching-failure-recovery`; the notes say the lane script adds two-node recovery. Confirm in `out/gate.log` that the recovery scenario actually ran; otherwise pass `-f extra_args="--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3"`.
 - `matching-http-tls-interop.yml`: fixture only, no Go History/Frontend/Worker, no process restart or failure recovery of the backend (only handshake-timeout recovery and drain). Not a recovery lane.
 - `rust-ci.yml`: unit tests only.
-- All five `matching-production-validation.yml` lanes and `matching-mixed-gate.yml` do pass restart and failure recovery. Thrift lane exercises Thrift transport but the Thrift-specific `run-matching-thrift-compat.py` is only run in lane 10.
+- All five `matching-production-validation.yml` lanes and `matching-mixed-gate.yml` do pass restart and failure recovery. Thrift lane exercises Thrift transport but the Thrift-specific `run-matching-thrift-compat.py` is only run in lane 11.
 
 ## Rerun requirements on the final binary
 
 Every prior result is bound to its named SHA (PostgreSQL 40173134481 and MySQL 40173683827 on `29bdd2b04`; Thrift 40174974248 on the pacing pin;
 workspace 40168414544 on `fade09c5`). The pin is going to change because two RPC production fixes were still under review, so
-rerun ALL ten steps above on the final pin. Rebinding an older run is allowed only with an empty `git diff OLD NEW -- rust go/idls` and
+rerun ALL eleven steps above on the final pin. Rebinding an older run is allowed only with an empty `git diff OLD NEW -- rust go/idls` and
 must be written as an explicit inference, not a new run. Never run on a moved branch head; each run's `out/commit.txt` and `headSha`
 must equal `EXPECTED_SHA`, and each mixed lane must have a fresh `binary.sha256`. Thrift original failure 40174280100 (paced dispatch
 `[8,6,7]`) has no confirmed root cause; if the lane flakes again keep the failing artifact.
 
 Keep the emitted labels (`preliminary-passed`, `acceptanceEligible:false`) unchanged. Matching remains INCOMPLETE until the parity audit rows and these runs are accepted.
+
+## October 26 production TLS gate status
+
+The production TLS gate is now committed (master01148d6cf) and dispatched as
+40364035990. It is not acceptance evidence until actual artifacts are reviewed.
+Two source-review fixes scoped Node TLS credentials to Matching only and added
+CA-backed hostname-verified TLS to the Go typed ownership-error oracle. The
+initial workflow422 parser rejection was fixed by setting CARGO_TARGET_DIR in
+a runner step via GITHUB_ENV. Final candidate must include these gate changes
+and the reviewed fatal writer lifecycle, then run all lanes on one stable SHA.
