@@ -12,6 +12,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::pin;
 use std::task::Poll;
 
+#[path = "go_strconv_isprint.rs"]
+mod go_strconv_isprint;
+
 /// Awaits `future`. A panic while it is polled is logged and returned as `Err(message)`.
 /// Typed through the `Result` bound so `?` inside `future` keeps its error type.
 pub async fn capture<T, E>(
@@ -62,15 +65,41 @@ pub fn is_captured_panic_message(message: &str) -> bool {
 
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     let value = if let Some(text) = payload.downcast_ref::<&str>() {
-        format!("{text:?}")
+        go_quote(text)
     } else if let Some(text) = payload.downcast_ref::<String>() {
-        format!("{text:?}")
+        go_quote(text)
     } else {
         "<non-string panic payload>".to_string()
     };
     let message = format!("panic object is not error: {value}");
     eprintln!("ERROR Panic is captured operation={operation} error={message}");
     message
+}
+
+/// Go `%#v` uses `strconv.Quote`; Rust `Debug` spells controls differently (NUL is `\\0`).
+/// Go `strconv.IsPrint` means Unicode L/M/N/P/S plus ASCII space: C1 controls,
+/// separators, format characters and other non-printing code points must be escaped.
+fn go_quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\x07' => out.push_str("\\a"), '\x08' => out.push_str("\\b"),
+            '\x0c' => out.push_str("\\f"), '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"),
+            '\x0b' => out.push_str("\\v"), '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            ch if !go_strconv_isprint::is_print(ch) => {
+                let code = ch as u32;
+                if code <= 0xff { out.push_str(&format!("\\x{code:02x}")); }
+                else if code <= 0xffff { out.push_str(&format!("\\u{code:04x}")); }
+                else { out.push_str(&format!("\\U{code:08x}")); }
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
@@ -172,6 +201,16 @@ mod tests {
             capture("test", formatted_panic()).await,
             Err(r#"panic object is not error: "value 7""#.to_string())
         );
+    }
+
+    #[test]
+    fn go_quote_matches_go_control_and_unicode_escaping() {
+        assert_eq!(go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
+            r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#);
+        assert_eq!(go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
+            r#""\u2028\xa0́\u200b\xad""#);
+        assert_eq!(go_quote("\u{378}"), r#""\u0378""#);
+        assert_eq!(go_quote("quote: \\\""), r#""quote: \\\"""#);
     }
 
     #[test]
