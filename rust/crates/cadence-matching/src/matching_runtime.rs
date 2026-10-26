@@ -915,6 +915,15 @@ mod tests {
         }
     }
 
+    // Release a blocked append even when a test assertion unwinds.
+    struct AppendReleaseGuard(Arc<DelayedAppendStore>);
+
+    impl Drop for AppendReleaseGuard {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+
     impl DelayedAppendStore {
         fn release(&self) {
             let (lock, changed) = &self.released;
@@ -1307,6 +1316,7 @@ mod tests {
             entered: entered_tx,
             released: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
         });
+        let _release_on_drop = AppendReleaseGuard(store.clone());
         let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
         let history = crate::matching_history::MatchingHistoryClient::new(
             channel,

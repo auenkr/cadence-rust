@@ -140,3 +140,5 @@ existing `standalone_matching_sqlite_malformed_run_id_exits_process_with_two`
 also passed. Its fresh target was `/home/runner/work/_temp/cargo-target-final`.
 This is focused crate validation, not a mixed-cluster gate; no service binary
 SHA256 is applicable. No Cargo, Go, or rustfmt validation ran locally.
+
+Integration review fix: the delayed store now has an owning drop guard created before the writer starts. Every test exit releases its Condvar, including assertion unwinding before the explicit normal-path release. This avoids trapping the blocking writer during test runtime teardown. The previous green run predates this guard; integrated focused validation must rerun.
