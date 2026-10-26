@@ -1607,11 +1607,11 @@ mod tests {
 
     use super::super::Compression;
     use super::SessionBuilder;
-    use crate::frame::CqlProtocolVersion;
     use crate::client::execution_profile::{ExecutionProfile, defaults};
     use crate::cluster::metadata::PeriodicFetchMode;
     use crate::cluster::node::KnownNode;
     use crate::errors::NewSessionError;
+    use crate::frame::CqlProtocolVersion;
     use crate::test_utils::setup_tracing;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
@@ -1628,7 +1628,11 @@ mod tests {
 
     #[test]
     fn session_builder_selects_protocol_version_in_session_config() {
-        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+        for version in [
+            CqlProtocolVersion::V2,
+            CqlProtocolVersion::V3,
+            CqlProtocolVersion::V4,
+        ] {
             let builder = SessionBuilder::new().protocol_version(version);
             assert_eq!(builder.config.protocol_version, version);
         }

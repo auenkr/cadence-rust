@@ -2737,10 +2737,13 @@ mod tests {
     #[test]
     fn protocol_version_propagates_to_host_connection_and_startup_language_version() {
         use super::{ConnectionConfig, cql_version_for_protocol};
-        use crate::cluster::node::ResolvedContactPoint;
         use crate::cluster::metadata::UntranslatedEndpoint;
+        use crate::cluster::node::ResolvedContactPoint;
 
-        assert_eq!(ConnectionConfig::default().protocol_version, CqlProtocolVersion::V4);
+        assert_eq!(
+            ConnectionConfig::default().protocol_version,
+            CqlProtocolVersion::V4
+        );
         assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V2), "3.0.0");
         assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V3), "3.0.0");
         assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V4), "3.0.0");
@@ -2748,9 +2751,19 @@ mod tests {
         let endpoint = UntranslatedEndpoint::ContactPoint(ResolvedContactPoint {
             address: "127.0.0.1:9042".parse().unwrap(),
         });
-        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
-            let config = ConnectionConfig { protocol_version: version, ..ConnectionConfig::default() };
-            assert_eq!(config.to_host_connection_config(&endpoint).protocol_version, version);
+        for version in [
+            CqlProtocolVersion::V2,
+            CqlProtocolVersion::V3,
+            CqlProtocolVersion::V4,
+        ] {
+            let config = ConnectionConfig {
+                protocol_version: version,
+                ..ConnectionConfig::default()
+            };
+            assert_eq!(
+                config.to_host_connection_config(&endpoint).protocol_version,
+                version
+            );
         }
     }
 
