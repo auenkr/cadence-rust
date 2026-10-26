@@ -21,6 +21,19 @@ A driver extension cannot be implemented by changing `SessionBuilder` configurat
 
 Implementing this safely requires a version parameter through connection establishment, framing, stream allocation, every request/response codec and event parser, then Go-compatible golden wire fixtures and server-version interoperability for each supported protocol. The vendored driver currently has a fixed-v4 startup path, so this is substantial driver work; a partial header-only change would corrupt RPC framing or parse responses incorrectly. This task leaves that larger codec change unresolved.
 
+## Follow-up source audit — 2026-10-27
+
+The required CQL codec is not in the vendored Scylla directory. `rust/vendor/scylla-1.9.0/Cargo.toml` pins registry package `scylla-cql = 2.0.0` and `scylla-cql-core = 1.9.0`. The installed source for that exact locked `scylla-cql` version is at `~/.cargo/registry/src/.../scylla-cql-2.0.0/src/frame/mod.rs` (source inspection only; no Cargo invocation was performed):
+
+- `HEADER_SIZE` is the constant 9. `SerializedRequest::make` allocates that size, writes request protocol byte `4`, and `set_stream` writes a two-byte `i16` stream at bytes 2–3.
+- `read_response_frame` reads exactly 9 bytes before it knows the protocol version, parses a two-byte stream and four-byte body size, and rejects every protocol version except 4.
+- The driver connection layer calls these versionless APIs in the shared request router and response reader. Its stream allocator and `FrameParams.stream` are `i16`; startup advertises the fixed `DEFAULT_CQL_PROTOCOL_VERSION` (`4.0.0`).
+- Query, execute, and batch objects are serialized without connection protocol context. Therefore, configuring only the STARTUP string or changing the header size would leave query parameter flags/trailing fields, response metadata, and stream framing inconsistent.
+
+No maintainable alternate configurable Rust CQL driver is already vendored or available through the locked dependencies. Replacing the driver would require reimplementing Matching's required Cassandra behavior and is not a smaller/safe adjustment than extending the existing protocol stack. The immediate implementation prerequisite is to vendor/fork both `scylla-cql` and any required `scylla-cql-core` changes, then carry a protocol-version type from `CassandraSessionConfig` through `SessionBuilder`, every connection, frame read/write and stream allocation, request codecs (including query/execute/batch), response codecs (including rows/prepared/errors), and event handling. Add v2/v3 wire fixtures and server integration coverage before permitting either version in config.
+
+This follow-up is a source audit only. It does not claim protocol v2/v3 support or change the existing explicit rejection. The persistence session remains v4-only until the end-to-end codec and CI coverage above land.
+
 ## Source change and evidence status
 
 The session setup error now names the actual limitation (“only speaks CQL protocol v4”) instead of suggesting that arbitrary versions are negotiated. A source regression covers v4 acceptance and explicit rejection for versions 2, 3, 5, and 6, ensuring unsupported values are not coerced. These source tests were intentionally not run per task constraints. The separate Go config/env/default trace above is static source inspection, not runtime validation.
