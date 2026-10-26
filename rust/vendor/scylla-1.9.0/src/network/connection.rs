@@ -409,9 +409,10 @@ impl ConnectionConfig {
 }
 
 fn cql_version_for_protocol(version: CqlProtocolVersion) -> &'static str {
+    // CQL language version is independent of the native wire protocol.
+    // Pinned gocql defaults to CQL 3.0.0 for all supported frame versions.
     match version {
-        CqlProtocolVersion::V2 => "2.0.0",
-        CqlProtocolVersion::V3 | CqlProtocolVersion::V4 => "3.0.0",
+        CqlProtocolVersion::V2 | CqlProtocolVersion::V3 | CqlProtocolVersion::V4 => "3.0.0",
     }
 }
 
@@ -2740,7 +2741,7 @@ mod tests {
         use crate::cluster::metadata::UntranslatedEndpoint;
 
         assert_eq!(ConnectionConfig::default().protocol_version, CqlProtocolVersion::V4);
-        assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V2), "2.0.0");
+        assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V2), "3.0.0");
         assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V3), "3.0.0");
         assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V4), "3.0.0");
 
