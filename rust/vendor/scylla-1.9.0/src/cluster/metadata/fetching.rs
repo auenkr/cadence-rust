@@ -798,7 +798,7 @@ impl ControlConnection {
         let (rows, legacy_schema): (Vec<(String, HashMap<String, String>, bool)>, bool) =
             match modern_rows.try_collect().await {
                 Ok(rows) => (rows, false),
-                Err(error) if is_missing_table_or_column(&error) => {
+                Err(error) if is_missing_modern_keyspace_schema(&error) => {
                     self.query_filter_keyspace_name::<(String, String, String, bool)>(
                         keyspace_metadata_query(true),
                         keyspaces_to_fetch,
@@ -2148,6 +2148,27 @@ fn consistency_mode_from_str(consistency: Option<&str>) -> ConsistencyMode {
 // FIXME: This catches every database error carrying this error code, not only the ones caused by
 // a missing table or column.
 // For more information please refer to https://github.com/scylladb/scylla-rust-driver/pull/349#discussion_r762050262
+fn is_missing_modern_keyspace_schema(error: &MetadataFetchError) -> bool {
+    let MetadataFetchError {
+        error: MetadataFetchErrorKind::NextRowError(NextRowError::NextPageError(
+            NextPageError::RequestFailure(RequestError::LastAttemptError(
+                RequestAttemptError::DbError(DbError::Invalid, message),
+            )),
+        )),
+        table: "system_schema.keyspaces",
+    } = error else {
+        return false;
+    };
+    let message = message.to_ascii_lowercase();
+    (message.contains("system_schema")
+        && (message.contains("does not exist")
+            || message.contains("unknown keyspace")
+            || message.contains("unconfigured keyspace")))
+        || (message.contains("keyspaces")
+            && (message.contains("unconfigured table")
+                || message.contains("unconfigured columnfamily")))
+}
+
 fn is_missing_table_or_column(error: &MetadataFetchError) -> bool {
     matches!(
         error,
@@ -2217,6 +2238,33 @@ mod tests {
     use crate::test_utils::setup_tracing;
 
     use super::*;
+
+    #[test]
+    fn legacy_schema_fallback_preserves_unrelated_invalid_errors() {
+        let error = |message: &str| MetadataFetchError {
+            error: MetadataFetchErrorKind::NextRowError(NextRowError::NextPageError(
+                NextPageError::RequestFailure(RequestError::LastAttemptError(
+                    RequestAttemptError::DbError(DbError::Invalid, message.to_owned()),
+                )),
+            )),
+            table: "system_schema.keyspaces",
+        };
+        for message in [
+            "Keyspace system_schema does not exist",
+            "unconfigured keyspace system_schema",
+            "unconfigured columnfamily keyspaces",
+            "unconfigured table keyspaces",
+        ] {
+            assert!(is_missing_modern_keyspace_schema(&error(message)), "{message}");
+        }
+        for message in [
+            "Invalid consistency level",
+            "Undefined column name replication",
+            "unconfigured table application_table",
+        ] {
+            assert!(!is_missing_modern_keyspace_schema(&error(message)), "{message}");
+        }
+    }
 
     #[test]
     fn legacy_replication_options_match_modern_strategy_input() {
