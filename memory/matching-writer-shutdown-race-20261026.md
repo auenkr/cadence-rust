@@ -109,3 +109,34 @@ coverage. The query-touched rustfmt check passed after formatting was generated
 by the Actions workflow and applied from its uploaded patch. No local Cargo,
 Go, or rustfmt validation was run. This is focused crate CI, not mixed-cluster
 evidence and has no service binary SHA requirement.
+
+## Delayed append during runtime shutdown follow-up (2026-10-26)
+
+Commit `ea0a367c95bd13c26e131a8452438d47feaafb56` adds
+`runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification` in
+`matching_runtime.rs`. Its delegating test store blocks the real
+`create_tasks_with_domains` persistence call, then resumes into SQLite's
+existing malformed RunID conversion. The test builds `MatchingRuntime` with
+durable queues and the fatal sender, loads its owner through `QueueRegistry::get`
+(which constructs/registers the actual TaskWriter), starts a real enqueue, waits
+for the persistence barrier, and invokes `MatchingRuntime::shutdown`. It asserts
+shutdown remains pending while the append is blocked, releases persistence,
+then asserts shutdown returns only after the fatal receiver contains the typed
+`SqlRunIdError::Malformed` cause. No production timeout or logic change was
+introduced.
+
+The first focused clean-target run
+[40371022510](https://github.com/auenkr/cadence-rust/actions/runs/40371022510)
+failed at the changed-runtime formatting gate; Go oracle steps passed, while
+Clippy, Formatting, and Test were skipped. The CI-requested rustfmt wrapping was
+applied in commit `10c7e8995aefe717b3d4388a405b07fee3a5b7bd`.
+
+The follow-up focused clean-target run
+[40371677686](https://github.com/auenkr/cadence-rust/actions/runs/40371677686)
+on that head succeeded. Changed-runtime formatting, Clippy, Formatting, and Test
+all passed; `runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification`
+passed, and the Matching library reported 724 passed, 0 failed, 3 ignored. The
+existing `standalone_matching_sqlite_malformed_run_id_exits_process_with_two`
+also passed. Its fresh target was `/home/runner/work/_temp/cargo-target-final`.
+This is focused crate validation, not a mixed-cluster gate; no service binary
+SHA256 is applicable. No Cargo, Go, or rustfmt validation ran locally.
