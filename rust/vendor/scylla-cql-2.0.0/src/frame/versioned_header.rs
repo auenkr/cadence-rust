@@ -53,7 +53,7 @@ impl Header {
 }
 
 fn validate_flags(version: CqlProtocolVersion, flags: u8) -> io::Result<()> {
-    let allowed = match version { CqlProtocolVersion::V2 => 0x03, CqlProtocolVersion::V3 => 0x07, CqlProtocolVersion::V4 => 0x0f };
+    let allowed = match version { CqlProtocolVersion::V2 => 0x03, CqlProtocolVersion::V3 => 0x03, CqlProtocolVersion::V4 => 0x0f };
     if flags & !allowed != 0 { Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported frame flags")) } else { Ok(()) }
 }
 
@@ -65,6 +65,14 @@ mod tests {
             for stream in streams { let h = Header { version:v,direction:Direction::Response,flags:0,stream,opcode:8,length:0x12345678 }; let bytes=h.encode().unwrap(); assert_eq!(bytes.len(),v.header_len()); assert_eq!(Header::decode(&mut bytes.as_slice(),Direction::Response).unwrap(),h); }
         }
         let h=Header{version:CqlProtocolVersion::V2,direction:Direction::Request,flags:0,stream:128,opcode:7,length:0}; assert!(h.encode().is_err());
+    }
+    #[test]
+    fn custom_payload_flag_requires_v4() {
+        let header = Header { version: CqlProtocolVersion::V3,
+            direction: Direction::Response, flags: 0x04,
+            stream: 0, opcode: 8, length: 0 };
+        assert!(header.encode().is_err());
+        assert!(Header { version: CqlProtocolVersion::V4, ..header }.encode().is_ok());
     }
     #[test] fn fragmented_read_and_direction_flags_are_checked() {
         struct Fragment<'a>(&'a [u8]); impl Read for Fragment<'_> { fn read(&mut self,b:&mut [u8])->io::Result<usize>{ if self.0.is_empty(){return Ok(0)} let n=1.min(b.len()); b[..n].copy_from_slice(&self.0[..n]); self.0=&self.0[n..]; Ok(n) } }
