@@ -275,7 +275,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs > fmt.log 2>&1
+          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs ../rust/vendor/scylla-1.9.0/src/cluster/metadata/fetching.rs > fmt.log 2>&1
           result=$?
           echo "$result" > fmt.exit
           cat fmt.log
@@ -318,6 +318,15 @@ jobs:
           echo "$result" > cql-driver-test.exit
           cat cql-driver-test.log
           exit "$result"
+      - name: Test vendored scylla metadata readers directly
+        working-directory: rust
+        run: |
+          set +e
+          cargo test -p scylla --lib cluster::metadata::fetching::tests:: > cql-metadata-test.log 2>&1
+          result=$?
+          echo "$result" > cql-metadata-test.exit
+          cat cql-metadata-test.log
+          exit "$result"
       - name: Compare live Go tally and Rust Matching emissions
         if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
         run: |
@@ -356,6 +365,7 @@ jobs:
             rust/test.log
             rust/cql-frame-test.log
             rust/cql-driver-test.log
+            rust/cql-metadata-test.log
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
