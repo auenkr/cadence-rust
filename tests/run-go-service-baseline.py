@@ -504,9 +504,11 @@ if args.matching_idle_check_seconds is not None:
         f'  - value: {args.matching_idle_check_seconds}s\n'
     )
 if args.probe_adaptive_scaler:
-    # Keep adaptive tuning scoped to the probe decision queue. Go's static partition listing
-    # remains at its default of one; the adaptive config is persisted independently.
+    # Go's scaler requires both adaptive scaling and cached partition counts.
+    # Keep both settings scoped to the probe decision queue; static partition
+    # listing remains at its default of one and is independent of adaptive config.
     for key, value in (('matching.enableAdaptiveScaler', 'true'),
+                       ('matching.enableGetNumberOfPartitionsFromCache', 'true'),
                        ('matching.partitionUpscaleRPS', '1'),
                        ('matching.partitionUpscaleSustainedDuration', '1s'),
                        ('matching.adaptiveScalerUpdateInterval', '1s'),
