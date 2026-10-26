@@ -245,9 +245,21 @@ async function adaptiveScaler(ctx) {
   // Go Matching getAllPartitions uses the filtered static numTasklistWritePartitions
   // setting for this queue (the default is one). Adaptive partition config is
   // persisted separately and is verified above; it does not change this listing.
-  const staticListing = await ctx.call('WorkflowAPI', 'ListTaskListPartitions', { domain: ctx.domain, taskList: { name: taskList } });
-  assert.deepEqual(staticListing.decisionTaskListPartitions.map(partition => partition.key), [taskList],
-    'Go-shaped listing must follow static matching.numTasklistWritePartitions, independently of adaptive config');
+  const listRequest = { domain: ctx.domain, taskList: { name: taskList } };
+  const rustListings = [];
+  for (const node of ctx.directClients) {
+    const response = await new Promise((resolve, reject) => node.client.ListTaskListPartitions(listRequest,
+      new ctx.grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, value) => (error ? reject(error) : resolve(value))));
+    rustListings.push({ source: node.tchannel, response });
+  }
+  const goListing = await ctx.call('WorkflowAPI', 'ListTaskListPartitions', listRequest);
+  for (const { source, response } of rustListings) {
+    assert.deepEqual(response.decisionTaskListPartitions.map(partition => partition.key), [taskList],
+      `${source} Go-shaped listing must follow static matching.numTasklistWritePartitions independently of adaptive config`);
+    assert.deepEqual(response, goListing, `${source} listing differs from Go Frontend`);
+  }
+  assert.deepEqual(goListing.decisionTaskListPartitions.map(partition => partition.key), [taskList],
+    'Go Frontend listing must follow static matching.numTasklistWritePartitions, independently of adaptive config');
 
   // Use the existing Go SDK worker/client on the changed queue. Its normal
   // workflow and activity loop proves tasks scheduled after the update still
@@ -266,11 +278,12 @@ async function adaptiveScaler(ctx) {
       `adaptive load workflow ${workflowExecution.workflowId} did not complete exactly once`);
     completedLoad++;
   }
+  assert.equal(completedLoad, load, 'not all 24 adaptive load workflows completed');
   return { result: 'passed', taskList, enableAdaptiveScaler: true, cacheBackedPartitionCount: true,
     scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
     updated: { version: String(config.version), writePartitions: writeCount,
       readPartitions: Object.keys(config.readPartitions || {}).length },
-    staticListing: staticListing.decisionTaskListPartitions.map(partition => partition.key),
+    staticListing: goListing.decisionTaskListPartitions.map(partition => partition.key),
     sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update' };
 }
 

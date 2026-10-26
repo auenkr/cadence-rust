@@ -68,6 +68,7 @@ parser.add_argument('--matching-backlog-forward', action='store_true', help='pro
 parser.add_argument('--probe-pg-gc-domain', action='store_true', help='probe scenario: PostgreSQL task GC convergence and domain metadata checks (requires --postgres)')
 parser.add_argument('--probe-query-standby', action='store_true', help='probe scenario: QueryWorkflow answered by a poller that only polls the parent partition (requires --rust-services matching)')
 parser.add_argument('--probe-list-partitions', action='store_true', help='probe scenario: ListTaskListPartitions/DescribeTaskList compared with Go semantics on every Rust node and through the Go Frontend; sets matching.numTasklistWritePartitions=3 (requires --rust-services matching)')
+parser.add_argument('--probe-adaptive-scaler', action='store_true', help='probe adaptive Matching scaling with Go SDK completion on a scaled queue (requires --rust-services matching)')
 parser.add_argument('--probe-durable-restart', action='store_true', help='probe scenario: stop Rust Matching with multi-partition backlog rows, restart, drain every partition (requires --rust-services matching)')
 parser.add_argument('--probe-auto-config-hint', action='store_true', help='probe scenario: decision and activity polls through Go Frontend carry autoConfigHint with enableAutoConfig=false; sets matching.enableClientAutoConfig=false in the dynamic config (requires --rust-services matching, not with --matching-configstore)')
 parser.add_argument('--probe-active-offer', action='store_true', help='probe active decision-task offer: wait for a real Rust Matching poller, then schedule via Go Frontend/History and require task-token delivery without persisted fallback')
@@ -342,8 +343,8 @@ if args.matching_failure_recovery and not production_matching:
     parser.error('--matching-failure-recovery requires --rust-services matching')
 if args.probe_pg_gc_domain and not args.postgres:
     parser.error('--probe-pg-gc-domain requires --postgres')
-if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart) and not production_matching:
-    parser.error('--probe-query-standby, --probe-list-partitions and --probe-durable-restart require --rust-services matching')
+if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler) and not production_matching:
+    parser.error('Matching probes require --rust-services matching')
 if args.probe_auto_config_hint and not production_matching:
     parser.error('--probe-auto-config-hint requires --rust-services matching')
 if args.probe_auto_config_hint and args.matching_configstore:
@@ -502,6 +503,15 @@ if args.matching_idle_check_seconds is not None:
         '\nmatching.idleTasklistCheckInterval:\n'
         f'  - value: {args.matching_idle_check_seconds}s\n'
     )
+if args.probe_adaptive_scaler:
+    # Keep adaptive tuning scoped to the probe decision queue. Go's static partition listing
+    # remains at its default of one; the adaptive config is persisted independently.
+    for key, value in (('matching.enableAdaptiveScaler', 'true'),
+                       ('matching.partitionUpscaleRPS', '1'),
+                       ('matching.partitionUpscaleSustainedDuration', '1s'),
+                       ('matching.adaptiveScalerUpdateInterval', '1s'),
+                       ('matching.qpsTrackerInterval', '1s')):
+        dynamic_text += f'\n{key}:\n  - value: {value}\n    constraints: {{taskListName: production-adaptive-scaler-probe, taskType: 0}}\n'
 if args.probe_list_partitions:
     # Go engine.go getAllPartitions reads this key to build the ListTaskListPartitions answer.
     # Only the listing fixture needs three partitions. A global override also
@@ -1094,7 +1104,8 @@ try:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
                     for flag, name in ((args.probe_pg_gc_domain, 'CADENCE_PROBE_PG_GC_DOMAIN'), (args.probe_query_standby, 'CADENCE_PROBE_QUERY_STANDBY'),
                                        (args.probe_list_partitions, 'CADENCE_PROBE_LIST_PARTITIONS'), (args.probe_durable_restart, 'CADENCE_PROBE_DURABLE_RESTART'), (args.probe_auto_config_hint, 'CADENCE_PROBE_AUTO_CONFIG_HINT'),
-                                       (args.probe_active_offer, 'CADENCE_PROBE_ACTIVE_OFFER')):
+                                       (args.probe_active_offer, 'CADENCE_PROBE_ACTIVE_OFFER'),
+                                       (args.probe_adaptive_scaler, 'CADENCE_PROBE_ADAPTIVE_SCALER')):
                         if flag:
                             probe_environment[name] = '1'
                     if args.matching_configstore:
