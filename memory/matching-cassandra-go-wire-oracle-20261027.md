@@ -12,7 +12,7 @@ swap, 2048 pids) on `ubuntu-latest`.
 
 The runner exercises the Matching Cassandra queue's CQL shape against a real
 server: CAS enqueue, bound SELECT/result decoding, automatic prepare/execute
-for bound statements, count, logged batch, range and point delete, and server
+for bound statements, count, logged batch, point delete, and server
 query errors. DDL requests produce schema-change results and exercise the
 control connection's schema event subscription. `gocql.UnsetValue` is
 intentionally never supplied: it is a v4+ query parameter feature and cannot
@@ -21,12 +21,12 @@ protocol, head SHA, command result and server log. This is backend runtime
 evidence for the pinned Go client; it is not Rust or service-gate evidence, and
 does not claim that Go's success proves Rust support.
 
-The first Actions run exposed a test query issue: Cassandra 2.1/2.2 reject a
-strict `>` lower bound in a primary-key DELETE with `Invalid operator >`. The
-harness uses an inclusive single-row range delete (`>= id AND <= id`) for the
-protocol exercise. The Go queue source's strict range-delete templates remain
-unchanged and are outside what this isolated oracle claims to validate; they
-need a separate schema/backend runtime follow-up.
+The Actions run showed Cassandra 2.1/2.2 reject both `>` and `>=` in a
+primary-key DELETE with `Invalid operator` (the same operators work in the
+Matching queue range SELECT). The oracle therefore covers point deletes only;
+it does not claim runtime validation of the Go queue's strict range-delete
+templates. That behavior needs separate investigation against the service's
+supported Cassandra/schema combination.
 
 ## Wire contract to carry into Rust driver work
 

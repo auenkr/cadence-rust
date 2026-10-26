@@ -70,11 +70,9 @@ func main() {
 	step("queue-batch")
 	batch.Query(`INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?)`, queueType, int64(1002), []byte("batch"), time.Now().UTC())
 	must(session.ExecuteBatch(batch))
-	step("queue-range-delete")
-	// Cassandra 2.1/2.2 reject a strict lower-bound DELETE on a primary-key
-	// component; use the inclusive boundary for this protocol/backend probe.
-	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id >= ? AND message_id <= ?`, queueType, int64(1002), int64(1002)).Exec())
-	step("queue-point-delete")
+	step("queue-point-delete-batch-row")
+	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1002)).Exec())
+	step("queue-point-delete-cas-row")
 	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1001)).Exec())
 	step("server-error")
 	if err := session.Query(`SELECT definitely_missing FROM queue WHERE queue_type = ?`, queueType).Exec(); err == nil {
