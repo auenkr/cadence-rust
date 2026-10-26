@@ -127,3 +127,8 @@ Independent TLS review found Matching CA credentials accidentally applied to
 all Node service clients. Corrected Domain/Workflow/Worker/Semaphore clients
 to retain plaintext credentials; only Matching clients use Matching TLS CA.
 Runtime acceptance remains pending.
+
+Second independent review found the Go typed ownership oracle still used
+plaintext. It now consumes CADENCE_MATCHING_GRPC_CA_FILE with a verified TLS
+dialer and localhost server name, matching gate certificate identity. No
+InsecureSkipVerify. Compilation/runtime validation remains Actions-only.
