@@ -825,8 +825,70 @@ fn notified_failover_domains(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_persistence::matching_sqlite::SqliteTaskStore;
+    use cadence_persistence::{
+        matching_blob::{BlobEncoding, TaskData, TaskListData},
+        matching_sqlite::{AllocatedTask, SqliteTaskStore, TaskListKey, TaskListRecord},
+        matching_task_store::{MatchingTaskStore, Result as StoreResult},
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Pauses the real store call used by TaskWriter while delegating every
+    /// other operation to SQLite. The released append reaches SQLite's normal
+    /// malformed-RunID conversion and typed error path.
+    struct DelayedAppendStore {
+        inner: Arc<SqliteTaskStore>,
+        entered: tokio::sync::mpsc::UnboundedSender<()>,
+        released: (std::sync::Mutex<bool>, std::sync::Condvar),
+    }
+
+    impl MatchingTaskStore for DelayedAppendStore {
+        fn get_task_list(&self, key: &TaskListKey) -> StoreResult<TaskListRecord> {
+            self.inner.get_task_list(key)
+        }
+        fn lease(&self, key: &TaskListKey, kind: i16, previous_range: i64, now_nanos: i64) -> StoreResult<TaskListRecord> {
+            self.inner.lease(key, kind, previous_range, now_nanos)
+        }
+        fn update_task_list(&self, key: &TaskListKey, range: i64, data: TaskListData, now_nanos: i64) -> StoreResult<()> {
+            self.inner.update_task_list(key, range, data, now_nanos)
+        }
+        fn create_tasks_with_domains(&self, key: &TaskListKey, range: i64, now_nanos: i64, tasks: &[(uuid::Uuid, &AllocatedTask)]) -> StoreResult<()> {
+            self.entered.send(()).expect("test is waiting for delayed append");
+            let (lock, changed) = &self.released;
+            let mut released = lock.lock().expect("append release lock");
+            while !*released {
+                released = changed.wait(released).expect("append release lock");
+            }
+            let _ = now_nanos;
+            self.inner.create_tasks_with_domains(
+                key,
+                range,
+                tasks.iter().map(|(domain, task)| (*domain, *task)),
+            )
+        }
+        fn get_tasks(&self, key: &TaskListKey, read_level: i64, max_read_level: i64, batch_size: i64) -> StoreResult<Vec<AllocatedTask>> {
+            self.inner.get_tasks(key, read_level, max_read_level, batch_size)
+        }
+        fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> StoreResult<i64> {
+            self.inner.task_list_size(key, ack_level)
+        }
+        fn complete_task(&self, key: &TaskListKey, task_id: i64) -> StoreResult<()> {
+            self.inner.complete_task(key, task_id)
+        }
+        fn complete_tasks_less_than(&self, key: &TaskListKey, inclusive_task_id: i64, limit: i64) -> StoreResult<usize> {
+            self.inner.complete_tasks_less_than(key, inclusive_task_id, limit)
+        }
+        fn delete_task_list(&self, key: &TaskListKey, range: i64) -> StoreResult<()> {
+            self.inner.delete_task_list(key, range)
+        }
+    }
+
+    impl DelayedAppendStore {
+        fn release(&self) {
+            let (lock, changed) = &self.released;
+            *lock.lock().expect("append release lock") = true;
+            changed.notify_all();
+        }
+    }
 
     #[test]
     fn failover_callback_selection_matches_go_and_advances_baseline() {
@@ -1194,5 +1256,90 @@ mod tests {
         );
         runtime.shutdown().await.unwrap();
         runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification() {
+        let directory = tempfile::tempdir().unwrap();
+        let sqlite = Arc::new(
+            SqliteTaskStore::create(directory.path().join("delayed-writer.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
+        let store = Arc::new(DelayedAppendStore {
+            inner: sqlite,
+            entered: entered_tx,
+            released: (std::sync::Mutex::new(false), std::sync::Condvar::new()),
+        });
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            channel,
+            Duration::from_millis(10),
+            1024,
+        );
+        let (fatal_tx, mut fatal_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut runtime = MatchingRuntime::with_durable_queues(
+            crate::handlers::AppState::default(),
+            store.clone(),
+            history,
+            NonZeroU32::new(100).unwrap(),
+            Duration::from_secs(1),
+            Arc::new(|| Duration::ZERO),
+        )
+        .with_fatal_writer(fatal_tx);
+
+        // Load the owner from the runtime's registry so TaskWriter is created
+        // through the same automatic tracker registration used in production.
+        let key = TaskListKey {
+            domain_id: uuid::Uuid::from_u128(9),
+            name: "runtime-delayed-fatal".into(),
+            task_type: 0,
+        };
+        let handle = runtime
+            .registry
+            .as_ref()
+            .expect("durable runtime registry")
+            .get(key.clone(), 0, 1)
+            .await
+            .unwrap();
+        let append = tokio::spawn(async move {
+            handle
+                .enqueue(
+                    TaskData::default().with_request_run_id("runtime-delayed-malformed-run-id"),
+                    key.domain_id,
+                    0,
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered_rx.recv())
+            .await
+            .expect("TaskWriter never entered the delayed persistence operation")
+            .expect("delayed persistence sender dropped");
+
+        let mut shutdown = tokio::spawn(async move { runtime.shutdown().await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut shutdown)
+                .await
+                .is_err(),
+            "runtime shutdown returned while the actual writer append remained in flight"
+        );
+
+        store.release();
+        tokio::time::timeout(Duration::from_secs(2), shutdown)
+            .await
+            .expect("runtime shutdown did not finish after releasing persistence")
+            .expect("runtime shutdown task panicked")
+            .unwrap();
+        let append_error = tokio::time::timeout(Duration::from_secs(2), append)
+            .await
+            .expect("append did not complete after releasing persistence")
+            .expect("append task panicked")
+            .expect_err("malformed RunID append unexpectedly succeeded");
+        assert_eq!(append_error.code(), tonic::Code::Internal);
+        assert!(matches!(
+            fatal_rx.try_recv().expect("fatal cause must be available when runtime shutdown returns"),
+            cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. }
+                if raw == "runtime-delayed-malformed-run-id"
+        ));
     }
 }
