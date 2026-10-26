@@ -2,6 +2,7 @@
 //! withdraw an enqueued request or block the writer's buffered response.
 use cadence_persistence::{matching_queue::DurableTaskQueue, matching_sqlite::AllocatedTask};
 use rand::SeedableRng;
+use std::collections::VecDeque;
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -9,7 +10,6 @@ use std::{
     },
     time::Duration,
 };
-use std::collections::VecDeque;
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tonic::Status;
 #[derive(Clone, Copy)]
@@ -49,7 +49,12 @@ async fn retry_write<T, F: std::future::Future<Output = Result<T, WriteError>>>(
     let mut previous = None;
     let mut attempt = 0;
     loop {
-        let error = match crate::matching_persistence_limiter::with_persistence_retry_count(attempt, operation()).await {
+        let error = match crate::matching_persistence_limiter::with_persistence_retry_count(
+            attempt,
+            operation(),
+        )
+        .await
+        {
             Ok(value) => return Ok(value),
             Err(error) => error,
         };
@@ -82,8 +87,14 @@ struct AdmissionGuard {
 impl Drop for AdmissionGuard {
     fn drop(&mut self) {
         if self.armed {
-            let mut waiters = self.rendezvous.waiters.lock().expect("Matching rendezvous queue lock");
-            if let Some(index) = waiters.iter().position(|(id, _)| *id == self.id) { waiters.remove(index); }
+            let mut waiters = self
+                .rendezvous
+                .waiters
+                .lock()
+                .expect("Matching rendezvous queue lock");
+            if let Some(index) = waiters.iter().position(|(id, _)| *id == self.id) {
+                waiters.remove(index);
+            }
         }
     }
 }
@@ -93,8 +104,15 @@ async fn receive_rendezvous(
 ) -> Option<Request> {
     loop {
         let notified = rendezvous.notify.notified();
-        if let Some((_, mut request)) = rendezvous.waiters.lock().expect("Matching rendezvous queue lock").pop_front() {
-            if let Some(accepted) = request.accepted.take() { let _ = accepted.send(()); }
+        if let Some((_, mut request)) = rendezvous
+            .waiters
+            .lock()
+            .expect("Matching rendezvous queue lock")
+            .pop_front()
+        {
+            if let Some(accepted) = request.accepted.take() {
+                let _ = accepted.send(());
+            }
             return Some(request);
         }
         tokio::select! {
@@ -104,8 +122,14 @@ async fn receive_rendezvous(
     }
 }
 fn try_receive_rendezvous(rendezvous: &Rendezvous) -> Option<Request> {
-    let (_, mut request) = rendezvous.waiters.lock().expect("Matching rendezvous queue lock").pop_front()?;
-    if let Some(accepted) = request.accepted.take() { let _ = accepted.send(()); }
+    let (_, mut request) = rendezvous
+        .waiters
+        .lock()
+        .expect("Matching rendezvous queue lock")
+        .pop_front()?;
+    if let Some(accepted) = request.accepted.take() {
+        let _ = accepted.send(());
+    }
     Some(request)
 }
 struct Inner {
@@ -208,26 +232,36 @@ impl TaskWriter {
     /// Install Go's per-task-list writer settings. Batch size is sampled at
     /// each getWriteBatch loop condition; append timeout is sampled per call.
     pub fn new_with_live_config(
-        queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
+        queue: Arc<DurableTaskQueue>,
+        notify: Arc<Notify>,
+        config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
     ) -> Self {
         Self::new_with_fatal_channel(queue, notify, config, live_config, None, None)
     }
     pub(crate) fn new_with_fatal_channel(
-        queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
+        queue: Arc<DurableTaskQueue>,
+        notify: Arc<Notify>,
+        config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
-    fatal: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
-    tracker: Option<Arc<WriterTracker>>,
+        fatal: Option<
+            tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>,
+        >,
+        tracker: Option<Arc<WriterTracker>>,
     ) -> Self {
-        let capacity = live_config.as_ref().map(|provider| provider().2)
+        let capacity = live_config
+            .as_ref()
+            .map(|provider| provider().2)
             .unwrap_or(config.outstanding_appends);
-        let capacity = usize::try_from(capacity)
-            .expect("negative matching outstanding task append threshold");
-        let rendezvous = (capacity == 0).then(|| Arc::new(Rendezvous {
-            waiters: Mutex::new(VecDeque::new()),
-            notify: Notify::new(),
-            next_id: AtomicU64::new(1),
-        }));
+        let capacity =
+            usize::try_from(capacity).expect("negative matching outstanding task append threshold");
+        let rendezvous = (capacity == 0).then(|| {
+            Arc::new(Rendezvous {
+                waiters: Mutex::new(VecDeque::new()),
+                notify: Notify::new(),
+                next_id: AtomicU64::new(1),
+            })
+        });
         let (sender, receiver) = mpsc::channel(capacity.max(1));
         let (stop, mut stopped_rx) = watch::channel(false);
         let inner = Arc::new(Inner {
@@ -270,27 +304,39 @@ impl TaskWriter {
                     let mut batch = vec![first];
                     let mut additional = 0i64;
                     loop {
-                        let maximum = live_config.as_ref().map(|provider| provider().0).unwrap_or(config.max_batch_size);
-                        if additional >= maximum { break; }
+                        let maximum = live_config
+                            .as_ref()
+                            .map(|provider| provider().0)
+                            .unwrap_or(config.max_batch_size);
+                        if additional >= maximum {
+                            break;
+                        }
                         match try_receive_rendezvous(rendezvous) {
-                            Some(request) => { batch.push(request); additional += 1; }
+                            Some(request) => {
+                                batch.push(request);
+                                additional += 1;
+                            }
                             None => break,
                         }
                     }
                     batch
-                } else { drain_batch_with(&mut vec![first], &mut receiver, || {
-                    live_config
-                        .as_ref()
-                        .map(|provider| provider().0)
-                        .unwrap_or(config.max_batch_size)
-                }) };
+                } else {
+                    drain_batch_with(&mut vec![first], &mut receiver, || {
+                        live_config
+                            .as_ref()
+                            .map(|provider| provider().0)
+                            .unwrap_or(config.max_batch_size)
+                    })
+                };
                 let data = batch
                     .iter()
                     .map(|request| request.task.clone())
                     .collect::<Vec<_>>();
                 let queue_copy = queue.clone();
-                let result =
-                    crate::matching_blocking::run(move || queue_copy.append_pending(&data, crate::matching_dispatch::now())).await;
+                let result = crate::matching_blocking::run(move || {
+                    queue_copy.append_pending(&data, crate::matching_dispatch::now())
+                })
+                .await;
                 let result = match result {
                     Ok(Ok(tasks)) => Ok(tasks),
                     Ok(Err(error)) => {
@@ -302,8 +348,12 @@ impl TaskWriter {
                                 (&error, kind),
                                 (QueueError::Storage(StorageError::ConditionFailed(_)), 1)
                             );
-                        if let QueueError::Storage(StorageError::MalformedSqlMatchingRunId(cause)) = &error {
-                            if let Some(fatal) = &fatal { let _ = fatal.send(cause.clone()); }
+                        if let QueueError::Storage(StorageError::MalformedSqlMatchingRunId(cause)) =
+                            &error
+                        {
+                            if let Some(fatal) = &fatal {
+                                let _ = fatal.send(cause.clone());
+                            }
                         }
                         let status = match (&error, kind) {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
@@ -386,19 +436,45 @@ impl TaskWriter {
             return Err(stopped().into());
         }
         // Each append attempt (including rewrite retries) gets a fresh sample.
-        let timeout_nanos = self.inner.live_config.as_ref().map(|provider| provider().1)
-            .unwrap_or_else(|| self.inner.config.append_timeout.as_nanos().min(i64::MAX as u128) as i64);
+        let timeout_nanos = self
+            .inner
+            .live_config
+            .as_ref()
+            .map(|provider| provider().1)
+            .unwrap_or_else(|| {
+                self.inner
+                    .config
+                    .append_timeout
+                    .as_nanos()
+                    .min(i64::MAX as u128) as i64
+            });
         let now = tokio::time::Instant::now();
-        let deadline = if timeout_nanos <= 0 { now } else { now + Duration::from_nanos(timeout_nanos as u64) };
+        let deadline = if timeout_nanos <= 0 {
+            now
+        } else {
+            now + Duration::from_nanos(timeout_nanos as u64)
+        };
         let (response, receiver) = oneshot::channel();
-        let request = Request { task, response, accepted: None };
+        let request = Request {
+            task,
+            response,
+            accepted: None,
+        };
         if let Some(rendezvous) = &self.inner.rendezvous {
             let (accepted, accepted_rx) = oneshot::channel();
             let mut request = request;
             request.accepted = Some(accepted);
             let id = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
-            rendezvous.waiters.lock().expect("Matching rendezvous queue lock").push_back((id, request));
-            let mut admission = AdmissionGuard { rendezvous: rendezvous.clone(), id, armed: true };
+            rendezvous
+                .waiters
+                .lock()
+                .expect("Matching rendezvous queue lock")
+                .push_back((id, request));
+            let mut admission = AdmissionGuard {
+                rendezvous: rendezvous.clone(),
+                id,
+                armed: true,
+            };
             rendezvous.notify.notify_one();
             match tokio::time::timeout_at(deadline, accepted_rx).await {
                 Ok(Ok(())) => admission.armed = false,
@@ -437,23 +513,51 @@ mod tests {
         // rather than manually incrementing the tracker. The standalone append test below covers
         // the typed SQL error path; this verifies shutdown's join observes the actor's send.
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("join.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("join.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain = Uuid::from_u128(9);
-        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "joined-fatal".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: domain,
+                    name: "joined-fatal".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
         let tracker = Arc::new(WriterTracker::default());
         let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
-        let writer = TaskWriter::new_with_fatal_channel(queue, Arc::new(Notify::new()), WriterConfig::default(), None, Some(fatal_tx), Some(tracker.clone()));
-        let expected = writer.append(WriteTask {
-            data: TaskData::default().with_request_run_id("delayed-malformed-run-id"),
-            source_domain: domain,
-            schedule_to_start_seconds: 0,
-        }).await.unwrap_err();
+        let writer = TaskWriter::new_with_fatal_channel(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+            None,
+            Some(fatal_tx),
+            Some(tracker.clone()),
+        );
+        let expected = writer
+            .append(WriteTask {
+                data: TaskData::default().with_request_run_id("delayed-malformed-run-id"),
+                source_domain: domain,
+                schedule_to_start_seconds: 0,
+            })
+            .await
+            .unwrap_err();
         assert_eq!(expected.code(), tonic::Code::Internal);
 
         // This is the same join QueueRegistry/MatchingRuntime use before the launcher
         // samples its fatal receiver. The actor's failure send precedes releasing its guard.
         tracker.wait_idle().await;
-        assert!(matches!(fatal_rx.try_recv().unwrap(), cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "delayed-malformed-run-id"));
+        assert!(
+            matches!(fatal_rx.try_recv().unwrap(), cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "delayed-malformed-run-id")
+        );
         writer.stop();
     }
     use cadence_persistence::{
@@ -466,19 +570,50 @@ mod tests {
     #[tokio::test]
     async fn standalone_fatal_channel_receives_typed_sql_run_id_failure_before_append_error() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("fatal.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("fatal.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain = Uuid::from_u128(9);
-        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "fatal".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: domain,
+                    name: "fatal".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
         let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
-        let writer = TaskWriter::new_with_fatal_channel(queue, Arc::new(Notify::new()), WriterConfig::default(), None, Some(fatal_tx), None);
-        let error = writer.append(WriteTask {
-            data: TaskData::default().with_request_run_id("malformed-run-id"),
-            source_domain: domain,
-            schedule_to_start_seconds: 0,
-        }).await.unwrap_err();
+        let writer = TaskWriter::new_with_fatal_channel(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+            None,
+            Some(fatal_tx),
+            None,
+        );
+        let error = writer
+            .append(WriteTask {
+                data: TaskData::default().with_request_run_id("malformed-run-id"),
+                source_domain: domain,
+                schedule_to_start_seconds: 0,
+            })
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
-        let fatal = tokio::time::timeout(Duration::from_secs(1), fatal_rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(fatal, cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "malformed-run-id"));
+        let fatal = tokio::time::timeout(Duration::from_secs(1), fatal_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(fatal, cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "malformed-run-id")
+        );
         writer.stop();
     }
 
@@ -498,20 +633,37 @@ mod tests {
                     let (accept_tx, accept_rx) = oneshot::channel();
                     let id = (pass * 100 + contender) as u64;
                     let request = Request {
-                        task: WriteTask { data: TaskData { workflow_id: id.to_string(), ..Default::default() }, source_domain: Uuid::from_u128(1), schedule_to_start_seconds: 0 },
+                        task: WriteTask {
+                            data: TaskData {
+                                workflow_id: id.to_string(),
+                                ..Default::default()
+                            },
+                            source_domain: Uuid::from_u128(1),
+                            schedule_to_start_seconds: 0,
+                        },
                         response,
                         accepted: Some(accept_tx),
                     };
                     let ticket = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
-                    rendezvous.waiters.lock().unwrap().push_back((ticket, request));
-                    let _guard = AdmissionGuard { rendezvous: rendezvous.clone(), id: ticket, armed: true };
+                    rendezvous
+                        .waiters
+                        .lock()
+                        .unwrap()
+                        .push_back((ticket, request));
+                    let _guard = AdmissionGuard {
+                        rendezvous: rendezvous.clone(),
+                        id: ticket,
+                        armed: true,
+                    };
                     rendezvous.notify.notify_one();
                     accept_rx.await.unwrap();
                     id
                 }));
             }
             tokio::task::yield_now().await;
-            while rendezvous.waiters.lock().unwrap().len() != 24 { tokio::task::yield_now().await; }
+            while rendezvous.waiters.lock().unwrap().len() != 24 {
+                tokio::task::yield_now().await;
+            }
             let mut stopped = watch::channel(false).1;
             let first = receive_rendezvous(&rendezvous, &mut stopped).await.unwrap();
             let mut ids = vec![first.task.data.workflow_id.parse::<u64>().unwrap()];
@@ -521,22 +673,41 @@ mod tests {
             assert_eq!(ids.len(), 24);
             assert_eq!(rendezvous.waiters.lock().unwrap().len(), 0);
             let mut completed = Vec::new();
-            for waiter in accepted { completed.push(waiter.await.unwrap()); }
-            ids.sort_unstable(); completed.sort_unstable();
+            for waiter in accepted {
+                completed.push(waiter.await.unwrap());
+            }
+            ids.sort_unstable();
+            completed.sort_unstable();
             assert_eq!(ids, completed);
         }
     }
 
     #[tokio::test]
     async fn zero_capacity_unaccepted_cancellation_removes_published_offer() {
-        let rendezvous = Arc::new(Rendezvous { waiters: Mutex::new(VecDeque::new()), notify: Notify::new(), next_id: AtomicU64::new(1) });
+        let rendezvous = Arc::new(Rendezvous {
+            waiters: Mutex::new(VecDeque::new()),
+            notify: Notify::new(),
+            next_id: AtomicU64::new(1),
+        });
         let (response, _response_rx) = oneshot::channel();
         let (accepted, _accepted_rx) = oneshot::channel();
-        let request = Request { task: WriteTask { data: TaskData::default(), source_domain: Uuid::from_u128(1), schedule_to_start_seconds: 0 }, response, accepted: Some(accepted) };
+        let request = Request {
+            task: WriteTask {
+                data: TaskData::default(),
+                source_domain: Uuid::from_u128(1),
+                schedule_to_start_seconds: 0,
+            },
+            response,
+            accepted: Some(accepted),
+        };
         let id = rendezvous.next_id.fetch_add(1, Ordering::Relaxed);
         rendezvous.waiters.lock().unwrap().push_back((id, request));
         {
-            let _cancelled = AdmissionGuard { rendezvous: rendezvous.clone(), id, armed: true };
+            let _cancelled = AdmissionGuard {
+                rendezvous: rendezvous.clone(),
+                id,
+                armed: true,
+            };
             assert_eq!(rendezvous.waiters.lock().unwrap().len(), 1);
         }
         assert!(rendezvous.waiters.lock().unwrap().is_empty());
@@ -621,10 +792,19 @@ mod tests {
     async fn matching_writer_samples_signed_capacity_once_and_preserves_zero() {
         use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain = Uuid::from_u128(1);
-        let key = TaskListKey { domain_id: domain, name: "capacity".into(), task_type: 0 };
-        let queue = Arc::new(DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let key = TaskListKey {
+            domain_id: domain,
+            name: "capacity".into(),
+            task_type: 0,
+        };
+        let queue = Arc::new(
+            DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap(),
+        );
         let capacity = Arc::new(AtomicI64::new(0));
         let samples = Arc::new(AtomicUsize::new(0));
         let live = {
@@ -635,26 +815,94 @@ mod tests {
                 (100i64, 5_000_000_000i64, capacity.load(Ordering::SeqCst))
             }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
         };
-        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
-        assert!(writer.inner.rendezvous.is_some(), "zero means a rendezvous, not a one-slot queue");
-        assert_eq!(samples.load(Ordering::SeqCst), 1, "capacity is sampled at owner construction");
+        let writer = TaskWriter::new_with_live_config(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+            Some(live),
+        );
+        assert!(
+            writer.inner.rendezvous.is_some(),
+            "zero means a rendezvous, not a one-slot queue"
+        );
+        assert_eq!(
+            samples.load(Ordering::SeqCst),
+            1,
+            "capacity is sampled at owner construction"
+        );
         capacity.store(4, Ordering::SeqCst);
-        assert!(writer.inner.rendezvous.is_some(), "live updates do not resize an existing owner");
+        assert!(
+            writer.inner.rendezvous.is_some(),
+            "live updates do not resize an existing owner"
+        );
         writer.stop();
 
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
-        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "negative-capacity".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: domain,
+                    name: "negative-capacity".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
         let negative = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            TaskWriter::new(queue, Arc::new(Notify::new()), WriterConfig { outstanding_appends: -1, ..WriterConfig::default() })
+            TaskWriter::new(
+                queue,
+                Arc::new(Notify::new()),
+                WriterConfig {
+                    outstanding_appends: -1,
+                    ..WriterConfig::default()
+                },
+            )
         }));
-        assert!(negative.is_err(), "negative capacity must fail construction like Go make(chan, negative)");
+        assert!(
+            negative.is_err(),
+            "negative capacity must fail construction like Go make(chan, negative)"
+        );
 
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
-        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "positive-capacity".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
-        let writer = TaskWriter::new(queue, Arc::new(Notify::new()), WriterConfig { outstanding_appends: 2, ..WriterConfig::default() });
-        assert_eq!(writer.inner.sender.capacity(), 2, "positive capacity retains exactly its configured buffer");
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: domain,
+                    name: "positive-capacity".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
+        let writer = TaskWriter::new(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig {
+                outstanding_appends: 2,
+                ..WriterConfig::default()
+            },
+        );
+        assert_eq!(
+            writer.inner.sender.capacity(),
+            2,
+            "positive capacity retains exactly its configured buffer"
+        );
         writer.stop();
     }
 
@@ -662,10 +910,26 @@ mod tests {
     async fn matching_writer_zero_capacity_times_out_unaccepted_and_keeps_accepted_write_on_stop() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain = Uuid::from_u128(1);
-        let key = TaskListKey { domain_id: domain, name: "rendezvous-gates".into(), task_type: 0 };
-        let queue = Arc::new(DurableTaskQueue::open(store.clone(), key.clone(), 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let key = TaskListKey {
+            domain_id: domain,
+            name: "rendezvous-gates".into(),
+            task_type: 0,
+        };
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store.clone(),
+                key.clone(),
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
         let calls = Arc::new(AtomicUsize::new(0));
         let entered = Arc::new(std::sync::Barrier::new(2));
         let release = Arc::new(std::sync::Barrier::new(2));
@@ -676,37 +940,90 @@ mod tests {
             Arc::new(move || {
                 let call = calls.fetch_add(1, Ordering::SeqCst);
                 // construction=0, first append timeout=1, writer batch sample=2
-                if call == 2 { entered.wait(); release.wait(); }
-                let timeout = if call == 3 { 80_000_000i64 } else { 5_000_000_000i64 };
+                if call == 2 {
+                    entered.wait();
+                    release.wait();
+                }
+                let timeout = if call == 3 {
+                    80_000_000i64
+                } else {
+                    5_000_000_000i64
+                };
                 (0i64, timeout, 0i64)
             }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
         };
-        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
+        let writer = TaskWriter::new_with_live_config(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+            Some(live),
+        );
         let first_writer = writer.clone();
-        let first = tokio::spawn(async move { first_writer.append(WriteTask {
-            data: TaskData { workflow_id: "accepted".into(), ..Default::default() },
-            source_domain: domain,
-            schedule_to_start_seconds: 0,
-        }).await });
-        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        let first = tokio::spawn(async move {
+            first_writer
+                .append(WriteTask {
+                    data: TaskData {
+                        workflow_id: "accepted".into(),
+                        ..Default::default()
+                    },
+                    source_domain: domain,
+                    schedule_to_start_seconds: 0,
+                })
+                .await
+        });
+        crate::matching_blocking::run({
+            let entered = entered.clone();
+            move || entered.wait()
+        })
+        .await
+        .unwrap();
 
-        let busy = writer.append(WriteTask { data: TaskData::default(), source_domain: domain, schedule_to_start_seconds: 0 }).await.unwrap_err();
-        assert_eq!(busy.code(), tonic::Code::ResourceExhausted, "no second append is accepted while persistence admission is busy");
+        let busy = writer
+            .append(WriteTask {
+                data: TaskData::default(),
+                source_domain: domain,
+                schedule_to_start_seconds: 0,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            busy.code(),
+            tonic::Code::ResourceExhausted,
+            "no second append is accepted while persistence admission is busy"
+        );
 
         let cancelled_writer = writer.clone();
-        let cancelled = tokio::spawn(async move { cancelled_writer.append(WriteTask {
-            data: TaskData { workflow_id: "cancelled-before-acceptance".into(), ..Default::default() },
-            source_domain: domain,
-            schedule_to_start_seconds: 0,
-        }).await });
+        let cancelled = tokio::spawn(async move {
+            cancelled_writer
+                .append(WriteTask {
+                    data: TaskData {
+                        workflow_id: "cancelled-before-acceptance".into(),
+                        ..Default::default()
+                    },
+                    source_domain: domain,
+                    schedule_to_start_seconds: 0,
+                })
+                .await
+        });
         tokio::task::yield_now().await;
         cancelled.abort();
 
         writer.stop();
-        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
-        let first_result = tokio::time::timeout(Duration::from_secs(1), first).await.unwrap().unwrap();
-        assert!(first_result.is_ok() || first_result.as_ref().unwrap_err().code() == tonic::Code::Internal,
-            "the accepted write may race its successful response with Stop");
+        crate::matching_blocking::run({
+            let release = release.clone();
+            move || release.wait()
+        })
+        .await
+        .unwrap();
+        let first_result = tokio::time::timeout(Duration::from_secs(1), first)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            first_result.is_ok()
+                || first_result.as_ref().unwrap_err().code() == tonic::Code::Internal,
+            "the accepted write may race its successful response with Stop"
+        );
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 let tasks = store.get_tasks(&key, 0, 10, 10).unwrap();
@@ -772,20 +1089,45 @@ mod tests {
     async fn matching_writer_resamples_live_append_timeout_for_saturated_enqueues() {
         use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain_id = Uuid::from_u128(1);
-        let key = TaskListKey { domain_id, name: "timeouts".into(), task_type: 0 };
-        let queue = Arc::new(DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let key = TaskListKey {
+            domain_id,
+            name: "timeouts".into(),
+            task_type: 0,
+        };
+        let queue = Arc::new(
+            DurableTaskQueue::open(store, key, 0, NonZeroU32::new(100).unwrap(), 1).unwrap(),
+        );
         let domains = cadence_persistence::InMemoryDomainStore::default();
-        domains.create(cadence_api::types::DomainInfo {
-            name: "domain".into(), uuid: domain_id.to_string(), ..Default::default()
-        }, Default::default(), Default::default(), false).unwrap();
+        domains
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "domain".into(),
+                    uuid: domain_id.to_string(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
         let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
         let timeout_value = |value: &str| DynamicConfigValue {
-            value: Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(value).unwrap())),
+            value: Some(DataBlob::new(
+                EncodingType::JSON,
+                serde_json::to_vec(value).unwrap(),
+            )),
             filters: vec![],
         };
-        overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("20ms")]);
+        overlay.lock().unwrap().update(
+            false,
+            "matching.appendTaskTimeout",
+            vec![timeout_value("20ms")],
+        );
         let provider = crate::grpc_matching::task_writer_live_provider(domains, overlay.clone());
         let domain = domain_id.to_string();
         let live = Arc::new(move || provider(&domain, "timeouts", 0));
@@ -793,16 +1135,37 @@ mod tests {
         // timeout decision is made by append's real enqueue path.
         let (sender, receiver) = mpsc::channel(1);
         let (stop, _) = watch::channel(false);
-        let writer = TaskWriter { inner: Arc::new(Inner {
-            sender, rendezvous: None, stop, queue, config: WriterConfig::default(), live_config: Some(live),
-            parked: Mutex::new(Some(receiver)),
-        }) };
-        let task = WriteTask { data: TaskData::default(), source_domain: domain_id, schedule_to_start_seconds: 0 };
-        assert_eq!(writer.append(task.clone()).await.unwrap_err().code(), tonic::Code::Internal,
-            "an accepted request keeps waiting for its response until its original deadline");
-        overlay.lock().unwrap().update(false, "matching.appendTaskTimeout", vec![timeout_value("0s")]);
-        assert_eq!(writer.append(task).await.unwrap_err().code(), tonic::Code::ResourceExhausted,
-            "the next saturated enqueue uses the updated nonpositive timeout");
+        let writer = TaskWriter {
+            inner: Arc::new(Inner {
+                sender,
+                rendezvous: None,
+                stop,
+                queue,
+                config: WriterConfig::default(),
+                live_config: Some(live),
+                parked: Mutex::new(Some(receiver)),
+            }),
+        };
+        let task = WriteTask {
+            data: TaskData::default(),
+            source_domain: domain_id,
+            schedule_to_start_seconds: 0,
+        };
+        assert_eq!(
+            writer.append(task.clone()).await.unwrap_err().code(),
+            tonic::Code::Internal,
+            "an accepted request keeps waiting for its response until its original deadline"
+        );
+        overlay.lock().unwrap().update(
+            false,
+            "matching.appendTaskTimeout",
+            vec![timeout_value("0s")],
+        );
+        assert_eq!(
+            writer.append(task).await.unwrap_err().code(),
+            tonic::Code::ResourceExhausted,
+            "the next saturated enqueue uses the updated nonpositive timeout"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -810,38 +1173,97 @@ mod tests {
         use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
         use std::sync::atomic::{AtomicUsize, Ordering};
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
         let domain_id = Uuid::from_u128(1);
-        let key = TaskListKey { domain_id, name: "batch-live".into(), task_type: 0 };
-        let queue = Arc::new(DurableTaskQueue::open(store.clone(), key.clone(), 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let key = TaskListKey {
+            domain_id,
+            name: "batch-live".into(),
+            task_type: 0,
+        };
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store.clone(),
+                key.clone(),
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
         let domains = cadence_persistence::InMemoryDomainStore::default();
-        domains.create(cadence_api::types::DomainInfo {
-            name: "domain".into(), uuid: domain_id.to_string(), ..Default::default()
-        }, Default::default(), Default::default(), false).unwrap();
+        domains
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "domain".into(),
+                    uuid: domain_id.to_string(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
         let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
-        overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
-            value: Some(DataBlob::new(EncodingType::JSON, b"0".to_vec())), filters: vec![],
-        }]);
+        overlay.lock().unwrap().update(
+            false,
+            "matching.maxTaskBatchSize",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(EncodingType::JSON, b"0".to_vec())),
+                filters: vec![],
+            }],
+        );
         let provider = crate::grpc_matching::task_writer_live_provider(domains, overlay.clone());
         let entered = Arc::new(std::sync::Barrier::new(2));
         let release = Arc::new(std::sync::Barrier::new(2));
         let calls = Arc::new(AtomicUsize::new(0));
         let live = {
-            let entered = entered.clone(); let release = release.clone(); let calls = calls.clone();
+            let entered = entered.clone();
+            let release = release.clone();
+            let calls = calls.clone();
             let domain = domain_id.to_string();
             Arc::new(move || {
-                if calls.fetch_add(1, Ordering::SeqCst) == 1 { entered.wait(); release.wait(); }
+                if calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                    entered.wait();
+                    release.wait();
+                }
                 provider(&domain, "batch-live", 0)
             }) as Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>
         };
-        let writer = TaskWriter::new_with_live_config(queue, Arc::new(Notify::new()), WriterConfig::default(), Some(live));
+        let writer = TaskWriter::new_with_live_config(
+            queue,
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+            Some(live),
+        );
         let make_request = |n: usize| {
             let (response, receiver) = oneshot::channel();
-            (Request { task: WriteTask { data: TaskData { workflow_id: format!("w{n}"), ..Default::default() }, source_domain: domain_id, schedule_to_start_seconds: 0 }, response, accepted: None }, receiver)
+            (
+                Request {
+                    task: WriteTask {
+                        data: TaskData {
+                            workflow_id: format!("w{n}"),
+                            ..Default::default()
+                        },
+                        source_domain: domain_id,
+                        schedule_to_start_seconds: 0,
+                    },
+                    response,
+                    accepted: None,
+                },
+                receiver,
+            )
         };
         let (first, first_rx) = make_request(0);
         writer.inner.sender.send(first).await.unwrap();
-        crate::matching_blocking::run({ let entered = entered.clone(); move || entered.wait() }).await.unwrap();
+        crate::matching_blocking::run({
+            let entered = entered.clone();
+            move || entered.wait()
+        })
+        .await
+        .unwrap();
         let mut responses = vec![first_rx];
         for n in 1..5 {
             let (request, response) = make_request(n);
@@ -850,12 +1272,28 @@ mod tests {
         }
         // Change the config while this same actor is paused immediately before
         // Go-style getWriteBatch sampling.
-        overlay.lock().unwrap().update(false, "matching.maxTaskBatchSize", vec![DynamicConfigValue {
-            value: Some(DataBlob::new(EncodingType::JSON, b"1".to_vec())), filters: vec![],
-        }]);
-        crate::matching_blocking::run({ let release = release.clone(); move || release.wait() }).await.unwrap();
-        for response in responses { response.await.unwrap().unwrap(); }
-        assert_eq!(calls.load(Ordering::SeqCst), 6, "one construction-time capacity sample plus Go's per-loop batch samples");
+        overlay.lock().unwrap().update(
+            false,
+            "matching.maxTaskBatchSize",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(EncodingType::JSON, b"1".to_vec())),
+                filters: vec![],
+            }],
+        );
+        crate::matching_blocking::run({
+            let release = release.clone();
+            move || release.wait()
+        })
+        .await
+        .unwrap();
+        for response in responses {
+            response.await.unwrap().unwrap();
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            6,
+            "one construction-time capacity sample plus Go's per-loop batch samples"
+        );
         assert_eq!(store.get_tasks(&key, 0, 10, 10).unwrap().len(), 5);
         writer.stop();
     }
