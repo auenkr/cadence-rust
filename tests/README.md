@@ -462,3 +462,45 @@ real Go handlers over gRPC; see
 [`shard-distributor-interoperability/README.md`](shard-distributor-interoperability/README.md)
 for the scope and current source-review status. It does not establish full
 Matching parity or production process assembly.
+# Downloaded Matching gate artifact review
+
+Use `tests/validate-matching-gate-artifact.py` after downloading a single
+mixed-lane artifact. It validates the recorded commit, binary SHA256, zero
+build/gate/lane/run exits, explicit Go/Rust service topology, and mandatory
+SDK outcomes from the standard workflow, restart, and crash recovery logs,
+plus a successful Matching shutdown record. These mandatory checks cannot be
+weakened by omitting command-line options or passing generic markers. For an
+upcoming lane, set `EXPECTED_SHA` to the full SHA actually tested by that lane
+and `ARTIFACT_DIR` to its downloaded artifact directory:
+
+```sh
+ARTIFACT_DIR=/path/to/downloaded/lane
+EXPECTED_SHA=<full-40-character-SHA-recorded-by-the-lane>
+python3 tests/validate-matching-gate-artifact.py "$ARTIFACT_DIR" \
+  --expected-sha "$EXPECTED_SHA"
+```
+
+Optional `--sdk-marker` and `--lifecycle-json` arguments add assertions; they
+never replace the mandatory checks. SDK markers are searched in
+`gate/run/probe.log`; lifecycle assertions check exact JSON values below
+`gate/run/`, with dotted keys supported. A requested CLI flag,
+`acceptanceEligible`, generic preliminary status, or mere presence of a result
+object is not proof of scenario success.
+
+Some older artifacts share filenames but omit newer result fields. Missing
+standard SDK or lifecycle evidence fails; inspect nonstandard lanes manually
+and extend the checker before treating them as eligible. A pass establishes
+artifact consistency and the named emitted assertions only. It does not
+independently establish SDK semantics, complete service parity, physical
+partition identity, or acceptance.
+
+For reference, the retained active-offer and TLS lanes can be rechecked with
+their own recorded source SHAs (these are historical evidence, not validation
+of a newer candidate):
+
+```sh
+python3 tests/validate-matching-gate-artifact.py /mnt/storage/service/ci-evidence/40361176805 \
+  --expected-sha 12a9a12cfb1cc72a04a2fd3443a8ce964b53cc8c
+python3 tests/validate-matching-gate-artifact.py /mnt/storage/service/ci-evidence/40364035990 \
+  --expected-sha 01148d6cf9c1e18a26e1e3385337d5f0c53bd534
+```
