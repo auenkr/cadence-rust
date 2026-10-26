@@ -46,9 +46,10 @@ jobs:
           NODE_PATH: ${{ runner.temp }}/node-grpc/node_modules
         run: |
           set +e
-          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --probe-active-offer --matching-idle-check-seconds 3' > out/command.txt
+          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --probe-active-offer --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3' > out/command.txt
           tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" \
-            --probe-active-offer --matching-idle-check-seconds 3 > out/gate.log 2>&1
+            --probe-active-offer --matching-restart --matching-failure-recovery \
+            --matching-idle-check-seconds 3 > out/gate.log 2>&1
           result=$?
           echo "$result" > out/gate.exit
           tail -60 out/gate.log | cut -c1-300
