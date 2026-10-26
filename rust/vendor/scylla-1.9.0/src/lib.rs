@@ -128,8 +128,10 @@ pub mod frame {
 
     pub(crate) use scylla_cql::frame::{
         FrameParams, SerializedRequest, parse_response_body_extensions, read_response_frame,
+        read_response_frame_with_version,
         request, server_event_type,
     };
+    pub(crate) use scylla_cql::frame::versioned_header;
     pub use scylla_cql_core::frame::frame_errors;
     pub use scylla_cql_core::frame::protocol_features;
     pub use scylla_cql_core::frame::{Authenticator, Compression};

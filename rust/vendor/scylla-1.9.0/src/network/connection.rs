@@ -31,6 +31,7 @@ use crate::frame::{
     response::{ResponseOpcode, ResponseV2 as Response, event::EventV2 as Event, result},
     server_event_type::EventTypeV2 as EventType,
 };
+use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::policies::address_translator::{AddressTranslator, UntranslatedPeer};
 use crate::policies::timestamp_generator::TimestampGenerator;
 use crate::response::query_result::QueryResult;
@@ -127,6 +128,7 @@ struct RouterHandle {
     /// already hold, so the hint needs no extra plumbing through
     /// `HostConnectionConfig` or `router()`.
     keepalive_hint: Notify,
+    protocol_version: CqlProtocolVersion,
 }
 
 impl RouterHandle {
@@ -141,7 +143,7 @@ impl RouterHandle {
         compression: Option<Compression>,
         tracing: bool,
     ) -> Result<TaskResponse, InternalRequestError> {
-        let serialized_request = SerializedRequest::make(request, compression, tracing)?;
+        let serialized_request = SerializedRequest::make_with_version(request, compression, tracing, self.protocol_version)?;
         let request_id = self.allocate_request_id();
 
         let (response_sender, receiver) = oneshot::channel();
@@ -326,6 +328,7 @@ pub(crate) struct ConnectionConfig {
     pub(crate) local_ip_address: Option<IpAddr>,
     pub(crate) shard_aware_local_port_range: ShardAwarePortRange,
     pub(crate) compression: Option<Compression>,
+    pub(crate) protocol_version: CqlProtocolVersion,
     pub(crate) tcp_socket_options: TcpSocketOptions,
     pub(crate) timestamp_generator: Option<Arc<dyn TimestampGenerator>>,
     pub(crate) tls_provider: Option<TlsProvider>,
@@ -378,6 +381,7 @@ impl ConnectionConfig {
             local_ip_address: self.local_ip_address,
             shard_aware_local_port_range: self.shard_aware_local_port_range.clone(),
             compression: self.compression,
+            protocol_version: self.protocol_version,
             tcp_socket_options: self.tcp_socket_options.clone(),
             timestamp_generator: self.timestamp_generator.clone(),
             tls_config,
@@ -407,6 +411,7 @@ pub(crate) struct HostConnectionConfig {
     pub(crate) local_ip_address: Option<IpAddr>,
     pub(crate) shard_aware_local_port_range: ShardAwarePortRange,
     pub(crate) compression: Option<Compression>,
+    pub(crate) protocol_version: CqlProtocolVersion,
     pub(crate) tcp_socket_options: TcpSocketOptions,
     pub(crate) timestamp_generator: Option<Arc<dyn TimestampGenerator>>,
     pub(crate) tls_config: Option<TlsConfig>,
@@ -438,6 +443,7 @@ impl Default for HostConnectionConfig {
             local_ip_address: None,
             shard_aware_local_port_range: ShardAwarePortRange::EPHEMERAL_PORT_RANGE,
             compression: None,
+            protocol_version: CqlProtocolVersion::V4,
             tcp_socket_options: TcpSocketOptions::default(),
             timestamp_generator: None,
             event_sender: None,
@@ -475,6 +481,7 @@ impl Default for ConnectionConfig {
             local_ip_address: None,
             shard_aware_local_port_range: ShardAwarePortRange::EPHEMERAL_PORT_RANGE,
             compression: None,
+            protocol_version: CqlProtocolVersion::V4,
             tcp_socket_options: TcpSocketOptions::default(),
             timestamp_generator: None,
             event_sender: None,
@@ -591,6 +598,7 @@ impl Connection {
             request_id_generator: AtomicU64::new(0),
             orphan_notification_sender,
             keepalive_hint: Notify::new(),
+            protocol_version: config.protocol_version,
         });
 
         let _worker_handle = Self::run_router(
@@ -1669,7 +1677,7 @@ impl Connection {
         // and writer futures are run on the same fiber, and both of them
         // are carefully written in such a way that they do not hold the lock
         // across .await points. Therefore, it should not be too expensive.
-        let handler_map = StdMutex::new(ResponseHandlerMap::new());
+        let handler_map = StdMutex::new(ResponseHandlerMap::new(config.protocol_version));
 
         let write_coalescing_delay = config.write_coalescing_delay;
 
@@ -1685,6 +1693,7 @@ impl Connection {
             &handler_map,
             config.event_sender.map(|(sender, _)| sender),
             config.compression,
+            config.protocol_version,
         );
         let w = Self::writer(
             BufWriter::with_capacity(8192, write_half),
@@ -1719,9 +1728,10 @@ impl Connection {
         handler_map: &StdMutex<ResponseHandlerMap>,
         event_sender: Option<mpsc::Sender<Event>>,
         compression: Option<Compression>,
+        protocol_version: CqlProtocolVersion,
     ) -> Result<(), BrokenConnectionError> {
         loop {
-            let (params, opcode, body) = frame::read_response_frame(&mut read_half)
+            let (params, opcode, body) = frame::read_response_frame_with_version(&mut read_half, protocol_version)
                 .await
                 .map_err(BrokenConnectionErrorKind::FrameHeaderParseError)?;
             let response = TaskResponse {
@@ -2517,9 +2527,9 @@ enum HandlerLookupResult {
 }
 
 impl ResponseHandlerMap {
-    fn new() -> Self {
+    fn new(protocol_version: CqlProtocolVersion) -> Self {
         Self {
-            stream_set: StreamIdSet::new(),
+            stream_set: StreamIdSet::new(protocol_version),
             handlers: HashMap::new(),
             request_to_stream: HashMap::new(),
             orphanage_tracker: OrphanageTracker::new(),
@@ -2597,9 +2607,14 @@ struct StreamIdSet {
 pub(crate) const MAX_IN_FLIGHT_REQUESTS: usize = i16::MAX as usize + 1;
 
 impl StreamIdSet {
-    fn new() -> Self {
+    fn new(protocol_version: CqlProtocolVersion) -> Self {
+        let max = if protocol_version == CqlProtocolVersion::V2 {
+            128
+        } else {
+            MAX_IN_FLIGHT_REQUESTS
+        };
         Self {
-            used_bitmap: vec![0; MAX_IN_FLIGHT_REQUESTS / 64].into_boxed_slice(),
+            used_bitmap: vec![0; max / 64].into_boxed_slice(),
         }
     }
 
@@ -2702,7 +2717,18 @@ mod tests {
     use tokio::task::JoinHandle;
     use tokio::time::Instant;
 
-    use super::{HostConnectionConfig, open_connection, options};
+    use super::{CqlProtocolVersion, HostConnectionConfig, open_connection, options};
+
+    #[test]
+    fn v2_stream_allocator_uses_only_nonnegative_i8_ids() {
+        let mut ids = super::StreamIdSet::new(CqlProtocolVersion::V2);
+        for expected in 0..=127i16 {
+            assert_eq!(ids.allocate(), Some(expected));
+        }
+        assert_eq!(ids.allocate(), None);
+        ids.free(127);
+        assert_eq!(ids.allocate(), Some(127));
+    }
     use crate::cluster::metadata::UntranslatedEndpoint;
     use crate::cluster::node::ResolvedContactPoint;
     use crate::errors::{

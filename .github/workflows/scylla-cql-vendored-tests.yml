@@ -1,0 +1,26 @@
+name: vendored scylla-cql tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["matching-*", "t3/**"]
+    paths:
+      - "rust/vendor/scylla-cql-2.0.0/**"
+      - "rust/Cargo.toml"
+      - ".github/workflows/scylla-cql-vendored-tests.yml"
+
+concurrency:
+  group: vendored-scylla-cql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check changed vendored Rust formatting
+        run: rustfmt --edition 2024 --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/versioned_header.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
+      - name: Test vendored CQL frame codecs directly
+        run: cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame::
