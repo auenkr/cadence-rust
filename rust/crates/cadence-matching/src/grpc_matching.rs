@@ -444,6 +444,15 @@ impl Matching {
         }
         self
     }
+    pub(crate) fn with_fatal_writer(
+        mut self,
+        fatal: tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>,
+    ) -> Self {
+        if let Some(queues) = self.queues.take() {
+            self.queues = Some(queues.with_fatal_writer(fatal));
+        }
+        self
+    }
     pub(crate) fn inbound_metrics(&self) -> &crate::matching_metrics::MatchingMetrics {
         &self.metrics
     }

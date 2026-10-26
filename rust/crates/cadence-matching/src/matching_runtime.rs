@@ -145,6 +145,7 @@ impl MatchingRuntime {
             cadence_persistence::matching_blob::SqlRunIdError,
         >,
     ) -> Self {
+        self.matching = self.matching.clone().with_fatal_writer(fatal.clone());
         if let Some(registry) = self.registry.take() {
             self.registry = Some(registry.with_fatal_writer(fatal));
         }
