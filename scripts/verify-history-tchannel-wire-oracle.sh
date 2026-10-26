@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-expected="$repo_root/rust/crates/cadence-server/tests/fixtures/history_tchannel_wire_oracle.json"
+expected="$repo_root/rust/crates/cadence-matching/tests/fixtures/history_tchannel_wire_oracle.json"
 export GOTOOLCHAIN=go1.25.14
 go_version="$(cd "$repo_root/go" && go version)"
 case "$go_version" in
@@ -13,8 +13,11 @@ case "$go_version" in
     ;;
 esac
 
-observed="$(mktemp "${TMPDIR:-/tmp}/history-tchannel-wire-oracle.XXXXXX.json")"
-trap 'rm -f "$observed"' EXIT
+observed="${CADENCE_THRIFT_WIRE_FIXTURE_OUT:-}"
+if [[ -z "$observed" ]]; then
+  observed="$(mktemp "${TMPDIR:-/tmp}/history-tchannel-wire-oracle.XXXXXX.json")"
+  trap 'rm -f "$observed"' EXIT
+fi
 (
   cd "$repo_root/go"
   CADENCE_THRIFT_WIRE_FIXTURE_OUT="$observed" \

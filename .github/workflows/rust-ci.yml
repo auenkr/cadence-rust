@@ -75,6 +75,42 @@ jobs:
         with:
           go-version: "1.25.14"
           cache: false
+      - name: Regenerate and compare History TChannel wire oracle
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/history-tchannel-wire-oracle"
+          mkdir -p "$evidence"
+          printf '%s\n' 'scripts/verify-history-tchannel-wire-oracle.sh' > "$evidence/command.txt"
+          printf '%s\n' 'Run the Go generator twice and compare both outputs byte-for-byte.' > "$evidence/stability-command.txt"
+          git rev-parse HEAD > "$evidence/head-sha.txt"
+          CADENCE_THRIFT_WIRE_FIXTURE_OUT="$evidence/generated.json" \
+            scripts/verify-history-tchannel-wire-oracle.sh > "$evidence/verify.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/verify.exit"
+          (cd go && CADENCE_THRIFT_WIRE_FIXTURE_OUT="$evidence/repeated.json" \
+            go test ./common/types/mapper/thrift -run '^TestGenerateHistoryTChannelWireOracle$' -count=1) \
+            > "$evidence/repeated.log" 2>&1
+          repeat_result=$?
+          if [ "$repeat_result" -eq 0 ]; then
+            cmp -s "$evidence/generated.json" "$evidence/repeated.json"
+            repeat_result=$?
+          fi
+          echo "$repeat_result" > "$evidence/stability.exit"
+          cat "$evidence/verify.log"
+          cat "$evidence/repeated.log"
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          if [ "$repeat_result" -ne 0 ]; then
+            echo 'Repeated Go fixture generation differed or failed.' >&2
+            exit "$repeat_result"
+          fi
+          echo 'Repeated Go fixture generation is byte-for-byte stable.'
+      - name: Upload History TChannel wire oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-tchannel-wire-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/history-tchannel-wire-oracle
       - name: Run original Go malformed DescribeTaskList oracle
         working-directory: go
         run: |
