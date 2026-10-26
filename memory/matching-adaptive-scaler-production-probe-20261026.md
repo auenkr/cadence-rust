@@ -51,6 +51,9 @@ the pushed commit and authorized Actions run before this evidence can be marked
 executed.
 
 Pushed implementation source SHA: `12e7ebdaa46f070a86fd65df1aa9d242c437e2b4`.
+Current branch head after the final-plan/audit insertion:
+`28c9d5588ac91b82f9b70560be779e411daf9846` (this is the ref head the exact
+dispatch command will build while the branch remains unchanged).
 Changed-file SHA256 at that source:
 
 - `tests/matching-probe-scenarios.cjs`: `8aa359916f82cccafd5a8e1958fce015fcd4087185836b7b16c4c410bb19278c`
