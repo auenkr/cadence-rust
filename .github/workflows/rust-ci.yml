@@ -214,7 +214,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-matching/src/matching_registry.rs crates/cadence-matching/src/matching_writer.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs > matching-runtime-format.log 2>&1
+          rustfmt --edition 2021 --check crates/cadence-matching/src/matching_panic.rs crates/cadence-matching/src/go_strconv_isprint.rs crates/cadence-matching/src/matching_domain_cache.rs crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-matching/src/matching_registry.rs crates/cadence-matching/src/matching_writer.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs > matching-runtime-format.log 2>&1
           result=$?
           echo "$result" > matching-runtime-format.exit
           cat matching-runtime-format.log
