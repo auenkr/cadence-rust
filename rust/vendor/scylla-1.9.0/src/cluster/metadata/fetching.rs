@@ -59,6 +59,22 @@ type PerTable<T> = HashMap<String, T>;
 type PerKsTable<T> = HashMap<(String, String), T>;
 type PerKsTableResult<T, E> = PerKsTable<Result<T, E>>;
 
+fn table_names_query(legacy: bool) -> &'static str {
+    if legacy {
+        "SELECT keyspace_name, columnfamily_name FROM system.schema_columnfamilies"
+    } else {
+        "SELECT keyspace_name, table_name FROM system_schema.tables"
+    }
+}
+
+fn keyspace_metadata_query(legacy: bool) -> &'static str {
+    if legacy {
+        "SELECT keyspace_name, strategy_class, strategy_options, durable_writes FROM system.schema_keyspaces"
+    } else {
+        "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces"
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PreColumnType {
     Native(NativeType),
@@ -766,15 +782,47 @@ impl ControlConnection {
             SchemaMetadataFetchMode::Enabled(level) => level,
         };
 
-        let rows = self
+        let modern_rows = self
             .query_filter_keyspace_name::<(String, HashMap<String, String>, bool)>(
-                "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces",
+                keyspace_metadata_query(false),
                 keyspaces_to_fetch,
             )
             .map_err(|error| MetadataFetchError {
                 error,
                 table: "system_schema.keyspaces",
             });
+        // Cassandra 2.x exposes the same keyspace values as a strategy class
+        // and JSON options in system.schema_keyspaces. Retry only for the
+        // server's missing-table/column Invalid response; other modern-schema
+        // errors retain their original meaning.
+        let (rows, legacy_schema): (Vec<(String, HashMap<String, String>, bool)>, bool) =
+            match modern_rows.try_collect().await {
+            Ok(rows) => (rows, false),
+            Err(error) if is_missing_table_or_column(&error) => {
+                self.query_filter_keyspace_name::<(String, String, String, bool)>(
+                    keyspace_metadata_query(true),
+                    keyspaces_to_fetch,
+                )
+                .map_err(|error| MetadataFetchError {
+                    error,
+                    table: "system.schema_keyspaces",
+                })
+                .and_then(|row| {
+                    let (name, class, options, durable_writes) = row?;
+                    // Preserve malformed replication data as an ordinary
+                    // strategy validation error (missing class), rather than
+                    // turning a bad row into a successful default strategy.
+                    let replication = legacy_replication_map(&class, &options)
+                        .unwrap_or_default();
+                    Ok((name, replication, durable_writes))
+                })
+                .try_collect()
+                .await
+                .map_err(MetadataError::from)
+                .map(|rows| (rows, true))?,
+            }
+            Err(error) => return Err(MetadataError::from(error)),
+        };
 
         // Fetching the schema (UDTs, tables, views) and the ScyllaDB-specific per-keyspace
         // metadata (tablet-based flag, consistency mode) are independent of each other, so we
@@ -785,7 +833,7 @@ impl ControlConnection {
                     // Fetch full schema: columns, keys, UDTs
                     let udts = self.query_user_defined_types(keyspaces_to_fetch).await?;
                     let mut tables_schema =
-                        self.query_tables_schema(keyspaces_to_fetch, &udts).await?;
+                        self.query_tables_schema(keyspaces_to_fetch, &udts, legacy_schema).await?;
                     Ok((
                         // We pass the mutable reference to the same map to the both functions.
                         // First function fetches `system_schema.tables`, and removes found
@@ -794,9 +842,9 @@ impl ControlConnection {
                         // The assumption here is that no keys (table names) can appear in both
                         // of those schema table.
                         // As far as we know this assumption is true for Scylla and Cassandra.
-                        self.query_tables(keyspaces_to_fetch, &mut tables_schema)
+                        self.query_tables(keyspaces_to_fetch, &mut tables_schema, legacy_schema)
                             .await?,
-                        self.query_views(keyspaces_to_fetch, &mut tables_schema)
+                        self.query_views(keyspaces_to_fetch, &mut tables_schema, legacy_schema)
                             .await?,
                         udts,
                     ))
@@ -805,7 +853,7 @@ impl ControlConnection {
                     // Fetch minimal schema: just table/view names and partitioners
                     // This is needed for token-awareness and tablet-awareness to work
                     let mut tables_schema = self
-                        .query_table_partitioners(keyspaces_to_fetch)
+                        .query_table_partitioners(keyspaces_to_fetch, legacy_schema)
                         .await?
                         .into_iter()
                         .map(|(keyspace_and_table_name, partitioner)| {
@@ -823,9 +871,9 @@ impl ControlConnection {
                         .collect();
 
                     Ok((
-                        self.query_tables(keyspaces_to_fetch, &mut tables_schema)
+                        self.query_tables(keyspaces_to_fetch, &mut tables_schema, legacy_schema)
                             .await?,
-                        self.query_views(keyspaces_to_fetch, &mut tables_schema)
+                        self.query_views(keyspaces_to_fetch, &mut tables_schema, legacy_schema)
                             .await?,
                         HashMap::new(),
                     ))
@@ -841,7 +889,9 @@ impl ControlConnection {
         let ((mut all_tables, mut all_views, mut all_user_defined_types), scylladb_specific) =
             tokio::try_join!(schema_query, scylladb_specific_query)?;
 
-        rows.map(|row_result| {
+        stream::iter(rows.into_iter().map(Ok::<_, MetadataFetchError>))
+            .map_err(MetadataError::from)
+            .map(|row_result| {
             let (keyspace_name, strategy_map, durable_writes) = row_result?;
 
             let strategy: Strategy = strategy_from_string_map(strategy_map).map_err(|error| {
@@ -1286,17 +1336,18 @@ impl ControlConnection {
         &self,
         keyspaces_to_fetch: &[String],
         tables: &mut PerKsTableResult<Table, SingleKeyspaceMetadataError>,
+        legacy_schema: bool,
     ) -> Result<PerKeyspaceResult<PerTable<Table>, SingleKeyspaceMetadataError>, MetadataError>
     {
+        let table_query = table_names_query(legacy_schema);
+        let table_name = if legacy_schema {
+            "system.schema_columnfamilies"
+        } else {
+            "system_schema.tables"
+        };
         let rows = self
-            .query_filter_keyspace_name::<(String, String)>(
-                "SELECT keyspace_name, table_name FROM system_schema.tables",
-                keyspaces_to_fetch,
-            )
-            .map_err(|error| MetadataFetchError {
-                error,
-                table: "system_schema.tables",
-            });
+            .query_filter_keyspace_name::<(String, String)>(table_query, keyspaces_to_fetch)
+            .map_err(|error| MetadataFetchError { error, table: table_name });
         let mut result = HashMap::new();
 
         rows.map(|row_result| {
@@ -1333,10 +1384,16 @@ impl ControlConnection {
         &self,
         keyspaces_to_fetch: &[String],
         tables: &mut PerKsTableResult<Table, SingleKeyspaceMetadataError>,
+        legacy_schema: bool,
     ) -> Result<
         PerKeyspaceResult<PerTable<MaterializedView>, SingleKeyspaceMetadataError>,
         MetadataError,
     > {
+        // Cassandra 2.1/2.2 predate materialized views. Do not probe a modern
+        // system_schema table in a mode already identified as legacy.
+        if legacy_schema {
+            return Ok(HashMap::new());
+        }
         let rows = self
             .query_filter_keyspace_name::<(String, String, String)>(
                 "SELECT keyspace_name, view_name, base_table_name FROM system_schema.views",
@@ -1392,7 +1449,10 @@ impl ControlConnection {
         &self,
         keyspaces_to_fetch: &[String],
         udts: &PerKeyspaceResult<PerTable<Arc<UserDefinedType<'static>>>, MissingUserDefinedType>,
+        legacy_schema: bool,
     ) -> Result<PerKsTableResult<Table, SingleKeyspaceMetadataError>, MetadataError> {
+        let _ = legacy_schema; // Legacy column conversion remains tracked in memory/matching-cql-legacy-schema.md.
+
         // Upon migration from thrift to CQL, Cassandra internally creates a surrogate column "value" of
         // type EmptyType for dense tables. This resolves into this CQL type name.
         // This column shouldn't be exposed to the user but is currently exposed in system tables.
@@ -1512,7 +1572,9 @@ impl ControlConnection {
         .try_for_each(|_| future::ok(()))
         .await?;
 
-        let mut all_partitioners = self.query_table_partitioners(keyspaces_to_fetch).await?;
+        let mut all_partitioners = self
+            .query_table_partitioners(keyspaces_to_fetch, legacy_schema)
+            .await?;
         let mut result = HashMap::new();
 
         'tables_loop: for ((keyspace_name, table_name), table_result) in tables_schema {
@@ -1625,6 +1687,54 @@ fn map_string_to_cql_type(typ: &str) -> Result<PreColumnType, InvalidCqlType> {
             reason: "leftover characters".to_string(),
         }),
         Ok((typ, _)) => Ok(typ),
+    }
+}
+
+/// Converts the two-column replication representation used by Cassandra 2.x
+/// (`strategy_class` plus JSON `strategy_options`) to the map consumed by the
+/// common keyspace strategy decoder.  Keeping this conversion independent of
+/// row decoding makes legacy schema handling usable by both Cassandra 2.1 and
+/// 2.2, whose metadata tables expose the same logical values.
+fn legacy_replication_map(
+    strategy_class: &str,
+    strategy_options_json: &str,
+) -> Result<HashMap<String, String>, serde_json::Error> {
+    let mut options: HashMap<String, String> = serde_json::from_str(strategy_options_json)?;
+    options.insert("class".to_owned(), strategy_class.to_owned());
+    Ok(options)
+}
+
+/// Maps the scalar Cassandra marshal names used in `system.schema_columns`
+/// onto CQL names understood by the regular schema type parser.
+///
+/// Cassandra 2.x reports validators rather than CQL types. Collection and
+/// composite validators are handled by the full legacy schema decoder; this
+/// scalar mapping is intentionally explicit so unknown marshal types remain
+/// visible as metadata errors instead of being guessed.
+fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
+    match validator.rsplit('.').next()? {
+        "AsciiType" => Some("ascii"),
+        "BooleanType" => Some("boolean"),
+        "BytesType" => Some("blob"),
+        "CounterColumnType" => Some("counter"),
+        "DecimalType" => Some("decimal"),
+        "DoubleType" => Some("double"),
+        "FloatType" => Some("float"),
+        "InetAddressType" => Some("inet"),
+        "Int32Type" => Some("int"),
+        "IntegerType" => Some("varint"),
+        "LongType" => Some("bigint"),
+        "UTF8Type" => Some("text"),
+        "UUIDType" => Some("uuid"),
+        "TimeUUIDType" => Some("timeuuid"),
+        "TimestampType" => Some("timestamp"),
+        "DateType" => Some("date"),
+        "SimpleDateType" => Some("date"),
+        "TimeType" => Some("time"),
+        "ShortType" => Some("smallint"),
+        "ByteType" => Some("tinyint"),
+        "EmptyType" => Some("empty"),
+        _ => None,
     }
 }
 
@@ -1770,7 +1880,25 @@ impl ControlConnection {
     async fn query_table_partitioners(
         &self,
         keyspaces_to_fetch: &[String],
+        legacy_schema: bool,
     ) -> Result<PerKsTable<Option<String>>, MetadataFetchError> {
+        if legacy_schema {
+            // Cassandra's legacy schema has no per-table partitioner column;
+            // token routing still uses peers/local token metadata.
+            let rows = self
+                .query_filter_keyspace_name::<(String, String)>(
+                    "SELECT keyspace_name, columnfamily_name FROM system.schema_columnfamilies",
+                    keyspaces_to_fetch,
+                )
+                .map_err(|error| MetadataFetchError {
+                    error,
+                    table: "system.schema_columnfamilies",
+                });
+            return rows
+                .map(|row| row.map(|(ks, table)| ((ks, table), None)))
+                .try_collect()
+                .await;
+        }
         let rows = self
             .query_filter_keyspace_name::<(String, String, Option<String>)>(
                 "SELECT keyspace_name, table_name, partitioner FROM system_schema.scylla_tables",
@@ -2005,6 +2133,93 @@ mod tests {
     use crate::test_utils::setup_tracing;
 
     use super::*;
+
+    #[test]
+    fn legacy_replication_options_match_modern_strategy_input() {
+        let options = legacy_replication_map(
+            "org.apache.cassandra.locator.NetworkTopologyStrategy",
+            r#"{"dc1":"3","dc2":"2"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            strategy_from_string_map(options).unwrap(),
+            Strategy::NetworkTopologyStrategy {
+                datacenter_repfactors: HashMap::from([
+                    ("dc1".to_owned(), 3),
+                    ("dc2".to_owned(), 2),
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn keyspace_query_selects_modern_and_cassandra_2_schema_rows() {
+        assert_eq!(
+            keyspace_metadata_query(false),
+            "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces"
+        );
+        assert_eq!(
+            keyspace_metadata_query(true),
+            "SELECT keyspace_name, strategy_class, strategy_options, durable_writes FROM system.schema_keyspaces"
+        );
+
+        // Exercise the legacy row shape and its conversion through the same
+        // strategy decoder used for modern keyspace rows.
+        let (name, class, options, durable_writes) = (
+            "legacy_ks".to_owned(),
+            "org.apache.cassandra.locator.SimpleStrategy".to_owned(),
+            r#"{"replication_factor":"3"}"#.to_owned(),
+            false,
+        );
+        let row = (name, legacy_replication_map(&class, &options).unwrap(), durable_writes);
+        assert_eq!(row.0, "legacy_ks");
+        assert!(!row.2);
+        assert_eq!(
+            strategy_from_string_map(row.1).unwrap(),
+            Strategy::SimpleStrategy { replication_factor: 3 }
+        );
+    }
+
+
+    #[test]
+    fn legacy_minimal_metadata_uses_columnfamilies_and_has_no_views_or_partitioner() {
+        assert_eq!(
+            table_names_query(true),
+            "SELECT keyspace_name, columnfamily_name FROM system.schema_columnfamilies"
+        );
+        assert_eq!(
+            table_names_query(false),
+            "SELECT keyspace_name, table_name FROM system_schema.tables"
+        );
+        assert_eq!(
+            legacy_scalar_validator_to_cql("org.apache.cassandra.db.marshal.Int32Type"),
+            Some("int")
+        );
+        assert_eq!(
+            legacy_scalar_validator_to_cql("org.apache.cassandra.db.marshal.UTF8Type"),
+            Some("text")
+        );
+    }
+
+    #[test]
+    fn legacy_scalar_validators_map_to_cql_types() {
+        for (validator, expected) in [
+            ("org.apache.cassandra.db.marshal.UTF8Type", "text"),
+            ("org.apache.cassandra.db.marshal.Int32Type", "int"),
+            ("org.apache.cassandra.db.marshal.LongType", "bigint"),
+            ("org.apache.cassandra.db.marshal.BytesType", "blob"),
+            ("org.apache.cassandra.db.marshal.TimeUUIDType", "timeuuid"),
+        ] {
+            assert_eq!(legacy_scalar_validator_to_cql(validator), Some(expected));
+            assert!(map_string_to_cql_type(expected).is_ok());
+        }
+
+        assert_eq!(
+            legacy_scalar_validator_to_cql("org.example.UnknownType"),
+            None
+        );
+    }
 
     #[test]
     fn test_consistency_mode_parsing() {
