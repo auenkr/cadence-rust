@@ -43,13 +43,13 @@ use crate::cluster::NodeAddr;
 use crate::cluster::control_connection::ControlConnection;
 use crate::cluster::metadata::update::{FetchedKeyspace, SchemaUpdate};
 use crate::cluster::metadata::{ClientRoutes, ClientRoutesUpdate};
+use crate::routing::{Token, partitioner::PartitionerName};
 use crate::deserialize::DeserializeOwnedRow;
 use crate::errors::{
     ClientRoutesMetadataError, DbError, KeyspaceStrategyError, KeyspacesMetadataError,
     MetadataError, MetadataFetchError, MetadataFetchErrorKind, NextPageError, NextRowError,
     PeersMetadataError, RequestAttemptError, RequestError, TablesMetadataError, UdtMetadataError,
 };
-use crate::routing::Token;
 
 use super::cc_establisher::TopologyUpdateGuard;
 
@@ -282,6 +282,10 @@ struct LocalNodeInfoRow {
     cluster_name: Option<String>,
 }
 
+#[derive(DeserializeRow)]
+#[scylla(crate = "scylla_cql")]
+struct LocalPartitionerRow { partitioner: Option<String> }
+
 #[derive(Clone, Copy)]
 enum NodeInfoSource {
     Local,
@@ -302,6 +306,20 @@ impl ControlConnection {
         &self,
         connect_port: u16,
     ) -> Result<(Vec<Peer>, Option<String>), MetadataError> {
+        // Token strings are partitioner-specific. Fetch the configured
+        // partitioner before interpreting either local or peer tokens.
+        let partitioner_pager = self.query_iter(
+            "SELECT partitioner FROM system.local WHERE key='local'", &()
+        ).await.map_err(|error| MetadataFetchError { error, table: "system.local" })?;
+        let partitioner_rows = partitioner_pager.rows_stream::<LocalPartitionerRow>()?;
+        let partitioner_rows = partitioner_rows
+            .map_err(MetadataFetchErrorKind::NextRowError)
+            .try_collect::<Vec<_>>().await
+            .map_err(|error| MetadataFetchError { error, table: "system.local" })?;
+        let partitioner = partitioner_rows
+            .into_iter().next().and_then(|row| row.partitioner)
+            .and_then(|name| PartitionerName::from_str(&name))
+            .unwrap_or_default();
         let peers_query_stream = self
             .query_iter(
                 "SELECT host_id, rpc_address, data_center, rack, tokens FROM system.peers",
@@ -357,7 +375,7 @@ impl ControlConnection {
         let translated_peers_futures = untranslated_rows.map(|row_result| async {
             match row_result {
                 Ok((source, row, cluster_name)) => {
-                    let peer = Self::create_peer_from_row(source, row, local_address).await;
+                    let peer = Self::create_peer_from_row(source, row, local_address, &partitioner).await;
                     (peer, cluster_name)
                 }
                 Err(err) => {
@@ -392,6 +410,7 @@ impl ControlConnection {
         source: NodeInfoSource,
         row: NodeInfoRow,
         local_address: SocketAddr,
+        partitioner: &PartitionerName,
     ) -> Option<Peer> {
         let NodeInfoRow {
             host_id,
@@ -423,22 +442,18 @@ impl ControlConnection {
         let tokens_str: Vec<String> = tokens.unwrap_or_default();
 
         // Parse string representation of tokens as integer values
-        let tokens: Vec<Token> = match tokens_str
-            .iter()
-            .map(|s| Token::from_str(s))
-            .collect::<Result<Vec<Token>, _>>()
-        {
+        let parsed_tokens = tokens_str.iter().map(|s| match partitioner {
+            PartitionerName::Random => Token::random_from_decimal(s).ok_or_else(|| format!("invalid RandomPartitioner token {s}")),
+            _ => Token::from_str(s).map_err(|error| error.to_string()),
+        }).collect::<Result<Vec<_>, _>>();
+        let tokens: Vec<Token> = match parsed_tokens {
             Ok(parsed) => parsed,
             Err(e) => {
-                // FIXME: we could allow the users to provide custom partitioning information
-                // in order for it to work with non-standard token sizes.
-                // Also, we could implement support for Cassandra's other standard partitioners
-                // like RandomPartitioner or ByteOrderedPartitioner.
                 trace!(
-                    "Couldn't parse tokens as 64-bit integers: {}, proceeding with a dummy token. If you're using a partitioner with different token size, consider migrating to murmur3",
+                    "Couldn't parse tokens for configured partitioner: {}, skipping node",
                     e
                 );
-                vec![Token::new(rand::rng().random::<i64>())]
+                return None;
             }
         };
 

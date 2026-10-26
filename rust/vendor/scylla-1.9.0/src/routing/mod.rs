@@ -16,7 +16,7 @@ mod sharding;
 pub use sharding::{InvalidShardAwarePortRange, Shard, ShardAwarePortRange, ShardCount, Sharder};
 pub(crate) use sharding::{ShardInfo, ShardingError};
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 
 /// Token is a result of computing a hash of a primary key
 ///
@@ -30,15 +30,18 @@ pub(crate) use sharding::{ShardInfo, ShardingError};
 /// This struct is a wrapper over i64 that performs this normalization
 /// when initialized using `new()` method.
 pub struct Token {
-    value: i64,
+    value: TokenValue,
 }
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum TokenValue { Murmur3(i64), Random(u128), Invalid }
 
 impl Token {
     /// Creates a new token with given value, normalizing the value if necessary.
     #[inline]
     pub fn new(value: i64) -> Self {
         Self {
-            value: if value == i64::MIN { i64::MAX } else { value },
+            value: TokenValue::Murmur3(if value == i64::MIN { i64::MAX } else { value }),
         }
     }
 
@@ -47,12 +50,43 @@ impl Token {
     /// This is (currently) only required by CDCPartitioner.
     /// See the following comment:
     /// https://github.com/scylladb/scylla-rust-driver/blob/049dc3546d24e45106fed0fdb985ec2511ab5192/scylla/src/transport/partitioner.rs#L312-L322
-    pub(crate) const INVALID: Self = Token { value: i64::MIN };
+    pub(crate) const INVALID: Self = Token { value: TokenValue::Invalid };
+
+    pub(crate) fn random(value: u128) -> Self { Self { value: TokenValue::Random(value) } }
+
+    /// Parse the native RandomPartitioner token domain: the generated MD5
+    /// tokens are non-negative signed 128-bit magnitudes; -1 is the ring sentinel.
+    pub(crate) fn random_from_decimal(value: &str) -> Option<Self> {
+        if value == "-1" { return Some(Self::random(u128::MAX)); }
+        let magnitude = value.parse::<u128>().ok()?;
+        (magnitude <= (1u128 << 127)).then(|| Self::random(magnitude))
+    }
 
     /// Retrieves the value of the token.
     #[inline]
     pub fn value(&self) -> i64 {
-        self.value
+        match self.value { TokenValue::Murmur3(value) => value, _ => panic!("RandomPartitioner token has no i64 value") }
+    }
+
+    pub(crate) fn random_decimal(&self) -> Option<String> {
+        match self.value { TokenValue::Random(u128::MAX) => Some("-1".into()), TokenValue::Random(v) => Some(v.to_string()), _ => None }
+    }
+}
+
+impl PartialOrd for Token { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+impl Ord for Token {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::*;
+        match (self.value, other.value) {
+            (TokenValue::Murmur3(a), TokenValue::Murmur3(b)) => a.cmp(&b),
+            (TokenValue::Random(u128::MAX), TokenValue::Random(_)) => if other.value == TokenValue::Random(u128::MAX) { Equal } else { Less },
+            (TokenValue::Random(_), TokenValue::Random(u128::MAX)) => Greater,
+            (TokenValue::Random(a), TokenValue::Random(b)) => a.cmp(&b),
+            (TokenValue::Invalid, TokenValue::Invalid) => Equal,
+            (TokenValue::Invalid, _) => Less, (_, TokenValue::Invalid) => Greater,
+            (TokenValue::Murmur3(_), TokenValue::Random(_)) => Less,
+            (TokenValue::Random(_), TokenValue::Murmur3(_)) => Greater,
+        }
     }
 }
 

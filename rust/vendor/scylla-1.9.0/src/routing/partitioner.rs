@@ -12,6 +12,7 @@ use crate::frame::types::RawValue;
 use crate::serialize::row::SerializedValues;
 use bytes::Buf;
 use std::num::Wrapping;
+use md5::{Digest, Md5};
 
 use crate::routing::Token;
 use crate::statement::prepared::TokenCalculationError;
@@ -31,6 +32,8 @@ pub enum PartitionerName {
     // TODO(2.0): Rename variant to Cdc.
     #[expect(clippy::upper_case_acronyms)]
     CDC,
+    /// Apache Cassandra's MD5 based RandomPartitioner.
+    Random,
 }
 
 impl PartitionerName {
@@ -39,6 +42,8 @@ impl PartitionerName {
             Some(PartitionerName::Murmur3)
         } else if name.ends_with("CDCPartitioner") {
             Some(PartitionerName::CDC)
+        } else if name.ends_with("RandomPartitioner") {
+            Some(PartitionerName::Random)
         } else {
             None
         }
@@ -55,6 +60,7 @@ impl Partitioner for PartitionerName {
                 PartitionerHasherAny::Murmur3(Murmur3Partitioner.build_hasher())
             }
             PartitionerName::CDC => PartitionerHasherAny::CDC(CDCPartitioner.build_hasher()),
+            PartitionerName::Random => PartitionerHasherAny::Random(RandomPartitionerHasher::default()),
         }
     }
 }
@@ -73,6 +79,8 @@ pub enum PartitionerHasherAny {
     // TODO(2.0): Rename CDCPartitionerHasher to CdcPartitionerHasher
     #[expect(clippy::upper_case_acronyms)]
     CDC(CDCPartitionerHasher),
+    /// Hasher for Cassandra RandomPartitioner.
+    Random(RandomPartitionerHasher),
 }
 
 impl sealed::Sealed for PartitionerHasherAny {}
@@ -81,6 +89,7 @@ impl PartitionerHasher for PartitionerHasherAny {
         match self {
             PartitionerHasherAny::Murmur3(h) => h.write(pk_part),
             PartitionerHasherAny::CDC(h) => h.write(pk_part),
+            PartitionerHasherAny::Random(h) => h.write(pk_part),
         }
     }
 
@@ -88,6 +97,7 @@ impl PartitionerHasher for PartitionerHasherAny {
         match self {
             PartitionerHasherAny::Murmur3(h) => h.finish(),
             PartitionerHasherAny::CDC(h) => h.finish(),
+            PartitionerHasherAny::Random(h) => h.finish(),
         }
     }
 }
@@ -133,6 +143,21 @@ pub trait PartitionerHasher: sealed::Sealed {
 
     /// Computes the token based on the values that have been fed so far.
     fn finish(&self) -> Token;
+}
+
+#[derive(Default)]
+pub struct RandomPartitionerHasher(Vec<u8>);
+impl sealed::Sealed for RandomPartitionerHasher {}
+impl PartitionerHasher for RandomPartitionerHasher {
+    fn write(&mut self, bytes: &[u8]) { self.0.extend_from_slice(bytes); }
+    fn finish(&self) -> Token {
+        let digest = Md5::digest(&self.0);
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest);
+        let raw = u128::from_be_bytes(bytes);
+        // gocql's RandomPartitioner hashes to abs(signed big-endian MD5).
+        Token::random(if bytes[0] & 0x80 != 0 { 0u128.wrapping_sub(raw) } else { raw })
+    }
 }
 
 /// Default partitioner used by ScyllaDB and Cassandra.
@@ -429,7 +454,27 @@ mod tests {
 
     use crate::test_utils::setup_tracing;
 
-    use super::{CDCPartitioner, Murmur3Partitioner, Partitioner, PartitionerHasher};
+    #[test]
+    fn random_partitioner_matches_pinned_gocql_tokens() {
+        // Reference: gocql v0.0.0-20211015133455-b225f9b53fa1 token.go
+        // randomPartitioner.Hash and token_test.go TestRandomPartitionerMatchesReference.
+        let random = PartitionerName::from_str("org.apache.cassandra.dht.RandomPartitioner").unwrap();
+        assert_eq!(random.build_hasher().finish().random_decimal().as_deref(), Some("58332598431525814501020785164969033090"));
+        let mut hasher = random.build_hasher();
+        hasher.write(b"test");
+        assert_eq!(hasher.finish().random_decimal().as_deref(), Some("12707736894140473154801792860916528374"));
+    }
+
+    #[test]
+    fn random_token_domain_and_order_include_ring_sentinel() {
+        let values = ["-1", "0", "1", "170141183460469231731687303715884105728"];
+        let tokens = values.map(|value| Token::random_from_decimal(value).unwrap());
+        assert!(tokens.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(Token::random_from_decimal("170141183460469231731687303715884105729").is_none());
+        assert!(Token::random_from_decimal("340282366920938463463374607431768211455").is_none());
+    }
+
+    use super::{CDCPartitioner, Murmur3Partitioner, Partitioner, PartitionerHasher, PartitionerName, Token};
 
     fn assert_correct_murmur3_hash(pk: &'static str, expected_hash: i64) {
         let hash = Murmur3Partitioner.hash_one(pk.as_bytes()).value();

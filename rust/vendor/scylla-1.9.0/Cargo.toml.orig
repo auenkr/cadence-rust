@@ -116,6 +116,7 @@ futures = "0.3.6"
 # Part of ReplicaSet::choose_filtered public API.
 # Used internally in some other places (mostly in LBP / routing).
 rand = "0.9.0"
+md-5 = "0.10"
 
 #####################
 # TLS implementations
