@@ -211,17 +211,21 @@ async function listPartitions(ctx) {
 // Frontend/History, so Matching observes genuine production task-add traffic.
 async function adaptiveScaler(ctx) {
   const taskList = 'production-adaptive-scaler-probe';
-  const request = { ...ctx.startRequest, taskList: { name: taskList } };
+  const request = { ...ctx.startRequest, taskList: { name: taskList },
+    workflowType: { name: 'main.EchoWorkflow' }, input: payload(JSON.stringify('adaptive-load')) };
   const initial = await ownerRpc(ctx, 'DescribeTaskList', { domainId: ctx.domainId,
     request: { taskList: { name: taskList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } });
   const initialConfig = initial.partitionConfig || {};
   const initialVersion = BigInt(initialConfig.version || '0');
   const initialWrites = Object.keys(initialConfig.writePartitions || {}).length || 1;
   const load = 24;
+  const loadExecutions = [];
   for (let index = 0; index < load; index++) {
-    await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
-      ...request, workflowId: `${taskList}-${ctx.id}-${index}`, requestId: randomUUID(),
+    const workflowId = `${taskList}-${ctx.id}-${index}`;
+    const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...request, workflowId, requestId: randomUUID(),
     });
+    loadExecutions.push({ workflowId, runId: started.runId });
   }
   const deadline = Date.now() + 45000;
   let updated;
@@ -247,12 +251,20 @@ async function adaptiveScaler(ctx) {
   // traverse Go Frontend/History and Rust Matching successfully.
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'),
     env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: ctx.domain,
-      CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList },
+      CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList,
+      CADENCE_MIXED_MATCHING_LOAD_IDS: JSON.stringify(loadExecutions.map(execution => execution.workflowId)) },
     encoding: 'utf8', timeout: 180000 });
   fs.writeFileSync(path.join(ctx.work, 'adaptive-scaler-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   assert.equal(sdk.status, 0, `Go SDK did not complete work on the scaled task list: ${sdk.error || sdk.status}; see adaptive-scaler-sdk.log`);
+  let completedLoad = 0;
+  for (const workflowExecution of loadExecutions) {
+    const history = await ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain: ctx.domain, workflowExecution });
+    assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+      `adaptive load workflow ${workflowExecution.workflowId} did not complete exactly once`);
+    completedLoad++;
+  }
   return { result: 'passed', taskList, enableAdaptiveScaler: true, cacheBackedPartitionCount: true,
-    scheduledLoad: load, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
+    scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
     updated: { version: String(config.version), writePartitions: writeCount,
       readPartitions: Object.keys(config.readPartitions || {}).length },
     frontendDecisionPartitions: partitions.decisionTaskListPartitions.map(partition => partition.key),

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -58,6 +59,20 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 	}
 	defer w.Stop()
 	c := client.NewClient(rpc, domain, nil)
+	if loadJSON := os.Getenv("CADENCE_MIXED_MATCHING_LOAD_IDS"); loadJSON != "" {
+		var ids []string
+		if err := json.Unmarshal([]byte(loadJSON), &ids); err != nil {
+			panic(err)
+		}
+		for _, id := range ids {
+			var value string
+			if err := c.GetWorkflow(ctx, id, "").Get(ctx, &value); err != nil {
+				panic(err)
+			}
+			require(value == "adaptive-load", "adaptive scaler load result changed")
+		}
+		fmt.Printf("Completed %d adaptive scaler load workflows on %s\n", len(ids), taskList)
+	}
 	run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: taskList, TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, EchoWorkflow, "sdk-through-rust-matching")
 	if err != nil {
 		panic(err)
