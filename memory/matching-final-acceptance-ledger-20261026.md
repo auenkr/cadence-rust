@@ -58,3 +58,35 @@ production contract fix requires a new reviewed pin and appropriately scoped
 validation; these runs cannot prove changes they do not contain.
 
 Independent Cassandra review subsequently confirmed a metric and quota-context label gap for gocql-valid UUID spellings. Backend-specific cache-key normalization is required; the prior telemetry-only closure is superseded. A Luna worker owns the fix, preserving SQL UUID panic behavior and strict real validation paths.
+
+## October 27 confirmed Cassandra protocol blocker
+
+The earlier no-new-production-mismatch snapshot is superseded. Audit
+`70edc8d8e` and follow-up `43281b14e` confirm a supported configuration mismatch:
+Go's pinned gocql supports configured CQL v2/v3/v4; current Rust Matching rejects
+v2/v3 and the locked Scylla codec/connection path assumes v4. Default-v4 and
+Cassandra 4.1 mixed evidence cannot close this item. Do not mark Matching
+complete based solely on the ten current mixed lanes.
+
+Required implementation and proof before acceptance:
+
+- Select configured v2/v3 through the real Matching persistence/session path.
+- Correct version-dependent frame headers, stream ranges and request/response
+  codecs used by Matching, preserving v4 behavior. A new enum or header encoder
+  alone is an incremental foundation, not end-to-end support.
+- Verify version-specific behavior against pinned Go and compatible Cassandra
+  server(s), then retain protocol-specific source/binary identities and results.
+- Keep unsupported protocol settings rejected until their complete path works.
+  No supported deployment requiring v1/v5 was identified by the bounded audit;
+  do not infer that their general frame constants create another requirement.
+
+Luna workers own frame/driver implementation and independent Go-backed protocol
+compatibility evidence. They must produce implementation, not merely repeat the
+audit. Deterministic History TChannel oracle repair continues separately.
+
+Supporting combined-source workspace run 40409014196 passed at
+`91c481a612eac48f786f208f4c2f4193864ed966` with verified fresh target, Clippy,
+workspace tests and metrics comparison. It does not contain the protocol port.
+Current formatted provisional candidate `eb6934853` is not a final acceptance
+pin. The original service scope and all serial mixed acceptance requirements
+remain required after the remaining implementation is integrated and reviewed.
