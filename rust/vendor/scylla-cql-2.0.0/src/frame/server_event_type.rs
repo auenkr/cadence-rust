@@ -9,7 +9,6 @@ use super::frame_errors::CqlEventParseError;
 /// Represents the type of a CQL event.
 // Check triggers because all variants end with "Change".
 // TODO(2.0): Remove the "Change" postfix from variants.
-#[expect(clippy::enum_variant_names)]
 pub enum EventType {
     /// Represents a change in the cluster topology, such as node addition or removal.
     TopologyChange,
@@ -23,7 +22,6 @@ pub enum EventType {
 // The postfix "Change" is used in all variants just because all currently existing events happen to be
 // about changes in the cluster, so it makes sense to use the same postfix for all of them.
 // If we add a new event type that is not about changes, then clippy will no longer complain.
-#[expect(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum EventTypeV2 {

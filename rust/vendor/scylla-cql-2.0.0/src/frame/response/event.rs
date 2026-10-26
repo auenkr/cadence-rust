@@ -15,7 +15,6 @@ use std::net::SocketAddr;
 #[derive(Debug)]
 // Check triggers because all variants end with "Change".
 // TODO(2.0): Remove the "Change" postfix from variants.
-#[expect(clippy::enum_variant_names)]
 pub enum Event {
     /// Topology changed.
     TopologyChange(TopologyChangeEvent),
@@ -30,7 +29,6 @@ pub enum Event {
 // The postfix "Change" is used in all variants just because all currently existing events happen to be
 // about changes in the cluster, so it makes sense to use the same postfix for all of them.
 // If we add a new event type that is not about changes, then clippy will no longer complain.
-#[expect(clippy::enum_variant_names)]
 #[non_exhaustive]
 pub enum EventV2 {
     /// Topology changed.
@@ -65,7 +63,6 @@ pub enum StatusChangeEvent {
 #[derive(Debug)]
 // Check triggers because all variants end with "Change".
 // TODO(2.0): Remove the "Change" postfix from variants.
-#[expect(clippy::enum_variant_names)]
 pub enum SchemaChangeEvent {
     /// Keyspace was altered.
     KeyspaceChange {

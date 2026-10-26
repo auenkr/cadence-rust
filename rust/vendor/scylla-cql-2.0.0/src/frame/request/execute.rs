@@ -135,11 +135,9 @@ impl ExecuteV2<'_> {
             .map_err(ExecuteSerializationError::StatementIdSerialization)?;
 
         // Serializing result metadata id
-        if version == CqlProtocolVersion::V4 {
-            if let Some(id) = self.result_metadata_id.as_ref() {
-                types::write_short_bytes(id.as_ref(), buf)
-                    .map_err(ExecuteSerializationError::ResultMetadataIdSerialization)?;
-            }
+        if version == CqlProtocolVersion::V4 && let Some(id) = self.result_metadata_id.as_ref() {
+            types::write_short_bytes(id.as_ref(), buf)
+                .map_err(ExecuteSerializationError::ResultMetadataIdSerialization)?;
         }
 
         // Serializing params
@@ -150,10 +148,8 @@ impl ExecuteV2<'_> {
         // Serializing the trailing TABLETS_ROUTING_V2 tablet-version block. On a V2
         // connection the server reads exactly one such byte after the query parameters for
         // every EXECUTE, so the connection layer always sets this to `Some(_)` there.
-        if version == CqlProtocolVersion::V4 {
-            if let Some(block) = self.tablet_version_block {
-                buf.push(block);
-            }
+        if version == CqlProtocolVersion::V4 && let Some(block) = self.tablet_version_block {
+            buf.push(block);
         }
         Ok(())
     }
@@ -162,6 +158,13 @@ impl ExecuteV2<'_> {
 impl DeserializableRequest for ExecuteV2<'static> {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
         Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    fn deserialize_with_features(
+        buf: &mut &[u8],
+        features: &ProtocolFeatures,
+    ) -> Result<Self, RequestDeserializationError> {
+        ExecuteV2::deserialize_with_features(buf, features)
     }
 }
 
