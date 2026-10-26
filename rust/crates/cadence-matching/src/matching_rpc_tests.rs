@@ -1886,6 +1886,50 @@ async fn matching_rpc_lists_configured_write_partitions() {
 }
 
 #[tokio::test]
+async fn matching_rpc_lists_persisted_adaptive_write_partitions() {
+    let (_dir, _store, matching, key) = fixture();
+    let list = list().unwrap();
+    let root = matching
+        .durable_queue(&key.domain_id.to_string(), &list, 0)
+        .await
+        .unwrap();
+    let partitions = (0..4)
+        .map(|id| {
+            (
+                id,
+                cadence_persistence::matching_blob::Partition {
+                    isolation_groups: Some(Vec::new()),
+                },
+            )
+        })
+        .collect();
+    root.queue
+        .update_partition_config(
+            Some(cadence_persistence::matching_blob::PartitionConfig {
+                version: 1,
+                num_read_partitions: 4,
+                num_write_partitions: 4,
+                read_partitions: Some(partitions.clone()),
+                write_partitions: Some(partitions),
+            }),
+            1,
+        )
+        .unwrap();
+
+    let response = matching
+        .list_task_list_partitions(Request::new(m::ListTaskListPartitionsRequest {
+            domain: "domain".into(),
+            task_list: Some(list),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(response.decision_task_list_partitions.len(), 4);
+    assert_eq!(response.decision_task_list_partitions[0].key, "queue");
+    assert_eq!(response.decision_task_list_partitions[3].key, "/__cadence_sys/queue/3");
+}
+
+#[tokio::test]
 async fn matching_rpc_scopes_partition_counts_to_task_list_and_type() {
     let (_dir, _store, matching, key) = fixture();
     use cadence_api::{
