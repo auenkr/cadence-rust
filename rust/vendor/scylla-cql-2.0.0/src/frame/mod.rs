@@ -128,7 +128,7 @@ impl SerializedRequest {
 /// Parts of the frame header which are not determined by the request/response type.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct FrameParams {
-    /// The version of the frame protocol. Currently, only version 4 is supported.
+    /// The version of the frame protocol used for this frame.
     /// The most significant bit (0x80) is treated specially:
     /// it indicates whether the frame is from the client or server.
     pub version: u8,
