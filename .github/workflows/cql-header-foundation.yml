@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: ["t3/matching-cql-integration"]
-    paths: [".github/workflows/cql-header-foundation.yml"]
+    paths: [".github/workflows/cql-header-foundation.yml", "rust/Cargo.toml"]
 concurrency:
   group: cql-header-foundation-${{ github.ref }}
   cancel-in-progress: true
