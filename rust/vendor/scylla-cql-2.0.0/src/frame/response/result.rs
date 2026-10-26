@@ -425,6 +425,45 @@ impl DeserializedMetadataAndRawRows {
         }
     }
 
+    /// Rewrites collection cells from a protocol v2 response to the v3+
+    /// layout expected by the value deserializers. Each cell is paired with
+    /// the response's actual column type. NULL cells are kept as-is.
+    pub fn transcode_v2_collections(mut self) -> StdResult<Self, ResultMetadataAndRowsCountParseError> {
+        use scylla_cql_core::protocol_collections::{CollectionProtocol, transcode_cell};
+
+        let col_count = self.metadata().col_count();
+        let mut input: &[u8] = &self.raw_rows;
+        let mut out = Vec::with_capacity(self.raw_rows.len());
+        for _ in 0..self.rows_count {
+            for column in 0..col_count {
+                let value = types::read_value(&mut input).map_err(|_| v2_rows_error("truncated or oversized row"))?;
+                match value {
+                    types::RawValue::Null => out.extend_from_slice(&(-1i32).to_be_bytes()),
+                    types::RawValue::Unset => out.extend_from_slice(&(-2i32).to_be_bytes()),
+                    types::RawValue::Value(payload) => {
+                        let typ = self.metadata().col_specs()[column].typ();
+                        let converted = transcode_cell(
+                            typ,
+                            CollectionProtocol::V2,
+                            CollectionProtocol::V3OrNewer,
+                            payload,
+                        )
+                        .map_err(|e| v2_rows_error(&e.to_string()))?;
+                        let len = i32::try_from(converted.len())
+                            .map_err(|_| v2_rows_error("truncated or oversized row"))?;
+                        out.extend_from_slice(&len.to_be_bytes());
+                        out.extend_from_slice(&converted);
+                    }
+                }
+            }
+        }
+        if !input.is_empty() {
+            return Err(v2_rows_error("trailing bytes after rows"));
+        }
+        self.raw_rows = Bytes::from(out);
+        Ok(self)
+    }
+
     pub(crate) fn into_inner(self) -> (ResultMetadataHolder, usize, Bytes) {
         (self.metadata, self.rows_count, self.raw_rows)
     }
@@ -1291,4 +1330,8 @@ mod test_utils {
             }
         }
     }
+}
+
+fn v2_rows_error(reason: &str) -> ResultMetadataAndRowsCountParseError {
+    ResultMetadataAndRowsCountParseError::V2RowsConversionError(reason.to_owned())
 }

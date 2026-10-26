@@ -118,7 +118,7 @@ pub use scylla_cql::{DeserializeRow, DeserializeValue, SerializeRow, SerializeVa
 pub mod protocol_collections {
     pub use scylla_cql_core::protocol_collections::{
         CollectionCodecError, CollectionKind, CollectionProtocol, decode_collection,
-        encode_collection,
+        encode_collection, transcode_cell,
     };
 }
 

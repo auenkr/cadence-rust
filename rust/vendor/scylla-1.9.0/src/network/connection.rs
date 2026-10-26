@@ -1166,6 +1166,25 @@ impl Connection {
             .get_timestamp()
             .or_else(get_timestamp_from_gen);
 
+        // Native protocol v2/v3 cannot carry UNSET, and v2 uses 16-bit collection
+        // sizes. Adapt the bound values to this connection's negotiated version.
+        let adapted_values;
+        let values = if self.config.protocol_version == CqlProtocolVersion::V4 {
+            values
+        } else {
+            adapted_values = values
+                .transcode_for_protocol(
+                    &prepared_statement.get_prepared_metadata().col_specs,
+                    self.config.protocol_version == CqlProtocolVersion::V2,
+                )
+                .map_err(|e| {
+                    RequestAttemptError::SerializationError(
+                        crate::serialize::SerializationError::new(e),
+                    )
+                })?;
+            &adapted_values
+        };
+
         let current_result_metadata = prepared_statement.get_current_result_metadata();
         let cached_metadata_params =
             self.calculate_cached_metadata_params(prepared_statement, &current_result_metadata);
@@ -1525,7 +1544,47 @@ impl Connection {
             cached_metadata,
         )?;
 
+        // Protocol v2 collection cells use 16-bit sizes; rewrite them to the v3+
+        // layout the value deserializers expect, using the response's column types.
+        let response = if self.config.protocol_version == CqlProtocolVersion::V2 {
+            Self::transcode_v2_rows(response)?
+        } else {
+            response
+        };
+
         Ok(response)
+    }
+
+    fn transcode_v2_rows(response: QueryResponse) -> Result<QueryResponse, ResponseParseError> {
+        let QueryResponse {
+            response,
+            warnings,
+            tracing_id,
+            custom_payload,
+        } = response;
+        let response = match response {
+            ResponseWithDeserializedMetadata::Result(ResultWithDeserializedMetadata::Rows((
+                raw,
+                paging_state,
+            ))) => {
+                let raw = raw.transcode_v2_collections().map_err(|e| {
+                    ResponseParseError::CqlResponseParseError(
+                        CqlResponseParseError::CqlResultParseError(e.into()),
+                    )
+                })?;
+                ResponseWithDeserializedMetadata::Result(ResultWithDeserializedMetadata::Rows((
+                    raw,
+                    paging_state,
+                )))
+            }
+            other => other,
+        };
+        Ok(QueryResponse {
+            response,
+            warnings,
+            tracing_id,
+            custom_payload,
+        })
     }
 
     fn parse_response(

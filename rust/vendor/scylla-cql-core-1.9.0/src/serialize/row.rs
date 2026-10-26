@@ -614,6 +614,58 @@ impl SerializedValues {
         }
     }
 
+    /// Rewrites the values for an older negotiated native protocol.
+    ///
+    /// `columns` are the prepared statement's bind-marker specs in marker
+    /// order. Protocols v2 and v3 have no UNSET value, so it is rejected
+    /// (as gocql does). Protocol v2 additionally uses 16-bit collection sizes,
+    /// so collection cells are transcoded recursively by schema. NULL cells
+    /// are passed through. A v4+ caller should not use this method.
+    pub fn transcode_for_protocol(
+        &self,
+        columns: &[ColumnSpec<'_>],
+        v2_collections: bool,
+    ) -> Result<Self, OldProtocolValuesError> {
+        use crate::protocol_collections::{CollectionProtocol, transcode_cell};
+
+        if usize::from(self.element_count) != columns.len() {
+            return Err(OldProtocolValuesError::ValueCountMismatch {
+                values: usize::from(self.element_count),
+                markers: columns.len(),
+            });
+        }
+        let mut out = Vec::with_capacity(self.serialized_values.len());
+        for (index, (raw, column)) in self.iter().zip(columns).enumerate() {
+            match raw {
+                RawValue::Unset => return Err(OldProtocolValuesError::UnsetUnsupported { index }),
+                RawValue::Null => out.extend_from_slice(&(-1i32).to_be_bytes()),
+                RawValue::Value(payload) => {
+                    let converted;
+                    let payload = if v2_collections {
+                        converted = transcode_cell(
+                            column.typ(),
+                            CollectionProtocol::V3OrNewer,
+                            CollectionProtocol::V2,
+                            payload,
+                        )
+                        .map_err(|source| OldProtocolValuesError::Collection { index, source })?;
+                        converted.as_slice()
+                    } else {
+                        payload
+                    };
+                    let len = i32::try_from(payload.len())
+                        .map_err(|_| OldProtocolValuesError::ValueTooLarge { index })?;
+                    out.extend_from_slice(&len.to_be_bytes());
+                    out.extend_from_slice(payload);
+                }
+            }
+        }
+        Ok(SerializedValues {
+            serialized_values: out,
+            element_count: self.element_count,
+        })
+    }
+
     /// Creates value list from the request frame
     ///
     /// Passed buffer must contain `[short]` N specifying the number of values,
@@ -659,6 +711,39 @@ impl<'a> Iterator for SerializedValuesIterator<'a> {
 
         Some(types::read_value(&mut self.serialized_values).expect("badly encoded value"))
     }
+}
+
+/// Failure to adapt bound values to native protocol v2/v3.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum OldProtocolValuesError {
+    /// UNSET values require native protocol v4.
+    #[error("UNSET value at bind position {index} is not supported by native protocol v2/v3")]
+    UnsetUnsupported {
+        /// Zero-based bind position.
+        index: usize,
+    },
+    /// The number of values did not match the prepared bind markers.
+    #[error("{values} bound values for {markers} bind markers")]
+    ValueCountMismatch {
+        /// Number of serialized values.
+        values: usize,
+        /// Number of prepared bind markers.
+        markers: usize,
+    },
+    /// A collection value could not be transcoded.
+    #[error("invalid collection value at bind position {index}: {source}")]
+    Collection {
+        /// Zero-based bind position.
+        index: usize,
+        /// Underlying codec error.
+        source: crate::protocol_collections::CollectionCodecError,
+    },
+    /// Value exceeds the protocol's signed 32-bit length.
+    #[error("value at bind position {index} is too large")]
+    ValueTooLarge {
+        /// Zero-based bind position.
+        index: usize,
+    },
 }
 
 #[cfg(test)]

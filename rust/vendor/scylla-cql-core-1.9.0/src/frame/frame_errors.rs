@@ -580,6 +580,10 @@ pub enum ResultMetadataAndRowsCountParseError {
     /// Received malformed rows count from the server.
     #[error("Malformed rows count: {0}")]
     RowsCountParseError(LowLevelDeserializationError),
+
+    /// Protocol v2 rows could not be converted to the v3+ cell layout.
+    #[error("Failed to convert protocol v2 rows: {0}")]
+    V2RowsConversionError(String),
 }
 
 /// An error type returned when deserialization
