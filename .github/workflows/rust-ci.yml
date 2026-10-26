@@ -182,7 +182,12 @@ jobs:
       - name: Check changed Matching runtime formatting
         working-directory: rust
         run: |
-          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs
+          set +e
+          rustfmt --edition 2021 --check crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-matching/src/matching_registry.rs crates/cadence-matching/src/matching_writer.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs > matching-runtime-format.log 2>&1
+          result=$?
+          echo "$result" > matching-runtime-format.exit
+          cat matching-runtime-format.log
+          exit "$result"
       - name: Clippy
         working-directory: rust
         run: |
@@ -246,6 +251,7 @@ jobs:
           path: |
             rust/clippy.log
             rust/fmt.log
+            rust/matching-runtime-format.log
             rust/test.log
             rust/*.exit
             rust/commit.txt
