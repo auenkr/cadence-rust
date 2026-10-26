@@ -28,7 +28,24 @@ decoder and mapping scalar legacy marshal validator names to CQL types. Unit
 tests cover NetworkTopologyStrategy option decoding, representative scalar
 validators, and unknown validator rejection.
 
-## Required live callsite integration still outstanding
+## Completed in the keyspace fallback increment
+
+`ControlConnection::query_keyspaces` now first reads the modern
+`system_schema.keyspaces` rows. If and only if that query yields the driver's
+existing missing-table/column `DbError::Invalid` shape, it retries using
+`system.schema_keyspaces` and converts `strategy_class` plus JSON
+`strategy_options` into the modern replication map. It retains
+`durable_writes`, and the converted values pass through the existing common
+strategy decoder. Errors unrelated to missing modern schema are returned
+unchanged. `keyspace_metadata_query` and the row conversion have direct unit
+coverage in the vendored scylla crate.
+
+CI now checks rustfmt on this file and explicitly runs the vendored scylla
+library's metadata fetching tests. This prevents a package-filtered
+`cadence-persistence` workflow from being mistaken for vendored driver test
+coverage.
+
+## Remaining live reader integration
 
 The live fetch remains modern-only. In `ControlConnection::query_keyspaces`
 (around line 759), the first keyspace query is hardcoded to
@@ -36,7 +53,7 @@ The live fetch remains modern-only. In `ControlConnection::query_keyspaces`
 that query reports Cassandra's missing-table/invalid error; peer discovery in
 `system.peers` / `system.local` remains valid and should not be changed.
 
-The subsequent schema branch (around lines 775-835) also calls
+The subsequent schema branch also calls
 `query_user_defined_types`, `query_tables_schema`, `query_tables`, and
 `query_views`, all modern `system_schema` readers. Those callsites need legacy
 reader counterparts for `system.schema_usertypes` (where available),
@@ -47,7 +64,10 @@ and retain token-aware partition keys. Cassandra 2.x has no materialized
 views, so its view result can be empty. Do not suppress metadata errors or
 fall back to an empty keyspace/table map.
 
-This change is deliberately not a functioning fallback yet: the isolated
-decoders/tests are groundwork, and no Rust/Go build or rustfmt was run locally
-per the CI-only command requirement. CI evidence must be added after a focused
-Actions run from the committed branch.
+The legacy keyspace fallback now works through query selection and row
+decoding, but full schema mode still cannot complete on Cassandra 2.x: UDT,
+table/column, and minimal table/partitioner readers remain modern-only. Those
+call sites must be integrated before claiming Cassandra 2.x full metadata
+parity. Cassandra 2.x has no materialized views, so that legacy path should
+produce an empty view set. No local Cargo/Go/rustfmt commands are used; record
+the focused Actions run, head SHA, and conclusion below after CI completes.

@@ -59,6 +59,14 @@ type PerTable<T> = HashMap<String, T>;
 type PerKsTable<T> = HashMap<(String, String), T>;
 type PerKsTableResult<T, E> = PerKsTable<Result<T, E>>;
 
+fn keyspace_metadata_query(legacy: bool) -> &'static str {
+    if legacy {
+        "SELECT keyspace_name, strategy_class, strategy_options, durable_writes FROM system.schema_keyspaces"
+    } else {
+        "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces"
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PreColumnType {
     Native(NativeType),
@@ -766,15 +774,48 @@ impl ControlConnection {
             SchemaMetadataFetchMode::Enabled(level) => level,
         };
 
-        let rows = self
+        let modern_rows = self
             .query_filter_keyspace_name::<(String, HashMap<String, String>, bool)>(
-                "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces",
+                keyspace_metadata_query(false),
                 keyspaces_to_fetch,
             )
             .map_err(|error| MetadataFetchError {
                 error,
                 table: "system_schema.keyspaces",
             });
+        // Cassandra 2.x exposes the same keyspace values as a strategy class
+        // and JSON options in system.schema_keyspaces. Retry only for the
+        // server's missing-table/column Invalid response; other modern-schema
+        // errors retain their original meaning.
+        let rows: Vec<(String, HashMap<String, String>, bool)> = match modern_rows
+            .try_collect()
+            .await
+        {
+            Ok(rows) => rows,
+            Err(error) if is_missing_table_or_column(&error) => {
+                self.query_filter_keyspace_name::<(String, String, String, bool)>(
+                    keyspace_metadata_query(true),
+                    keyspaces_to_fetch,
+                )
+                .map_err(|error| MetadataFetchError {
+                    error,
+                    table: "system.schema_keyspaces",
+                })
+                .and_then(|row| {
+                    let (name, class, options, durable_writes) = row?;
+                    // Preserve malformed replication data as an ordinary
+                    // strategy validation error (missing class), rather than
+                    // turning a bad row into a successful default strategy.
+                    let replication = legacy_replication_map(&class, &options)
+                        .unwrap_or_default();
+                    Ok((name, replication, durable_writes))
+                })
+                .try_collect()
+                .await
+                .map_err(MetadataError::from)?,
+            }
+            Err(error) => return Err(MetadataError::from(error)),
+        };
 
         // Fetching the schema (UDTs, tables, views) and the ScyllaDB-specific per-keyspace
         // metadata (tablet-based flag, consistency mode) are independent of each other, so we
@@ -841,7 +882,9 @@ impl ControlConnection {
         let ((mut all_tables, mut all_views, mut all_user_defined_types), scylladb_specific) =
             tokio::try_join!(schema_query, scylladb_specific_query)?;
 
-        rows.map(|row_result| {
+        stream::iter(rows.into_iter().map(Ok::<_, MetadataFetchError>))
+            .map_err(MetadataError::from)
+            .map(|row_result| {
             let (keyspace_name, strategy_map, durable_writes) = row_result?;
 
             let strategy: Strategy = strategy_from_string_map(strategy_map).map_err(|error| {
@@ -2070,6 +2113,34 @@ mod tests {
                     ("dc2".to_owned(), 2),
                 ]),
             }
+        );
+    }
+
+    #[test]
+    fn keyspace_query_selects_modern_and_cassandra_2_schema_rows() {
+        assert_eq!(
+            keyspace_metadata_query(false),
+            "SELECT keyspace_name, replication, durable_writes FROM system_schema.keyspaces"
+        );
+        assert_eq!(
+            keyspace_metadata_query(true),
+            "SELECT keyspace_name, strategy_class, strategy_options, durable_writes FROM system.schema_keyspaces"
+        );
+
+        // Exercise the legacy row shape and its conversion through the same
+        // strategy decoder used for modern keyspace rows.
+        let (name, class, options, durable_writes) = (
+            "legacy_ks".to_owned(),
+            "org.apache.cassandra.locator.SimpleStrategy".to_owned(),
+            r#"{"replication_factor":"3"}"#.to_owned(),
+            false,
+        );
+        let row = (name, legacy_replication_map(&class, &options).unwrap(), durable_writes);
+        assert_eq!(row.0, "legacy_ks");
+        assert!(!row.2);
+        assert_eq!(
+            strategy_from_string_map(row.1).unwrap(),
+            Strategy::SimpleStrategy { replication_factor: 3 }
         );
     }
 
