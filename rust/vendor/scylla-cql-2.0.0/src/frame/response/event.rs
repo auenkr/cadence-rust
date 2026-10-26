@@ -199,9 +199,9 @@ impl EventV2 {
                 StatusChangeEvent::deserialize(buf)
                     .map_err(CqlEventParseError::StatusChangeEventParseError)?,
             )),
-            EventTypeV2::SchemaChange => {
-                Ok(Self::SchemaChange(SchemaChangeEvent::deserialize_for_version(buf, version)?))
-            }
+            EventTypeV2::SchemaChange => Ok(Self::SchemaChange(
+                SchemaChangeEvent::deserialize_for_version(buf, version)?,
+            )),
             EventTypeV2::ClientRoutesChange => Ok(Self::ClientRoutesChange(
                 ClientRoutesChangeEvent::deserialize(buf)
                     .map_err(CqlEventParseError::ClientRoutesChangeEventParseError)?,
@@ -239,9 +239,16 @@ impl SchemaChangeEvent {
                 .map_err(SchemaChangeEventParseError::AffectedTargetNameParseError)?
                 .to_string();
             return if table_name.is_empty() {
-                Ok(Self::KeyspaceChange { change_type: type_of_change, keyspace_name: keyspace_affected })
+                Ok(Self::KeyspaceChange {
+                    change_type: type_of_change,
+                    keyspace_name: keyspace_affected,
+                })
             } else {
-                Ok(Self::TableChange { change_type: type_of_change, keyspace_name: keyspace_affected, object_name: table_name })
+                Ok(Self::TableChange {
+                    change_type: type_of_change,
+                    keyspace_name: keyspace_affected,
+                    object_name: table_name,
+                })
             };
         } else {
             types::read_string(buf).map_err(SchemaChangeEventParseError::TargetTypeParseError)?
@@ -438,7 +445,11 @@ mod version_tests {
         match SchemaChangeEvent::deserialize_for_version(&mut &v2[..], CqlProtocolVersion::V2)
             .unwrap()
         {
-            SchemaChangeEvent::TableChange { keyspace_name, object_name, .. } => {
+            SchemaChangeEvent::TableChange {
+                keyspace_name,
+                object_name,
+                ..
+            } => {
                 assert_eq!(keyspace_name, "ks");
                 assert_eq!(object_name, "tbl");
             }
@@ -453,7 +464,11 @@ mod version_tests {
         match SchemaChangeEvent::deserialize_for_version(&mut &v3[..], CqlProtocolVersion::V3)
             .unwrap()
         {
-            SchemaChangeEvent::TableChange { keyspace_name, object_name, .. } => {
+            SchemaChangeEvent::TableChange {
+                keyspace_name,
+                object_name,
+                ..
+            } => {
                 assert_eq!(keyspace_name, "ks");
                 assert_eq!(object_name, "tbl");
             }

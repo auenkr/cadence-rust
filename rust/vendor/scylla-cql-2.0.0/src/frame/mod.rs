@@ -10,13 +10,13 @@
 
 pub use scylla_cql_core::frame::frame_errors;
 pub use scylla_cql_core::frame::protocol_features;
-pub mod versioned_header;
 pub mod request;
 pub mod response;
 pub mod server_event_type;
 pub mod types;
+pub mod versioned_header;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes};
 use frame_errors::{
     CqlRequestSerializationError, FrameBodyExtensionsParseError, FrameHeaderParseError,
     LowLevelDeserializationError,
@@ -100,12 +100,22 @@ impl SerializedRequest {
         }
 
         let body_len = data.len() as u32;
-        let header = Header { version: protocol_version, direction: Direction::Request, flags,
-            stream: 0, opcode: R::OPCODE as u8, length: body_len }
-            .encode().expect("valid request frame header");
+        let header = Header {
+            version: protocol_version,
+            direction: Direction::Request,
+            flags,
+            stream: 0,
+            opcode: R::OPCODE as u8,
+            length: body_len,
+        }
+        .encode()
+        .expect("valid request frame header");
         let mut frame = header;
         frame.extend_from_slice(&data);
-        Ok(Self { data: frame, protocol_version })
+        Ok(Self {
+            data: frame,
+            protocol_version,
+        })
     }
 
     /// Sets the stream number for this request frame.
@@ -165,17 +175,24 @@ pub async fn read_response_frame_with_version(
     protocol_version: CqlProtocolVersion,
 ) -> Result<(FrameParams, ResponseOpcode, Bytes), FrameHeaderParseError> {
     let mut raw_header = vec![0u8; protocol_version.header_len()];
-    reader.read_exact(&mut raw_header).await.map_err(FrameHeaderParseError::HeaderIoError)?;
+    reader
+        .read_exact(&mut raw_header)
+        .await
+        .map_err(FrameHeaderParseError::HeaderIoError)?;
     if raw_header[0] & 0x80 == 0 {
         return Err(FrameHeaderParseError::FrameFromClient);
     }
     if raw_header[0] & 0x7f != protocol_version as u8 {
-        return Err(FrameHeaderParseError::VersionNotSupported(raw_header[0] & 0x7f));
+        return Err(FrameHeaderParseError::VersionNotSupported(
+            raw_header[0] & 0x7f,
+        ));
     }
     let header = Header::decode(&mut raw_header.as_slice(), Direction::Response)
         .map_err(FrameHeaderParseError::HeaderIoError)?;
     if header.version != protocol_version {
-        return Err(FrameHeaderParseError::VersionNotSupported(header.version as u8));
+        return Err(FrameHeaderParseError::VersionNotSupported(
+            header.version as u8,
+        ));
     }
     let version = raw_header[0];
     let flags = header.flags;
@@ -183,7 +200,11 @@ pub async fn read_response_frame_with_version(
     let opcode = ResponseOpcode::try_from(header.opcode)?;
     let length = header.length as usize;
 
-    let frame_params = FrameParams { version, flags, stream };
+    let frame_params = FrameParams {
+        version,
+        flags,
+        stream,
+    };
 
     let mut raw_body = Vec::with_capacity(length).limit(length);
     while raw_body.has_remaining_mut() {
@@ -337,16 +358,23 @@ pub fn decompress(
 #[cfg(test)]
 mod test {
     use super::*;
-    use versioned_header::{CqlProtocolVersion as V, Direction, Header};
     use tokio::io::AsyncWriteExt;
+    use versioned_header::{CqlProtocolVersion as V, Direction, Header};
 
     #[test]
     fn request_serializer_emits_version_specific_headers() {
         for (version, expected_len) in [(V::V2, 8), (V::V3, 9), (V::V4, 9)] {
-            let mut frame = SerializedRequest::make_with_version(&request::options::Options, None, false, version).unwrap();
+            let mut frame = SerializedRequest::make_with_version(
+                &request::options::Options,
+                None,
+                false,
+                version,
+            )
+            .unwrap();
             frame.set_stream(127);
             assert_eq!(frame.get_data().len(), expected_len);
-            let decoded = Header::decode(&mut frame.get_data().as_ref(), Direction::Request).unwrap();
+            let decoded =
+                Header::decode(&mut frame.get_data().as_ref(), Direction::Request).unwrap();
             assert_eq!(decoded.version, version);
             assert_eq!(decoded.stream, 127);
             assert_eq!(decoded.length, 0);
@@ -358,7 +386,10 @@ mod test {
         use std::borrow::Cow;
         let request = request::query::Query {
             contents: Cow::Borrowed("x"),
-            parameters: request::query::QueryParameters { timestamp: Some(1), ..Default::default() },
+            parameters: request::query::QueryParameters {
+                timestamp: Some(1),
+                ..Default::default()
+            },
         };
         let v2 = SerializedRequest::make_with_version(&request, None, false, V::V2).unwrap();
         let v3 = SerializedRequest::make_with_version(&request, None, false, V::V3).unwrap();
@@ -374,13 +405,21 @@ mod test {
     fn response_reader_consumes_v2_and_v4_header_layouts() {
         futures::executor::block_on(async {
             for version in [V::V2, V::V4] {
-                let header = Header { version, direction: Direction::Response, flags: 0,
-                    stream: 7, opcode: ResponseOpcode::Ready as u8, length: 0 };
+                let header = Header {
+                    version,
+                    direction: Direction::Response,
+                    flags: 0,
+                    stream: 7,
+                    opcode: ResponseOpcode::Ready as u8,
+                    length: 0,
+                };
                 let wire = header.encode().unwrap();
                 let (mut tx, mut rx) = tokio::io::duplex(64);
                 tx.write_all(&wire).await.unwrap();
                 drop(tx);
-                let (params, opcode, body) = read_response_frame_with_version(&mut rx, version).await.unwrap();
+                let (params, opcode, body) = read_response_frame_with_version(&mut rx, version)
+                    .await
+                    .unwrap();
                 assert_eq!(params.stream, 7);
                 assert_eq!(params.version, (version as u8) | 0x80);
                 assert_eq!(opcode, ResponseOpcode::Ready);
@@ -392,10 +431,19 @@ mod test {
     #[test]
     fn existing_response_reader_remains_v4_and_rejects_v3_payload_flag() {
         futures::executor::block_on(async {
-            let header = Header { version: V::V3, direction: Direction::Response, flags: 0x04,
-                stream: 0, opcode: ResponseOpcode::Ready as u8, length: 0 };
+            let header = Header {
+                version: V::V3,
+                direction: Direction::Response,
+                flags: 0x04,
+                stream: 0,
+                opcode: ResponseOpcode::Ready as u8,
+                length: 0,
+            };
             assert!(header.encode().is_err());
-            let header = Header { version: V::V4, ..header };
+            let header = Header {
+                version: V::V4,
+                ..header
+            };
             let (mut tx, mut rx) = tokio::io::duplex(64);
             tx.write_all(&header.encode().unwrap()).await.unwrap();
             drop(tx);

@@ -127,7 +127,13 @@ impl Response {
         buf_bytes: bytes::Bytes,
         cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
     ) -> Result<Response, CqlResponseParseError> {
-        Self::deserialize_for_version(features, opcode, buf_bytes, cached_metadata, super::versioned_header::CqlProtocolVersion::V4)
+        Self::deserialize_for_version(
+            features,
+            opcode,
+            buf_bytes,
+            cached_metadata,
+            super::versioned_header::CqlProtocolVersion::V4,
+        )
     }
 
     /// Deserialize a response body according to the negotiated native protocol version.
@@ -152,7 +158,9 @@ impl Response {
                 features,
                 version,
             )?),
-            ResponseOpcode::Event => Response::Event(event::Event::deserialize_for_version(buf, version)?),
+            ResponseOpcode::Event => {
+                Response::Event(event::Event::deserialize_for_version(buf, version)?)
+            }
             ResponseOpcode::AuthChallenge => {
                 Response::AuthChallenge(authenticate::AuthChallenge::deserialize(buf)?)
             }

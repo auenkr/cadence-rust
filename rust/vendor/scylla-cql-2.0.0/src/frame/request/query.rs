@@ -2,9 +2,9 @@
 
 use std::borrow::Cow;
 
+use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::{frame_errors::CqlRequestSerializationError, types::SerialConsistency};
 use crate::serialize::row::SerializedValues;
-use crate::frame::versioned_header::CqlProtocolVersion;
 use bytes::{Buf, BufMut};
 
 use crate::{
@@ -51,7 +51,11 @@ impl SerializableRequest for Query<'_> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
 
-    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+    fn serialize_with_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, version)
     }
 }
@@ -229,7 +233,9 @@ impl QueryParameters<'_> {
 
         let flags = buf.get_u8();
         let supported_flags = match version {
-            CqlProtocolVersion::V2 => ALL_FLAGS & !(FLAG_WITH_DEFAULT_TIMESTAMP | FLAG_WITH_NAMES_FOR_VALUES),
+            CqlProtocolVersion::V2 => {
+                ALL_FLAGS & !(FLAG_WITH_DEFAULT_TIMESTAMP | FLAG_WITH_NAMES_FOR_VALUES)
+            }
             CqlProtocolVersion::V3 | CqlProtocolVersion::V4 => ALL_FLAGS,
         };
         let unknown_flags = flags & !supported_flags;
@@ -243,8 +249,10 @@ impl QueryParameters<'_> {
         let page_size_flag = (flags & FLAG_PAGE_SIZE) != 0;
         let paging_state_flag = (flags & FLAG_WITH_PAGING_STATE) != 0;
         let serial_consistency_flag = (flags & FLAG_WITH_SERIAL_CONSISTENCY) != 0;
-        let default_timestamp_flag = version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_DEFAULT_TIMESTAMP) != 0;
-        let values_have_names_flag = version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_NAMES_FOR_VALUES) != 0;
+        let default_timestamp_flag =
+            version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_DEFAULT_TIMESTAMP) != 0;
+        let values_have_names_flag =
+            version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_NAMES_FOR_VALUES) != 0;
 
         if values_have_names_flag {
             return Err(RequestDeserializationError::NamedValuesUnsupported);
@@ -303,13 +311,18 @@ mod version_tests {
     fn empty_query_parameters_have_same_wire_fixture_for_v2_v3_v4() {
         // CQL consistency LOCAL_QUORUM (0x0006), then a zero query-flags byte.
         let expected = [0x00, 0x06, 0x00];
-        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+        for version in [
+            CqlProtocolVersion::V2,
+            CqlProtocolVersion::V3,
+            CqlProtocolVersion::V4,
+        ] {
             let mut body = Vec::new();
             QueryParameters::default()
                 .serialize_for_version(&mut body, version)
                 .unwrap();
             assert_eq!(body, expected, "protocol {version:?}");
-            let decoded = QueryParameters::deserialize_for_version(&mut &body[..], version).unwrap();
+            let decoded =
+                QueryParameters::deserialize_for_version(&mut &body[..], version).unwrap();
             assert_eq!(decoded.consistency, types::Consistency::LocalQuorum);
         }
     }
@@ -318,28 +331,51 @@ mod version_tests {
     fn v2_rejects_v3_query_parameter_flags() {
         // Consistency LOCAL_QUORUM and the v3+ default-timestamp flag.
         let body = [0x00, 0x06, FLAG_WITH_DEFAULT_TIMESTAMP];
-        assert!(QueryParameters::deserialize_for_version(
-            &mut &body[..],
-            CqlProtocolVersion::V2,
-        )
-        .is_err());
+        assert!(
+            QueryParameters::deserialize_for_version(&mut &body[..], CqlProtocolVersion::V2,)
+                .is_err()
+        );
     }
 
     #[test]
     fn query_flags_follow_gocql_v2_and_v3_gates() {
         // Pinned gocql frame.go: skip metadata is v2+, timestamp is v3+.
-        let mut params = QueryParameters { skip_metadata: true, ..Default::default() };
+        let mut params = QueryParameters {
+            skip_metadata: true,
+            ..Default::default()
+        };
         let mut body = Vec::new();
-        params.serialize_for_version(&mut body, CqlProtocolVersion::V2).unwrap();
+        params
+            .serialize_for_version(&mut body, CqlProtocolVersion::V2)
+            .unwrap();
         assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA]);
 
         params.timestamp = Some(1);
         body.clear();
-        params.serialize_for_version(&mut body, CqlProtocolVersion::V2).unwrap();
+        params
+            .serialize_for_version(&mut body, CqlProtocolVersion::V2)
+            .unwrap();
         assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA]);
 
         body.clear();
-        params.serialize_for_version(&mut body, CqlProtocolVersion::V3).unwrap();
-        assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA | FLAG_WITH_DEFAULT_TIMESTAMP, 0, 0, 0, 0, 0, 0, 0, 1]);
+        params
+            .serialize_for_version(&mut body, CqlProtocolVersion::V3)
+            .unwrap();
+        assert_eq!(
+            body,
+            [
+                0x00,
+                0x06,
+                FLAG_SKIP_METADATA | FLAG_WITH_DEFAULT_TIMESTAMP,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1
+            ]
+        );
     }
 }

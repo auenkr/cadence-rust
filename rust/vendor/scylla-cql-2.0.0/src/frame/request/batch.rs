@@ -5,9 +5,9 @@ use std::{borrow::Cow, convert::TryInto};
 
 use crate::frame::{
     frame_errors::CqlRequestSerializationError,
-    versioned_header::CqlProtocolVersion,
     request::{RequestOpcode, SerializableRequest},
     types::{self, SerialConsistency},
+    versioned_header::CqlProtocolVersion,
 };
 use crate::serialize::{
     RowWriter, SerializationError,
@@ -61,7 +61,11 @@ where
     Statement: Clone,
     Values: RawBatchValues,
 {
-    fn do_serialize(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), BatchSerializationError> {
+    fn do_serialize(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), BatchSerializationError> {
         // Serializing type of batch
         buf.put_u8(self.batch_type as u8);
 
@@ -175,7 +179,11 @@ where
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
 
-    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+    fn serialize_with_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, version)
     }
 }
@@ -264,7 +272,11 @@ impl<'b> Batch<'b, BatchStatement<'b>, Vec<SerializedValues>> {
 
         let consistency = types::read_consistency(buf)?;
 
-        let flags = if version == CqlProtocolVersion::V2 { 0 } else { buf.get_u8() };
+        let flags = if version == CqlProtocolVersion::V2 {
+            0
+        } else {
+            buf.get_u8()
+        };
         let unknown_flags = flags & (!ALL_FLAGS);
         if unknown_flags != 0 {
             return Err(RequestDeserializationError::UnknownFlags {
@@ -322,11 +334,15 @@ mod version_tests {
         };
 
         let mut v2 = Vec::new();
-        batch.serialize_for_version(&mut v2, CqlProtocolVersion::V2).unwrap();
+        batch
+            .serialize_for_version(&mut v2, CqlProtocolVersion::V2)
+            .unwrap();
         assert_eq!(v2, [0, 0, 0, 6]);
 
         let mut v3 = Vec::new();
-        batch.serialize_for_version(&mut v3, CqlProtocolVersion::V3).unwrap();
+        batch
+            .serialize_for_version(&mut v3, CqlProtocolVersion::V3)
+            .unwrap();
         assert_eq!(v3, [0, 0, 0, 6, 0]);
     }
 }

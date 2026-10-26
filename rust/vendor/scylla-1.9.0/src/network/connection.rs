@@ -25,13 +25,13 @@ use crate::frame::response::{
     Error, ResponseWithDeserializedMetadataV2 as ResponseWithDeserializedMetadata,
 };
 use crate::frame::types::SerialConsistency;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::{
     self, FrameParams, SerializedRequest,
     request::{self, SerializableRequest, batch, execute, query},
     response::{ResponseOpcode, ResponseV2 as Response, event::EventV2 as Event, result},
     server_event_type::EventTypeV2 as EventType,
 };
-use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::policies::address_translator::{AddressTranslator, UntranslatedPeer};
 use crate::policies::timestamp_generator::TimestampGenerator;
 use crate::response::query_result::QueryResult;
@@ -143,7 +143,12 @@ impl RouterHandle {
         compression: Option<Compression>,
         tracing: bool,
     ) -> Result<TaskResponse, InternalRequestError> {
-        let serialized_request = SerializedRequest::make_with_version(request, compression, tracing, self.protocol_version)?;
+        let serialized_request = SerializedRequest::make_with_version(
+            request,
+            compression,
+            tracing,
+            self.protocol_version,
+        )?;
         let request_id = self.allocate_request_id();
 
         let (response_sender, receiver) = oneshot::channel();
@@ -1733,9 +1738,10 @@ impl Connection {
         protocol_version: CqlProtocolVersion,
     ) -> Result<(), BrokenConnectionError> {
         loop {
-            let (params, opcode, body) = frame::read_response_frame_with_version(&mut read_half, protocol_version)
-                .await
-                .map_err(BrokenConnectionErrorKind::FrameHeaderParseError)?;
+            let (params, opcode, body) =
+                frame::read_response_frame_with_version(&mut read_half, protocol_version)
+                    .await
+                    .map_err(BrokenConnectionErrorKind::FrameHeaderParseError)?;
             let response = TaskResponse {
                 params,
                 opcode,

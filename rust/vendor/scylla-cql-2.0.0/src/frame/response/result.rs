@@ -12,10 +12,10 @@ use crate::frame::frame_errors::{
     TableSpecParseError,
 };
 use crate::frame::protocol_features::ProtocolFeatures;
-use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::request::query::PagingStateResponse;
 use crate::frame::response::event::SchemaChangeEvent;
 use crate::frame::types;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use bytes::Bytes;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -1329,7 +1329,8 @@ mod version_tests {
 
         // V4 appends the partition-key count after flags and bound-variable count.
         let v4_fixture = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let metadata = deser_prepared_metadata(&mut &v4_fixture[..], CqlProtocolVersion::V4).unwrap();
+        let metadata =
+            deser_prepared_metadata(&mut &v4_fixture[..], CqlProtocolVersion::V4).unwrap();
         assert!(metadata.pk_indexes.is_empty());
     }
 }

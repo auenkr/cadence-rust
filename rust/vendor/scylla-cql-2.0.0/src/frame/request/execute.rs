@@ -2,8 +2,8 @@
 
 use crate::frame::frame_errors::CqlRequestSerializationError;
 use crate::frame::protocol_features::ProtocolFeatures;
-use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::response::result::cow_bytes::CowBytes;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use bytes::Bytes;
 
 use crate::{
@@ -36,7 +36,11 @@ impl SerializableRequest for Execute<'_> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
 
-    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+    fn serialize_with_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, version)
     }
 }
@@ -78,7 +82,7 @@ impl Execute<'_> {
         let id = types::read_short_bytes(buf)?.to_vec().into();
         let parameters = QueryParameters::deserialize_for_version(buf, version)?;
 
-        Ok(Self { id, parameters })
+        Ok(Execute { id, parameters })
     }
 }
 
@@ -110,7 +114,11 @@ impl SerializableRequest for ExecuteV2<'_> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
 
-    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+    fn serialize_with_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, version)
     }
 }
@@ -129,8 +137,8 @@ impl ExecuteV2<'_> {
         // Serializing result metadata id
         if version == CqlProtocolVersion::V4 {
             if let Some(id) = self.result_metadata_id.as_ref() {
-            types::write_short_bytes(id.as_ref(), buf)
-                .map_err(ExecuteSerializationError::ResultMetadataIdSerialization)?;
+                types::write_short_bytes(id.as_ref(), buf)
+                    .map_err(ExecuteSerializationError::ResultMetadataIdSerialization)?;
             }
         }
 
@@ -144,7 +152,7 @@ impl ExecuteV2<'_> {
         // every EXECUTE, so the connection layer always sets this to `Some(_)` there.
         if version == CqlProtocolVersion::V4 {
             if let Some(block) = self.tablet_version_block {
-            buf.push(block);
+                buf.push(block);
             }
         }
         Ok(())
@@ -220,7 +228,7 @@ mod tests {
 
     use crate::Consistency;
     use crate::frame::protocol_features::ProtocolFeatures;
-    use crate::frame::request::{DeserializableRequest, SerializableRequest};
+    use crate::frame::request::SerializableRequest;
     use crate::frame::response::result::cow_bytes::CowBytes;
     use crate::serialize::row::SerializedValues;
 
