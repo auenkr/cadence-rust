@@ -89,10 +89,10 @@ impl SerializedRequest {
 
         if let Some(compression) = compression {
             flags |= flag::COMPRESSION;
-            let body = req.to_bytes()?;
+            let body = req.to_bytes_with_version(protocol_version)?;
             compress_append(&body, compression, &mut data)?;
         } else {
-            req.serialize(&mut data)?;
+            req.serialize_with_version(&mut data, protocol_version)?;
         }
 
         if tracing {
@@ -351,6 +351,23 @@ mod test {
             assert_eq!(decoded.stream, 127);
             assert_eq!(decoded.length, 0);
         }
+    }
+
+    #[test]
+    fn query_request_dispatches_body_codec_with_frame_protocol_version() {
+        use std::borrow::Cow;
+        let request = request::query::Query {
+            contents: Cow::Borrowed("x"),
+            parameters: request::query::QueryParameters { timestamp: Some(1), ..Default::default() },
+        };
+        let v2 = SerializedRequest::make_with_version(&request, None, false, V::V2).unwrap();
+        let v3 = SerializedRequest::make_with_version(&request, None, false, V::V3).unwrap();
+        // The timestamp option was introduced in v3: the same real dispatcher
+        // emits an 8-byte body for v2 and appends its i64 field for v3.
+        let v2_header = Header::decode(&mut v2.get_data().as_ref(), Direction::Request).unwrap();
+        let v3_header = Header::decode(&mut v3.get_data().as_ref(), Direction::Request).unwrap();
+        assert_eq!(v2_header.length, 8);
+        assert_eq!(v3_header.length, 16);
     }
 
     #[test]

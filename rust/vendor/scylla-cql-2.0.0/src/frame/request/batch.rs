@@ -174,6 +174,10 @@ where
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
+
+    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, version)
+    }
 }
 
 impl<Statement, Values> Batch<'_, Statement, Values>

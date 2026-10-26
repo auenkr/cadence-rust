@@ -35,6 +35,10 @@ impl SerializableRequest for Execute<'_> {
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
     }
+
+    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, version)
+    }
 }
 
 #[expect(deprecated)]
@@ -104,6 +108,10 @@ impl SerializableRequest for ExecuteV2<'_> {
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
         self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    fn serialize_with_version(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, version)
     }
 }
 

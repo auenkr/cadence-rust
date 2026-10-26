@@ -236,6 +236,7 @@ struct TaskResponse {
     params: FrameParams,
     opcode: ResponseOpcode,
     body: Bytes,
+    protocol_version: CqlProtocolVersion,
 }
 
 impl<'id: 'map, 'map> SelfIdentity<'id> {
@@ -1534,11 +1535,12 @@ impl Connection {
             );
         }
 
-        let response = Response::deserialize(
+        let response = Response::deserialize_for_version(
             features,
             task_response.opcode,
             body_with_ext.body,
             cached_metadata,
+            task_response.protocol_version,
         )?
         .deserialize_metadata()
         .map_err(|e| {
@@ -1738,6 +1740,7 @@ impl Connection {
                 params,
                 opcode,
                 body,
+                protocol_version,
             };
 
             match params.stream.cmp(&-1) {

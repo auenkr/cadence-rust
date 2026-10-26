@@ -19,7 +19,7 @@ jobs:
       - name: Generate formatting patch on runner
         run: |
           mkdir -p out
-          rustfmt --edition 2024 --config skip_children=true rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/versioned_header.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
+          rustfmt --edition 2024 --config skip_children=true rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/versioned_header.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/query.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/execute.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/batch.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/prepare.rs rust/vendor/scylla-cql-2.0.0/src/frame/response/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/response/result.rs rust/vendor/scylla-cql-2.0.0/src/frame/response/event.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
           rustfmt --edition 2021 rust/crates/cadence-persistence/examples/matching_cassandra_protocol_probe.rs
           git diff --binary > out/format.patch
       - name: Test actual vendored header codec

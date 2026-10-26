@@ -84,10 +84,30 @@ pub trait SerializableRequest {
     /// Serializes the request into the provided buffer.
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError>;
 
+    /// Serializes the request body using the negotiated native protocol version.
+    /// Implementations that do not vary by version retain their existing encoding.
+    fn serialize_with_version(
+        &self,
+        buf: &mut Vec<u8>,
+        _version: super::versioned_header::CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
+        self.serialize(buf)
+    }
+
     /// Serializes the request into a heap-allocated `Bytes` object.
     fn to_bytes(&self) -> Result<Bytes, CqlRequestSerializationError> {
         let mut v = Vec::new();
         self.serialize(&mut v)?;
+        Ok(v.into())
+    }
+
+    /// Serializes the request into bytes using the negotiated protocol version.
+    fn to_bytes_with_version(
+        &self,
+        version: super::versioned_header::CqlProtocolVersion,
+    ) -> Result<Bytes, CqlRequestSerializationError> {
+        let mut v = Vec::new();
+        self.serialize_with_version(&mut v, version)?;
         Ok(v.into())
     }
 }
