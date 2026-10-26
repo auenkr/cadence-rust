@@ -110,6 +110,18 @@ pub mod _macro_internal {
 
 pub use scylla_cql::{DeserializeRow, DeserializeValue, SerializeRow, SerializeValue};
 
+/// Explicit protocol-selected codec for CQL collection cell payloads.
+///
+/// The standard driver serializer/deserializer remains v4-oriented. The
+/// connection/body implementation must use this boundary for collection
+/// cells when operating with protocol v2 or v3.
+pub mod protocol_collections {
+    pub use scylla_cql_core::protocol_collections::{
+        CollectionCodecError, CollectionKind, CollectionProtocol, decode_collection,
+        encode_collection,
+    };
+}
+
 pub mod value {
     //! Defines CQL values of various types and their representations,
     //! as well as conversion between them and other types.

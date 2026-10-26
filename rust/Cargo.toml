@@ -2,6 +2,7 @@
 resolver = "2"
 exclude = ["vendor/scylla-cql-2.0.0"]
 members = [
+    "vendor/scylla-cql-core-1.9.0",
     "crates/cadence-api",
     "crates/cadence-common",
     "crates/cadence-persistence",
@@ -24,6 +25,7 @@ repository = "https://github.com/auenkr/cadence-rust"
 mysql_async = { path = "vendor/mysql_async-0.37.1" }
 scylla = { path = "vendor/scylla-1.9.0" }
 scylla-cql = { path = "vendor/scylla-cql-2.0.0" }
+scylla-cql-core = { path = "vendor/scylla-cql-core-1.9.0" }
 
 [profile.dev]
 debug = "line-tables-only"
