@@ -1,0 +1,545 @@
+diff --git a/rust/crates/cadence-matching/src/go_strconv_isprint.rs b/rust/crates/cadence-matching/src/go_strconv_isprint.rs
+index cc9dbb5..57ed59a 100644
+--- a/rust/crates/cadence-matching/src/go_strconv_isprint.rs
++++ b/rust/crates/cadence-matching/src/go_strconv_isprint.rs
+@@ -496,270 +496,47 @@ const ISPRINT32: &[(u32, u32)] = &[
+ ];
+ 
+ const ISNOTPRINT16: &[u32] = &[
+-    0xad,
+-    0x38b,
+-    0x38d,
+-    0x3a2,
+-    0x530,
+-    0x590,
+-    0x61c,
+-    0x6dd,
+-    0x83f,
+-    0x85f,
+-    0x8e2,
+-    0x984,
+-    0x9a9,
+-    0x9b1,
+-    0x9de,
+-    0xa04,
+-    0xa29,
+-    0xa31,
+-    0xa34,
+-    0xa37,
+-    0xa3d,
+-    0xa5d,
+-    0xa84,
+-    0xa8e,
+-    0xa92,
+-    0xaa9,
+-    0xab1,
+-    0xab4,
+-    0xac6,
+-    0xaca,
+-    0xb00,
+-    0xb04,
+-    0xb29,
+-    0xb31,
+-    0xb34,
+-    0xb5e,
+-    0xb84,
+-    0xb91,
+-    0xb9b,
+-    0xb9d,
+-    0xbc9,
+-    0xc0d,
+-    0xc11,
+-    0xc29,
+-    0xc45,
+-    0xc49,
+-    0xc57,
+-    0xc5b,
+-    0xc8d,
+-    0xc91,
+-    0xca9,
+-    0xcb4,
+-    0xcc5,
+-    0xcc9,
+-    0xcdf,
+-    0xcf0,
+-    0xd0d,
+-    0xd11,
+-    0xd45,
+-    0xd49,
+-    0xd80,
+-    0xd84,
+-    0xdb2,
+-    0xdbc,
+-    0xdd5,
+-    0xdd7,
+-    0xe83,
+-    0xe85,
+-    0xe8b,
+-    0xea4,
+-    0xea6,
+-    0xec5,
+-    0xec7,
+-    0xecf,
+-    0xf48,
+-    0xf98,
+-    0xfbd,
+-    0xfcd,
+-    0x10c6,
+-    0x1249,
+-    0x1257,
+-    0x1259,
+-    0x1289,
+-    0x12b1,
+-    0x12bf,
+-    0x12c1,
+-    0x12d7,
+-    0x1311,
+-    0x1680,
+-    0x176d,
+-    0x1771,
+-    0x180e,
+-    0x191f,
+-    0x1a5f,
+-    0x1b4d,
+-    0x1f58,
+-    0x1f5a,
+-    0x1f5c,
+-    0x1f5e,
+-    0x1fb5,
+-    0x1fc5,
+-    0x1fdc,
+-    0x1ff5,
+-    0x208f,
+-    0x2d26,
+-    0x2da7,
+-    0x2daf,
+-    0x2db7,
+-    0x2dbf,
+-    0x2dc7,
+-    0x2dcf,
+-    0x2dd7,
+-    0x2ddf,
+-    0x2e9a,
+-    0x3000,
+-    0x3040,
+-    0x3130,
+-    0x318f,
+-    0x321f,
+-    0xa9ce,
+-    0xa9ff,
+-    0xab27,
+-    0xab2f,
+-    0xfb37,
+-    0xfb3d,
+-    0xfb3f,
+-    0xfb42,
+-    0xfb45,
+-    0xfe53,
+-    0xfe67,
+-    0xfe75,
+-    0xffe7,
++    0xad, 0x38b, 0x38d, 0x3a2, 0x530, 0x590, 0x61c, 0x6dd, 0x83f, 0x85f, 0x8e2, 0x984, 0x9a9,
++    0x9b1, 0x9de, 0xa04, 0xa29, 0xa31, 0xa34, 0xa37, 0xa3d, 0xa5d, 0xa84, 0xa8e, 0xa92, 0xaa9,
++    0xab1, 0xab4, 0xac6, 0xaca, 0xb00, 0xb04, 0xb29, 0xb31, 0xb34, 0xb5e, 0xb84, 0xb91, 0xb9b,
++    0xb9d, 0xbc9, 0xc0d, 0xc11, 0xc29, 0xc45, 0xc49, 0xc57, 0xc5b, 0xc8d, 0xc91, 0xca9, 0xcb4,
++    0xcc5, 0xcc9, 0xcdf, 0xcf0, 0xd0d, 0xd11, 0xd45, 0xd49, 0xd80, 0xd84, 0xdb2, 0xdbc, 0xdd5,
++    0xdd7, 0xe83, 0xe85, 0xe8b, 0xea4, 0xea6, 0xec5, 0xec7, 0xecf, 0xf48, 0xf98, 0xfbd, 0xfcd,
++    0x10c6, 0x1249, 0x1257, 0x1259, 0x1289, 0x12b1, 0x12bf, 0x12c1, 0x12d7, 0x1311, 0x1680, 0x176d,
++    0x1771, 0x180e, 0x191f, 0x1a5f, 0x1b4d, 0x1f58, 0x1f5a, 0x1f5c, 0x1f5e, 0x1fb5, 0x1fc5, 0x1fdc,
++    0x1ff5, 0x208f, 0x2d26, 0x2da7, 0x2daf, 0x2db7, 0x2dbf, 0x2dc7, 0x2dcf, 0x2dd7, 0x2ddf, 0x2e9a,
++    0x3000, 0x3040, 0x3130, 0x318f, 0x321f, 0xa9ce, 0xa9ff, 0xab27, 0xab2f, 0xfb37, 0xfb3d, 0xfb3f,
++    0xfb42, 0xfb45, 0xfe53, 0xfe67, 0xfe75, 0xffe7,
+ ];
+ 
+ const ISNOTPRINT32: &[u32] = &[
+-    0x20000,
+-    0x1000c,
+-    0x10027,
+-    0x1003b,
+-    0x1003e,
+-    0x1018f,
+-    0x1039e,
+-    0x1057b,
+-    0x1058b,
+-    0x10593,
+-    0x10596,
+-    0x105a2,
+-    0x105b2,
+-    0x105ba,
+-    0x10786,
+-    0x107b1,
+-    0x10809,
+-    0x10836,
+-    0x10856,
+-    0x108f3,
+-    0x10a04,
+-    0x10a14,
+-    0x10a18,
+-    0x10e7f,
+-    0x10eaa,
+-    0x110bd,
+-    0x11135,
+-    0x111e0,
+-    0x11212,
+-    0x11287,
+-    0x11289,
+-    0x1128e,
+-    0x1129e,
+-    0x11304,
+-    0x11329,
+-    0x11331,
+-    0x11334,
+-    0x1133a,
+-    0x1138a,
+-    0x1138f,
+-    0x113b6,
+-    0x113c1,
+-    0x113c6,
+-    0x113cb,
+-    0x113d6,
+-    0x1145c,
+-    0x11914,
+-    0x11917,
+-    0x11936,
+-    0x11c09,
+-    0x11c37,
+-    0x11ca8,
+-    0x11d07,
+-    0x11d0a,
+-    0x11d3b,
+-    0x11d3e,
+-    0x11d66,
+-    0x11d69,
+-    0x11d8f,
+-    0x11d92,
+-    0x11f11,
+-    0x1246f,
+-    0x16a5f,
+-    0x16abf,
+-    0x16b5a,
+-    0x16b62,
+-    0x1aff4,
+-    0x1affc,
+-    0x1afff,
+-    0x1d455,
+-    0x1d49d,
+-    0x1d4ad,
+-    0x1d4ba,
+-    0x1d4bc,
+-    0x1d4c4,
+-    0x1d506,
+-    0x1d515,
+-    0x1d51d,
+-    0x1d53a,
+-    0x1d53f,
+-    0x1d545,
+-    0x1d551,
+-    0x1daa0,
+-    0x1e007,
+-    0x1e022,
+-    0x1e025,
+-    0x1e6df,
+-    0x1e7e7,
+-    0x1e7ec,
+-    0x1e7ef,
+-    0x1e7ff,
+-    0x1ee04,
+-    0x1ee20,
+-    0x1ee23,
+-    0x1ee28,
+-    0x1ee33,
+-    0x1ee38,
+-    0x1ee3a,
+-    0x1ee48,
+-    0x1ee4a,
+-    0x1ee4c,
+-    0x1ee50,
+-    0x1ee53,
+-    0x1ee58,
+-    0x1ee5a,
+-    0x1ee5c,
+-    0x1ee5e,
+-    0x1ee60,
+-    0x1ee63,
+-    0x1ee6b,
+-    0x1ee73,
+-    0x1ee78,
+-    0x1ee7d,
+-    0x1ee7f,
+-    0x1ee8a,
+-    0x1eea4,
+-    0x1eeaa,
+-    0x1f0c0,
+-    0x1f0d0,
+-    0x1fac7,
++    0x20000, 0x1000c, 0x10027, 0x1003b, 0x1003e, 0x1018f, 0x1039e, 0x1057b, 0x1058b, 0x10593,
++    0x10596, 0x105a2, 0x105b2, 0x105ba, 0x10786, 0x107b1, 0x10809, 0x10836, 0x10856, 0x108f3,
++    0x10a04, 0x10a14, 0x10a18, 0x10e7f, 0x10eaa, 0x110bd, 0x11135, 0x111e0, 0x11212, 0x11287,
++    0x11289, 0x1128e, 0x1129e, 0x11304, 0x11329, 0x11331, 0x11334, 0x1133a, 0x1138a, 0x1138f,
++    0x113b6, 0x113c1, 0x113c6, 0x113cb, 0x113d6, 0x1145c, 0x11914, 0x11917, 0x11936, 0x11c09,
++    0x11c37, 0x11ca8, 0x11d07, 0x11d0a, 0x11d3b, 0x11d3e, 0x11d66, 0x11d69, 0x11d8f, 0x11d92,
++    0x11f11, 0x1246f, 0x16a5f, 0x16abf, 0x16b5a, 0x16b62, 0x1aff4, 0x1affc, 0x1afff, 0x1d455,
++    0x1d49d, 0x1d4ad, 0x1d4ba, 0x1d4bc, 0x1d4c4, 0x1d506, 0x1d515, 0x1d51d, 0x1d53a, 0x1d53f,
++    0x1d545, 0x1d551, 0x1daa0, 0x1e007, 0x1e022, 0x1e025, 0x1e6df, 0x1e7e7, 0x1e7ec, 0x1e7ef,
++    0x1e7ff, 0x1ee04, 0x1ee20, 0x1ee23, 0x1ee28, 0x1ee33, 0x1ee38, 0x1ee3a, 0x1ee48, 0x1ee4a,
++    0x1ee4c, 0x1ee50, 0x1ee53, 0x1ee58, 0x1ee5a, 0x1ee5c, 0x1ee5e, 0x1ee60, 0x1ee63, 0x1ee6b,
++    0x1ee73, 0x1ee78, 0x1ee7d, 0x1ee7f, 0x1ee8a, 0x1eea4, 0x1eeaa, 0x1f0c0, 0x1f0d0, 0x1fac7,
+     0x1fb93,
+ ];
+ 
+ fn in_ranges(code: u32, ranges: &[(u32, u32)]) -> bool {
+-    ranges.binary_search_by(|(start, end)| {
+-        if code < *start { std::cmp::Ordering::Greater }
+-        else if code > *end { std::cmp::Ordering::Less }
+-        else { std::cmp::Ordering::Equal }
+-    }).is_ok()
++    ranges
++        .binary_search_by(|(start, end)| {
++            if code < *start {
++                std::cmp::Ordering::Greater
++            } else if code > *end {
++                std::cmp::Ordering::Less
++            } else {
++                std::cmp::Ordering::Equal
++            }
++        })
++        .is_ok()
+ }
+ 
+ pub(super) fn is_print(ch: char) -> bool {
+diff --git a/rust/crates/cadence-matching/src/matching_domain_cache.rs b/rust/crates/cadence-matching/src/matching_domain_cache.rs
+index 5fdf801..6432508 100644
+--- a/rust/crates/cadence-matching/src/matching_domain_cache.rs
++++ b/rust/crates/cadence-matching/src/matching_domain_cache.rs
+@@ -208,13 +208,16 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
+     }
+ }
+ 
+-impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
++impl DomainMetadataSource
++    for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore
++{
+     fn normalize_domain_id(&self, id: &str) -> Option<String> {
+         gocql_uuid_string(id)
+     }
+ 
+     fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
+-        self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
++        self.metadata_version()
++            .map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
+     }
+ 
+     fn list_domains(
+@@ -229,8 +232,13 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
+             MatchingDomainMetadataError::InvalidPageSize | MatchingDomainMetadataError::InvalidBlob(_) => DomainMetadataSourceError::permanent(error.to_string()),
+             _ => DomainMetadataSourceError::transient(error.to_string()),
+         })?;
+-        for domain in &page.domains { validate_typed_domain_config(domain)?; }
+-        Ok(DomainMetadataPage { domains: page.domains, next_page_token: page.next_page_token })
++        for domain in &page.domains {
++            validate_typed_domain_config(domain)?;
++        }
++        Ok(DomainMetadataPage {
++            domains: page.domains,
++            next_page_token: page.next_page_token,
++        })
+     }
+ 
+     fn get_domain(
+@@ -239,19 +247,23 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
+         id: Option<&str>,
+         _timeout: Duration,
+     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+-        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
+-            .map_err(|error| match error {
+-                MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
+-                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => {
+-                    let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
+-                        DomainErrorClass::NotFound
+-                    } else {
+-                        DomainErrorClass::BadRequest
+-                    };
+-                    DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
+-                }
+-                _ => DomainMetadataSourceError::transient(error.to_string()),
+-            })
++        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(
++            self, name, id,
++        )
++        .map_err(|error| match error {
++            MatchingDomainMetadataError::NotFound(_)
++            | MatchingDomainMetadataError::BothIdAndName
++            | MatchingDomainMetadataError::EmptyIdentity
++            | MatchingDomainMetadataError::InvalidUuid(_) => {
++                let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
++                    DomainErrorClass::NotFound
++                } else {
++                    DomainErrorClass::BadRequest
++                };
++                DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
++            }
++            _ => DomainMetadataSourceError::transient(error.to_string()),
++        })
+     }
+ }
+ 
+@@ -606,7 +618,10 @@ impl MatchingDomainCache {
+     }
+ 
+     /// Backend parse mode for the pre-handler domain lookup guard (set before sharing).
+-    pub fn with_domain_id_parse(mut self, mode: crate::matching_domain_uuid::DomainIdParse) -> Self {
++    pub fn with_domain_id_parse(
++        mut self,
++        mode: crate::matching_domain_uuid::DomainIdParse,
++    ) -> Self {
+         self.domain_id_parse = mode;
+         self
+     }
+@@ -749,9 +764,10 @@ impl MatchingDomainCache {
+         if id.is_empty() {
+             return Err(DomainCacheError::EmptyId);
+         }
+-        let lookup_id = self.source.normalize_domain_id(id).ok_or_else(|| {
+-            DomainCacheError::Source(format!("invalid Cassandra UUID {id:?}"))
+-        })?;
++        let lookup_id = self
++            .source
++            .normalize_domain_id(id)
++            .ok_or_else(|| DomainCacheError::Source(format!("invalid Cassandra UUID {id:?}")))?;
+         if let Some(entry) = self.by_id(&lookup_id) {
+             return Ok(entry);
+         }
+@@ -1308,7 +1324,9 @@ mod tests {
+         cache.refresh_domains().unwrap();
+ 
+         assert_eq!(
+-            cache.cached_domain_name("0000000000000000000000000000000a").as_deref(),
++            cache
++                .cached_domain_name("0000000000000000000000000000000a")
++                .as_deref(),
+             Some("quota-label-domain")
+         );
+         assert!(cache.cached_domain_name("not-a-uuid").is_none());
+diff --git a/rust/crates/cadence-matching/src/matching_panic.rs b/rust/crates/cadence-matching/src/matching_panic.rs
+index f9a2511..2e735d8 100644
+--- a/rust/crates/cadence-matching/src/matching_panic.rs
++++ b/rust/crates/cadence-matching/src/matching_panic.rs
+@@ -23,15 +23,17 @@ pub async fn capture<T, E>(
+ ) -> Result<Result<T, E>, String> {
+     let mut future = pin!(future);
+     let mut injected = armed_for_test(operation);
+-    poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| {
+-        if std::mem::take(&mut injected) {
+-            panic!("injected panic for test: {operation}");
++    poll_fn(|cx| {
++        match catch_unwind(AssertUnwindSafe(|| {
++            if std::mem::take(&mut injected) {
++                panic!("injected panic for test: {operation}");
++            }
++            future.as_mut().poll(cx)
++        })) {
++            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
++            Ok(Poll::Pending) => Poll::Pending,
++            Err(payload) => Poll::Ready(Err(panic_message(operation, payload))),
+         }
+-        future.as_mut().poll(cx)
+-    })) {
+-        Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+-        Ok(Poll::Pending) => Poll::Pending,
+-        Err(payload) => Poll::Ready(Err(panic_message(operation, payload))),
+     })
+     .await
+ }
+@@ -84,16 +86,24 @@ fn go_quote(text: &str) -> String {
+     out.push('"');
+     for ch in text.chars() {
+         match ch {
+-            '\x07' => out.push_str("\\a"), '\x08' => out.push_str("\\b"),
+-            '\x0c' => out.push_str("\\f"), '\n' => out.push_str("\\n"),
+-            '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"),
+-            '\x0b' => out.push_str("\\v"), '\\' => out.push_str("\\\\"),
++            '\x07' => out.push_str("\\a"),
++            '\x08' => out.push_str("\\b"),
++            '\x0c' => out.push_str("\\f"),
++            '\n' => out.push_str("\\n"),
++            '\r' => out.push_str("\\r"),
++            '\t' => out.push_str("\\t"),
++            '\x0b' => out.push_str("\\v"),
++            '\\' => out.push_str("\\\\"),
+             '"' => out.push_str("\\\""),
+             ch if !go_strconv_isprint::is_print(ch) => {
+                 let code = ch as u32;
+-                if code <= 0xff { out.push_str(&format!("\\x{code:02x}")); }
+-                else if code <= 0xffff { out.push_str(&format!("\\u{code:04x}")); }
+-                else { out.push_str(&format!("\\U{code:08x}")); }
++                if code <= 0xff {
++                    out.push_str(&format!("\\x{code:02x}"));
++                } else if code <= 0xffff {
++                    out.push_str(&format!("\\u{code:04x}"));
++                } else {
++                    out.push_str(&format!("\\U{code:08x}"));
++                }
+             }
+             ch => out.push(ch),
+         }
+@@ -139,7 +149,10 @@ pub(crate) fn armed_left_for_test(operation: &str) -> usize {
+ fn armed_for_test(operation: &str) -> bool {
+     ARMED.with(|armed| {
+         let mut armed = armed.borrow_mut();
+-        match armed.iter_mut().find(|(name, times)| *name == operation && *times > 0) {
++        match armed
++            .iter_mut()
++            .find(|(name, times)| *name == operation && *times > 0)
++        {
+             Some(entry) => {
+                 entry.1 -= 1;
+                 true
+@@ -165,9 +178,15 @@ mod tests {
+             capture("armed-op", async { Ok::<u8, String>(7) }).await,
+             Err(r#"panic object is not error: "injected panic for test: armed-op""#.to_string())
+         );
+-        assert_eq!(capture("armed-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
++        assert_eq!(
++            capture("armed-op", async { Ok::<u8, String>(7) }).await,
++            Ok(Ok(7))
++        );
+         assert_eq!(armed_left_for_test("armed-op"), 0);
+-        assert_eq!(capture("other-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
++        assert_eq!(
++            capture("other-op", async { Ok::<u8, String>(7) }).await,
++            Ok(Ok(7))
++        );
+     }
+ 
+     async fn str_panic() -> Result<u8, String> {
+@@ -180,7 +199,10 @@ mod tests {
+ 
+     #[tokio::test]
+     async fn capture_passes_completed_results_through() {
+-        assert_eq!(capture("test", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
++        assert_eq!(
++            capture("test", async { Ok::<u8, String>(7) }).await,
++            Ok(Ok(7))
++        );
+         assert_eq!(
+             capture("test", async { Err::<u8, String>("denied".into()) }).await,
+             Ok(Err("denied".to_string()))
+@@ -205,10 +227,14 @@ mod tests {
+ 
+     #[test]
+     fn go_quote_matches_go_control_and_unicode_escaping() {
+-        assert_eq!(go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
+-            r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#);
+-        assert_eq!(go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
+-            r#""\u2028\xa0́\u200b\xad""#);
++        assert_eq!(
++            go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
++            r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#
++        );
++        assert_eq!(
++            go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
++            r#""\u2028\xa0́\u200b\xad""#
++        );
+         assert_eq!(go_quote("\u{378}"), r#""\u0378""#);
+         assert_eq!(go_quote("quote: \\\""), r#""quote: \\\"""#);
+     }
