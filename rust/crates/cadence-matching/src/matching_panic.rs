@@ -12,6 +12,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::pin;
 use std::task::Poll;
 
+#[path = "go_strconv_isprint.rs"]
+mod go_strconv_isprint;
+
 /// Awaits `future`. A panic while it is polled is logged and returned as `Err(message)`.
 /// Typed through the `Result` bound so `?` inside `future` keeps its error type.
 pub async fn capture<T, E>(
@@ -86,7 +89,7 @@ fn go_quote(text: &str) -> String {
             '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"),
             '\x0b' => out.push_str("\\v"), '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
-            ch if !go_is_print(ch) => {
+            ch if !go_strconv_isprint::is_print(ch) => {
                 let code = ch as u32;
                 if code <= 0xff { out.push_str(&format!("\\x{code:02x}")); }
                 else if code <= 0xffff { out.push_str(&format!("\\u{code:04x}")); }
@@ -97,33 +100,6 @@ fn go_quote(text: &str) -> String {
     }
     out.push('"');
     out
-}
-
-// `char::is_control` only covers Unicode Cc. Go IsPrint also excludes format
-// characters and separators (except ASCII space); keep those contract cases explicit.
-fn go_is_print(ch: char) -> bool {
-    let code = ch as u32;
-    if code == 0x20 || (0x21..=0x7e).contains(&code) { return true; }
-    if code <= 0xff {
-        return (0xa1..=0xff).contains(&code) && code != 0xad;
-    }
-    if ch.is_control()
-        || matches!(code, 0x00ad | 0x061c | 0x06dd | 0x070f | 0x08e2 | 0x180e
-            | 0x2028..=0x202e | 0x2060..=0x206f | 0xfeff | 0xfff9..=0xfffb
-            | 0x110bd | 0x110cd)
-        || (0x0600..=0x0605).contains(&code)
-        || (0x0890..=0x0891).contains(&code)
-        || (0x200b..=0x200f).contains(&code)
-        || (0x1bca0..=0x1bca3).contains(&code)
-        || (0x1d173..=0x1d17a).contains(&code)
-        || (0xe0000..=0xe0fff).contains(&code)
-        // U+0378 is unassigned in the Go-pinned Unicode tables (and therefore not L/M/N/P/S).
-        || code == 0x0378
-        || matches!(code, 0x1680 | 0x2000..=0x200a | 0x202f | 0x205f | 0x3000)
-    {
-        return false;
-    }
-    true
 }
 
 /// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
@@ -232,7 +208,7 @@ mod tests {
         assert_eq!(go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
             r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#);
         assert_eq!(go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
-            r#""\u2028\xa0́\u200b\u00ad""#);
+            r#""\u2028\xa0́\u200b\xad""#);
         assert_eq!(go_quote("\u{378}"), r#""\u0378""#);
         assert_eq!(go_quote("quote: \\\""), r#""quote: \\\"""#);
     }
