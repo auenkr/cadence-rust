@@ -36,3 +36,26 @@ The matrix keeps protocol 2 / Cassandra
 2.1.22 and protocol 3 / Cassandra 3.11.17 range-delete expectations, adds
 protocol 4 / Cassandra 4.1.7 task UDT success, and preserves all scalar queue
 CAS/count/batch/error/range assertions.
+
+## Review update (integration branch t3/cassandra-udt-oracle)
+
+- Run 40416310576 (head 74e5fbe1c) was still `in_progress` at inspection; the
+  v2 (Cassandra 2.1.22) and v3 (3.11.17) jobs FAILED in 0–1 s at the
+  "Run exact pinned Go gocql protocol oracle" step with empty output and no
+  oracle.log artifact. Cause: the step's first command
+  `test -z "$(gofmt -d main.go)"` failed (set -e) because the new
+  `matchingTask` composite literal keys were not gofmt-aligned. This is NOT
+  evidence of a UDT/protocol failure; the oracle never ran. v4 was pending.
+  Run is not accepted as terminal evidence.
+- Fixed by aligning the literal keys (whitespace only, not verified with gofmt
+  locally; no Go/Cargo/rustfmt run). Needs a fresh oracle dispatch
+  (`compare_rust=false`) to get real v2/v3/v4 results; none dispatched here.
+- Merged origin/t3/matching-cassandra-udt-oracle (clean) onto
+  dc84a0690 (legacy UDT metadata mismatch rejection).
+- Unresolved acceptance boundaries: task UDT Go roundtrip on protocols 3/4 and
+  the v2 ErrorUDTUnavailable expectation unproven; Rust probe parity
+  (compare_rust) unrun and Rust rejects protocols 2/3 so v3 UDT parity is
+  impossible by config; legacy system.schema_usertypes / schema_columns reader
+  vs pinned gocql was not re-audited against live Cassandra 2.1/3.x output.
+  A stray `step("task-udt-prepare-insert")` precedes the insert without a
+  separate prepare; cosmetic.

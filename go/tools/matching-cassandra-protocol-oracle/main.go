@@ -62,11 +62,11 @@ func main() {
 	must(session.Query(`CREATE TYPE matching_protocol_task (domain_id uuid, workflow_id text, run_id uuid, schedule_id bigint, created_time timestamp, partition_config map<text, text>)`).Exec())
 	must(session.Query(`CREATE TABLE matching_protocol_tasks (id bigint PRIMARY KEY, task frozen<matching_protocol_task>)`).Exec())
 	task := matchingTask{
-		DomainID: gocql.UUID{0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55, 0x66, 0x66, 0x77, 0x77, 0x88, 0x88},
-		WorkflowID: "matching-udt-workflow",
-		RunID: gocql.UUID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
-		ScheduleID: 123456789,
-		CreatedTime: time.Date(2026, time.October, 27, 12, 34, 56, 789000000, time.UTC),
+		DomainID:        gocql.UUID{0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44, 0x55, 0x55, 0x66, 0x66, 0x77, 0x77, 0x88, 0x88},
+		WorkflowID:      "matching-udt-workflow",
+		RunID:           gocql.UUID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
+		ScheduleID:      123456789,
+		CreatedTime:     time.Date(2026, time.October, 27, 12, 34, 56, 789000000, time.UTC),
 		PartitionConfig: map[string]string{"partition": "blue", "zone": "west"},
 	}
 	step("task-udt-prepare-insert")
