@@ -117,6 +117,7 @@ jobs:
           CASSANDRA_SERVER_VERSION: ${{ matrix.image }}
           CASSANDRA_EXPECT_RANGE_DELETE_REJECTION: ${{ matrix.expect_range_delete_rejection }}
         run: |
+          set +e
           set -uo pipefail
           evidence="$RUNNER_TEMP/matching-cassandra-rust-probe"
           mkdir -p "$evidence"

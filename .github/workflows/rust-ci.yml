@@ -301,6 +301,7 @@ jobs:
       - name: Test vendored driver protocol configuration and streams directly
         working-directory: rust
         run: |
+          set +e
           set -uo pipefail
           result=0
           : > cql-driver-test.log
