@@ -1,0 +1,86 @@
+name: matching-cassandra-protocol-oracle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["matching-*", "t3/matching-cassandra-wire-oracle"]
+    paths:
+      - "go/tools/matching-cassandra-protocol-oracle/**"
+      - ".github/workflows/matching-cassandra-protocol-oracle.yml"
+
+concurrency:
+  group: matching-cassandra-protocol-oracle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gocql-backend-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - protocol: 2
+            image: cassandra:2.1.22
+          - protocol: 3
+            image: cassandra:2.2.19
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.14"
+          cache: false
+      - name: Start pinned Cassandra server
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          docker run --detach --name matching-cassandra-oracle \
+            --memory 1800m --memory-swap 1800m --cpus 1.5 --pids-limit 2048 \
+            -e MAX_HEAP_SIZE=768M -e HEAP_NEWSIZE=256M \
+            -p 127.0.0.1:9042:9042 "$IMAGE"
+          ready=0
+          for attempt in $(seq 1 120); do
+            if docker exec matching-cassandra-oracle cqlsh -e 'DESCRIBE CLUSTER' >/dev/null 2>&1; then ready=1; break; fi
+            sleep 5
+          done
+          if [ "$ready" != 1 ]; then docker logs matching-cassandra-oracle; exit 1; fi
+          docker exec matching-cassandra-oracle cqlsh -e \
+            "CREATE KEYSPACE cadence_oracle WITH replication = {'class':'SimpleStrategy','replication_factor':1};"
+          docker exec matching-cassandra-oracle cqlsh -k cadence_oracle -e \
+            "CREATE TABLE queue (queue_type int, message_id bigint, message_payload blob, created_time timestamp, PRIMARY KEY (queue_type, message_id));"
+      - name: Run exact pinned Go gocql protocol oracle
+        working-directory: go
+        env:
+          CASSANDRA_HOST: 127.0.0.1
+          CASSANDRA_KEYSPACE: cadence_oracle
+          CASSANDRA_PROTO_VERSION: ${{ matrix.protocol }}
+          CASSANDRA_SERVER_VERSION: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -d tools/matching-cassandra-protocol-oracle/main.go)"
+          evidence="$RUNNER_TEMP/matching-cassandra-protocol-oracle"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/head-sha.txt"
+          printf 'Cassandra protocol %s against %s; Go module pins gocql v0.0.0-20211015133455-b225f9b53fa1\n' "$CASSANDRA_PROTO_VERSION" "$CASSANDRA_SERVER_VERSION" > "$evidence/contract.txt"
+          set +e
+          go run ./tools/matching-cassandra-protocol-oracle > "$evidence/oracle.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/oracle.exit"
+          cat "$evidence/oracle.log"
+          exit "$result"
+      - name: Capture Cassandra server log
+        if: always()
+        run: docker logs matching-cassandra-oracle > "$RUNNER_TEMP/cassandra-server.log" 2>&1 || true
+      - name: Upload protocol oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-cassandra-cql-v${{ matrix.protocol }}-oracle
+          retention-days: 3
+          path: |
+            ${{ runner.temp }}/matching-cassandra-protocol-oracle
+            ${{ runner.temp }}/cassandra-server.log
+      - name: Remove Cassandra container
+        if: always()
+        run: docker rm --force matching-cassandra-oracle || true
