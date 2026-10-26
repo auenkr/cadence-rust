@@ -408,6 +408,13 @@ impl ConnectionConfig {
     }
 }
 
+fn cql_version_for_protocol(version: CqlProtocolVersion) -> &'static str {
+    match version {
+        CqlProtocolVersion::V2 => "2.0.0",
+        CqlProtocolVersion::V3 | CqlProtocolVersion::V4 => "3.0.0",
+    }
+}
+
 /// Configuration used for new connections, customized for a specific endpoint.
 ///
 /// Created from [ConnectionConfig] using [ConnectionConfig::to_host_connection_config].
@@ -2284,10 +2291,11 @@ pub(crate) async fn open_connection(
     let mut options = HashMap::new();
     protocol_features.add_startup_options(&mut options);
 
-    // The only CQL protocol version supported by the driver.
+    // Advertise the CQL language version associated with the selected native
+    // protocol. Native protocol v3 and v4 both use CQL 3.x.
     options.insert(
         Cow::Borrowed(options::CQL_VERSION),
-        Cow::Borrowed(options::DEFAULT_CQL_PROTOCOL_VERSION),
+        Cow::Borrowed(cql_version_for_protocol(config.protocol_version)),
     );
 
     // Application & driver's identity.
@@ -2724,6 +2732,26 @@ mod tests {
     use tokio::time::Instant;
 
     use super::{CqlProtocolVersion, HostConnectionConfig, open_connection, options};
+
+    #[test]
+    fn protocol_version_propagates_to_host_connection_and_startup_language_version() {
+        use super::{ConnectionConfig, cql_version_for_protocol};
+        use crate::cluster::node::ResolvedContactPoint;
+        use crate::cluster::metadata::UntranslatedEndpoint;
+
+        assert_eq!(ConnectionConfig::default().protocol_version, CqlProtocolVersion::V4);
+        assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V2), "2.0.0");
+        assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V3), "3.0.0");
+        assert_eq!(cql_version_for_protocol(CqlProtocolVersion::V4), "3.0.0");
+
+        let endpoint = UntranslatedEndpoint::ContactPoint(ResolvedContactPoint {
+            address: "127.0.0.1:9042".parse().unwrap(),
+        });
+        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+            let config = ConnectionConfig { protocol_version: version, ..ConnectionConfig::default() };
+            assert_eq!(config.to_host_connection_config(&endpoint).protocol_version, version);
+        }
+    }
 
     #[test]
     fn v2_stream_allocator_uses_only_nonnegative_i8_ids() {
