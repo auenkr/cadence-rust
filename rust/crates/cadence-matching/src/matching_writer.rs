@@ -554,11 +554,11 @@ mod tests {
 
         // This is the same join QueueRegistry/MatchingRuntime use before the launcher
         // samples its fatal receiver. The actor's failure send precedes releasing its guard.
+        writer.stop();
         tracker.wait_idle().await;
         assert!(
             matches!(fatal_rx.try_recv().unwrap(), cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "delayed-malformed-run-id")
         );
-        writer.stop();
     }
     use cadence_persistence::{
         matching_blob::{BlobEncoding, TaskData},
