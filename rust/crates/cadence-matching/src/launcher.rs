@@ -1744,10 +1744,10 @@ pub async fn run(
                 task.abort();
                 let _ = task.await;
             }
-            // A shutdown signal or listener failure can win `select!` while
-            // the typed writer notification is concurrently becoming ready.
-            // Writers are stopped by runtime shutdown; sample the channel
-            // again after listener teardown so that race cannot hide exit 2.
+            // Runtime shutdown joins every writer actor after stopping its
+            // owners, so no SQL fatal notification can arrive after this
+            // final sample. Keep the sample after listener teardown to catch
+            // a notification that was queued while drain was in progress.
             if fatal_writer.is_none() {
                 fatal_writer = fatal_writer_rx
                     .try_recv()

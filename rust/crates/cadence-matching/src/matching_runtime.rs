@@ -726,6 +726,13 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        // Registry shutdown stops every owner, but a writer actor may already
+        // be inside a blocking SQL append. Join those actors before the
+        // launcher samples its fatal-writer channel, so shutdown cannot race
+        // a late typed SQL failure notification.
+        if let Some(registry) = &self.registry {
+            registry.wait_for_writers().await;
+        }
         // Go Stop also stops every semaphore bucket, not only the ones the ring moved away.
         self.matching.stop_semaphores();
         let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
