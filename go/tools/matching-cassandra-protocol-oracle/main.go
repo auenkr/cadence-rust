@@ -23,8 +23,8 @@ func must(err error) {
 func main() {
 	version, err := strconv.Atoi(os.Getenv("CASSANDRA_PROTO_VERSION"))
 	must(err)
-	if version != 2 && version != 3 {
-		must(fmt.Errorf("oracle supports only requested protocols 2 and 3, got %d", version))
+	if version != 2 && version != 3 && version != 4 {
+		must(fmt.Errorf("oracle supports only requested protocols 2, 3 and 4, got %d", version))
 	}
 	host := os.Getenv("CASSANDRA_HOST")
 	keyspace := os.Getenv("CASSANDRA_KEYSPACE")

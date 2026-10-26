@@ -35,6 +35,9 @@ jobs:
           - protocol: 3
             image: cassandra:3.11.17
             expect_range_delete_rejection: false
+          - protocol: 4
+            image: cassandra:4.1.7
+            expect_range_delete_rejection: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
