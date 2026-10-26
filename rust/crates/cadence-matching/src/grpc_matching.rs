@@ -1077,12 +1077,22 @@ impl Matching {
         name: &TaskListName,
         task_type: i32,
     ) -> Result<Vec<p::TaskListPartitionMetadata>, Status> {
-        let count = self
+        let mut count = self
             .partition_count
             .as_ref()
             .map(|provider| provider(domain_id, name.root(), task_type))
             .unwrap_or(1)
             .max(1);
+        // Adaptive scaling persists the partition config on the root manager.
+        // Unlike the static dynamic-config count, this is the live count that
+        // Go Frontend's partition listing must expose after a scale operation.
+        if let Some(queues) = &self.queues {
+            if let Some(adaptive_count) = queues
+                .adaptive_write_partition_count(domain_id, name.root(), task_type)?
+            {
+                count = adaptive_count.max(1);
+            }
+        }
         let mut result = Vec::with_capacity(count as usize);
         for partition in 0..count {
             let key = name.partition_name(partition);

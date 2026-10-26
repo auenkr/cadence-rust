@@ -549,6 +549,32 @@ async fn owner_work<T: Send + 'static>(
     result
 }
 impl QueueRegistry {
+    /// Return the persisted adaptive write-partition count for a root task
+    /// list. The static dynamic-config count remains the fallback for queues
+    /// without an adaptive partition config.
+    pub fn adaptive_write_partition_count(
+        &self,
+        domain_id: &str,
+        root_name: &str,
+        task_type: i32,
+    ) -> Result<Option<i64>, Status> {
+        let domain_id = Uuid::parse_str(domain_id)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        let key = TaskListKey {
+            domain_id,
+            name: root_name.to_owned(),
+            task_type,
+        };
+        match cadence_persistence::matching_retry::persistence(|| self.store.get_task_list(&key)) {
+            Ok(record) => Ok(record
+                .data
+                .adaptive_partition_config
+                .map(|config| i64::from(config.num_write_partitions.max(1)))),
+            Err(cadence_persistence::matching_task_store::StorageError::NotFound) => Ok(None),
+            Err(error) => Err(Status::unavailable(error.to_string())),
+        }
+    }
+
     /// Report whether this exact queue manager is currently reusable without
     /// loading or mutating registry state. This is advisory: callers must
     /// still perform their normal ownership check and call `get`, which
