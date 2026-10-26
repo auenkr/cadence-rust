@@ -21,6 +21,10 @@ on:
         description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
         type: boolean
         default: false
+      format_panic_files:
+        description: "Apply rustfmt to the three panic/cache-touched Matching files and upload the patch"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -116,6 +120,20 @@ jobs:
             rust/crates/cadence-matching/src/matching_rpc_tests.rs \
             rust/crates/cadence-matching/src/matching_writer.rs \
             > "$RUNNER_TEMP/query-format.patch"
+      - name: Format panic/cache-touched Rust files
+        if: inputs.format_panic_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --config skip_children=true \
+            crates/cadence-matching/src/matching_panic.rs \
+            crates/cadence-matching/src/go_strconv_isprint.rs \
+            crates/cadence-matching/src/matching_domain_cache.rs
+          git -C "$GITHUB_WORKSPACE" diff --binary -- \
+            rust/crates/cadence-matching/src/matching_panic.rs \
+            rust/crates/cadence-matching/src/go_strconv_isprint.rs \
+            rust/crates/cadence-matching/src/matching_domain_cache.rs \
+            > "$RUNNER_TEMP/panic-format.patch"
       - name: Upload query formatting patch
         if: inputs.format_query_files == true
         uses: actions/upload-artifact@v4
@@ -130,6 +148,13 @@ jobs:
           name: tls-format-patch
           retention-days: 3
           path: ${{ runner.temp }}/tls-format.patch
+      - name: Upload panic/cache formatting patch
+        if: inputs.format_panic_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: panic-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/panic-format.patch
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
