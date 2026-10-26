@@ -1150,7 +1150,7 @@ try:
                             'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
                         })
                 result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery or args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_pg_gc_domain else (600 if args.matching_delivery or args.rust_matching else 120)))
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery or args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler or args.probe_pg_gc_domain else (600 if args.matching_delivery or args.rust_matching else 120)))
                 if udp_capture:
                     udp_stop.set()
                     udp_thread.join(timeout=2)

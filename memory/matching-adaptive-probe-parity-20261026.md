@@ -30,3 +30,5 @@ The runner exposes `--probe-adaptive-scaler`, applies scaler tuning only to the 
 - Local checks are syntax-only (`node --check`, `python3 -m py_compile`, `git diff --check`). No Cargo, Go, formatting, or runtime validation was run locally.
 
 No Matching service completion or parity claim is made by this probe correction.
+
+Integration review: included `probe_adaptive_scaler` in the extended outer probe timeout condition, so standalone adaptive invocation cannot inherit 120 seconds while its SDK child permits 180 seconds. The production lane already requests restart and receives its longer timeout. Local Python AST parsing passed; runtime evidence remains pending.
