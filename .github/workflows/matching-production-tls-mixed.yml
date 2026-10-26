@@ -10,8 +10,6 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/matching-production-tls-target-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Init IDL submodule
@@ -26,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Select fresh target
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/matching-production-tls-target-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
       - name: Build Rust Matching on a fresh target
         run: |
           mkdir -p out "$CARGO_TARGET_DIR"
