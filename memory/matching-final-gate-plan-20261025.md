@@ -9,7 +9,7 @@ Source inputs: `.github/workflows/*`, `tests/gates/*`, and
 | Workflow | Inputs | Topology | Backend / transport | Restart / recovery flags |
 |---|---|---|---|---|
 | `rust-ci.yml` | `package`, `clean_target`, `format_tls_files` | none (Clippy then tests, Go oracles, metrics compare) | n/a | n/a |
-| `matching-production-validation.yml` | `lane` = postgres, mysql-probes, thrift, configstore, shard-distributor | Go Frontend/History/Worker + Rust Matching (`tests/gates/run-{postgres,mysql}-lane.sh`) | PostgreSQL (postgres lane); MySQL (all others); thrift lane = Thrift Matching + TChannel History | every lane: `--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3` |
+| `matching-production-validation.yml` | `lane` = postgres, mysql-probes, thrift, configstore, shard-distributor, adaptive-scaler | Go Frontend/History/Worker + Rust Matching (`tests/gates/run-{postgres,mysql}-lane.sh`) | PostgreSQL (postgres lane); MySQL (all others); thrift lane = Thrift Matching + TChannel History | every lane: `--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3` |
 | `matching-mixed-gate.yml` | `extra_args` (default restart + failure-recovery + idle 3) | MySQL, two Rust Matching nodes | MySQL, gRPC | restart, failure recovery, idle |
 | `matching-cassandra-mixed-gate.yml` | `extra_args` (default `--matching-restart --matching-idle-check-seconds 3`) | Go services + Rust Matching, `run-cassandra-lane.sh` | Cassandra | restart, idle; lane itself adds two-node failure recovery |
 | `matching-active-offer-gate.yml` | none | Go History + Rust Matching, `run-mysql-lane.sh --probe-active-offer` | MySQL | restart, failure recovery, idle (flags present; inspect emitted scenarios) |
@@ -30,23 +30,24 @@ confirm `headSha == EXPECTED_SHA`, download the artifact, record binary SHA256 (
 (`gh run list --status in_progress` must be empty first).
 
 1. `gh workflow run rust-ci.yml --ref "$BRANCH" -f clean_target=true` (fresh target, Clippy `-D warnings` then workspace tests; record the advisory workspace-format exit 1 as such).
-2. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=postgres`
-3. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=mysql-probes`
-4. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=thrift`
-5. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=configstore`
-6. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=shard-distributor`
-7. `gh workflow run matching-mixed-gate.yml --ref "$BRANCH"` (MySQL two-node; defaults are already right; not in the earlier plan, add it)
-8. `gh workflow run matching-cassandra-mixed-gate.yml --ref "$BRANCH"`
-9. `gh workflow run matching-active-offer-gate.yml --ref "$BRANCH"` now runs
+2. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=adaptive-scaler` (production adaptive-scaler config/load/update-version/partition-list/Go SDK completion assertion; exact implementation and evidence limits are in `memory/matching-adaptive-scaler-production-probe-20261026.md`).
+3. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=postgres`
+4. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=mysql-probes`
+5. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=thrift`
+6. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=configstore`
+7. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=shard-distributor`
+8. `gh workflow run matching-mixed-gate.yml --ref "$BRANCH"` (MySQL two-node; defaults are already right; not in the earlier plan, add it)
+9. `gh workflow run matching-cassandra-mixed-gate.yml --ref "$BRANCH"`
+10. `gh workflow run matching-active-offer-gate.yml --ref "$BRANCH"` now runs
    `--probe-active-offer --matching-restart --matching-failure-recovery
    --matching-idle-check-seconds 3`; inspect the gate artifacts for the SIGTERM
    drain/restart, SIGKILL recovery, two-node owner takeover and active-offer
    scenario assertions. Its topology remains Go Frontend/History/Worker plus
    Rust Matching, with Go Matching absent.
-10. `gh workflow run matching-production-tls-mixed.yml --ref "$BRANCH"` (real mixed topology; inspect CA/hostname verification, both nodes, typed Go ownership oracle, restart/recovery, SDK outcome and exact binary hash)
-11. `gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"` (separate HTTP/TLS fixture)
+11. `gh workflow run matching-production-tls-mixed.yml --ref "$BRANCH"` (real mixed topology; inspect CA/hostname verification, both nodes, typed Go ownership oracle, restart/recovery, SDK outcome and exact binary hash)
+12. `gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"` (separate HTTP/TLS fixture)
 
-Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/TChannel = 4 (+11 fixture); production gRPC TLS = 10; HTTP/TLS fixture = 11
+Coverage by requirement: adaptive scaler = 2; MySQL = 4, 8, 10; PostgreSQL = 3; Cassandra = 9; Thrift/TChannel = 5 (+12 fixture); production gRPC TLS = 11; HTTP/TLS fixture = 12
 (plus workspace TLS unit tests in 1); SDK workflows = every mixed lane via the SDK probe.
 
 ## Lanes lacking a restart or failure-recovery check

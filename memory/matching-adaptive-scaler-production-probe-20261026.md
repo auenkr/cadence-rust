@@ -49,3 +49,15 @@ Python byte compilation, and `git diff --check`.
 Final source commit SHA and production binary SHA256 remain to be filled from
 the pushed commit and authorized Actions run before this evidence can be marked
 executed.
+
+Pushed implementation source SHA: `12e7ebdaa46f070a86fd65df1aa9d242c437e2b4`.
+Changed-file SHA256 at that source:
+
+- `tests/matching-probe-scenarios.cjs`: `8aa359916f82cccafd5a8e1958fce015fcd4087185836b7b16c4c410bb19278c`
+- `tests/run-go-service-baseline.py`: `4c3b141d73d6bbcb25d1b7da7e078bad65dcac20088d043a67d4fd91fd763135`
+- `tests/go-sdk/mixed_matching.go`: `70526e9c9e6aa3d4cdde63252b03636ae02a0a2feff932bc60cf8dc0c15e0864`
+- `.github/workflows/matching-production-validation.yml`: `724cbbf47e3d098f94fa5195e6a9d8adbae98414fdc85746400f94d2bebabfa3`
+
+The workflow's `out/binary.sha256` is authoritative for the compiled binary;
+it remains pending authorized mixed execution. Scenario outcome is also
+pending that run.
