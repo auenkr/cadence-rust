@@ -16,6 +16,7 @@ use crate::frame::request::query::PagingStateResponse;
 use crate::frame::response::event::SchemaChangeEvent;
 use crate::frame::types;
 use crate::frame::versioned_header::CqlProtocolVersion;
+use crate::protocol_collections::{CollectionProtocol, transcode_cell};
 use bytes::Bytes;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -219,6 +220,7 @@ pub struct RawMetadataAndRawRows {
 
     /// Metadata cached in PreparedStatement, if present.
     cached_metadata: Option<Arc<ResultMetadata<'static>>>,
+    protocol_version: CqlProtocolVersion,
 }
 
 impl RawMetadataAndRawRows {
@@ -238,6 +240,7 @@ impl RawMetadataAndRawRows {
             metadata_presence: MetadataPresence::JustMetadata,
             raw_metadata_and_rows,
             cached_metadata: None,
+            protocol_version: CqlProtocolVersion::V4,
         }
     }
 
@@ -774,6 +777,7 @@ impl RawMetadataAndRawRows {
         frame: &mut FrameSlice,
         cached_metadata: Option<Arc<ResultMetadata<'static>>>,
         features: &ProtocolFeatures,
+        protocol_version: CqlProtocolVersion,
     ) -> StdResult<(Self, PagingStateResponse), RawRowsAndPagingStateResponseParseError> {
         let flags = types::read_int(frame.as_slice_mut())
             .map_err(|err| RawRowsAndPagingStateResponseParseError::FlagsParseError(err.into()))?;
@@ -809,6 +813,7 @@ impl RawMetadataAndRawRows {
             metadata_presence: metadata_presense,
             raw_metadata_and_rows: frame.to_bytes(),
             cached_metadata,
+            protocol_version,
         };
 
         Ok((raw_rows, paging_state))
@@ -912,10 +917,17 @@ impl RawMetadataAndRawRows {
         let rows_count: usize = types::read_int_length(frame_slice.as_slice_mut())
             .map_err(ResultMetadataAndRowsCountParseError::RowsCountParseError)?;
 
+        let raw_rows = transcode_result_rows(
+            frame_slice.as_slice(),
+            rows_count,
+            metadata_deserialized.inner(),
+            self.protocol_version,
+        )?;
+
         Ok(DeserializedMetadataAndRawRows {
             metadata: metadata_deserialized,
             rows_count,
-            raw_rows: frame_slice.to_bytes(),
+            raw_rows,
             raw_metadata_and_rows_bytes_size,
         })
     }
@@ -967,10 +979,64 @@ fn deser_rows(
     buf_bytes: Bytes,
     cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
     features: &ProtocolFeatures,
+    protocol_version: CqlProtocolVersion,
 ) -> StdResult<(RawMetadataAndRawRows, PagingStateResponse), RawRowsAndPagingStateResponseParseError>
 {
     let mut frame_slice = FrameSlice::new(&buf_bytes);
-    RawMetadataAndRawRows::deserialize(&mut frame_slice, cached_metadata.cloned(), features)
+    RawMetadataAndRawRows::deserialize(
+        &mut frame_slice,
+        cached_metadata.cloned(),
+        features,
+        protocol_version,
+    )
+}
+
+/// Converts v2/v3 collection cells into the v3+ layout consumed by the shared
+/// typed row deserializer. The schema is taken from response metadata; scalar
+/// cells and null/unset markers are copied unchanged.
+fn transcode_result_rows(
+    raw_rows: &[u8],
+    rows_count: usize,
+    metadata: &ResultMetadata<'_>,
+    version: CqlProtocolVersion,
+) -> StdResult<Bytes, ResultMetadataAndRowsCountParseError> {
+    let source = match version {
+        CqlProtocolVersion::V2 => CollectionProtocol::V2,
+        CqlProtocolVersion::V3 => CollectionProtocol::V3OrNewer,
+        CqlProtocolVersion::V4 => return Ok(Bytes::copy_from_slice(raw_rows)),
+    };
+
+    let mut input = raw_rows;
+    let mut output = Vec::with_capacity(raw_rows.len());
+    for _ in 0..rows_count {
+        for column in metadata.col_specs() {
+            match types::read_value(&mut input)
+                .map_err(ResultMetadataAndRowsCountParseError::RowValueParseError)?
+            {
+                types::RawValue::Null => output.extend_from_slice(&(-1i32).to_be_bytes()),
+                types::RawValue::Unset => output.extend_from_slice(&(-2i32).to_be_bytes()),
+                types::RawValue::Value(cell) => {
+                    let modern = transcode_cell(
+                        column.typ(),
+                        source,
+                        CollectionProtocol::V3OrNewer,
+                        cell,
+                    )?;
+                    let len = i32::try_from(modern.len()).map_err(|_| {
+                        ResultMetadataAndRowsCountParseError::CollectionCellTranscodeError(
+                            crate::protocol_collections::CollectionCodecError::SizeOverflow,
+                        )
+                    })?;
+                    output.extend_from_slice(&len.to_be_bytes());
+                    output.extend_from_slice(&modern);
+                }
+            }
+        }
+    }
+    if !input.is_empty() {
+        return Err(ResultMetadataAndRowsCountParseError::TrailingRowBytes);
+    }
+    Ok(Bytes::from(output))
 }
 
 fn deser_set_keyspace(buf: &mut &[u8]) -> StdResult<SetKeyspace, SetKeyspaceParseError> {
@@ -1059,6 +1125,7 @@ pub fn deserialize_for_version(
                 buf_bytes.slice_ref(buf),
                 cached_metadata,
                 features,
+                version,
             )?),
             0x0003 => SetKeyspace(deser_set_keyspace(buf)?),
             0x0004 => Prepared(deser_prepared(buf, features, version)?),
@@ -1289,6 +1356,7 @@ mod test_utils {
                 &mut FrameSlice::new(&raw_result_rows),
                 cached_metadata,
                 &ProtocolFeatures::default(),
+                CqlProtocolVersion::V4,
             )
             .expect("Ill-formed serialized metadata for tests - likely bug in serialization code");
 
@@ -1317,6 +1385,28 @@ mod test_utils {
 #[cfg(test)]
 mod version_tests {
     use super::*;
+
+    #[test]
+    fn result_rows_transcode_v2_collection_cells_using_column_schema() {
+        let metadata = ResultMetadata::new_for_test(
+            1,
+            vec![ColumnSpec::owned(
+                "v".to_owned(),
+                ColumnType::Collection {
+                    frozen: false,
+                    typ: CollectionType::List(Box::new(ColumnType::Native(NativeType::Blob))),
+                },
+                TableSpec::owned("ks".to_owned(), "tbl".to_owned()),
+            )],
+        );
+        // One v2 list cell: [count:u16=1][element len:u16=1]["x"].
+        let v2_row = [0, 0, 0, 5, 0, 1, 0, 1, b'x'];
+        let modern = transcode_result_rows(&v2_row, 1, &metadata, CqlProtocolVersion::V2).unwrap();
+        assert_eq!(
+            modern.as_ref(),
+            &[0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 1, b'x']
+        );
+    }
 
     #[test]
     fn prepared_metadata_partition_key_indexes_are_v4_only() {

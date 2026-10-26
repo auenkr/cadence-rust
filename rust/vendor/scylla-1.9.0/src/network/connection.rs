@@ -19,7 +19,9 @@ use crate::frame::request::options::{self, Options};
 use crate::frame::request::query::QueryParameters;
 use crate::frame::request::register::RegisterV2 as Register;
 use crate::frame::response::authenticate::Authenticate;
-use crate::frame::response::result::{ResultMetadata, ResultWithDeserializedMetadata, TableSpec};
+use crate::frame::response::result::{
+    ColumnSpec, ResultMetadata, ResultWithDeserializedMetadata, TableSpec,
+};
 use crate::frame::response::{self, error};
 use crate::frame::response::{
     Error, ResponseWithDeserializedMetadataV2 as ResponseWithDeserializedMetadata,
@@ -41,11 +43,14 @@ use crate::routing::{Shard, ShardAwarePortRange, ShardInfo, Sharder, ShardingErr
 use crate::serialize::batch::{BatchValues, BatchValuesIterator};
 use crate::serialize::raw_batch::RawBatchValuesAdapter;
 use crate::serialize::row::{RowSerializationContext, SerializedValues};
+use crate::frame::types::RawValue;
+use crate::protocol_collections::{CollectionProtocol, transcode_cell};
 use crate::statement::batch::{Batch, BatchStatement};
 use crate::statement::prepared::{PreparedStatement, RawPreparedStatement};
 use crate::statement::unprepared::Statement;
 use crate::statement::{Consistency, PageSize};
 use bytes::Bytes;
+use bytes::BufMut;
 use futures::{FutureExt, future::RemoteHandle};
 use socket2::{SockRef, TcpKeepalive};
 use std::borrow::Cow;
@@ -182,6 +187,51 @@ impl RouterHandle {
 
         task_response
     }
+}
+
+/// Converts standard driver-serialized bind cells into the collection width
+/// selected by this connection. Scalar cells remain byte-for-byte unchanged.
+fn values_for_protocol(
+    values: &SerializedValues,
+    columns: &[ColumnSpec<'static>],
+    version: CqlProtocolVersion,
+) -> Result<SerializedValues, RequestAttemptError> {
+    let destination = match version {
+        CqlProtocolVersion::V2 => CollectionProtocol::V2,
+        CqlProtocolVersion::V3 => CollectionProtocol::V3OrNewer,
+        CqlProtocolVersion::V4 => return Ok(values.clone()),
+    };
+
+    let mut frame = Vec::new();
+    frame.put_u16(values.element_count());
+    for (index, value) in values.iter().enumerate() {
+        match value {
+            RawValue::Null => frame.put_i32(-1),
+            RawValue::Unset => return Err(RequestAttemptError::UnsetValueUnsupportedProtocol),
+            RawValue::Value(cell) => {
+                let converted = match columns.get(index) {
+                    Some(column) => transcode_cell(
+                        column.typ(),
+                        CollectionProtocol::V3OrNewer,
+                        destination,
+                        cell,
+                    )?,
+                    None => cell.to_vec(),
+                };
+                let len = i32::try_from(converted.len()).map_err(|_| {
+                    RequestAttemptError::CollectionCellTranscodeError(
+                        crate::protocol_collections::CollectionCodecError::SizeOverflow,
+                    )
+                })?;
+                frame.put_i32(len);
+                frame.extend_from_slice(&converted);
+            }
+        }
+    }
+
+    let mut input = frame.as_slice();
+    Ok(SerializedValues::new_from_frame(&mut input)
+        .expect("newly encoded SerializedValues frame is well-formed"))
 }
 
 #[derive(Default)]
@@ -1177,13 +1227,19 @@ impl Connection {
             .tablets_v2_supported
             .then_some(tablet_block_hint);
 
+        let protocol_values = values_for_protocol(
+            values,
+            &prepared_statement.get_prepared_metadata().col_specs,
+            self.config.protocol_version,
+        )?;
+
         let execute_frame = execute::ExecuteV2 {
             id: prepared_statement.get_id().as_ref().into(),
             result_metadata_id: cached_metadata_params.result_metadata_id.map(Into::into),
             parameters: query::QueryParameters {
                 consistency,
                 serial_consistency,
-                values: Cow::Borrowed(values),
+                values: Cow::Borrowed(&protocol_values),
                 page_size: page_size.map(Into::into),
                 timestamp,
                 skip_metadata: cached_metadata_params.skip_metadata,
@@ -2713,6 +2769,9 @@ mod tests {
         LWT_OPTIMIZATION_META_BIT_MASK_KEY, SCYLLA_LWT_ADD_METADATA_MARK_EXTENSION,
     };
     use crate::frame::types;
+    use crate::frame::response::result::{
+        CollectionType, ColumnSpec, ColumnType, NativeType, TableSpec,
+    };
     use crate::serialize::row::SerializedValues;
     use assert_matches::assert_matches;
     use scylla_proxy::{
@@ -2727,6 +2786,37 @@ mod tests {
     use tokio::time::Instant;
 
     use super::{CqlProtocolVersion, HostConnectionConfig, open_connection, options};
+
+    #[test]
+    fn prepared_collection_values_use_connection_protocol_and_v2_rejects_unset() {
+        let mut frame = vec![0, 1];
+        types::write_bytes(&[0, 0, 0, 1, 0, 0, 0, 1, b'x'], &mut frame).unwrap();
+        let mut raw = frame.as_slice();
+        let values = SerializedValues::new_from_frame(&mut raw).unwrap();
+        let columns = [ColumnSpec::owned(
+            "v".to_owned(),
+            ColumnType::Collection {
+                frozen: false,
+                typ: CollectionType::List(Box::new(ColumnType::Native(NativeType::Blob))),
+            },
+            TableSpec::owned("ks".to_owned(), "tbl".to_owned()),
+        )];
+
+        let v2 = super::values_for_protocol(&values, &columns, CqlProtocolVersion::V2).unwrap();
+        assert_eq!(
+            v2.iter().next(),
+            Some(types::RawValue::Value(&[0, 1, 0, 1, b'x']))
+        );
+
+        let mut unset_frame = vec![0, 1];
+        unset_frame.extend_from_slice(&(-2i32).to_be_bytes());
+        let mut unset_bytes = unset_frame.as_slice();
+        let unset = SerializedValues::new_from_frame(&mut unset_bytes).unwrap();
+        assert!(matches!(
+            super::values_for_protocol(&unset, &columns, CqlProtocolVersion::V2),
+            Err(crate::errors::RequestAttemptError::UnsetValueUnsupportedProtocol)
+        ));
+    }
 
     #[test]
     fn v2_stream_allocator_uses_only_nonnegative_i8_ids() {

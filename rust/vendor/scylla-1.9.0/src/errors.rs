@@ -963,6 +963,14 @@ pub enum RequestAttemptError {
     #[error("Failed to serialize CQL request: {0}")]
     CqlRequestSerialization(#[from] CqlRequestSerializationError),
 
+    /// A protocol v2/v3 request attempted to encode an Unset value, which Go's CQL driver rejects.
+    #[error("Unset values require CQL protocol v4 or newer")]
+    UnsetValueUnsupportedProtocol,
+
+    /// Failed to transcode a typed collection cell for the negotiated CQL protocol.
+    #[error("Failed to transcode a CQL collection value: {0}")]
+    CollectionCellTranscodeError(#[from] crate::protocol_collections::CollectionCodecError),
+
     /// Driver was unable to allocate a stream id to execute a query on.
     #[error("Unable to allocate stream id")]
     UnableToAllocStreamId,

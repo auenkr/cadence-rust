@@ -233,6 +233,23 @@ impl ResponseV2 {
         buf_bytes: bytes::Bytes,
         cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
     ) -> Result<Self, CqlResponseParseError> {
+        Self::deserialize_for_version(
+            features,
+            opcode,
+            buf_bytes,
+            cached_metadata,
+            super::versioned_header::CqlProtocolVersion::V4,
+        )
+    }
+
+    /// Deserialize a response body according to the negotiated native protocol version.
+    pub fn deserialize_for_version(
+        features: &ProtocolFeatures,
+        opcode: ResponseOpcode,
+        buf_bytes: bytes::Bytes,
+        cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
+        version: super::versioned_header::CqlProtocolVersion,
+    ) -> Result<Self, CqlResponseParseError> {
         let buf = &mut &*buf_bytes;
         let response = match opcode {
             ResponseOpcode::Error => Self::Error(Error::deserialize(features, buf)?),
@@ -241,12 +258,15 @@ impl ResponseV2 {
                 Self::Authenticate(authenticate::Authenticate::deserialize(buf)?)
             }
             ResponseOpcode::Supported => Self::Supported(Supported::deserialize(buf)?),
-            ResponseOpcode::Result => Self::Result(result::deserialize_with_features(
+            ResponseOpcode::Result => Self::Result(result::deserialize_for_version(
                 buf_bytes,
                 cached_metadata,
                 features,
+                version,
             )?),
-            ResponseOpcode::Event => Self::Event(event::EventV2::deserialize(buf)?),
+            ResponseOpcode::Event => {
+                Self::Event(event::EventV2::deserialize_for_version(buf, version)?)
+            }
             ResponseOpcode::AuthChallenge => {
                 Self::AuthChallenge(authenticate::AuthChallenge::deserialize(buf)?)
             }

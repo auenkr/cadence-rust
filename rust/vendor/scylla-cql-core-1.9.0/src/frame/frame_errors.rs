@@ -580,6 +580,15 @@ pub enum ResultMetadataAndRowsCountParseError {
     /// Received malformed rows count from the server.
     #[error("Malformed rows count: {0}")]
     RowsCountParseError(LowLevelDeserializationError),
+    /// Failed to transcode a typed collection cell to the driver's internal collection layout.
+    #[error("Failed to transcode a RESULT row collection cell: {0}")]
+    CollectionCellTranscodeError(#[from] crate::protocol_collections::CollectionCodecError),
+    /// Failed to parse a row value while transcoding collection cells.
+    #[error("Malformed RESULT row value: {0}")]
+    RowValueParseError(LowLevelDeserializationError),
+    /// Bytes remained after all rows and column values were consumed.
+    #[error("Trailing bytes after RESULT row values")]
+    TrailingRowBytes,
 }
 
 /// An error type returned when deserialization
