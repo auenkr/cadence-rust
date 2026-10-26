@@ -845,14 +845,34 @@ mod tests {
         fn get_task_list(&self, key: &TaskListKey) -> StoreResult<TaskListRecord> {
             self.inner.get_task_list(key)
         }
-        fn lease(&self, key: &TaskListKey, kind: i16, previous_range: i64, now_nanos: i64) -> StoreResult<TaskListRecord> {
+        fn lease(
+            &self,
+            key: &TaskListKey,
+            kind: i16,
+            previous_range: i64,
+            now_nanos: i64,
+        ) -> StoreResult<TaskListRecord> {
             self.inner.lease(key, kind, previous_range, now_nanos)
         }
-        fn update_task_list(&self, key: &TaskListKey, range: i64, data: TaskListData, now_nanos: i64) -> StoreResult<()> {
+        fn update_task_list(
+            &self,
+            key: &TaskListKey,
+            range: i64,
+            data: TaskListData,
+            now_nanos: i64,
+        ) -> StoreResult<()> {
             self.inner.update_task_list(key, range, data, now_nanos)
         }
-        fn create_tasks_with_domains(&self, key: &TaskListKey, range: i64, now_nanos: i64, tasks: &[(uuid::Uuid, &AllocatedTask)]) -> StoreResult<()> {
-            self.entered.send(()).expect("test is waiting for delayed append");
+        fn create_tasks_with_domains(
+            &self,
+            key: &TaskListKey,
+            range: i64,
+            now_nanos: i64,
+            tasks: &[(uuid::Uuid, &AllocatedTask)],
+        ) -> StoreResult<()> {
+            self.entered
+                .send(())
+                .expect("test is waiting for delayed append");
             let (lock, changed) = &self.released;
             let mut released = lock.lock().expect("append release lock");
             while !*released {
@@ -865,8 +885,15 @@ mod tests {
                 tasks.iter().map(|(domain, task)| (*domain, *task)),
             )
         }
-        fn get_tasks(&self, key: &TaskListKey, read_level: i64, max_read_level: i64, batch_size: i64) -> StoreResult<Vec<AllocatedTask>> {
-            self.inner.get_tasks(key, read_level, max_read_level, batch_size)
+        fn get_tasks(
+            &self,
+            key: &TaskListKey,
+            read_level: i64,
+            max_read_level: i64,
+            batch_size: i64,
+        ) -> StoreResult<Vec<AllocatedTask>> {
+            self.inner
+                .get_tasks(key, read_level, max_read_level, batch_size)
         }
         fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> StoreResult<i64> {
             self.inner.task_list_size(key, ack_level)
@@ -874,8 +901,14 @@ mod tests {
         fn complete_task(&self, key: &TaskListKey, task_id: i64) -> StoreResult<()> {
             self.inner.complete_task(key, task_id)
         }
-        fn complete_tasks_less_than(&self, key: &TaskListKey, inclusive_task_id: i64, limit: i64) -> StoreResult<usize> {
-            self.inner.complete_tasks_less_than(key, inclusive_task_id, limit)
+        fn complete_tasks_less_than(
+            &self,
+            key: &TaskListKey,
+            inclusive_task_id: i64,
+            limit: i64,
+        ) -> StoreResult<usize> {
+            self.inner
+                .complete_tasks_less_than(key, inclusive_task_id, limit)
         }
         fn delete_task_list(&self, key: &TaskListKey, range: i64) -> StoreResult<()> {
             self.inner.delete_task_list(key, range)
@@ -1262,8 +1295,11 @@ mod tests {
     async fn runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification() {
         let directory = tempfile::tempdir().unwrap();
         let sqlite = Arc::new(
-            SqliteTaskStore::create(directory.path().join("delayed-writer.db"), BlobEncoding::ThriftRW)
-                .unwrap(),
+            SqliteTaskStore::create(
+                directory.path().join("delayed-writer.db"),
+                BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
         );
         let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
         let store = Arc::new(DelayedAppendStore {

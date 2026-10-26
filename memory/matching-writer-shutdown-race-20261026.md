@@ -128,5 +128,9 @@ introduced.
 Focused clean-target Actions run
 [40371022510](https://github.com/auenkr/cadence-rust/actions/runs/40371022510)
 was dispatched for `package=cadence-matching`, `clean_target=true`, on the commit
-above. Its result is pending at the time of this note; update this entry with
-the conclusion and test result before considering the regression validated.
+above and failed at the changed-runtime formatting gate. The Go oracle steps
+passed; Clippy, Formatting, and Test were skipped because the runtime formatter
+check failed. CI listed rustfmt-only wrapping changes in the test wrapper and
+SQLite construction, now applied in the follow-up commit. No Rust compilation
+or test conclusion was obtained from this run. A new focused clean-target CI run
+is required for the formatted source.
