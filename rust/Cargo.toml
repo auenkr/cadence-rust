@@ -14,7 +14,6 @@ members = [
     "crates/cadence-thrift",
     "crates/cadence-proto",
 ]
-exclude = ["vendor/scylla-cql-2.0.0"]
 
 [workspace.package]
 edition = "2021"

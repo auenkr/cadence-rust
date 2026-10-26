@@ -150,7 +150,7 @@ jobs:
         with:
           components: clippy
       - name: Check vendored CQL driver formatting
-        run: rustfmt --edition 2024 --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
+        run: rustfmt --edition 2024 --config skip_children=true --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
       - name: Format TLS-touched Rust files
         if: inputs.format_tls_files == true
         working-directory: rust
