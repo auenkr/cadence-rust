@@ -995,6 +995,17 @@ impl TryFrom<UdtRow> for UdtRowWithParsedFieldTypes {
             field_names,
             field_types,
         } = udt_row;
+        if field_names.len() != field_types.len() {
+            return Err(InvalidCqlType {
+                typ: format!("UDT {keyspace_name}.{type_name}"),
+                position: 0,
+                reason: format!(
+                    "field name/type count mismatch ({} names, {} types)",
+                    field_names.len(),
+                    field_types.len()
+                ),
+            });
+        }
         let field_types = field_types
             .into_iter()
             .map(|type_| {
@@ -2481,6 +2492,18 @@ mod tests {
             < names.iter().position(|name| *name == "task_list_partition_config").unwrap());
         assert!(names.iter().position(|name| *name == "task_list_partition_config").unwrap()
             < names.iter().position(|name| *name == "task_list").unwrap());
+    }
+
+    #[test]
+    fn legacy_udt_metadata_rejects_mismatched_field_names_and_types() {
+        let err = super::UdtRowWithParsedFieldTypes::try_from(super::UdtRow {
+            keyspace_name: "cadence".into(),
+            type_name: "task_list_partition".into(),
+            field_names: vec!["isolation_groups".into(), "extra".into()],
+            field_types: vec!["org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.UTF8Type)".into()],
+        }).unwrap_err();
+        assert_eq!(err.typ, "UDT cadence.task_list_partition");
+        assert!(err.reason.contains("2 names, 1 types"));
     }
 
     #[test]
