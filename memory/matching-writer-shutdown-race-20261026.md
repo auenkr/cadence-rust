@@ -109,3 +109,24 @@ coverage. The query-touched rustfmt check passed after formatting was generated
 by the Actions workflow and applied from its uploaded patch. No local Cargo,
 Go, or rustfmt validation was run. This is focused crate CI, not mixed-cluster
 evidence and has no service binary SHA requirement.
+
+## Delayed append during runtime shutdown follow-up (2026-10-26)
+
+Commit `ea0a367c95bd13c26e131a8452438d47feaafb56` adds
+`runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification` in
+`matching_runtime.rs`. Its delegating test store blocks the real
+`create_tasks_with_domains` persistence call, then resumes into SQLite's
+existing malformed RunID conversion. The test builds `MatchingRuntime` with
+durable queues and the fatal sender, loads its owner through `QueueRegistry::get`
+(which constructs/registers the actual TaskWriter), starts a real enqueue, waits
+for the persistence barrier, and invokes `MatchingRuntime::shutdown`. It asserts
+shutdown remains pending while the append is blocked, releases persistence,
+then asserts shutdown returns only after the fatal receiver contains the typed
+`SqlRunIdError::Malformed` cause. No production timeout or logic change was
+introduced.
+
+Focused clean-target Actions run
+[40371022510](https://github.com/auenkr/cadence-rust/actions/runs/40371022510)
+was dispatched for `package=cadence-matching`, `clean_target=true`, on the commit
+above. Its result is pending at the time of this note; update this entry with
+the conclusion and test result before considering the regression validated.
