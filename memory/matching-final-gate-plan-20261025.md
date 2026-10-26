@@ -96,3 +96,30 @@ partition listing, SDK workflow/activity completion on that queue, and completio
 of all 24 generated load workflows. Queue completion alone does not prove direct
 root/child read routing. Record exact source and binary hashes as for every mixed
 lane. This dispatch instruction is a plan, not execution or acceptance evidence.
+
+## October 27 orchestration recheck
+
+Current master at this check: `bbe93dfa89640e0931362a7dcf5b2b2772a8c4bc`.
+This is not a new acceptance pin. Three Luna workers separately own Cassandra
+metric/quota domain-context UUID normalization, panic wire-string quoting, and
+the adaptive SDK retry failure from run `40375459588`. Integrate validated fixes
+before pinning and running the final serial gates.
+
+Source recheck confirms `tests/run-go-service-baseline.py` explicitly sets both
+`matching_restart` and `matching_failure_recovery` when `args.cassandra` is true.
+The Cassandra shell wrapper itself does not add these flags; the Python argument
+normalization does. Thus the workflow's shorter default args do not omit those
+scenarios. Confirm the executed scenarios in each final artifact regardless.
+
+The current production-validation workflow supports six lanes, including
+`adaptive`. Its fresh build records commit, binary SHA256 and build exit; the
+mixed step records command and gate exit, and always uploads the output tree.
+Active-offer likewise requests restart and recovery and records those build/gate
+identities. This is source evidence only, not a runtime pass.
+
+For final dispatch use the acceptance ledger's required mixed set: six production
+lanes plus two-node MySQL, Cassandra, active-offer and production Matching TLS,
+after fresh whole-workspace CI. The separate HTTP/TLS History fixture remains
+supplemental and does not replace production Matching TLS evidence. All required
+lanes must build the same immutable source SHA. No new workflow was dispatched
+by this recheck, and no Cargo or Go command ran locally.
