@@ -2,6 +2,7 @@
 
 use crate::frame::frame_errors::CqlRequestSerializationError;
 use crate::frame::protocol_features::ProtocolFeatures;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::response::result::cow_bytes::CowBytes;
 use bytes::Bytes;
 
@@ -32,13 +33,25 @@ impl SerializableRequest for Execute<'_> {
     const OPCODE: RequestOpcode = RequestOpcode::Execute;
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+#[expect(deprecated)]
+impl Execute<'_> {
+    /// Serializes this EXECUTE body using the selected native protocol version.
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         // Serializing statement id
         types::write_short_bytes(&self.id[..], buf)
             .map_err(ExecuteSerializationError::StatementIdSerialization)?;
 
         // Serializing params
         self.parameters
-            .serialize(buf)
+            .serialize_for_version(buf, version)
             .map_err(ExecuteSerializationError::QueryParametersSerialization)?;
         Ok(())
     }
@@ -47,8 +60,19 @@ impl SerializableRequest for Execute<'_> {
 #[expect(deprecated)]
 impl DeserializableRequest for Execute<'_> {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+#[expect(deprecated)]
+impl Execute<'_> {
+    /// Deserializes an EXECUTE body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Execute<'static>, RequestDeserializationError> {
         let id = types::read_short_bytes(buf)?.to_vec().into();
-        let parameters = QueryParameters::deserialize(buf)?;
+        let parameters = QueryParameters::deserialize_for_version(buf, version)?;
 
         Ok(Self { id, parameters })
     }
@@ -79,26 +103,41 @@ impl SerializableRequest for ExecuteV2<'_> {
     const OPCODE: RequestOpcode = RequestOpcode::Execute;
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl ExecuteV2<'_> {
+    /// Serializes this EXECUTE body using the selected native protocol version.
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         // Serializing statement id
         types::write_short_bytes(self.id.as_ref(), buf)
             .map_err(ExecuteSerializationError::StatementIdSerialization)?;
 
         // Serializing result metadata id
-        if let Some(id) = self.result_metadata_id.as_ref() {
+        if version == CqlProtocolVersion::V4 {
+            if let Some(id) = self.result_metadata_id.as_ref() {
             types::write_short_bytes(id.as_ref(), buf)
                 .map_err(ExecuteSerializationError::ResultMetadataIdSerialization)?;
+            }
         }
 
         // Serializing params
         self.parameters
-            .serialize(buf)
+            .serialize_for_version(buf, version)
             .map_err(ExecuteSerializationError::QueryParametersSerialization)?;
 
         // Serializing the trailing TABLETS_ROUTING_V2 tablet-version block. On a V2
         // connection the server reads exactly one such byte after the query parameters for
         // every EXECUTE, so the connection layer always sets this to `Some(_)` there.
-        if let Some(block) = self.tablet_version_block {
+        if version == CqlProtocolVersion::V4 {
+            if let Some(block) = self.tablet_version_block {
             buf.push(block);
+            }
         }
         Ok(())
     }
@@ -106,13 +145,27 @@ impl SerializableRequest for ExecuteV2<'_> {
 
 impl DeserializableRequest for ExecuteV2<'static> {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl ExecuteV2<'static> {
+    /// Deserializes an EXECUTE body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, RequestDeserializationError> {
         let id = CowBytes::from(types::read_short_bytes(buf)?).into_owned();
-        let result_metadata_id = CowBytes::from(types::read_short_bytes(buf)?).into_owned();
-        let parameters = QueryParameters::deserialize(buf)?;
+        let result_metadata_id = if version == CqlProtocolVersion::V4 {
+            Some(CowBytes::from(types::read_short_bytes(buf)?).into_owned())
+        } else {
+            None
+        };
+        let parameters = QueryParameters::deserialize_for_version(buf, version)?;
 
         Ok(Self {
             id,
-            result_metadata_id: Some(result_metadata_id),
+            result_metadata_id,
             parameters,
             // Unlike `result_metadata_id` - whose presence is implied by the frame being an
             // `ExecuteV2` rather than an `Execute` at all - nothing in the frame or in the

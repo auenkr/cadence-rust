@@ -4,6 +4,7 @@ use std::borrow::Cow;
 
 use crate::frame::{frame_errors::CqlRequestSerializationError, types::SerialConsistency};
 use crate::serialize::row::SerializedValues;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use bytes::{Buf, BufMut};
 
 use crate::{
@@ -47,10 +48,22 @@ impl SerializableRequest for Query<'_> {
     const OPCODE: RequestOpcode = RequestOpcode::Query;
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl Query<'_> {
+    /// Serializes this QUERY body using the selected native protocol version.
+    /// Existing [`SerializableRequest`] callers retain v4 behavior.
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         types::write_long_string(&self.contents, buf)
             .map_err(QuerySerializationError::StatementStringSerialization)?;
         self.parameters
-            .serialize(buf)
+            .serialize_for_version(buf, version)
             .map_err(QuerySerializationError::QueryParametersSerialization)?;
         Ok(())
     }
@@ -58,10 +71,20 @@ impl SerializableRequest for Query<'_> {
 
 impl DeserializableRequest for Query<'_> {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
-        let contents = Cow::Owned(types::read_long_string(buf)?.to_owned());
-        let parameters = QueryParameters::deserialize(buf)?;
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
 
-        Ok(Self {
+impl Query<'_> {
+    /// Deserializes a QUERY body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Query<'static>, RequestDeserializationError> {
+        let contents = Cow::Owned(types::read_long_string(buf)?.to_owned());
+        let parameters = QueryParameters::deserialize_for_version(buf, version)?;
+
+        Ok(Query {
             contents,
             parameters,
         })
@@ -121,6 +144,17 @@ impl QueryParameters<'_> {
         &self,
         buf: &mut impl BufMut,
     ) -> Result<(), QueryParametersSerializationError> {
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    /// Serializes query parameters using the selected native protocol version.
+    /// V2 supports skip-metadata; v3 adds timestamps and named values (named values remain
+    /// unsupported by this Rust representation).
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut impl BufMut,
+        version: CqlProtocolVersion,
+    ) -> Result<(), QueryParametersSerializationError> {
         types::write_consistency(self.consistency, buf);
 
         let paging_state_bytes = self.paging_state.as_bytes_slice();
@@ -146,7 +180,7 @@ impl QueryParameters<'_> {
             flags |= FLAG_WITH_SERIAL_CONSISTENCY;
         }
 
-        if self.timestamp.is_some() {
+        if self.timestamp.is_some() && version != CqlProtocolVersion::V2 {
             flags |= FLAG_WITH_DEFAULT_TIMESTAMP;
         }
 
@@ -168,7 +202,7 @@ impl QueryParameters<'_> {
             types::write_serial_consistency(serial_consistency, buf);
         }
 
-        if let Some(timestamp) = self.timestamp {
+        if let Some(timestamp) = self.timestamp.filter(|_| version != CqlProtocolVersion::V2) {
             types::write_long(timestamp, buf);
         }
 
@@ -179,10 +213,22 @@ impl QueryParameters<'_> {
 impl QueryParameters<'_> {
     /// Deserializes the parameters from the provided buffer.
     pub fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    /// Deserializes query parameters from a body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, RequestDeserializationError> {
         let consistency = types::read_consistency(buf)?;
 
         let flags = buf.get_u8();
-        let unknown_flags = flags & (!ALL_FLAGS);
+        let supported_flags = match version {
+            CqlProtocolVersion::V2 => ALL_FLAGS & !(FLAG_WITH_DEFAULT_TIMESTAMP | FLAG_WITH_NAMES_FOR_VALUES),
+            CqlProtocolVersion::V3 | CqlProtocolVersion::V4 => ALL_FLAGS,
+        };
+        let unknown_flags = flags & !supported_flags;
         if unknown_flags != 0 {
             return Err(RequestDeserializationError::UnknownFlags {
                 flags: unknown_flags,
@@ -193,8 +239,8 @@ impl QueryParameters<'_> {
         let page_size_flag = (flags & FLAG_PAGE_SIZE) != 0;
         let paging_state_flag = (flags & FLAG_WITH_PAGING_STATE) != 0;
         let serial_consistency_flag = (flags & FLAG_WITH_SERIAL_CONSISTENCY) != 0;
-        let default_timestamp_flag = (flags & FLAG_WITH_DEFAULT_TIMESTAMP) != 0;
-        let values_have_names_flag = (flags & FLAG_WITH_NAMES_FOR_VALUES) != 0;
+        let default_timestamp_flag = version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_DEFAULT_TIMESTAMP) != 0;
+        let values_have_names_flag = version != CqlProtocolVersion::V2 && (flags & FLAG_WITH_NAMES_FOR_VALUES) != 0;
 
         if values_have_names_flag {
             return Err(RequestDeserializationError::NamedValuesUnsupported);
@@ -244,3 +290,52 @@ impl QueryParameters<'_> {
 
 // Re-export from scylla-cql-core for backward compatibility.
 pub use scylla_cql_core::frame::request::query::{PagingState, PagingStateResponse};
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn empty_query_parameters_have_same_wire_fixture_for_v2_v3_v4() {
+        // CQL consistency LOCAL_QUORUM (0x0006), then a zero query-flags byte.
+        let expected = [0x00, 0x06, 0x00];
+        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+            let mut body = Vec::new();
+            QueryParameters::default()
+                .serialize_for_version(&mut body, version)
+                .unwrap();
+            assert_eq!(body, expected, "protocol {version:?}");
+            let decoded = QueryParameters::deserialize_for_version(&mut &body[..], version).unwrap();
+            assert_eq!(decoded.consistency, types::Consistency::LocalQuorum);
+        }
+    }
+
+    #[test]
+    fn v2_rejects_v3_query_parameter_flags() {
+        // Consistency LOCAL_QUORUM and the v3+ default-timestamp flag.
+        let body = [0x00, 0x06, FLAG_WITH_DEFAULT_TIMESTAMP];
+        assert!(QueryParameters::deserialize_for_version(
+            &mut &body[..],
+            CqlProtocolVersion::V2,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn query_flags_follow_gocql_v2_and_v3_gates() {
+        // Pinned gocql frame.go: skip metadata is v2+, timestamp is v3+.
+        let mut params = QueryParameters { skip_metadata: true, ..Default::default() };
+        let mut body = Vec::new();
+        params.serialize_for_version(&mut body, CqlProtocolVersion::V2).unwrap();
+        assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA]);
+
+        params.timestamp = Some(1);
+        body.clear();
+        params.serialize_for_version(&mut body, CqlProtocolVersion::V2).unwrap();
+        assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA]);
+
+        body.clear();
+        params.serialize_for_version(&mut body, CqlProtocolVersion::V3).unwrap();
+        assert_eq!(body, [0x00, 0x06, FLAG_SKIP_METADATA | FLAG_WITH_DEFAULT_TIMESTAMP, 0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+}

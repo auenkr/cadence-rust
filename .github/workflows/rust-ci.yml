@@ -165,6 +165,7 @@ jobs:
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
       - name: Capture Go metered persistence wrapper output
+        if: inputs.package != 'scylla-cql'
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/matching-metrics-emission"
@@ -180,7 +181,11 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          cargo fmt --all -- --check > format.log 2>&1
+          if [ "$PKG" = "scylla-cql" ]; then
+            cargo fmt --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml -- --check > format.log 2>&1
+          else
+            cargo fmt --all -- --check > format.log 2>&1
+          fi
           echo "$?" > workspace-format.exit
           exit 0
         continue-on-error: true
@@ -229,7 +234,11 @@ jobs:
           set +e
           set -o pipefail
           if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
-          cargo clippy $SEL --all-targets -- -D warnings 2>&1 | tee clippy.log
+          if [ "$PKG" = "scylla-cql" ]; then
+            cargo clippy --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml --all-targets -- -D warnings 2>&1 | tee clippy.log
+          else
+            cargo clippy $SEL --all-targets -- -D warnings 2>&1 | tee clippy.log
+          fi
           result=${PIPESTATUS[0]}
           echo "$result" > clippy.exit
           exit "$result"
@@ -248,7 +257,11 @@ jobs:
           set +e
           set -o pipefail
           if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
-          cargo test $SEL 2>&1 | tee test.log
+          if [ "$PKG" = "scylla-cql" ]; then
+            cargo test --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml 2>&1 | tee test.log
+          else
+            cargo test $SEL 2>&1 | tee test.log
+          fi
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"

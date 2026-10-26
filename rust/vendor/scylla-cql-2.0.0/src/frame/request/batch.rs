@@ -5,6 +5,7 @@ use std::{borrow::Cow, convert::TryInto};
 
 use crate::frame::{
     frame_errors::CqlRequestSerializationError,
+    versioned_header::CqlProtocolVersion,
     request::{RequestOpcode, SerializableRequest},
     types::{self, SerialConsistency},
 };
@@ -60,7 +61,7 @@ where
     Statement: Clone,
     Values: RawBatchValues,
 {
-    fn do_serialize(&self, buf: &mut Vec<u8>) -> Result<(), BatchSerializationError> {
+    fn do_serialize(&self, buf: &mut Vec<u8>, version: CqlProtocolVersion) -> Result<(), BatchSerializationError> {
         // Serializing type of batch
         buf.put_u8(self.batch_type as u8);
 
@@ -138,21 +139,24 @@ where
         types::write_consistency(self.consistency, buf);
 
         // Serializing flags
-        let mut flags = 0;
-        if self.serial_consistency.is_some() {
-            flags |= FLAG_WITH_SERIAL_CONSISTENCY;
-        }
-        if self.timestamp.is_some() {
-            flags |= FLAG_WITH_DEFAULT_TIMESTAMP;
+        if version != CqlProtocolVersion::V2 {
+            let mut flags = 0;
+            if self.serial_consistency.is_some() {
+                flags |= FLAG_WITH_SERIAL_CONSISTENCY;
+            }
+            if self.timestamp.is_some() {
+                flags |= FLAG_WITH_DEFAULT_TIMESTAMP;
+            }
+            buf.put_u8(flags);
         }
 
-        buf.put_u8(flags);
-
-        if let Some(serial_consistency) = self.serial_consistency {
-            types::write_serial_consistency(serial_consistency, buf);
-        }
-        if let Some(timestamp) = self.timestamp {
-            types::write_long(timestamp, buf);
+        if version != CqlProtocolVersion::V2 {
+            if let Some(serial_consistency) = self.serial_consistency {
+                types::write_serial_consistency(serial_consistency, buf);
+            }
+            if let Some(timestamp) = self.timestamp {
+                types::write_long(timestamp, buf);
+            }
         }
 
         Ok(())
@@ -168,7 +172,23 @@ where
     const OPCODE: RequestOpcode = RequestOpcode::Batch;
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
-        self.do_serialize(buf)?;
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl<Statement, Values> Batch<'_, Statement, Values>
+where
+    for<'s> BatchStatement<'s>: From<&'s Statement>,
+    Statement: Clone,
+    Values: RawBatchValues,
+{
+    /// Serializes this BATCH body using the selected native protocol version.
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut Vec<u8>,
+        version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
+        self.do_serialize(buf, version)?;
         Ok(())
     }
 }
@@ -214,6 +234,16 @@ fn serialize_batch_statement(
 
 impl<'b> DeserializableRequest for Batch<'b, BatchStatement<'b>, Vec<SerializedValues>> {
     fn deserialize(buf: &mut &[u8]) -> Result<Self, RequestDeserializationError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl<'b> Batch<'b, BatchStatement<'b>, Vec<SerializedValues>> {
+    /// Deserializes a BATCH body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, RequestDeserializationError> {
         let batch_type = buf.get_u8().try_into()?;
 
         let statements_count: usize = types::read_short(buf)?.into();
@@ -230,7 +260,7 @@ impl<'b> DeserializableRequest for Batch<'b, BatchStatement<'b>, Vec<SerializedV
 
         let consistency = types::read_consistency(buf)?;
 
-        let flags = buf.get_u8();
+        let flags = if version == CqlProtocolVersion::V2 { 0 } else { buf.get_u8() };
         let unknown_flags = flags & (!ALL_FLAGS);
         if unknown_flags != 0 {
             return Err(RequestDeserializationError::UnknownFlags {
@@ -268,5 +298,31 @@ impl<'b> DeserializableRequest for Batch<'b, BatchStatement<'b>, Vec<SerializedV
             statements: Cow::Owned(statements),
             values,
         })
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn batch_parameter_flags_are_absent_in_v2_and_present_in_v3() {
+        let statements: Vec<BatchStatement<'_>> = Vec::new();
+        let batch = Batch {
+            statements: Cow::Borrowed(&statements),
+            batch_type: BatchType::Logged,
+            consistency: types::Consistency::LocalQuorum,
+            serial_consistency: None,
+            timestamp: None,
+            values: Vec::<SerializedValues>::new(),
+        };
+
+        let mut v2 = Vec::new();
+        batch.serialize_for_version(&mut v2, CqlProtocolVersion::V2).unwrap();
+        assert_eq!(v2, [0, 0, 0, 6]);
+
+        let mut v3 = Vec::new();
+        batch.serialize_for_version(&mut v3, CqlProtocolVersion::V3).unwrap();
+        assert_eq!(v3, [0, 0, 0, 6, 0]);
     }
 }

@@ -5,6 +5,7 @@ use crate::frame::frame_errors::CqlRequestSerializationError;
 use crate::{
     frame::request::{RequestOpcode, SerializableRequest},
     frame::types,
+    frame::versioned_header::CqlProtocolVersion,
 };
 
 // Re-export for backward compatibility.
@@ -21,6 +22,17 @@ impl SerializableRequest for Prepare<'_> {
     const OPCODE: RequestOpcode = RequestOpcode::Prepare;
 
     fn serialize(&self, buf: &mut Vec<u8>) -> Result<(), CqlRequestSerializationError> {
+        self.serialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+}
+
+impl Prepare<'_> {
+    /// Serializes this PREPARE body. The CQL query string has the same representation in v2-v4.
+    pub fn serialize_for_version(
+        &self,
+        buf: &mut Vec<u8>,
+        _version: CqlProtocolVersion,
+    ) -> Result<(), CqlRequestSerializationError> {
         types::write_long_string(self.query, buf)
             .map_err(PrepareSerializationError::StatementStringSerialization)?;
         Ok(())
