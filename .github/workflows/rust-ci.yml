@@ -149,6 +149,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Check vendored CQL driver formatting
+        run: rustfmt --edition 2024 --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
       - name: Format TLS-touched Rust files
         if: inputs.format_tls_files == true
         working-directory: rust
@@ -288,6 +290,8 @@ jobs:
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Test vendored scylla-cql frame codecs directly
+        run: cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame::
       - name: Compare live Go tally and Rust Matching emissions
         if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
         run: |

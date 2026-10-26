@@ -1457,6 +1457,7 @@ impl Session {
             local_ip_address: config.local_ip_address,
             shard_aware_local_port_range: config.shard_aware_local_port_range,
             compression: config.compression,
+            protocol_version: crate::frame::versioned_header::CqlProtocolVersion::V4,
             tcp_socket_options,
             timestamp_generator: config.timestamp_generator,
             tls_provider,
