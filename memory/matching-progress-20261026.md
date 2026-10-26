@@ -120,3 +120,17 @@ check), not runtime acceptance. No other mixed gate should run concurrently.
 Active-offer run40361176805 succeeded; a second Luna worker is checking actual
 source/binary hashes, scenario outcomes, topology and cleanup artifacts. Current
 limit remains two workers; all Cargo/Go/format/mixed validation stays on Actions.
+
+## Integrated fatal lifecycle CI result
+
+Master merge40f98ee1b19d76376e51ae9751de8d6980152099 includes the reviewed
+fatal registry clone wiring, standalone exit2 mapping, Go-compatible SQL UUID
+forms and writer actor drain. Ordinary integration workspace run
+https://github.com/auenkr/cadence-rust/actions/runs/40365683379 succeeded on
+that exact SHA. This is not the final fresh combined candidate acceptance.
+
+The strengthened regression initially waited tracker idle before writer stop;
+parent fixed stop-before-join in e8669db4b. Cancelled40364944856 is not passing
+evidence. Worker latest retry40366940209 targets c027a0ae66b80586e139a234d1d2f314dfeb5e0f
+and was pending at latest check. Adaptive-scaler production probe is the other
+active Luna assignment, based on the final acceptance audit merged9a8505ceb.
