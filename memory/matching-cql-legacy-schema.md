@@ -67,7 +67,12 @@ mixed-cluster SDK compatibility still require the parent CI/gate pass.
 
 Focused direct tests cover recursive collection/reversed validator parsing;
 the prior scalar and keyspace tests remain. No local Cargo, Go, or rustfmt
-commands were used. This commit's CI status is pending parent validation.
+commands were used. Dispatch was attempted after push against
+`t3/cassandra-legacy-metadata`; GitHub returned HTTP 422:
+`Workflow does not have 'workflow_dispatch' trigger` for workflow `394409098`.
+The branch YAML does contain `workflow_dispatch`; the dispatch API rejected
+the request, so no run URL, CI conclusion, or compilation evidence exists for
+this commit. Parent validation remains required.
 
 ## CI evidence
 
