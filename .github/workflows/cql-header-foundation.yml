@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: ["t3/matching-cql-integration"]
-    paths: [".github/workflows/cql-header-foundation.yml", "rust/Cargo.toml"]
+    paths: [".github/workflows/cql-header-foundation.yml", "rust/Cargo.toml", "rust/vendor/**", "rust/crates/cadence-persistence/**"]
 concurrency:
   group: cql-header-foundation-${{ github.ref }}
   cancel-in-progress: true
@@ -22,33 +22,37 @@ jobs:
           rustfmt --edition 2024 --config skip_children=true rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-cql-2.0.0/src/frame/versioned_header.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs rust/vendor/scylla-1.9.0/src/client/session_builder.rs rust/vendor/scylla-1.9.0/src/cluster/metadata/fetching.rs rust/vendor/scylla-cql-core-1.9.0/src/protocol_collections.rs rust/vendor/scylla-1.9.0/src/routing/mod.rs rust/vendor/scylla-1.9.0/src/routing/partitioner.rs
           rustfmt --edition 2021 rust/crates/cadence-persistence/examples/matching_cassandra_protocol_probe.rs
           git diff --binary > out/format.patch
-      - name: Test actual vendored header codec
+      - name: Test actual vendored scylla and cql crates
         run: |
           mkdir -p out
           git rev-parse HEAD > out/commit.txt
           printf '%s\n' "$CARGO_TARGET_DIR" > out/target-dir.txt
-          set +e
-          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql --lib versioned_header) > out/test.log 2>&1
-          result=$?
-          echo "$result" > out/test.exit
-          cat out/test.log
-          exit "$result"
-      - name: Test actual vendored collection codec
+          overall=0
+          run_step() {
+            name="$1"; pkg="$2"; filter="$3"
+            (cd rust && cargo test --manifest-path vendor/Cargo.toml -p "$pkg" --lib "$filter") > "out/$name.log" 2>&1
+            rc=$?
+            # a compile failure keeps its exit code; a green run that executed zero tests is a failure too
+            if [ "$rc" -eq 0 ] && ! grep -Eq 'running [1-9][0-9]* tests?' "out/$name.log"; then
+              echo "no tests executed for $name" >> "out/$name.log"; rc=1
+            fi
+            echo "$rc" > "out/$name.exit"
+            grep -E '^error|test result|running [0-9]+ test|no tests executed' "out/$name.log" || true
+            [ "$rc" -eq 0 ] || overall=1
+          }
+          run_step header scylla-cql versioned_header
+          run_step collection scylla-cql-core protocol_collections::
+          run_step routing scylla routing::partitioner::tests::
+          exit "$overall"
+      - name: Compile persistence Cassandra protocol probe
+        if: always()
         run: |
+          mkdir -p out
           set +e
-          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql-core --lib protocol_collections::) > out/collection-test.log 2>&1
-          result=$?
-          echo "$result" > out/collection-test.exit
-          cat out/collection-test.log
-          exit "$result"
-      - name: Test actual vendored partitioner routing
-        run: |
-          set +e
-          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla --lib routing::partitioner::tests::) > out/routing-test.log 2>&1
-          result=$?
-          echo "$result" > out/routing-test.exit
-          cat out/routing-test.log
-          exit "$result"
+          (cd rust && cargo build -p cadence-persistence --example matching_cassandra_protocol_probe) > out/probe-build.log 2>&1
+          echo $? > out/probe-build.exit
+          grep -E '^(error|warning: unused)' out/probe-build.log || true
+          exit "$(cat out/probe-build.exit)"
       - name: Preserve runner-resolved lockfile
         if: always()
         run: |
