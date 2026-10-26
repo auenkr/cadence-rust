@@ -12,7 +12,7 @@ Source inputs: `.github/workflows/*`, `tests/gates/*`, and
 | `matching-production-validation.yml` | `lane` = postgres, mysql-probes, thrift, configstore, shard-distributor | Go Frontend/History/Worker + Rust Matching (`tests/gates/run-{postgres,mysql}-lane.sh`) | PostgreSQL (postgres lane); MySQL (all others); thrift lane = Thrift Matching + TChannel History | every lane: `--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3` |
 | `matching-mixed-gate.yml` | `extra_args` (default restart + failure-recovery + idle 3) | MySQL, two Rust Matching nodes | MySQL, gRPC | restart, failure recovery, idle |
 | `matching-cassandra-mixed-gate.yml` | `extra_args` (default `--matching-restart --matching-idle-check-seconds 3`) | Go services + Rust Matching, `run-cassandra-lane.sh` | Cassandra | restart, idle; lane itself adds two-node failure recovery |
-| `matching-active-offer-gate.yml` | none | Go History + Rust Matching, `run-mysql-lane.sh --probe-active-offer` | MySQL | idle check only |
+| `matching-active-offer-gate.yml` | none | Go History + Rust Matching, `run-mysql-lane.sh --probe-active-offer` | MySQL | restart, failure recovery, idle (flags present; inspect emitted scenarios) |
 | `matching-http-tls-interop.yml` | none | NOT the full mixed cluster: Go YARPC/Thrift client, Go Ringpop stub + Rust History fixture, `tests/run-matching-thrift-compat.py` | SQLite / embedded | timeout recovery and drain only |
 
 Ignored: `ci-checks`, `breaking_change_reminder`, `fresh-go-deps-check`, `issue-validation`, `semantic-pr` (upstream Go, not gates).
@@ -49,7 +49,7 @@ Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/
 
 ## Lanes lacking a restart or failure-recovery check
 
-- `matching-active-offer-gate.yml`: no `--matching-restart`, no `--matching-failure-recovery`. Gap. Either extend the command with both flags (a workflow change, then the whole plan re-pins) or record it explicitly as scenario-only.
+- `matching-active-offer-gate.yml`: current workflow already passes `--matching-restart` and `--matching-failure-recovery`. The earlier missing-flags finding is stale. Verify the active-offer scenario and recovery scenarios actually execute together; flags alone are not runtime evidence. A Luna worker is reviewing substantive coverage.
 - `matching-cassandra-mixed-gate.yml`: default args omit `--matching-failure-recovery`; the notes say the lane script adds two-node recovery. Confirm in `out/gate.log` that the recovery scenario actually ran; otherwise pass `-f extra_args="--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3"`.
 - `matching-http-tls-interop.yml`: fixture only, no Go History/Frontend/Worker, no process restart or failure recovery of the backend (only handshake-timeout recovery and drain). Not a recovery lane.
 - `rust-ci.yml`: unit tests only.
