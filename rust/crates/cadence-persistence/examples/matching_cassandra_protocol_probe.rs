@@ -4,9 +4,12 @@
 //! `CASSANDRA_PROTO_VERSION` is mandatory. Protocol negotiation/configuration
 //! errors are intentionally fatal; this probe never silently falls back.
 use anyhow::{bail, Context, Result};
-use cadence_persistence::cassandra::{CassandraSessionConfig, CassandraSessionOptions};
+use cadence_persistence::cassandra::{
+    CassandraSessionConfig, CassandraSessionOptions, CassandraTaskUdt,
+};
 use scylla::statement::batch::{Batch, BatchType};
 use std::{env, time::Duration};
+use uuid::Uuid;
 
 fn required(name: &str) -> Result<String> {
     env::var(name).with_context(|| format!("{name} is required"))
@@ -44,6 +47,46 @@ async fn main() -> Result<()> {
         "CREATE TABLE IF NOT EXISTS matching_protocol_oracle (id bigint PRIMARY KEY, payload blob)",
         (),
     ).await.context("schema create result")?;
+
+    println!("RUN task-udt-schema-create");
+    session.query_unpaged(
+        "CREATE TYPE matching_protocol_task (domain_id uuid, workflow_id text, run_id uuid, schedule_id bigint, created_time timestamp, partition_config map<text, text>)",
+        (),
+    ).await.context("create Matching task-shaped UDT")?;
+    session.query_unpaged(
+        "CREATE TABLE matching_protocol_tasks (id bigint PRIMARY KEY, task frozen<matching_protocol_task>)",
+        (),
+    ).await.context("create Matching task-shaped UDT table")?;
+    let task = CassandraTaskUdt {
+        domain_id: Uuid::parse_str("11112222-3333-4444-5555-666677778888")?,
+        workflow_id: "matching-udt-workflow".to_owned(),
+        run_id: Some(Uuid::parse_str("00000000-0000-0001-0000-000000000002")?),
+        schedule_id: 123_456_789,
+        created_time: chrono::DateTime::parse_from_rfc3339("2026-10-27T12:34:56.789Z")?.with_timezone(&chrono::Utc),
+        partition_config: Some([("partition".to_owned(), "blue".to_owned()), ("zone".to_owned(), "west".to_owned())].into()),
+    };
+    println!("RUN task-udt-prepare-insert");
+    let task_insert = session.prepare(
+        "INSERT INTO matching_protocol_tasks (id, task) VALUES (?, ?)",
+    ).await.context("prepare task UDT insert")?;
+    println!("RUN task-udt-insert");
+    session.execute_unpaged(&task_insert, (7001_i64, task.clone())).await
+        .context("execute Matching task UDT insert")?;
+    println!("RUN task-udt-select");
+    let task_select = session.prepare(
+        "SELECT task FROM matching_protocol_tasks WHERE id = ?",
+    ).await.context("prepare task UDT select")?;
+    let task_result = session.execute_unpaged(&task_select, (7001_i64,)).await
+        .context("execute Matching task UDT select")?;
+    let task_rows = task_result.into_rows_result().context("task UDT result metadata")?;
+    let got = task_rows.maybe_first_row::<(CassandraTaskUdt,)>()?
+        .context("task UDT SELECT returned no row")?.0;
+    if got.domain_id != task.domain_id || got.workflow_id != task.workflow_id
+        || got.run_id != task.run_id || got.schedule_id != task.schedule_id
+        || got.created_time != task.created_time || got.partition_config != task.partition_config
+    {
+        bail!("Matching task UDT roundtrip mismatch: got {got:?}");
+    }
 
     const QUEUE_TYPE: i32 = 91;
     println!("RUN queue-cas-enqueue");
@@ -191,6 +234,10 @@ async fn main() -> Result<()> {
         .query_unpaged("DROP TABLE matching_protocol_oracle", ())
         .await
         .context("schema drop result")?;
-    println!("PASS rust-cadence-persistence protocol={protocol} operations=schema-change,cas,prepare,query,result,batch,range-delete,point-delete,server-error");
+    session.query_unpaged("DROP TABLE matching_protocol_tasks", ()).await
+        .context("drop Matching task UDT table")?;
+    session.query_unpaged("DROP TYPE matching_protocol_task", ()).await
+        .context("drop Matching task UDT type")?;
+    println!("PASS rust-cadence-persistence protocol={protocol} operations=schema-change,cas,query,result,batch,range-delete,point-delete,server-error,task-udt");
     Ok(())
 }
