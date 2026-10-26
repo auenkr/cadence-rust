@@ -1,6 +1,9 @@
 name: CQL header foundation
 on:
   workflow_dispatch:
+  push:
+    branches: ["t3/matching-cql-integration"]
+    paths: [".github/workflows/cql-header-foundation.yml"]
 concurrency:
   group: cql-header-foundation-${{ github.ref }}
   cancel-in-progress: true
