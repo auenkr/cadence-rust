@@ -1,0 +1,15 @@
+test grpc_matching::durable_tests::matching_rpc_adaptive_scaler_upscales_write_partitions_on_load ... ok
+test matching_writer::tests::standalone_fatal_channel_receives_typed_sql_run_id_failure_before_append_error ... ok
+test matching_writer::tests::zero_capacity_handoffs_are_fifo_and_never_overwrite_waiters ... ok
+test matching_writer::tests::zero_capacity_unaccepted_cancellation_removes_published_offer ... ok
+test ringpop_provider::tests::accepted_suspect_cascades_through_faulty_tombstone_and_eviction ... ok
+test ringpop_provider::tests::alive_cancels_timer_and_stop_restart_does_not_restore_cleared_timer ... ok
+test ringpop_provider::tests::exponential_join_delayer_matches_go_window_and_cap ... ok
+
+     Running tests/sql_writer_fatal_process.rs (target/debug/deps/sql_writer_fatal_process-6e18fbbd02fedf4c)
+
+running 1 test
+test standalone_matching_sqlite_malformed_run_id_exits_process_with_two ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 722 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 35.09s

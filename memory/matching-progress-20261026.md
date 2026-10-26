@@ -69,3 +69,17 @@ The readiness review's stale shard failure statement must not override run
 `5d9a60123b651e6cdd1fa3197a9955085351536a668daf8eb57085c8663d52e3`.
 It must still be repeated against the final candidate after semantic changes.
 No current final candidate is pinned; Matching remains incomplete.
+
+### Artifact verification of focused pass
+
+Downloaded `rust-ci-logs` for40357713048; embedded commit matches e69c76633.
+`clippy.exit=0`, `test.exit=0`, `fmt.exit=0`. Actual test log confirms722
+library tests passed and the real `sql_writer_fatal_process` integration test
+passed (1 test). Compact excerpts, original-log hashes and exit files are in
+`memory/evidence/matching-fatal-focused-40357713048/`.
+
+Important limitation: `query-format.exit=1`, `tls-format.exit=1`, and
+`workspace-format.exit=1` despite green job steps. Touched-file logs identify
+formatting in `grpc_matching.rs` and `matching_registry.rs`, including long
+fatal-channel types. Obtain/apply an Actions-generated patch after lifecycle
+fix; do not claim touched-file formatting acceptance from job status alone.

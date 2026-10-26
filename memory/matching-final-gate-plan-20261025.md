@@ -36,7 +36,12 @@ confirm `headSha == EXPECTED_SHA`, download the artifact, record binary SHA256 (
 6. `gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=shard-distributor`
 7. `gh workflow run matching-mixed-gate.yml --ref "$BRANCH"` (MySQL two-node; defaults are already right; not in the earlier plan, add it)
 8. `gh workflow run matching-cassandra-mixed-gate.yml --ref "$BRANCH"`
-9. `gh workflow run matching-active-offer-gate.yml --ref "$BRANCH"`
+9. `gh workflow run matching-active-offer-gate.yml --ref "$BRANCH"` now runs
+   `--probe-active-offer --matching-restart --matching-failure-recovery
+   --matching-idle-check-seconds 3`; inspect the gate artifacts for the SIGTERM
+   drain/restart, SIGKILL recovery, two-node owner takeover and active-offer
+   scenario assertions. Its topology remains Go Frontend/History/Worker plus
+   Rust Matching, with Go Matching absent.
 10. `gh workflow run matching-http-tls-interop.yml --ref "$BRANCH"`
 
 Coverage by requirement: MySQL = 3, 7, 9; PostgreSQL = 2; Cassandra = 8; Thrift/TChannel = 4 (+10 fixture); HTTP and TLS = 10 only
