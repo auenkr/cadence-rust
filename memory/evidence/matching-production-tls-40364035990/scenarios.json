@@ -1,0 +1,44 @@
+{
+  "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+  "goMatchingStarted": false,
+  "rustServices": [
+    "matching"
+  ],
+  "goServices": [
+    "frontend",
+    "history",
+    "worker"
+  ],
+  "acceptanceEligible": false,
+  "probeExitCode": 0,
+  "runExitCode": 0,
+  "failure": null,
+  "ownershipSamples": 64,
+  "ownershipAgreement": true,
+  "idleEviction": {
+    "taskList": "production-idle-d4d58293-ef58-4d84-b3a7-44db9ffcc705",
+    "releasedWithEmptyResponse": true,
+    "sdkCompletedWorkflow": "production-idle-recovery-d4d58293-ef58-4d84-b3a7-44db9ffcc705",
+    "completionEvents": 1
+  },
+  "crashRecovery": {
+    "taskList": "production-crash-d4d58293-ef58-4d84-b3a7-44db9ffcc705",
+    "crashedPid": 9164,
+    "crashedHostIndex": 0,
+    "survivorPid": 9184,
+    "workflowId": "production-crash-recovery-d4d58293-ef58-4d84-b3a7-44db9ffcc705",
+    "completionEvents": 1,
+    "rangeBefore": 1,
+    "rangeAfter": 2,
+    "ackBefore": 0,
+    "ackAfter": 1,
+    "queuedRowsAfterCompletion": 0
+  },
+  "shutdown": {
+    "signal": "SIGTERM",
+    "sigtermSentUnixNs": 1793034113309000000,
+    "exitCode": 0,
+    "childSignal": null,
+    "completedAtUnixNs": 1793034113382000000
+  }
+}
