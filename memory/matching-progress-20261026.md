@@ -48,3 +48,24 @@ is pending at this record. This branch also restricts SQL UUID inputs to Go's
 exact 32/36/38/45-byte forms; compact or braced URN suffixes must be rejected.
 Two Luna workers are independently reviewing the fatal wiring and final mixed
 acceptance requirements. No final mixed run has started for this source.
+
+## Confirmed focused pass and remaining work, 22:00 IST
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40357713048 completed
+**success** on exact head `e69c7663392db4e2c356d38d2a4a42a4b35125b8`.
+GitHub job metadata confirms Clippy and Test succeeded. This is focused,
+cache-enabled CI, not fresh final workspace or mixed-cluster acceptance.
+
+Independent source review found a remaining concurrent-shutdown race: signal
+selection may finish teardown before an in-flight writer sends its fatal
+notification; a final `try_recv` alone cannot establish writer completion.
+A Luna worker is implementing a lifecycle fix and regression. A second Luna
+worker is addressing active-offer restart/recovery coverage and auditing the
+HTTP/TLS mixed scope. Both use medium reasoning/default speed; limit remains2.
+
+The readiness review's stale shard failure statement must not override run
+40218022772: that shard recovery run succeeded on
+`a5a8e2a14638efcc2d7f6cc5bd6ec027271978dd`, binary SHA256
+`5d9a60123b651e6cdd1fa3197a9955085351536a668daf8eb57085c8663d52e3`.
+It must still be repeated against the final candidate after semantic changes.
+No current final candidate is pinned; Matching remains incomplete.
