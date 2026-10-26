@@ -68,6 +68,6 @@ workflow dispatched with:
 gh workflow run rust-ci.yml --ref t3/cassandra-v2-collections -f package=scylla-cql-core
 ```
 
-Run: https://github.com/auenkr/cadence-rust/actions/runs/40413948100
-Head at dispatch: `3286e0c656d15c87f1b65b46890dd78407fe19ca`.
+Run: https://github.com/auenkr/cadence-rust/actions/runs/40414042129
+Head at dispatch: `eb47d20a447c265fdab0a28b346cf52db9437262`.
 Conclusion at last status query: pending; tests/clippy/format not yet verified.
