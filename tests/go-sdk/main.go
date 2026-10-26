@@ -144,7 +144,14 @@ func main() {
 	}
 	defer dispatcher.Stop()
 	rpc := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	sdkTimeout := 60 * time.Second
+	if os.Getenv("CADENCE_MIXED_MATCHING_DOMAIN") != "" {
+		// The production mixed Matching probe shares one SDK context across
+		// 24 adaptive load workflows and the serial compatibility scenarios.
+		// Keep room for the complete suite under the probe's 180s subprocess cap.
+		sdkTimeout = 150 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sdkTimeout)
 	defer cancel()
 	if domain := os.Getenv("CADENCE_MIXED_MATCHING_DOMAIN"); domain != "" {
 		runMixedMatchingSDK(ctx, rpc, domain)
