@@ -293,7 +293,7 @@ jobs:
       - name: Test vendored scylla-cql frame codecs directly
         run: |
           set +e
-          cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame:: > rust/cql-frame-test.log 2>&1
+          (cd rust && cargo test -p scylla-cql --lib frame::) > rust/cql-frame-test.log 2>&1
           result=$?
           echo "$result" > rust/cql-frame-test.exit
           cat rust/cql-frame-test.log
