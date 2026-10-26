@@ -66,7 +66,7 @@ pub fn encode_collection(
     kind: CollectionKind,
     elements: &[&[u8]],
 ) -> Result<Vec<u8>, CollectionCodecError> {
-    if kind == CollectionKind::Map && elements.len() % 2 != 0 {
+    if kind == CollectionKind::Map && !elements.len().is_multiple_of(2) {
         return Err(CollectionCodecError::OddMapElementCount);
     }
     let mut out = Vec::new();
@@ -84,11 +84,11 @@ pub fn encode_collection(
 }
 
 /// Decodes one list/set or map payload, returning borrowed element bytes.
-pub fn decode_collection<'a>(
+pub fn decode_collection(
     protocol: CollectionProtocol,
     kind: CollectionKind,
-    payload: &'a [u8],
-) -> Result<Vec<&'a [u8]>, CollectionCodecError> {
+    payload: &[u8],
+) -> Result<Vec<&[u8]>, CollectionCodecError> {
     let mut cursor = 0;
     let count = read_size(protocol, payload, &mut cursor)?;
     let count = if kind == CollectionKind::Map {
@@ -301,7 +301,7 @@ mod tests {
             encode_collection(
                 CollectionProtocol::V2,
                 CollectionKind::List,
-                &vec![b""; u16::MAX as usize + 1]
+                &vec![b"".as_slice(); u16::MAX as usize + 1]
             ),
             Err(CollectionCodecError::SizeOverflow)
         );
