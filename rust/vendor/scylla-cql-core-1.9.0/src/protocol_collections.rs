@@ -113,7 +113,7 @@ pub fn encode_collection(
     kind: CollectionKind,
     elements: &[&[u8]],
 ) -> Result<Vec<u8>, CollectionCodecError> {
-    if kind == CollectionKind::Map && elements.len() % 2 != 0 {
+    if kind == CollectionKind::Map && !elements.len().is_multiple_of(2) {
         return Err(CollectionCodecError::OddMapElementCount);
     }
     let mut out = Vec::new();
@@ -131,11 +131,11 @@ pub fn encode_collection(
 }
 
 /// Decodes one list/set or map payload, returning borrowed element bytes.
-pub fn decode_collection<'a>(
+pub fn decode_collection(
     protocol: CollectionProtocol,
     kind: CollectionKind,
-    payload: &'a [u8],
-) -> Result<Vec<&'a [u8]>, CollectionCodecError> {
+    payload: &[u8],
+) -> Result<Vec<&[u8]>, CollectionCodecError> {
     let mut cursor = 0;
     let count = read_size(protocol, payload, &mut cursor)?;
     let count = if kind == CollectionKind::Map {
@@ -237,7 +237,7 @@ mod tests {
     fn rejects_overflow_malformed_map_negative_and_trailing_bytes() {
         let too_big = vec![b'x'; u16::MAX as usize + 1];
         assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::List, &[&too_big]), Err(CollectionCodecError::SizeOverflow));
-        assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::List, &vec![b""; u16::MAX as usize + 1]), Err(CollectionCodecError::SizeOverflow));
+        assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::List, &vec![&b""[..]; u16::MAX as usize + 1]), Err(CollectionCodecError::SizeOverflow));
         assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::Map, &[b"k"]), Err(CollectionCodecError::OddMapElementCount));
         assert_eq!(decode_collection(CollectionProtocol::V2, CollectionKind::List, &[0]), Err(CollectionCodecError::Truncated));
         assert_eq!(decode_collection(CollectionProtocol::V3OrNewer, CollectionKind::List, &(-1i32).to_be_bytes()), Err(CollectionCodecError::NegativeSize));
