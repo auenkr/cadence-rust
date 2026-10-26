@@ -21,3 +21,5 @@ Exact instrumentation proposal if physical service identity is required: add a t
 ## Validation and limits
 
 Syntax-only validation is `node --check tests/matching-probe-scenarios.cjs` plus `git diff --check`. No Cargo/Go builds, mixed-cluster runtime gate, workflow execution, or Actions dispatch is performed in this correction. Therefore this records probe implementation and its evidence limits, not a successful adaptive routing runtime result. Runtime validation remains pending on the approved Actions workflow.
+
+Integration review corrections: routing tasks explicitly complete their workflow with a checked result, poll response run ID must match, cleanup attempts every recorded execution before raising accumulated errors, and evidence names candidate endpoints rather than falsely identifying the responding node after owner retries. Runtime validation remains pending.

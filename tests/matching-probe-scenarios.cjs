@@ -318,17 +318,23 @@ async function adaptiveScaler(ctx) {
         `read partition ${readId} returned a different workflow`);
       // Complete through the ordinary Go Frontend API after observing delivery
       // from the requested live partition on the directly addressed Rust node.
-      await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken, decisions: [] });
+      assert.equal(task.workflowExecution?.runId, started.runId, 'routing poll returned a different run');
+      const expectedResult = `adaptive-routing-${readId}`;
+      await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken,
+        decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload(expectedResult) } }] });
       const history = await ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
         domain: ctx.domain, workflowExecution: { workflowId, runId: started.runId },
       });
-      assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
-        `routing workflow ${workflowId} did not complete exactly once`);
+      const completions = history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes);
+      assert.equal(completions.length, 1, `routing workflow ${workflowId} did not complete exactly once`);
+      assert.equal(completions[0].workflowExecutionCompletedEventAttributes.result.data.toString(), expectedResult);
       routingEvidence.push({ readId, requestedPartition: partition, workflowId, runId: started.runId,
-        matchingNode: ctx.directClients[0].tchannel, delivered: true, completed: true });
+        candidateMatchingEndpoints: ctx.directClients.map(node => node.tchannel), delivered: true, completed: true });
     }
   } finally {
+    const cleanupErrors = [];
     for (const execution of routingExecutions) {
+      try {
       const readHistory = () => ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
         domain: ctx.domain, workflowExecution: execution,
       });
@@ -343,7 +349,11 @@ async function adaptiveScaler(ctx) {
         history = await readHistory().catch(() => null);
         assert(isTerminal(history), `routing workflow ${execution.workflowId}/${execution.runId} remained nonterminal after cleanup`);
       }
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
     }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'adaptive routing cleanup failed');
   }
   return { result: 'passed', taskList, enableAdaptiveScaler: true, cacheBackedPartitionCount: true,
     scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
@@ -352,7 +362,7 @@ async function adaptiveScaler(ctx) {
     staticListing: goListing.decisionTaskListPartitions.map(partition => partition.key),
     sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update',
     routingExecutions, routingEvidence,
-    servingPartitionProof: 'requested live read partition delivered the expected task through the directly addressed Rust Matching node; current RPC response has no field identifying the internal partition that physically served after forwarding' };
+    servingPartitionProof: 'requested live read partition delivered the expected task through an addressed Rust Matching endpoint (owner retry may choose another candidate endpoint); current RPC response has no field identifying the internal partition that physically served after forwarding' };
 }
 
 // CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a Rust Matching restart and
