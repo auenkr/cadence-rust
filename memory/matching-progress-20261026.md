@@ -96,3 +96,27 @@ No other mixed gate was active at dispatch. Do not dispatch a second mixed
 lane until this one is terminal and artifacts/cleanup have been checked.
 Shutdown-race worker also has focused CI40360696410 in progress; its result
 and source remain to inspect after the worker completes.
+
+## Shutdown and TLS integration checkpoint
+
+Shutdown implementation7e435116ebe22273dfe6857d145fba2d64533de2 passed fresh
+focused run40360696410; docs head338665e4ef296e20110308384c8cd5d52041d591.
+Independent review found no functional ordering defect: shared tracker covers
+registry clones, replacement and evicted writers, shutdown fences new owners,
+and actor guards drop on exit/cancellation. However its delayed-write test was
+synthetic (manual guard/task), not an actual TaskWriter append/runtime drain.
+A Luna worker is adding the real-writer regression before candidate integration.
+A stalled blocking persistence call can delay shutdown indefinitely; do not
+claim bounded shutdown absent backend timeout evidence. Advisory workspace
+format still fails, including registry/writer; obtain mechanical Actions patch.
+
+Production TLS workflow and two reviewed client fixes are on master01148d6cf:
+Node TLS credentials only for Matching; Go typed ownership oracle uses CA-backed
+YARPC TLS dialer with localhost hostname verification. Initial dispatch422 for
+runner.temp at job env was corrected with step-level GITHUB_ENV setup.
+Run40364035990 on that exact source is in progress (fresh Rust build at latest
+check), not runtime acceptance. No other mixed gate should run concurrently.
+
+Active-offer run40361176805 succeeded; a second Luna worker is checking actual
+source/binary hashes, scenario outcomes, topology and cleanup artifacts. Current
+limit remains two workers; all Cargo/Go/format/mixed validation stays on Actions.
