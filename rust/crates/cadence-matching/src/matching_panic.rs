@@ -23,15 +23,17 @@ pub async fn capture<T, E>(
 ) -> Result<Result<T, E>, String> {
     let mut future = pin!(future);
     let mut injected = armed_for_test(operation);
-    poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| {
-        if std::mem::take(&mut injected) {
-            panic!("injected panic for test: {operation}");
+    poll_fn(|cx| {
+        match catch_unwind(AssertUnwindSafe(|| {
+            if std::mem::take(&mut injected) {
+                panic!("injected panic for test: {operation}");
+            }
+            future.as_mut().poll(cx)
+        })) {
+            Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
+            Ok(Poll::Pending) => Poll::Pending,
+            Err(payload) => Poll::Ready(Err(panic_message(operation, payload))),
         }
-        future.as_mut().poll(cx)
-    })) {
-        Ok(Poll::Ready(output)) => Poll::Ready(Ok(output)),
-        Ok(Poll::Pending) => Poll::Pending,
-        Err(payload) => Poll::Ready(Err(panic_message(operation, payload))),
     })
     .await
 }
@@ -84,16 +86,24 @@ fn go_quote(text: &str) -> String {
     out.push('"');
     for ch in text.chars() {
         match ch {
-            '\x07' => out.push_str("\\a"), '\x08' => out.push_str("\\b"),
-            '\x0c' => out.push_str("\\f"), '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"),
-            '\x0b' => out.push_str("\\v"), '\\' => out.push_str("\\\\"),
+            '\x07' => out.push_str("\\a"),
+            '\x08' => out.push_str("\\b"),
+            '\x0c' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\x0b' => out.push_str("\\v"),
+            '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
             ch if !go_strconv_isprint::is_print(ch) => {
                 let code = ch as u32;
-                if code <= 0xff { out.push_str(&format!("\\x{code:02x}")); }
-                else if code <= 0xffff { out.push_str(&format!("\\u{code:04x}")); }
-                else { out.push_str(&format!("\\U{code:08x}")); }
+                if code <= 0xff {
+                    out.push_str(&format!("\\x{code:02x}"));
+                } else if code <= 0xffff {
+                    out.push_str(&format!("\\u{code:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{code:08x}"));
+                }
             }
             ch => out.push(ch),
         }
@@ -139,7 +149,10 @@ pub(crate) fn armed_left_for_test(operation: &str) -> usize {
 fn armed_for_test(operation: &str) -> bool {
     ARMED.with(|armed| {
         let mut armed = armed.borrow_mut();
-        match armed.iter_mut().find(|(name, times)| *name == operation && *times > 0) {
+        match armed
+            .iter_mut()
+            .find(|(name, times)| *name == operation && *times > 0)
+        {
             Some(entry) => {
                 entry.1 -= 1;
                 true
@@ -165,9 +178,15 @@ mod tests {
             capture("armed-op", async { Ok::<u8, String>(7) }).await,
             Err(r#"panic object is not error: "injected panic for test: armed-op""#.to_string())
         );
-        assert_eq!(capture("armed-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
+        assert_eq!(
+            capture("armed-op", async { Ok::<u8, String>(7) }).await,
+            Ok(Ok(7))
+        );
         assert_eq!(armed_left_for_test("armed-op"), 0);
-        assert_eq!(capture("other-op", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
+        assert_eq!(
+            capture("other-op", async { Ok::<u8, String>(7) }).await,
+            Ok(Ok(7))
+        );
     }
 
     async fn str_panic() -> Result<u8, String> {
@@ -180,7 +199,10 @@ mod tests {
 
     #[tokio::test]
     async fn capture_passes_completed_results_through() {
-        assert_eq!(capture("test", async { Ok::<u8, String>(7) }).await, Ok(Ok(7)));
+        assert_eq!(
+            capture("test", async { Ok::<u8, String>(7) }).await,
+            Ok(Ok(7))
+        );
         assert_eq!(
             capture("test", async { Err::<u8, String>("denied".into()) }).await,
             Ok(Err("denied".to_string()))
@@ -205,10 +227,14 @@ mod tests {
 
     #[test]
     fn go_quote_matches_go_control_and_unicode_escaping() {
-        assert_eq!(go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
-            r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#);
-        assert_eq!(go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
-            r#""\u2028\xa0́\u200b\xad""#);
+        assert_eq!(
+            go_quote("\0\x07\x08\x0c\n\r\t\x0b\x7f\u{85}é"),
+            r#""\x00\a\b\f\n\r\t\v\x7f\x85é""#
+        );
+        assert_eq!(
+            go_quote("\u{2028}\u{a0}\u{301}\u{200b}\u{ad}"),
+            r#""\u2028\xa0́\u200b\xad""#
+        );
         assert_eq!(go_quote("\u{378}"), r#""\u0378""#);
         assert_eq!(go_quote("quote: \\\""), r#""quote: \\\"""#);
     }
