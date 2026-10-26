@@ -797,31 +797,31 @@ impl ControlConnection {
         // errors retain their original meaning.
         let (rows, legacy_schema): (Vec<(String, HashMap<String, String>, bool)>, bool) =
             match modern_rows.try_collect().await {
-            Ok(rows) => (rows, false),
-            Err(error) if is_missing_table_or_column(&error) => {
-                self.query_filter_keyspace_name::<(String, String, String, bool)>(
-                    keyspace_metadata_query(true),
-                    keyspaces_to_fetch,
-                )
-                .map_err(|error| MetadataFetchError {
-                    error,
-                    table: "system.schema_keyspaces",
-                })
-                .map_ok(|(name, class, options, durable_writes)| {
-                    // Preserve malformed replication data as an ordinary
-                    // strategy validation error (missing class), rather than
-                    // turning a bad row into a successful default strategy.
-                    let replication = legacy_replication_map(&class, &options)
-                        .unwrap_or_default();
-                    (name, replication, durable_writes)
-                })
-                .try_collect()
-                .await
-                .map_err(MetadataError::from)
-                .map(|rows| (rows, true))?
-            }
-            Err(error) => return Err(MetadataError::from(error)),
-        };
+                Ok(rows) => (rows, false),
+                Err(error) if is_missing_table_or_column(&error) => {
+                    self.query_filter_keyspace_name::<(String, String, String, bool)>(
+                        keyspace_metadata_query(true),
+                        keyspaces_to_fetch,
+                    )
+                    .map_err(|error| MetadataFetchError {
+                        error,
+                        table: "system.schema_keyspaces",
+                    })
+                    .map_ok(|(name, class, options, durable_writes)| {
+                        // Preserve malformed replication data as an ordinary
+                        // strategy validation error (missing class), rather than
+                        // turning a bad row into a successful default strategy.
+                        let replication =
+                            legacy_replication_map(&class, &options).unwrap_or_default();
+                        (name, replication, durable_writes)
+                    })
+                    .try_collect()
+                    .await
+                    .map_err(MetadataError::from)
+                    .map(|rows| (rows, true))?
+                }
+                Err(error) => return Err(MetadataError::from(error)),
+            };
 
         // Fetching the schema (UDTs, tables, views) and the ScyllaDB-specific per-keyspace
         // metadata (tablet-based flag, consistency mode) are independent of each other, so we
@@ -830,9 +830,12 @@ impl ControlConnection {
             match schema_metadata_fetch_level {
                 SchemaMetadataFetchLevel::Full => {
                     // Fetch full schema: columns, keys, UDTs
-                    let udts = self.query_user_defined_types(keyspaces_to_fetch, legacy_schema).await?;
-                    let mut tables_schema =
-                        self.query_tables_schema(keyspaces_to_fetch, &udts, legacy_schema).await?;
+                    let udts = self
+                        .query_user_defined_types(keyspaces_to_fetch, legacy_schema)
+                        .await?;
+                    let mut tables_schema = self
+                        .query_tables_schema(keyspaces_to_fetch, &udts, legacy_schema)
+                        .await?;
                     Ok((
                         // We pass the mutable reference to the same map to the both functions.
                         // First function fetches `system_schema.tables`, and removes found
@@ -891,60 +894,62 @@ impl ControlConnection {
         stream::iter(rows.into_iter().map(Ok::<_, MetadataFetchError>))
             .map_err(MetadataError::from)
             .map(|row_result| {
-            let (keyspace_name, strategy_map, durable_writes) = row_result?;
+                let (keyspace_name, strategy_map, durable_writes) = row_result?;
 
-            let strategy: Strategy = strategy_from_string_map(strategy_map).map_err(|error| {
-                KeyspacesMetadataError::Strategy {
-                    keyspace: keyspace_name.clone(),
-                    error,
-                }
-            })?;
-            let tables = all_tables
-                .remove(&keyspace_name)
-                .unwrap_or_else(|| Ok(HashMap::new()));
-            let views = all_views
-                .remove(&keyspace_name)
-                .unwrap_or_else(|| Ok(HashMap::new()));
-            let user_defined_types = all_user_defined_types
-                .remove(&keyspace_name)
-                .unwrap_or_else(|| Ok(HashMap::new()));
+                let strategy: Strategy =
+                    strategy_from_string_map(strategy_map).map_err(|error| {
+                        KeyspacesMetadataError::Strategy {
+                            keyspace: keyspace_name.clone(),
+                            error,
+                        }
+                    })?;
+                let tables = all_tables
+                    .remove(&keyspace_name)
+                    .unwrap_or_else(|| Ok(HashMap::new()));
+                let views = all_views
+                    .remove(&keyspace_name)
+                    .unwrap_or_else(|| Ok(HashMap::new()));
+                let user_defined_types = all_user_defined_types
+                    .remove(&keyspace_name)
+                    .unwrap_or_else(|| Ok(HashMap::new()));
 
-            // As you can notice, in this file we generally operate on two layers of errors:
-            // - Outer (MetadataError) if something went wrong with querying the cluster.
-            // - Inner (SingleKeyspaceMetadataError) if the fetched metadata turned out to not be fully consistent.
-            // If there is an inner error, we want to drop metadata for the whole keyspace.
-            // This logic checks if either tables, views, or UDTs have such inner error, and returns it if so.
-            // Notice that in the error branch, return value is wrapped in `Ok` - but this is the
-            // outer error, so it just means there was no error while querying the cluster.
-            let (tables, views, user_defined_types) = match (tables, views, user_defined_types) {
-                (Ok(t), Ok(v), Ok(u)) => (t, v, u),
-                (Err(e), _, _) | (_, Err(e), _) => return Ok((keyspace_name, Err(e))),
-                (_, _, Err(e)) => {
-                    return Ok((
-                        keyspace_name,
-                        Err(SingleKeyspaceMetadataError::MissingUDT(e)),
-                    ));
-                }
-            };
+                // As you can notice, in this file we generally operate on two layers of errors:
+                // - Outer (MetadataError) if something went wrong with querying the cluster.
+                // - Inner (SingleKeyspaceMetadataError) if the fetched metadata turned out to not be fully consistent.
+                // If there is an inner error, we want to drop metadata for the whole keyspace.
+                // This logic checks if either tables, views, or UDTs have such inner error, and returns it if so.
+                // Notice that in the error branch, return value is wrapped in `Ok` - but this is the
+                // outer error, so it just means there was no error while querying the cluster.
+                let (tables, views, user_defined_types) = match (tables, views, user_defined_types)
+                {
+                    (Ok(t), Ok(v), Ok(u)) => (t, v, u),
+                    (Err(e), _, _) | (_, Err(e), _) => return Ok((keyspace_name, Err(e))),
+                    (_, _, Err(e)) => {
+                        return Ok((
+                            keyspace_name,
+                            Err(SingleKeyspaceMetadataError::MissingUDT(e)),
+                        ));
+                    }
+                };
 
-            let keyspace = Keyspace {
-                strategy,
-                durable_writes,
-                tablet_based: scylladb_specific.tablet_based.contains(&keyspace_name),
-                consistency_mode: scylladb_specific
-                    .consistency_modes
-                    .get(&keyspace_name)
-                    .cloned()
-                    .unwrap_or(ConsistencyMode::Eventual),
-                tables,
-                views,
-                user_defined_types,
-            };
+                let keyspace = Keyspace {
+                    strategy,
+                    durable_writes,
+                    tablet_based: scylladb_specific.tablet_based.contains(&keyspace_name),
+                    consistency_mode: scylladb_specific
+                        .consistency_modes
+                        .get(&keyspace_name)
+                        .cloned()
+                        .unwrap_or(ConsistencyMode::Eventual),
+                    tables,
+                    views,
+                    user_defined_types,
+                };
 
-            Ok((keyspace_name, Ok(keyspace)))
-        })
-        .try_collect()
-        .await
+                Ok((keyspace_name, Ok(keyspace)))
+            })
+            .try_collect()
+            .await
     }
 }
 
@@ -1357,7 +1362,10 @@ impl ControlConnection {
         };
         let rows = self
             .query_filter_keyspace_name::<(String, String)>(table_query, keyspaces_to_fetch)
-            .map_err(|error| MetadataFetchError { error, table: table_name });
+            .map_err(|error| MetadataFetchError {
+                error,
+                table: table_name,
+            });
         let mut result = HashMap::new();
 
         rows.map(|row_result| {
@@ -1461,7 +1469,6 @@ impl ControlConnection {
         udts: &PerKeyspaceResult<PerTable<Arc<UserDefinedType<'static>>>, MissingUserDefinedType>,
         legacy_schema: bool,
     ) -> Result<PerKsTableResult<Table, SingleKeyspaceMetadataError>, MetadataError> {
-
         // Upon migration from thrift to CQL, Cassandra internally creates a surrogate column "value" of
         // type EmptyType for dense tables. This resolves into this CQL type name.
         // This column shouldn't be exposed to the user but is currently exposed in system tables.
@@ -1767,19 +1774,26 @@ fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
 /// collection wrappers) into the CQL type grammar consumed by this module.
 fn legacy_validator_to_cql(validator: &str) -> Option<String> {
     let validator = validator.trim();
-    if let Some(inner) = validator.strip_prefix("org.apache.cassandra.db.marshal.ReversedType(")
+    if let Some(inner) = validator
+        .strip_prefix("org.apache.cassandra.db.marshal.ReversedType(")
         .and_then(|s| s.strip_suffix(')'))
     {
         return legacy_validator_to_cql(inner);
     }
     for (marshal, cql) in [("ListType", "list"), ("SetType", "set"), ("MapType", "map")] {
         let prefix = format!("org.apache.cassandra.db.marshal.{marshal}(");
-        if let Some(inner) = validator.strip_prefix(&prefix).and_then(|s| s.strip_suffix(')')) {
+        if let Some(inner) = validator
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(')'))
+        {
             let args = split_legacy_marshal_args(inner)?;
             if (cql == "map" && args.len() != 2) || (cql != "map" && args.len() != 1) {
                 return None;
             }
-            let converted = args.iter().map(|arg| legacy_validator_to_cql(arg)).collect::<Option<Vec<_>>>()?;
+            let converted = args
+                .iter()
+                .map(|arg| legacy_validator_to_cql(arg))
+                .collect::<Option<Vec<_>>>()?;
             return Some(format!("{cql}<{}>", converted.join(", ")));
         }
     }
@@ -1794,11 +1808,16 @@ fn split_legacy_marshal_args(input: &str) -> Option<Vec<&str>> {
         match ch {
             '(' => depth += 1,
             ')' => depth = depth.checked_sub(1)?,
-            ',' if depth == 0 => { args.push(input[start..i].trim()); start = i + 1; }
+            ',' if depth == 0 => {
+                args.push(input[start..i].trim());
+                start = i + 1;
+            }
             _ => (),
         }
     }
-    if depth != 0 { return None; }
+    if depth != 0 {
+        return None;
+    }
     args.push(input[start..].trim());
     Some(args)
 }
@@ -2237,15 +2256,20 @@ mod tests {
             r#"{"replication_factor":"3"}"#.to_owned(),
             false,
         );
-        let row = (name, legacy_replication_map(&class, &options).unwrap(), durable_writes);
+        let row = (
+            name,
+            legacy_replication_map(&class, &options).unwrap(),
+            durable_writes,
+        );
         assert_eq!(row.0, "legacy_ks");
         assert!(!row.2);
         assert_eq!(
             strategy_from_string_map(row.1).unwrap(),
-            Strategy::SimpleStrategy { replication_factor: 3 }
+            Strategy::SimpleStrategy {
+                replication_factor: 3
+            }
         );
     }
-
 
     #[test]
     fn legacy_minimal_metadata_uses_columnfamilies_and_has_no_views_or_partitioner() {
@@ -2289,15 +2313,21 @@ mod tests {
     #[test]
     fn legacy_collection_validators_are_recursively_converted() {
         assert_eq!(
-            legacy_validator_to_cql("org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.Int32Type))"),
+            legacy_validator_to_cql(
+                "org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.Int32Type))"
+            ),
             Some("map<text, list<int>>".to_owned())
         );
         assert_eq!(
-            legacy_validator_to_cql("org.apache.cassandra.db.marshal.ReversedType(org.apache.cassandra.db.marshal.UTF8Type)"),
+            legacy_validator_to_cql(
+                "org.apache.cassandra.db.marshal.ReversedType(org.apache.cassandra.db.marshal.UTF8Type)"
+            ),
             Some("text".to_owned())
         );
         assert_eq!(
-            legacy_validator_to_cql("org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type)"),
+            legacy_validator_to_cql(
+                "org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type)"
+            ),
             None
         );
     }
