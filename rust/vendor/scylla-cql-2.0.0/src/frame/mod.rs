@@ -373,8 +373,8 @@ mod test {
             .unwrap();
             frame.set_stream(127);
             assert_eq!(frame.get_data().len(), expected_len);
-            let decoded =
-                Header::decode(&mut frame.get_data().as_ref(), Direction::Request).unwrap();
+            let mut frame_bytes = frame.get_data();
+            let decoded = Header::decode(&mut frame_bytes, Direction::Request).unwrap();
             assert_eq!(decoded.version, version);
             assert_eq!(decoded.stream, 127);
             assert_eq!(decoded.length, 0);
@@ -395,8 +395,10 @@ mod test {
         let v3 = SerializedRequest::make_with_version(&request, None, false, V::V3).unwrap();
         // The timestamp option was introduced in v3: the same real dispatcher
         // emits an 8-byte body for v2 and appends its i64 field for v3.
-        let v2_header = Header::decode(&mut v2.get_data().as_ref(), Direction::Request).unwrap();
-        let v3_header = Header::decode(&mut v3.get_data().as_ref(), Direction::Request).unwrap();
+        let mut v2_bytes = v2.get_data();
+        let mut v3_bytes = v3.get_data();
+        let v2_header = Header::decode(&mut v2_bytes, Direction::Request).unwrap();
+        let v3_header = Header::decode(&mut v3_bytes, Direction::Request).unwrap();
         assert_eq!(v2_header.length, 8);
         assert_eq!(v3_header.length, 16);
     }
