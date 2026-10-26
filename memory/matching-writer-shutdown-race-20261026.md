@@ -35,9 +35,19 @@ cause. The existing process test and its exit-code/log assertions remain intact.
 - Prior base validation: Actions run `40357713048`, success on base SHA
   `e69c7663392db4e2c356d38d2a4a42a4b35125b8`; this is not validation of the
   shutdown race fix.
-- Fix validation: pending GitHub Actions dispatch on the pushed implementation
-  SHA. Record the run URL, head SHA, conclusion, and Matching binary SHA256
-  here after it completes.
+- Fix validation: [GitHub Actions run 40360696410](https://github.com/auenkr/cadence-rust/actions/runs/40360696410)
+  on head `7e435116ebe22273dfe6857d145fba2d64533de2`, conclusion `success`.
+  It used `package=cadence-matching` and `clean_target=true`, so clippy and tests
+  ran on the fresh runner target without the Rust cache. Formatting checks
+  passed. The new `shutdown_waits_for_inflight_writer_fatal_notification`
+  regression passed; the test log reports 723 matching library tests passed
+  (3 ignored), and the actual
+  `standalone_matching_sqlite_malformed_run_id_exits_process_with_two`
+  subprocess test passed, retaining the exit-code-2 and malformed SQL marker
+  assertions.
+- This was a focused crate CI run, not a mixed-cluster gate; no binary SHA256
+  applies to this evidence. The workflow records the checked-out head SHA in
+  its uploaded CI log artifact.
 - No local Cargo, Go, or rustfmt commands were run, per the validation rule.
 
 ## Limits
