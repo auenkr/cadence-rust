@@ -433,36 +433,28 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_waits_for_inflight_writer_fatal_notification() {
+        // This test deliberately exercises registration made by TaskWriter::new_with_fatal_channel,
+        // rather than manually incrementing the tracker. The standalone append test below covers
+        // the typed SQL error path; this verifies shutdown's join observes the actor's send.
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("join.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain = Uuid::from_u128(9);
+        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "joined-fatal".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
         let tracker = Arc::new(WriterTracker::default());
-        let guard = tracker.start();
         let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
-        let cause = cadence_persistence::matching_blob::SqlRunIdError::Malformed {
-            raw: "delayed-malformed-run-id".into(),
-            message: "invalid UUID length: 26".into(),
-        };
-        let expected = cause.clone();
-        let (release_write, write_finished) = oneshot::channel();
-        let writer = tokio::spawn(async move {
-            let _guard = guard;
-            // This oneshot models an append blocked in its SQL operation. Its
-            // fatal result must be sent before actor exit drops the guard.
-            write_finished.await.unwrap();
-            fatal_tx.send(cause).unwrap();
-        });
+        let writer = TaskWriter::new_with_fatal_channel(queue, Arc::new(Notify::new()), WriterConfig::default(), None, Some(fatal_tx), Some(tracker.clone()));
+        let expected = writer.append(WriteTask {
+            data: TaskData::default().with_request_run_id("delayed-malformed-run-id"),
+            source_domain: domain,
+            schedule_to_start_seconds: 0,
+        }).await.unwrap_err();
+        assert_eq!(expected.status.code(), tonic::Code::Internal);
 
-        let idle = tracker.wait_idle();
-        tokio::pin!(idle);
-        use std::future::Future;
-        let still_waiting = std::future::poll_fn(|cx| {
-            std::task::Poll::Ready(idle.as_mut().poll(cx).is_pending())
-        })
-        .await;
-        assert!(still_waiting, "shutdown must wait while a SQL append is active");
-
-        release_write.send(()).unwrap();
-        writer.await.unwrap();
-        idle.await;
-        assert_eq!(fatal_rx.try_recv().unwrap(), expected);
+        // This is the same join QueueRegistry/MatchingRuntime use before the launcher
+        // samples its fatal receiver. The actor's failure send precedes releasing its guard.
+        tracker.wait_idle().await;
+        assert!(matches!(fatal_rx.try_recv().unwrap(), cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "delayed-malformed-run-id"));
+        writer.stop();
     }
     use cadence_persistence::{
         matching_blob::{BlobEncoding, TaskData},

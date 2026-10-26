@@ -107,12 +107,14 @@ jobs:
             crates/cadence-matching/src/matching_query.rs \
             crates/cadence-matching/src/matching_registry.rs \
             crates/cadence-matching/src/grpc_matching.rs \
-            crates/cadence-matching/src/matching_rpc_tests.rs
+            crates/cadence-matching/src/matching_rpc_tests.rs \
+            crates/cadence-matching/src/matching_writer.rs
           git -C "$GITHUB_WORKSPACE" diff --binary -- \
             rust/crates/cadence-matching/src/matching_query.rs \
             rust/crates/cadence-matching/src/matching_registry.rs \
             rust/crates/cadence-matching/src/grpc_matching.rs \
             rust/crates/cadence-matching/src/matching_rpc_tests.rs \
+            rust/crates/cadence-matching/src/matching_writer.rs \
             > "$RUNNER_TEMP/query-format.patch"
       - name: Upload query formatting patch
         if: inputs.format_query_files == true
@@ -159,6 +161,7 @@ jobs:
             crates/cadence-matching/src/grpc_matching.rs \
             crates/cadence-matching/src/launcher.rs \
             crates/cadence-matching/src/matching_rpc_tests.rs \
+            crates/cadence-matching/src/matching_writer.rs \
             crates/cadence-service-core/src/grpc_tls.rs \
             > tls-format.log 2>&1
           result=$?
@@ -174,6 +177,7 @@ jobs:
             crates/cadence-matching/src/matching_registry.rs \
             crates/cadence-matching/src/grpc_matching.rs \
             crates/cadence-matching/src/matching_rpc_tests.rs \
+            crates/cadence-matching/src/matching_writer.rs \
             > query-format.log 2>&1
           result=$?
           echo "$result" > query-format.exit
