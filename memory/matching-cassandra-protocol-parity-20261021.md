@@ -26,3 +26,61 @@ Implementing this safely requires a version parameter through connection establi
 The session setup error now names the actual limitation (“only speaks CQL protocol v4”) instead of suggesting that arbitrary versions are negotiated. A source regression covers v4 acceptance and explicit rejection for versions 2, 3, 5, and 6, ensuring unsupported values are not coerced. These source tests were intentionally not run per task constraints. The separate Go config/env/default trace above is static source inspection, not runtime validation.
 
 Remaining work: implement or select a CQL driver with configurable v1–v5 wire codecs and test against Cassandra server versions; then remove the non-v4 startup rejection only when each selected protocol is actually supported end to end. Matching Cassandra protocol parity is not complete.
+
+## Bounded recheck against final acceptance audit — 2026-10-27
+
+The protocol gap above is **still unresolved**; it was not superseded by
+`matching-final-acceptance-audit-20261026.md` or its ledger. Those audits discuss
+the Cassandra mixed lane and other service requirements but do not trace the
+`protoVersion` deployment setting or the driver's protocol selection. Their
+“no new concrete production mismatch” finding therefore does not close this
+separately recorded configuration mismatch.
+
+The supported, reachable mismatch is specifically protocol v2/v3 selection:
+
+- Go's production NoSQL config has `ProtoVersion int` tagged `yaml:"protoVersion"`
+  (`go/common/config/config.go:240-241`). The normal Cassandra template exposes
+  `CASSANDRA_PROTO_VERSION` in that field and defaults it to 4
+  (`go/docker/config_template.yaml:23,31`). Config loading expands environment
+  variables (`go/common/config/loader.go`); when zero remains,
+  `toGoCqlConfig` reads `CASSANDRA_PROTO_VERSION`
+  (`go/common/persistence/nosql/nosqlplugin/cassandra/plugin.go:123-124`),
+  whose getter defaults to 4 and parses an integer without rewriting it
+  (`go/environment/env.go:186-194`). `newCassandraCluster` assigns that value
+  to `cluster.ProtoVersion` (`go/common/persistence/nosql/nosqlplugin/cassandra/gocql/client.go:56-59`).
+- The pinned gocql version is
+  `v0.0.0-20211015133455-b225f9b53fa1` (`go/go.mod:20`). Its
+  `ClusterConfig.ProtoVersion` comment says to use known versions 2, 3, or 4
+  (`/home/auenkr/go/pkg/mod/github.com/gocql/gocql@v0.0.0-20211015133455-b225f9b53fa1/cluster.go:41-48`);
+  its frame codec has version-specific framing and codecs in `frame.go`.
+  Thus YAML `protoVersion: 2` / `3`, or the corresponding environment setting
+  through the defaulted config, is a supported Go deployment choice for a
+  cluster that requires that protocol.
+- Rust parses the same YAML field (`rust/crates/cadence-service-core/src/config.rs:705-706`)
+  and resolves zero from the same environment variable, defaulting to 4
+  (`rust/crates/cadence-matching/src/matching_task_store.rs:58-66`). But
+  `CassandraSessionConfig::with_go_options` rejects every explicit value other
+  than 4 (`rust/crates/cadence-persistence/src/cassandra.rs:751-752`), and the
+  vendored Scylla driver's startup path uses its fixed
+  `DEFAULT_CQL_PROTOCOL_VERSION` (`rust/vendor/scylla-1.9.0/src/network/connection.rs:2274`).
+  Therefore a supported Go v2/v3 deployment fails during Rust Matching startup.
+
+The ordinary default-v4 configuration and the Cassandra 4.1 mixed acceptance
+lane (`memory/matching-cassandra-acceptance-20261024.md`) establish v4 behavior
+only. They do not establish v2/v3 parity. Conversely, do not broaden this
+finding to v1 or v5: the pinned gocql `ClusterConfig` documents 2/3/4 as the
+known versions to configure, and no supported Matching deployment using v1/v5
+was identified in the traced configuration. No current server matrix was
+established here, so this note does not claim that any particular server
+version requires v2 or v3; it records the concrete supported configuration
+surface and its observable Rust startup rejection.
+
+Minimal required port: Matching's Cassandra client must be able to select and
+use v2 and v3 end to end when configured, including the version-dependent
+frame layout and request/response codecs already identified above, with
+protocol-specific compatibility evidence before accepting those settings.
+Merely accepting the option or changing startup negotiation is insufficient.
+Until then, preserve the explicit rejection and mark this parity item open;
+do not silently waive it based on v4 acceptance. This recheck was static source
+inspection only; no Cargo, Go, formatting, CI, or mixed-service command was
+run.
