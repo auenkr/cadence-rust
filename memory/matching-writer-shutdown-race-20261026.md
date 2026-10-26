@@ -125,12 +125,18 @@ then asserts shutdown returns only after the fatal receiver contains the typed
 `SqlRunIdError::Malformed` cause. No production timeout or logic change was
 introduced.
 
-Focused clean-target Actions run
+The first focused clean-target run
 [40371022510](https://github.com/auenkr/cadence-rust/actions/runs/40371022510)
-was dispatched for `package=cadence-matching`, `clean_target=true`, on the commit
-above and failed at the changed-runtime formatting gate. The Go oracle steps
-passed; Clippy, Formatting, and Test were skipped because the runtime formatter
-check failed. CI listed rustfmt-only wrapping changes in the test wrapper and
-SQLite construction, now applied in the follow-up commit. No Rust compilation
-or test conclusion was obtained from this run. A new focused clean-target CI run
-is required for the formatted source.
+failed at the changed-runtime formatting gate; Go oracle steps passed, while
+Clippy, Formatting, and Test were skipped. The CI-requested rustfmt wrapping was
+applied in commit `10c7e8995aefe717b3d4388a405b07fee3a5b7bd`.
+
+The follow-up focused clean-target run
+[40371677686](https://github.com/auenkr/cadence-rust/actions/runs/40371677686)
+on that head succeeded. Changed-runtime formatting, Clippy, Formatting, and Test
+all passed; `runtime_shutdown_waits_for_real_delayed_append_and_fatal_notification`
+passed, and the Matching library reported 724 passed, 0 failed, 3 ignored. The
+existing `standalone_matching_sqlite_malformed_run_id_exits_process_with_two`
+also passed. Its fresh target was `/home/runner/work/_temp/cargo-target-final`.
+This is focused crate validation, not a mixed-cluster gate; no service binary
+SHA256 is applicable. No Cargo, Go, or rustfmt validation ran locally.
