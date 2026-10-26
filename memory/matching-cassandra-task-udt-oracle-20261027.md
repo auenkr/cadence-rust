@@ -27,9 +27,12 @@ not count this edit or Go success as Rust protocol parity.
 ## Validation and evidence
 
 No local Go, Cargo, Rust, or rustfmt commands were run. `git diff --check` was
-clean before commit. The focused Go matrix is dispatched with
-`compare_rust=false` on the pushed branch; record its run URL, head SHA, and
-conclusion here after completion. The matrix keeps protocol 2 / Cassandra
+clean before commit. Go matrix run
+https://github.com/auenkr/cadence-rust/actions/runs/40416310576 was dispatched
+with `compare_rust=false` at head
+`74e5fbe1cda804cca7c9bc17b8d392d1a74947c8`. On first inspection it was queued,
+with protocol 2 running setup and protocol 3/4 queued; conclusion is pending.
+The matrix keeps protocol 2 / Cassandra
 2.1.22 and protocol 3 / Cassandra 3.11.17 range-delete expectations, adds
 protocol 4 / Cassandra 4.1.7 task UDT success, and preserves all scalar queue
 CAS/count/batch/error/range assertions.
