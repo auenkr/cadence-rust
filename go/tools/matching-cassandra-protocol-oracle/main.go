@@ -41,34 +41,44 @@ func main() {
 	must(err)
 	defer session.Close()
 
+	step := func(name string) { fmt.Printf("RUN %s\n", name) }
 	// DDL makes the server return a schema-change result and emits the schema
 	// event gocql's control connection subscribes to during startup.
+	step("schema-create")
 	must(session.Query(`CREATE TABLE IF NOT EXISTS matching_protocol_oracle (id bigint PRIMARY KEY, payload blob)`).Exec())
 
 	// These are the Matching persistence queue statements/schema shape: an
 	// idempotent enqueue, ordered/ranged reads, deletes, count, and a batch.
 	const queueType = 91
+	step("queue-cas-enqueue")
 	_, err = session.Query(`INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?) IF NOT EXISTS`, queueType, int64(1001), []byte("protocol-oracle"), time.Now().UTC()).MapScanCAS(map[string]interface{}{})
 	must(err)
 	var gotID int64
 	var payload []byte
+	step("queue-range-select")
 	must(session.Query(`SELECT message_id, message_payload FROM queue WHERE queue_type = ? AND message_id > ? LIMIT ?`, queueType, int64(1000), 10).Scan(&gotID, &payload))
 	if gotID != 1001 || string(payload) != "protocol-oracle" {
 		must(fmt.Errorf("queue read mismatch: id=%d payload=%q", gotID, payload))
 	}
 	var count int64
+	step("queue-count")
 	must(session.Query(`SELECT COUNT(1) AS count FROM queue WHERE queue_type = ?`, queueType).Scan(&count))
 	if count != 1 {
 		must(fmt.Errorf("queue count mismatch: %d", count))
 	}
 	batch := session.NewBatch(gocql.LoggedBatch)
+	step("queue-batch")
 	batch.Query(`INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?)`, queueType, int64(1002), []byte("batch"), time.Now().UTC())
 	must(session.ExecuteBatch(batch))
+	step("queue-range-delete")
 	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id > ? AND message_id <= ?`, queueType, int64(1001), int64(1002)).Exec())
+	step("queue-point-delete")
 	must(session.Query(`DELETE FROM queue WHERE queue_type = ? AND message_id = ?`, queueType, int64(1001)).Exec())
+	step("server-error")
 	if err := session.Query(`SELECT definitely_missing FROM queue WHERE queue_type = ?`, queueType).Exec(); err == nil {
 		must(fmt.Errorf("expected server query error, got nil"))
 	}
+	step("schema-drop")
 	must(session.Query(`DROP TABLE matching_protocol_oracle`).Exec())
 	fmt.Printf("PASS gocql=%s protocol=%d server=%s operations=schema-change,event-subscription,cas,query,result,prepared,batch,delete,error unset_value=not-used\n", "v0.0.0-20211015133455-b225f9b53fa1", version, os.Getenv("CASSANDRA_SERVER_VERSION"))
 }
