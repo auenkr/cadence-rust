@@ -1287,6 +1287,7 @@ pub async fn run(
             // Explicit production config starts the shared metadata cache and
             // opens Matching queues on the configured defaultStore. The
             // private data-dir database is only an embedded-development path.
+            let (fatal_writer_tx, mut fatal_writer_rx) = tokio::sync::mpsc::unbounded_channel();
             let mut matching_runtime = if run_matching {
                 // Keep this as a provider: Go reads the global drain property
                 // at shutdown, after membership withdrawal, rather than when
@@ -1362,6 +1363,9 @@ pub async fn run(
             } else {
                 None
             };
+            if let Some(runtime) = matching_runtime.take() {
+                matching_runtime = Some(runtime.with_fatal_writer(fatal_writer_tx));
+            }
             if let Some(sink) = matching_metric_sink.as_ref() {
                 matching_runtime = matching_runtime
                     .take()
@@ -1686,7 +1690,16 @@ pub async fn run(
                     (Some(result), None)
                 },
                 signal = shutdown_signal() => (None, Some(signal)),
+                fatal = fatal_writer_rx.recv() => {
+                    let detail = fatal.map(|cause| cause.to_string()).unwrap_or_else(|| "Matching writer fatal channel closed".into());
+                    (Some(Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)))), None)
+                },
             };
+            let mut fatal_writer = serving_result
+                .as_ref()
+                .and_then(|result| result.as_ref().err())
+                .and_then(|error| error.downcast_ref::<SqlMatchingWriterFatal>())
+                .map(|fatal| fatal.0.clone());
             // On a signal, or after one listener exits, the remaining listener
             // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
@@ -1731,6 +1744,16 @@ pub async fn run(
                 task.abort();
                 let _ = task.await;
             }
+            // A shutdown signal or listener failure can win `select!` while
+            // the typed writer notification is concurrently becoming ready.
+            // Writers are stopped by runtime shutdown; sample the channel
+            // again after listener teardown so that race cannot hide exit 2.
+            if fatal_writer.is_none() {
+                fatal_writer = fatal_writer_rx
+                    .try_recv()
+                    .ok()
+                    .map(|cause| cause.to_string());
+            }
             let mut shutdown_errors = Vec::new();
             if let Some(Err(error)) = serving_result {
                 shutdown_errors.push(format!("serving Matching cluster: {error:#}"));
@@ -1757,7 +1780,13 @@ pub async fn run(
                 }
             }
             if !shutdown_errors.is_empty() {
+                if let Some(detail) = fatal_writer {
+                    return Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)));
+                }
                 anyhow::bail!("Matching shutdown failed: {}", shutdown_errors.join("; "));
+            }
+            if let Some(detail) = fatal_writer {
+                return Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)));
             }
             println!("shutting down");
         }
@@ -1773,6 +1802,10 @@ pub async fn run(
     }
     Ok(())
 }
+
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("fatal SQL Matching writer persistence error: {0}")]
+pub struct SqlMatchingWriterFatal(pub String);
 
 #[cfg(test)]
 mod matching_http_listener_tests {

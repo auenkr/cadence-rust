@@ -139,6 +139,18 @@ impl MatchingRuntime {
         }
         self
     }
+    pub(crate) fn with_fatal_writer(
+        mut self,
+        fatal: tokio::sync::mpsc::UnboundedSender<
+            cadence_persistence::matching_blob::SqlRunIdError,
+        >,
+    ) -> Self {
+        self.matching = self.matching.clone().with_fatal_writer(fatal.clone());
+        if let Some(registry) = self.registry.take() {
+            self.registry = Some(registry.with_fatal_writer(fatal));
+        }
+        self
+    }
 
     pub fn in_memory(state: crate::handlers::AppState, drain_duration: DrainDuration) -> Self {
         Self {
