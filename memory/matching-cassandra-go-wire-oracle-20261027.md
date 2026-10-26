@@ -21,6 +21,13 @@ protocol, head SHA, command result and server log. This is backend runtime
 evidence for the pinned Go client; it is not Rust or service-gate evidence, and
 does not claim that Go's success proves Rust support.
 
+The first Actions run exposed a test query issue: Cassandra 2.1/2.2 reject a
+strict `>` lower bound in a primary-key DELETE with `Invalid operator >`. The
+harness uses an inclusive single-row range delete (`>= id AND <= id`) for the
+protocol exercise. The Go queue source's strict range-delete templates remain
+unchanged and are outside what this isolated oracle claims to validate; they
+need a separate schema/backend runtime follow-up.
+
 ## Wire contract to carry into Rust driver work
 
 The pinned source's `frame.go` has a version-dependent header implementation:
