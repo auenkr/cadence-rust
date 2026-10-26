@@ -83,3 +83,16 @@ Important limitation: `query-format.exit=1`, `tls-format.exit=1`, and
 formatting in `grpc_matching.rs` and `matching_registry.rs`, including long
 fatal-channel types. Obtain/apply an Actions-generated patch after lifecycle
 fix; do not claim touched-file formatting acceptance from job status alone.
+
+## Active-offer gate change validation
+
+Integrated active-offer lifecycle flags and evidence-plan updates at
+`12a9a12cfb1cc72a04a2fd3443a8ce964b53cc8c` (worker implementation839aaa798).
+Dispatched https://github.com/auenkr/cadence-rust/actions/runs/40361176805
+on that exact source. GitHub confirms in_progress; no result yet.
+This is gate-change validation before fatal-lifecycle integration, not final
+Matching acceptance. It must be rerun on the final combined candidate.
+No other mixed gate was active at dispatch. Do not dispatch a second mixed
+lane until this one is terminal and artifacts/cleanup have been checked.
+Shutdown-race worker also has focused CI40360696410 in progress; its result
+and source remain to inspect after the worker completes.
