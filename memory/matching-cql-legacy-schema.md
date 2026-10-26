@@ -47,11 +47,10 @@ coverage.
 
 ## Remaining live reader integration
 
-The live fetch remains modern-only. In `ControlConnection::query_keyspaces`
-(around line 759), the first keyspace query is hardcoded to
-`system_schema.keyspaces`. A compatible fallback must be selected only when
-that query reports Cassandra's missing-table/invalid error; peer discovery in
-`system.peers` / `system.local` remains valid and should not be changed.
+The keyspace fetch falls back from `system_schema.keyspaces` to
+`system.schema_keyspaces` only for the recognized missing-table/column
+`DbError::Invalid` response. Peer discovery in `system.peers` / `system.local`
+is unchanged.
 
 The subsequent schema branch also calls
 `query_user_defined_types`, `query_tables_schema`, `query_tables`, and
@@ -69,5 +68,18 @@ decoding, but full schema mode still cannot complete on Cassandra 2.x: UDT,
 table/column, and minimal table/partitioner readers remain modern-only. Those
 call sites must be integrated before claiming Cassandra 2.x full metadata
 parity. Cassandra 2.x has no materialized views, so that legacy path should
-produce an empty view set. No local Cargo/Go/rustfmt commands are used; record
-the focused Actions run, head SHA, and conclusion below after CI completes.
+produce an empty view set. No local Cargo/Go/rustfmt commands were used.
+
+## CI evidence
+
+- Commit: `bd07d81254e5fee01a3b0493b30232098cc9355c`.
+- Push run: https://github.com/auenkr/cadence-rust/actions/runs/40412443565
+  (matching head SHA, event `push`, conclusion `failure`, zero jobs). The
+  workflow push filter only covers `master` and `matching-*`, so this assigned
+  `t3/legacy-keyspace-fallback` branch got no validation jobs.
+- Dispatch for this ref was rejected by GitHub with HTTP 422: the workflow at
+  the default branch does not have a `workflow_dispatch` trigger.
+- Earlier helper run `40411987955` belongs to `03171a099` and failed. It is
+  retained as prior evidence, not attributed to this implementation.
+
+The focused CI run has not executed; do not treat this increment as validated.
