@@ -22,9 +22,9 @@ The runner exposes `--probe-adaptive-scaler`, applies scaler tuning only to the 
 
 ## CI and mixed-gate evidence
 
-- Obsolete mixed gate `40369759414` (head `ca64a5a934c6c04daf0f9385c00adbad09e788ea`) was still running when inspected and was sent a cancellation request before corrected validation. Cancellation confirmation and final conclusion: pending.
-- Focused `rust-ci.yml` run: pending dispatch.
-- Corrected adaptive mixed gate: pending; dispatch only after the focused CI run is complete so the two gates do not overlap.
+- Obsolete mixed gate `40369759414` (head `ca64a5a934c6c04daf0f9385c00adbad09e788ea`) was cancelled; final status/conclusion: `completed` / `cancelled` ([run](https://github.com/auenkr/cadence-rust/actions/runs/40369759414)).
+- Focused `rust-ci.yml` run `40370761303` was dispatched for `cadence-matching` at source SHA `fb5f0ccac3450d549aad16d0c6fdc785302c9b12`; when last inspected it was `in_progress` ([run](https://github.com/auenkr/cadence-rust/actions/runs/40370761303)). This is the code revision before this evidence-only memory update.
+- Corrected adaptive mixed gate: pending dispatch until the focused CI run completes, so the gates remain serial.
 - Fresh runner binary SHA256 and final run URLs/conclusions: pending.
 - Local checks are syntax-only (`node --check`, `python3 -m py_compile`, `git diff --check`). No Cargo, Go, formatting, or runtime validation was run locally.
 
