@@ -38,6 +38,22 @@ commit.
 - Workflow: `rust-ci.yml`, `workflow_dispatch`,
   `package=cadence-matching`, `clean_target=true`
 - Run: https://github.com/auenkr/cadence-rust/actions/runs/40408688639
-- Status at recording: `in_progress`; conclusion pending. This is the requested
-  fresh-target CI run; no pass is claimed yet.
+- Job: `clippy-test`; the Go oracle comparison failed with exit 1 because
+  `describe_workflow_execution_response` and the decision/activity start
+  responses contained current-time timestamps and Go map-order variation.
+  The run uploaded `history-tchannel-wire-oracle` evidence, which is retained
+  as the original failure record.
 - No mixed-cluster gate was dispatched.
+
+## Determinism fix in progress
+
+- The opt-in generator pins `testdata.Timestamp` and `Timestamp1` through
+  `Timestamp5` before mapping. This affects only the generator test process;
+  imported fixtures and production Go semantics are unchanged.
+- The generator canonicalizes only Thrift map entry ordering after the Go
+  ThriftRW encoder emits each full struct. It preserves every map entry and
+  every field, and does not weaken Rust fixture consumer assertions.
+- CI now retains `generated.json` and `repeated.json`, runs generation twice,
+  and compares the outputs. The updated checked-in fixture must be copied from
+  the uploaded Go-generated artifact after review.
+- Fix commit and focused fresh-target Matching CI run: pending.
