@@ -261,6 +261,55 @@ async function adaptiveScaler(ctx) {
   assert.deepEqual(goListing.decisionTaskListPartitions.map(partition => partition.key), [taskList],
     'Go Frontend listing must follow static matching.numTasklistWritePartitions, independently of adaptive config');
 
+  // Prove that the live adaptive read-partition IDs serve decision tasks. Keep
+  // these tasks on a separate task list so the direct polls can never consume
+  // any of the 24 SDK load workflows above. Copy only the live read map; the
+  // adaptive-load task list remains untouched while this controlled phase runs.
+  const routingRoot = `${taskList}-read-routing-${ctx.id}`;
+  const readPartitions = Object.keys(config.readPartitions || {}).map(Number).sort((a, b) => a - b);
+  assert(readPartitions.includes(0), 'live adaptive config has no root read partition');
+  assert(readPartitions.length > 1, 'live adaptive config has no eligible child read partition');
+  const routingConfig = {
+    version: String(config.version), numReadPartitions: readPartitions.length,
+    numWritePartitions: readPartitions.length,
+    readPartitions: config.readPartitions,
+    writePartitions: config.writePartitions,
+  };
+  await ownerRpc(ctx, 'UpdateTaskListPartitionConfig', { domainId: ctx.domainId,
+    taskList: { name: routingRoot }, taskListType: 'TASK_LIST_TYPE_DECISION', partitionConfig: routingConfig });
+  const routedTasks = [];
+  for (const partitionId of [0, readPartitions[1]]) {
+    const targetList = { name: partitionName(routingRoot, partitionId) };
+    const workflowId = `${routingRoot}-partition-${partitionId}`;
+    const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...ctx.startRequest, workflowId, taskList: targetList,
+      workflowType: { name: 'main.EchoWorkflow' }, input: payload(JSON.stringify(`route-${partitionId}`)),
+      requestId: randomUUID(),
+    });
+    const task = await ownerRpc(ctx, 'PollForDecisionTask', { domainId: ctx.domainId,
+      pollerId: randomUUID(), request: { domain: ctx.domain, taskList: targetList,
+        identity: `adaptive-read-routing-${partitionId}` } });
+    assert(task.taskToken?.length, `partition ${partitionId} direct poll returned no task token`);
+    assert.equal(task.workflowExecution.workflowId, workflowId,
+      `partition ${partitionId} poll consumed a different workflow`);
+    assert.equal(task.workflowExecution.runId, started.runId,
+      `partition ${partitionId} poll consumed a different run`);
+    await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken,
+      identity: `adaptive-read-routing-${partitionId}`,
+      decisions: [{ completeWorkflowExecutionDecisionAttributes: {
+        result: payload(JSON.stringify(`served-by-partition-${partitionId}`)),
+      } }],
+    });
+    const history = await ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+      domain: ctx.domain, workflowExecution: { workflowId, runId: started.runId },
+    });
+    assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+      `routing workflow ${workflowId} did not reach terminal completion exactly once`);
+    routedTasks.push({ workflowId, runId: started.runId, partitionId,
+      requestedTaskList: targetList.name, returnedWorkflowId: task.workflowExecution.workflowId,
+      completedThrough: 'Go Frontend RespondDecisionTaskCompleted' });
+  }
+
   // Use the existing Go SDK worker/client on the changed queue. Its normal
   // workflow and activity loop proves tasks scheduled after the update still
   // traverse Go Frontend/History and Rust Matching successfully.
@@ -283,6 +332,8 @@ async function adaptiveScaler(ctx) {
     scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
     updated: { version: String(config.version), writePartitions: writeCount,
       readPartitions: Object.keys(config.readPartitions || {}).length },
+    directReadRouting: { source: 'live DescribeTaskList partitionConfig.readPartitions',
+      controlledTaskList: routingRoot, tasks: routedTasks },
     staticListing: goListing.decisionTaskListPartitions.map(partition => partition.key),
     sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update' };
 }
