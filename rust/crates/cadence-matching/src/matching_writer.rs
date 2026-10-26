@@ -448,7 +448,7 @@ mod tests {
             source_domain: domain,
             schedule_to_start_seconds: 0,
         }).await.unwrap_err();
-        assert_eq!(expected.status.code(), tonic::Code::Internal);
+        assert_eq!(expected.code(), tonic::Code::Internal);
 
         // This is the same join QueueRegistry/MatchingRuntime use before the launcher
         // samples its fatal receiver. The actor's failure send precedes releasing its guard.
