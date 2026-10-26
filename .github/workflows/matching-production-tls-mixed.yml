@@ -1,0 +1,62 @@
+name: Matching production TLS mixed gate
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: matching-production-tls-mixed-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/matching-production-tls-target-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/go-sdk/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Rust Matching on a fresh target
+        run: |
+          mkdir -p out "$CARGO_TARGET_DIR"
+          git rev-parse HEAD > out/commit.txt
+          printf '%s\n' "$CARGO_TARGET_DIR" > out/cargo-target-dir.txt
+          set +e
+          cargo build --locked --manifest-path rust/Cargo.toml -p cadence-matching -j2 > out/build.log 2>&1
+          result=$?
+          echo "$result" > out/build.exit
+          set -e
+          test "$result" = 0 || { tail -80 out/build.log; exit "$result"; }
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-matching" | tee out/binary.sha256
+      - name: Install Node gRPC probe dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/node-grpc" && cd "$RUNNER_TEMP/node-grpc"
+          npm install @grpc/grpc-js@^1.14.6 @grpc/proto-loader@^0.8.1
+          echo "NODE_PATH=$RUNNER_TEMP/node-grpc/node_modules" >> "$GITHUB_ENV"
+      - name: Run Go Frontend/History/Worker with TLS Rust Matching
+        run: |
+          set +e
+          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --matching-rpc-tls --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3' > out/command.txt
+          tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" \
+            --matching-rpc-tls --matching-restart --matching-failure-recovery \
+            --matching-idle-check-seconds 3 > out/gate.log 2>&1
+          result=$?
+          echo "$result" > out/gate.exit
+          tail -80 out/gate.log | cut -c1-300
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matching-production-tls-mixed
+          path: out/
+          retention-days: 3
