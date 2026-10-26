@@ -996,7 +996,10 @@ impl TryFrom<UdtRow> for UdtRowWithParsedFieldTypes {
         } = udt_row;
         let field_types = field_types
             .into_iter()
-            .map(|type_| map_string_to_cql_type(&type_))
+            .map(|type_| {
+                let converted = legacy_validator_to_cql(&type_).unwrap_or(type_);
+                map_string_to_cql_type(&converted)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             keyspace_name,
@@ -1777,7 +1780,10 @@ fn legacy_scalar_validator_to_cql(validator: &str) -> Option<&'static str> {
         "UUIDType" => Some("uuid"),
         "TimeUUIDType" => Some("timeuuid"),
         "TimestampType" => Some("timestamp"),
-        "DateType" => Some("date"),
+        // Cassandra 2.1's DateType is the old timestamp marshal (gocql's
+        // pinned getCassandraBaseType maps both DateType and TimestampType to
+        // TypeTimestamp). SimpleDateType is the later CQL date type.
+        "DateType" => Some("timestamp"),
         "SimpleDateType" => Some("date"),
         "TimeType" => Some("time"),
         "ShortType" => Some("smallint"),
@@ -1793,9 +1799,39 @@ fn legacy_validator_to_cql(validator: &str) -> Option<String> {
     let validator = validator.trim();
     if let Some(inner) = validator
         .strip_prefix("org.apache.cassandra.db.marshal.ReversedType(")
+        .or_else(|| validator.strip_prefix("org.apache.cassandra.db.marshal.FrozenType("))
         .and_then(|s| s.strip_suffix(')'))
     {
         return legacy_validator_to_cql(inner);
+    }
+    if let Some(inner) = validator
+        .strip_prefix("org.apache.cassandra.db.marshal.UserType(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let mut args = split_legacy_marshal_args(inner)?.into_iter();
+        let keyspace = args.next()?.trim();
+        let type_name = decode_legacy_udt_hex(args.next()?.trim())?;
+        // UserType embeds its full field declaration. Metadata rows separately
+        // provide those fields, while a reference only needs the qualified name.
+        for field in args {
+            let (_, field_type) = field.split_once(':')?;
+            legacy_validator_to_cql(field_type)?;
+        }
+        if keyspace.is_empty() || type_name.is_empty() {
+            return None;
+        }
+        return Some(format!("{keyspace}.{type_name}"));
+    }
+    if let Some(inner) = validator
+        .strip_prefix("org.apache.cassandra.db.marshal.TupleType(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let converted = split_legacy_marshal_args(inner)?
+            .into_iter()
+            .map(legacy_validator_to_cql)
+            .collect::<Option<Vec<_>>>()?;
+        if converted.is_empty() { return None; }
+        return Some(format!("tuple<{}>", converted.join(", ")));
     }
     for (marshal, cql) in [("ListType", "list"), ("SetType", "set"), ("MapType", "map")] {
         let prefix = format!("org.apache.cassandra.db.marshal.{marshal}(");
@@ -1815,6 +1851,17 @@ fn legacy_validator_to_cql(validator: &str) -> Option<String> {
         }
     }
     legacy_scalar_validator_to_cql(validator).map(str::to_owned)
+}
+
+fn decode_legacy_udt_hex(hex: &str) -> Option<String> {
+    if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes = hex.as_bytes().chunks_exact(2).map(|pair| {
+        let s = std::str::from_utf8(pair).ok()?;
+        u8::from_str_radix(s, 16).ok()
+    }).collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok()
 }
 
 fn split_legacy_marshal_args(input: &str) -> Option<Vec<&str>> {
@@ -2372,6 +2419,8 @@ mod tests {
             ("org.apache.cassandra.db.marshal.LongType", "bigint"),
             ("org.apache.cassandra.db.marshal.BytesType", "blob"),
             ("org.apache.cassandra.db.marshal.TimeUUIDType", "timeuuid"),
+            ("org.apache.cassandra.db.marshal.DateType", "timestamp"),
+            ("org.apache.cassandra.db.marshal.SimpleDateType", "date"),
         ] {
             assert_eq!(legacy_scalar_validator_to_cql(validator), Some(expected));
             assert!(map_string_to_cql_type(expected).is_ok());
@@ -2403,6 +2452,34 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn legacy_cadence_udts_decode_and_toposort_nested_types() {
+        use super::{UdtRow, UdtRowWithParsedFieldTypes, legacy_validator_to_cql, topo_sort_udts};
+
+        let partition = "org.apache.cassandra.db.marshal.UserType(cadence,7461736b5f6c6973745f706172746974696f6e,69736f6c6174696f6e5f67726f757073:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.UTF8Type))";
+        let parsed = legacy_validator_to_cql(partition).unwrap();
+        assert_eq!(parsed, "cadence.task_list_partition");
+        assert!(map_string_to_cql_type(&parsed).is_ok());
+
+        // Cassandra 2.1 metadata contains fields as marshal strings. These are
+        // the task_list_partition and task_list_partition_config declarations
+        // in go/schema/cassandra/cadence/schema.cql.
+        let mut rows: Vec<UdtRowWithParsedFieldTypes> = vec![
+            UdtRow { keyspace_name: "cadence".into(), type_name: "task_list_partition_config".into(),
+                field_names: vec!["read_partitions".into()], field_types: vec!["org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.Int32Type,org.apache.cassandra.db.marshal.FrozenType(org.apache.cassandra.db.marshal.UserType(cadence,7461736b5f6c6973745f706172746974696f6e,69736f6c6174696f6e5f67726f757073:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.UTF8Type))))".into()] }.try_into().unwrap(),
+            UdtRow { keyspace_name: "cadence".into(), type_name: "task_list_partition".into(),
+                field_names: vec!["isolation_groups".into()], field_types: vec!["org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.UTF8Type)".into()] }.try_into().unwrap(),
+            UdtRow { keyspace_name: "cadence".into(), type_name: "task_list".into(),
+                field_names: vec!["adaptive_partition_config".into()], field_types: vec!["org.apache.cassandra.db.marshal.FrozenType(org.apache.cassandra.db.marshal.UserType(cadence,7461736b5f6c6973745f706172746974696f6e5f636f6e666967,76657273696f6e:org.apache.cassandra.db.marshal.LongType))".into()] }.try_into().unwrap(),
+        ];
+        topo_sort_udts(&mut rows).unwrap();
+        let names: Vec<_> = rows.iter().map(|row| row.type_name.as_str()).collect();
+        assert!(names.iter().position(|name| *name == "task_list_partition").unwrap()
+            < names.iter().position(|name| *name == "task_list_partition_config").unwrap());
+        assert!(names.iter().position(|name| *name == "task_list_partition_config").unwrap()
+            < names.iter().position(|name| *name == "task_list").unwrap());
     }
 
     #[test]
