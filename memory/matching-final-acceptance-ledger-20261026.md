@@ -40,3 +40,19 @@ Worker `c25` owns the fresh, uncached CI run. Parent owns serial mixed validatio
 - **Explicit requirement still awaiting proof:** all above exact-pin fresh/mixed lanes, including the corrected adaptive production probe.
 - **Optional coverage only:** exhaustive pairing of every RPC validation/error-precedence branch with a Go oracle; direct physical internal-partition identity instrumentation; dedicated scaler unload probe. Add these only if source evidence identifies an observable mismatch or a required contract currently unproved by the listed lifecycle lanes.
 - **Next service:** do not advance to History until final artifacts are reviewed and this checklist is closed.
+
+## Later contract recheck — acceptance still open
+
+The older unresolved panic-string note exposed a concrete current wire-text gap:
+Go `%#v` renders NUL as `\x00`, while Rust debug string formatting renders
+`\0`. A Luna worker owns a Go-compatible quoting implementation and focused
+Actions validation. Do not interpret the earlier no-new-mismatch snapshot as
+closing this subsequently confirmed issue. Cassandra UUID-spelling effects are
+also under independent review: a metrics label discrepancy is not automatically
+resolved merely because it does not alter task delivery.
+
+The corrected adaptive fixture candidate is immutable tag `t3/final-acceptance-v2`
+at `eba0b437df9096d44b82be91af542d164c5c5123`. Fresh workspace run
+40375453720 and adaptive mixed run 40375459588 target that source. Any subsequent
+production contract fix requires a new reviewed pin and appropriately scoped
+validation; these runs cannot prove changes they do not contain.
