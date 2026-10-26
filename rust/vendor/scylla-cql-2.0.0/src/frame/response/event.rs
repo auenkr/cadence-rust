@@ -8,6 +8,7 @@ use crate::frame::frame_errors::{
 };
 use crate::frame::server_event_type::{EventType, EventTypeV2};
 use crate::frame::types;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use std::net::SocketAddr;
 
 /// Event that the server notified the client about.
@@ -148,6 +149,14 @@ pub enum ClientRoutesChangeEvent {
 impl Event {
     /// Deserialize an event from the provided buffer.
     pub fn deserialize(buf: &mut &[u8]) -> Result<Self, CqlEventParseError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    /// Deserializes an EVENT body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, CqlEventParseError> {
         let event_type: EventType = types::read_string(buf)
             .map_err(CqlEventParseError::EventTypeParseError)?
             .parse()?;
@@ -160,7 +169,9 @@ impl Event {
                 StatusChangeEvent::deserialize(buf)
                     .map_err(CqlEventParseError::StatusChangeEventParseError)?,
             )),
-            EventType::SchemaChange => Ok(Self::SchemaChange(SchemaChangeEvent::deserialize(buf)?)),
+            EventType::SchemaChange => Ok(Self::SchemaChange(
+                SchemaChangeEvent::deserialize_for_version(buf, version)?,
+            )),
         }
     }
 }
@@ -168,6 +179,14 @@ impl Event {
 impl EventV2 {
     /// Deserialize an event from the provided buffer.
     pub fn deserialize(buf: &mut &[u8]) -> Result<Self, CqlEventParseError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    /// Deserializes an EVENT body using its native protocol version.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, CqlEventParseError> {
         let event_type: EventTypeV2 = types::read_string(buf)
             .map_err(CqlEventParseError::EventTypeParseError)?
             .parse()?;
@@ -181,7 +200,7 @@ impl EventV2 {
                     .map_err(CqlEventParseError::StatusChangeEventParseError)?,
             )),
             EventTypeV2::SchemaChange => {
-                Ok(Self::SchemaChange(SchemaChangeEvent::deserialize(buf)?))
+                Ok(Self::SchemaChange(SchemaChangeEvent::deserialize_for_version(buf, version)?))
             }
             EventTypeV2::ClientRoutesChange => Ok(Self::ClientRoutesChange(
                 ClientRoutesChangeEvent::deserialize(buf)
@@ -194,6 +213,15 @@ impl EventV2 {
 impl SchemaChangeEvent {
     /// Deserialize a schema change event from the provided buffer.
     pub fn deserialize(buf: &mut &[u8]) -> Result<Self, SchemaChangeEventParseError> {
+        Self::deserialize_for_version(buf, CqlProtocolVersion::V4)
+    }
+
+    /// Deserializes a schema-change payload. V2 uses the legacy keyspace/table form;
+    /// v3/v4 carry the explicit target string.
+    pub fn deserialize_for_version(
+        buf: &mut &[u8],
+        version: CqlProtocolVersion,
+    ) -> Result<Self, SchemaChangeEventParseError> {
         let type_of_change_string =
             types::read_string(buf).map_err(SchemaChangeEventParseError::TypeOfChangeParseError)?;
         let type_of_change = match type_of_change_string {
@@ -203,8 +231,21 @@ impl SchemaChangeEvent {
             _ => SchemaChangeType::Invalid,
         };
 
-        let target =
-            types::read_string(buf).map_err(SchemaChangeEventParseError::TargetTypeParseError)?;
+        let target = if version == CqlProtocolVersion::V2 {
+            let keyspace_affected = types::read_string(buf)
+                .map_err(SchemaChangeEventParseError::AffectedKeyspaceParseError)?
+                .to_string();
+            let table_name = types::read_string(buf)
+                .map_err(SchemaChangeEventParseError::AffectedTargetNameParseError)?
+                .to_string();
+            return if table_name.is_empty() {
+                Ok(Self::KeyspaceChange { change_type: type_of_change, keyspace_name: keyspace_affected })
+            } else {
+                Ok(Self::TableChange { change_type: type_of_change, keyspace_name: keyspace_affected, object_name: table_name })
+            };
+        } else {
+            types::read_string(buf).map_err(SchemaChangeEventParseError::TargetTypeParseError)?
+        };
         let keyspace_affected = types::read_string(buf)
             .map_err(SchemaChangeEventParseError::AffectedKeyspaceParseError)?
             .to_string();
@@ -375,5 +416,48 @@ impl ClientRoutesChangeEvent {
             connection_ids,
             host_ids,
         })
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    fn put_string(out: &mut Vec<u8>, value: &str) {
+        types::write_string(value, out).unwrap();
+    }
+
+    #[test]
+    fn schema_change_fixtures_decode_legacy_v2_and_target_tagged_v3() {
+        // Paired with the v2 legacy (change, keyspace, table) and v3+ (change,
+        // target, keyspace, object) schema-change layouts.
+        let mut v2 = Vec::new();
+        put_string(&mut v2, "CREATED");
+        put_string(&mut v2, "ks");
+        put_string(&mut v2, "tbl");
+        match SchemaChangeEvent::deserialize_for_version(&mut &v2[..], CqlProtocolVersion::V2)
+            .unwrap()
+        {
+            SchemaChangeEvent::TableChange { keyspace_name, object_name, .. } => {
+                assert_eq!(keyspace_name, "ks");
+                assert_eq!(object_name, "tbl");
+            }
+            other => panic!("unexpected v2 schema-change event: {other:?}"),
+        }
+
+        let mut v3 = Vec::new();
+        put_string(&mut v3, "DROPPED");
+        put_string(&mut v3, "TABLE");
+        put_string(&mut v3, "ks");
+        put_string(&mut v3, "tbl");
+        match SchemaChangeEvent::deserialize_for_version(&mut &v3[..], CqlProtocolVersion::V3)
+            .unwrap()
+        {
+            SchemaChangeEvent::TableChange { keyspace_name, object_name, .. } => {
+                assert_eq!(keyspace_name, "ks");
+                assert_eq!(object_name, "tbl");
+            }
+            other => panic!("unexpected v3 schema-change event: {other:?}"),
+        }
     }
 }

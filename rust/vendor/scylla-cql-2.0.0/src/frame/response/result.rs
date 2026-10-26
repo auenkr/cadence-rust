@@ -12,6 +12,7 @@ use crate::frame::frame_errors::{
     TableSpecParseError,
 };
 use crate::frame::protocol_features::ProtocolFeatures;
+use crate::frame::versioned_header::CqlProtocolVersion;
 use crate::frame::request::query::PagingStateResponse;
 use crate::frame::response::event::SchemaChangeEvent;
 use crate::frame::types;
@@ -922,6 +923,7 @@ impl RawMetadataAndRawRows {
 
 fn deser_prepared_metadata(
     buf: &mut &[u8],
+    version: CqlProtocolVersion,
 ) -> StdResult<PreparedMetadata, PreparedMetadataParseError> {
     let flags = types::read_int(buf)
         .map_err(|err| PreparedMetadataParseError::FlagsParseError(err.into()))?;
@@ -930,8 +932,12 @@ fn deser_prepared_metadata(
     let col_count =
         types::read_int_length(buf).map_err(PreparedMetadataParseError::ColumnCountParseError)?;
 
-    let pk_count: usize =
-        types::read_int_length(buf).map_err(PreparedMetadataParseError::PkCountParseError)?;
+    // Protocol v2/v3 omit partition-key index metadata entirely.
+    let pk_count: usize = if version == CqlProtocolVersion::V4 {
+        types::read_int_length(buf).map_err(PreparedMetadataParseError::PkCountParseError)?
+    } else {
+        0
+    };
 
     let mut pk_indexes = Vec::with_capacity(pk_count);
     for i in 0..pk_count {
@@ -976,6 +982,7 @@ fn deser_set_keyspace(buf: &mut &[u8]) -> StdResult<SetKeyspace, SetKeyspacePars
 fn deser_prepared(
     buf: &mut &[u8],
     features: &ProtocolFeatures,
+    version: CqlProtocolVersion,
 ) -> StdResult<Prepared, PreparedParseError> {
     let id = types::read_short_bytes(buf)
         .map_err(PreparedParseError::IdParseError)?
@@ -991,8 +998,8 @@ fn deser_prepared(
         .transpose()?
         .map(|x| cow_bytes::CowBytes::from(x).into_owned());
 
-    let prepared_metadata =
-        deser_prepared_metadata(buf).map_err(PreparedParseError::PreparedMetadataParseError)?;
+    let prepared_metadata = deser_prepared_metadata(buf, version)
+        .map_err(PreparedParseError::PreparedMetadataParseError)?;
     let (mut result_metadata, paging_state_response) = deser_result_metadata(buf, features)
         .map_err(PreparedParseError::ResultMetadataParseError)?;
     // It makes more sense to use the field from prepared, rather than from result metadata stored in prepared.
@@ -1013,9 +1020,12 @@ fn deser_prepared(
     })
 }
 
-fn deser_schema_change(buf: &mut &[u8]) -> StdResult<SchemaChange, SchemaChangeEventParseError> {
+fn deser_schema_change(
+    buf: &mut &[u8],
+    version: CqlProtocolVersion,
+) -> StdResult<SchemaChange, SchemaChangeEventParseError> {
     Ok(SchemaChange {
-        event: SchemaChangeEvent::deserialize(buf)?,
+        event: SchemaChangeEvent::deserialize_for_version(buf, version)?,
     })
 }
 
@@ -1026,6 +1036,17 @@ pub fn deserialize_with_features(
     buf_bytes: Bytes,
     cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
     features: &ProtocolFeatures,
+) -> StdResult<Result, CqlResultParseError> {
+    deserialize_for_version(buf_bytes, cached_metadata, features, CqlProtocolVersion::V4)
+}
+
+/// Deserializes a RESULT response using the selected native protocol version.
+/// The existing `deserialize_with_features` API retains its v4 behavior.
+pub fn deserialize_for_version(
+    buf_bytes: Bytes,
+    cached_metadata: Option<&Arc<ResultMetadata<'static>>>,
+    features: &ProtocolFeatures,
+    version: CqlProtocolVersion,
 ) -> StdResult<Result, CqlResultParseError> {
     let buf = &mut &*buf_bytes;
     use self::Result::*;
@@ -1040,8 +1061,8 @@ pub fn deserialize_with_features(
                 features,
             )?),
             0x0003 => SetKeyspace(deser_set_keyspace(buf)?),
-            0x0004 => Prepared(deser_prepared(buf, features)?),
-            0x0005 => SchemaChange(deser_schema_change(buf)?),
+            0x0004 => Prepared(deser_prepared(buf, features, version)?),
+            0x0005 => SchemaChange(deser_schema_change(buf, version)?),
             id => return Err(CqlResultParseError::UnknownResultId(id)),
         },
     )
@@ -1290,5 +1311,25 @@ mod test_utils {
                 raw_metadata_and_rows_bytes_size: 0,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_metadata_partition_key_indexes_are_v4_only() {
+        let v2_v3_fixture = [0, 0, 0, 0, 0, 0, 0, 0];
+        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3] {
+            let metadata = deser_prepared_metadata(&mut &v2_v3_fixture[..], version).unwrap();
+            assert!(metadata.pk_indexes.is_empty());
+            assert_eq!(metadata.col_count, 0);
+        }
+
+        // V4 appends the partition-key count after flags and bound-variable count.
+        let v4_fixture = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let metadata = deser_prepared_metadata(&mut &v4_fixture[..], CqlProtocolVersion::V4).unwrap();
+        assert!(metadata.pk_indexes.is_empty());
     }
 }
