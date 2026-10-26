@@ -122,3 +122,8 @@ SHA or runtime TLS acceptance evidence yet; obtain it from the Actions
 artifact (`out/binary.sha256`) and record the Actions run URL, head SHA and
 conclusion after the serialized dispatch. This is a gate implementation, not
 Matching service completion evidence.
+
+Independent TLS review found Matching CA credentials accidentally applied to
+all Node service clients. Corrected Domain/Workflow/Worker/Semaphore clients
+to retain plaintext credentials; only Matching clients use Matching TLS CA.
+Runtime acceptance remains pending.

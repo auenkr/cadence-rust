@@ -30,7 +30,7 @@ const matchingCredentials = process.env.CADENCE_MATCHING_GRPC_CA_FILE
   : grpc.credentials.createInsecure();
 const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
 const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
-const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, matchingCredentials)]));
+const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
 clients.Matching = new schema.matching.v1.MatchingAPI(peer, matchingCredentials);
 const cassandraGate = process.env.CADENCE_MATCHING_CASSANDRA_GATE === '1';
 function cassandraCommand(args, label) {
@@ -266,7 +266,7 @@ function clientsForTaskList(taskListName) {
   const port = realShardDistributor && taskListName ? realShardOwnerPorts.get(taskListName) : undefined;
   if (!port) return clients;
   if (!realOwnerClients.has(port)) {
-    const owned = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](`127.0.0.1:${port}`, matchingCredentials)]));
+    const owned = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](`127.0.0.1:${port}`, grpc.credentials.createInsecure())]));
     owned.Matching = new schema.matching.v1.MatchingAPI(`127.0.0.1:${port}`, matchingCredentials);
     realOwnerClients.set(port, owned);
   }
