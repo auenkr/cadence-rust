@@ -1,0 +1,32 @@
+name: CQL header foundation
+on:
+  workflow_dispatch:
+concurrency:
+  group: cql-header-foundation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  headers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/cql-header-target
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test actual vendored header codec
+        run: |
+          mkdir -p out
+          git rev-parse HEAD > out/commit.txt
+          printf '%s\n' "$CARGO_TARGET_DIR" > out/target-dir.txt
+          set +e
+          cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib versioned_header > out/test.log 2>&1
+          result=$?
+          echo "$result" > out/test.exit
+          cat out/test.log
+          exit "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cql-header-foundation
+          path: out/
+          retention-days: 3
