@@ -268,7 +268,9 @@ async function adaptiveScaler(ctx) {
     env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: ctx.domain,
       CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList,
       CADENCE_MIXED_MATCHING_LOAD_IDS: JSON.stringify(loadExecutions.map(execution => execution.workflowId)) },
-    encoding: 'utf8', timeout: 180000 });
+    // Leave headroom beyond the adaptive-only three-minute SDK context so the
+    // parent process cannot win the timeout race at the same deadline.
+    encoding: 'utf8', timeout: 240000 });
   fs.writeFileSync(path.join(ctx.work, 'adaptive-scaler-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
   assert.equal(sdk.status, 0, `Go SDK did not complete work on the scaled task list: ${sdk.error || sdk.status}; see adaptive-scaler-sdk.log`);
   let completedLoad = 0;
