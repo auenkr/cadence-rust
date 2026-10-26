@@ -85,3 +85,27 @@ shutdown timeout. Therefore a store operation that never returns can hold
 shutdown indefinitely; the effective bound is the persistence driver's own
 operation timeout, if configured. The existing process-level malformed RunID
 subprocess test remains unchanged and continues to cover exit status 2.
+
+## Corrected regression follow-up and focused clean-target CI
+
+Parent correction `e8669db4b` fixed the initial follow-up's deadlock by calling
+`writer.stop()` before joining the actor. I added a 2-second diagnostic timeout
+to the join (commit `c027a0ae6`) so a regression fails with a clear message
+instead of hanging the crate suite. The test now creates a real SQLite-backed
+queue and actual `TaskWriter` with the runtime fatal sender/tracker wiring,
+appends a malformed RunID through the writer, stops it, joins the registered
+actor, and verifies the typed fatal notification. It does not hold the store
+operation in flight when shutdown starts and it does not invoke
+`QueueRegistry`/`MatchingRuntime` shutdown. A deterministic controlled-store
+integration remains open; the existing launcher subprocess exit-2 test is
+unchanged and passed.
+
+Focused clean-target validation: [GitHub Actions run 40366940209](https://github.com/auenkr/cadence-rust/actions/runs/40366940209), head
+`c027a0ae66b80586e139a234d1d2f314dfeb5e0f`, conclusion `success`,
+`package=cadence-matching`, `clean_target=true` (fresh `/home/runner/work/_temp/cargo-target-final`). Clippy and tests succeeded; the new regression passed;
+the matching library reported 723 passed, 0 failed, 3 ignored. The existing
+`sql_writer_fatal_process` test passed (1 passed), preserving subprocess exit-2
+coverage. The query-touched rustfmt check passed after formatting was generated
+by the Actions workflow and applied from its uploaded patch. No local Cargo,
+Go, or rustfmt validation was run. This is focused crate CI, not mixed-cluster
+evidence and has no service binary SHA requirement.
