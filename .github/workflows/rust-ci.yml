@@ -21,6 +21,10 @@ on:
         description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
         type: boolean
         default: false
+      format_panic_files:
+        description: "Format changed Matching panic/cache files and upload the patch only"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
