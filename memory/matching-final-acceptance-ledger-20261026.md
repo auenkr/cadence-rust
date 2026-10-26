@@ -1,5 +1,19 @@
 # Matching final acceptance ledger — 2026-10-26
 
+## Current disposition — October 27 CQL integration
+
+**Matching remains incomplete.** Historical pins and no-new-mismatch statements below are snapshots, superseded by the concrete Cassandra requirements in this section. `t3/matching-cql-integration` is an integration branch, not a final acceptance pin. No History migration has begun.
+
+Current required work:
+
+- Finish real selected-version request/result body dispatch, pre-v4 UNSET rejection, and typed protocol-v2 collection conversion in live requests and result rows. Header and helper tests alone cannot establish this. The collection helper's map pair-count and missing Set defects were corrected in `47d40051f`; live conversion remains under implementation.
+- Validate the integrated Cassandra 2.x keyspace/UDT/column/table metadata path. Parent corrected syntax, successful-stream mapping, modern/legacy stream type unification, and restricted fallback to actual missing-schema messages. CI `40413961800` failed compilation before tests; later changes need successful combined CI.
+- Complete RandomPartitioner hash, token storage/order, configured partitioner discovery, peer token parsing and routing. An unused MD5 helper or dummy peer tokens cannot close this source-confirmed Go behavior gap.
+- Keep persistence protocols 2/3 rejected until the complete selected-version path is ready. Run actual Rust backend comparison against the pinned Go reference for v2, v3 and v4 with fresh build/target, exact source and executable hash. Go-only matrix `40413206359` passed all three and is reference evidence only.
+- Re-pin the combined source after implementation/review; obtain fresh workspace CI and all original serial mixed service gates below on that same immutable source. Focused persistence CI `40412875471` passed on earlier `e7657429b`; it does not validate later session/metadata/core changes.
+
+The three vendored CQL crates now have a dedicated unit-test workspace at `rust/vendor/Cargo.toml`, with patches pointing to the local implementations. This addresses Cargo's refusal to run dev-dependency tests for nonmember dependencies. Tests must exercise the patched graph, rather than silently using the registry core. Current validation handles: foundation/core run `40414709509` on `a9382e18d`; persistence run `40414519214` on `ea17b5ae6`. Results were pending at last check; neither is final-source service acceptance.
+
 ## Pin and disposition
 
 Reconciled against current source pin `10692b2d5a5b912da051a80ca15c30f8236484dd` (master). The prior RPC matrix and gate plan remain useful inventories, but their older-source status statements are stale. The final combined-pin fresh CI belongs to worker `c25`; the serial mixed gates belong to the parent. Adaptive run `40373145351` targets the older `eecb6bef8b5b5c6c36e3e9c7336fa01f451a3f97` source. Do not treat that run as evidence for this pin, and do not poll or dispatch from this ledger update.
