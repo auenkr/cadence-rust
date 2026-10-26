@@ -45,7 +45,7 @@ commit.
   as the original failure record.
 - No mixed-cluster gate was dispatched.
 
-## Determinism fix in progress
+## Determinism fix
 
 - The opt-in generator pins `testdata.Timestamp` and `Timestamp1` through
   `Timestamp5` before mapping. This affects only the generator test process;
@@ -66,4 +66,13 @@ commit.
   Rust fixture. It still has all 25 original names, all are
   `thrift-binary-struct`, and none are empty. Rust consumer assertions were not
   changed.
-- Fixture commit and final focused fresh-target Matching CI run: pending.
+- Fixture commit: `6f436aee429cbc68f851b827dc0577955e55492c`.
+- Final focused validation run:
+  https://github.com/auenkr/cadence-rust/actions/runs/40409713719
+  (`workflow_dispatch`, `package=cadence-matching`, `clean_target=true`). It
+  completed `success` on the fixture commit SHA above. The oracle comparison,
+  clippy, formatting, and Matching package tests all passed. The run's
+  uploaded Go outputs again had identical SHA-256
+  `85b60a8d977f4d8db2b6ff2196c566b995a907588781a31e2adb84b21c1902d9`, and
+  both `verify.exit` and `stability.exit` are `0`.
+- No mixed-cluster gate was dispatched.
