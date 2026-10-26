@@ -45,40 +45,34 @@ library's metadata fetching tests. This prevents a package-filtered
 `cadence-persistence` workflow from being mistaken for vendored driver test
 coverage.
 
-## Remaining live reader integration
+## Live reader integration status (2026-10-27)
 
-The keyspace fetch falls back from `system_schema.keyspaces` to
-`system.schema_keyspaces` only for the recognized missing-table/column
-`DbError::Invalid` response. Peer discovery in `system.peers` / `system.local`
-is unchanged.
+The keyspace fetch identifies legacy mode only when the modern keyspace query
+returns the recognized missing-table/column `DbError::Invalid`; unrelated
+errors are propagated. That mode now selects `system.schema_usertypes` and
+`system.schema_columns` in full schema loading. Legacy validators are parsed
+recursively for scalar marshal types, `ListType`, `SetType`, `MapType`, and
+`ReversedType`; the existing table assembly consumes column kind and component
+position and resolves UDT references using the legacy UDT rows. `schema_columnfamilies`
+supplies table names, and Cassandra 2.x materialized-view metadata is empty.
 
-The subsequent schema branch also calls
-`query_user_defined_types`, `query_tables_schema`, `query_tables`, and
-`query_views`, all modern `system_schema` readers. Those callsites need legacy
-reader counterparts for `system.schema_usertypes` (where available),
-`system.schema_columnfamilies`, and `system.schema_columns`. Legacy readers
-must assemble keyspace-scoped table schemas, convert validators to CQL types,
-preserve partition/clustering key positions, derive reversed clustering order,
-and retain token-aware partition keys. Cassandra 2.x has no materialized
-views, so its view result can be empty. Do not suppress metadata errors or
-fall back to an empty keyspace/table map.
+Remaining gaps: Cassandra 2.1 protocol v1 omits `system.schema_columns.type`;
+the Go driver derives key columns from `key_validator`, `comparator`, aliases,
+and `default_validator`. Rust does not yet implement that alias/comparator
+derivation. Legacy column kinds/positions therefore cover protocol-v2+ schema
+rows, not every protocol-v1 response. Marshal families outside scalar,
+list/set/map, and reversed wrappers (including tuples, composites, and nested
+UDT marshal encodings) are not yet decoded. Cassandra2 end-to-end behavior and
+mixed-cluster SDK compatibility still require the parent CI/gate pass.
 
-This increment now propagates the detected legacy mode into table-name and
-partitioner metadata. `system.schema_columnfamilies` supplies table names in
-both full and minimal paths; Cassandra 2.x has no per-table partitioner, so
-minimal metadata uses `None` while peer token discovery remains untouched.
-Views return empty only after legacy keyspace mode has been positively
-detected. The focused test covers the legacy table query selection and
-representative marshal validator conversion.
-
-Full schema mode remains incomplete. `query_user_defined_types` still uses
-`system_schema.types`, and `query_tables_schema` still reads
-`system_schema.columns`; Cassandra 2.x will fail those modern readers before
-column metadata can be published. The remaining implementation needs
-`system.schema_usertypes`, `system.schema_columns`, and `schema_columnfamilies`
-validator/key/comparator decoding, including frozen nested collection and UDT
-conversion. Do not claim full Cassandra 2.x metadata parity yet. No local
-Cargo/Go/rustfmt commands were used.
+Focused direct tests cover recursive collection/reversed validator parsing;
+the prior scalar and keyspace tests remain. No local Cargo, Go, or rustfmt
+commands were used. Dispatch was attempted after push against
+`t3/cassandra-legacy-metadata`; GitHub returned HTTP 422:
+`Workflow does not have 'workflow_dispatch' trigger` for workflow `394409098`.
+The branch YAML does contain `workflow_dispatch`; the dispatch API rejected
+the request, so no run URL, CI conclusion, or compilation evidence exists for
+this commit. Parent validation remains required.
 
 ## CI evidence
 
