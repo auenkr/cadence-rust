@@ -77,3 +77,22 @@ CA-backed hostname-verified TLS to the Go typed ownership-error oracle. The
 initial workflow422 parser rejection was fixed by setting CARGO_TARGET_DIR in
 a runner step via GITHUB_ENV. Final candidate must include these gate changes
 and the reviewed fatal writer lifecycle, then run all lanes on one stable SHA.
+
+## October 26 adaptive probe correction
+
+The proposed persisted-config partition-listing repair `ca64a5a9` was rejected:
+Go `getAllPartitions` uses the filtered static write-partition dynamic property,
+not persisted adaptive configuration. Do not include that repair in the final pin.
+The corrected probe commit `fb5f0ccac3450d549aad16d0c6fdc785302c9b12` adds
+the workflow lane named **`adaptive`** (not `adaptive-scaler`). Once reviewed and
+integrated, add this serial final-pin gate after the production validation lanes:
+
+```sh
+gh workflow run matching-production-validation.yml --ref "$BRANCH" -f lane=adaptive
+```
+
+Require persisted adaptive config/version growth, independently Go-shaped static
+partition listing, SDK workflow/activity completion on that queue, and completion
+of all 24 generated load workflows. Queue completion alone does not prove direct
+root/child read routing. Record exact source and binary hashes as for every mixed
+lane. This dispatch instruction is a plan, not execution or acceptance evidence.
