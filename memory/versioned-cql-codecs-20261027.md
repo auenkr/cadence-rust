@@ -14,8 +14,10 @@ The expected v2/v3 gates were checked against the pinned Go gocql source
 `v0.0.0-20211015133455-b225f9b53fa1` (`frame.go`: `writeQueryParams`,
 `writeBatchFrame`, `parsePreparedMetadata`, and `parseResultSchemaChange`). The
 fixtures encode those wire layouts directly; they have not been run against a
-live Go oracle. CI evidence must be added after dispatching `rust-ci.yml` with
-`package=scylla-cql`.
+live Go oracle. Dependency CI is dispatched with `package=scylla-cql` and a
+fresh target: <https://github.com/auenkr/cadence-rust/actions/runs/40412352115>
+(head `3198153f5cdb430a69d2dca76170905f56d8d506`; status was `in_progress` at
+recording time; conclusion pending).
 
 ## Remaining work before driver use
 
