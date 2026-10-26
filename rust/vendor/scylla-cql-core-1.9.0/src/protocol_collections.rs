@@ -8,6 +8,8 @@
 
 use std::fmt;
 
+use crate::frame::response::result::{ColumnType, CollectionType};
+
 /// Native protocol version relevant to collection payload widths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CollectionProtocol {
@@ -26,6 +28,53 @@ pub enum CollectionKind {
     Set,
     /// Map: alternating key and value byte strings.
     Map,
+}
+
+/// Transcodes a CQL cell between collection encodings used by native protocol
+/// versions. The schema is required: scalar values (including `blob`) are
+/// opaque, while collection payloads are recursively interpreted according
+/// to their declared element, key, and value types.
+///
+/// Pass the column type from result metadata for a returned cell, or the
+/// prepared statement's bind-marker type for a request value. Null cells have
+/// no payload and should be handled by the enclosing row/value codec.
+pub fn transcode_cell(
+    column_type: &ColumnType<'_>,
+    source: CollectionProtocol,
+    destination: CollectionProtocol,
+    payload: &[u8],
+) -> Result<Vec<u8>, CollectionCodecError> {
+    transcode_typed(column_type, source, destination, payload)
+}
+
+fn transcode_typed(
+    column_type: &ColumnType<'_>,
+    source: CollectionProtocol,
+    destination: CollectionProtocol,
+    payload: &[u8],
+) -> Result<Vec<u8>, CollectionCodecError> {
+    let (kind, key_type, value_type) = match column_type {
+        ColumnType::Collection { typ: CollectionType::List(t), .. } => (CollectionKind::List, None, Some(t.as_ref())),
+        ColumnType::Collection { typ: CollectionType::Set(t), .. } => (CollectionKind::Set, None, Some(t.as_ref())),
+        ColumnType::Collection { typ: CollectionType::Map(k, v), .. } => (CollectionKind::Map, Some(k.as_ref()), Some(v.as_ref())),
+        // This includes scalar blob values. Their contents may happen to look
+        // like a collection payload, but without a collection schema they are
+        // bytes and must never be rewritten.
+        _ => return Ok(payload.to_vec()),
+    };
+
+    let elements = decode_collection(source, kind, payload)?;
+    let mut transcoded = Vec::with_capacity(elements.len());
+    for (index, element) in elements.into_iter().enumerate() {
+        let element_type = if kind == CollectionKind::Map && index % 2 == 0 {
+            key_type.expect("map has key type")
+        } else {
+            value_type.expect("collection has element type")
+        };
+        transcoded.push(transcode_typed(element_type, source, destination, element)?);
+    }
+    let refs: Vec<&[u8]> = transcoded.iter().map(Vec::as_slice).collect();
+    encode_collection(destination, kind, &refs)
 }
 
 /// Failure to encode or decode a collection payload.
@@ -182,6 +231,15 @@ fn read_size(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::response::result::NativeType;
+
+    fn blob() -> ColumnType<'static> { ColumnType::Native(NativeType::Blob) }
+    fn list(t: ColumnType<'static>) -> ColumnType<'static> {
+        ColumnType::Collection { frozen: false, typ: CollectionType::List(Box::new(t)) }
+    }
+    fn map(k: ColumnType<'static>, v: ColumnType<'static>) -> ColumnType<'static> {
+        ColumnType::Collection { frozen: false, typ: CollectionType::Map(Box::new(k), Box::new(v)) }
+    }
 
     fn roundtrip(p: CollectionProtocol, k: CollectionKind, items: &[&[u8]], expected: &[u8]) {
         let encoded = encode_collection(p, k, items).unwrap();
@@ -325,5 +383,47 @@ mod tests {
             decode_collection(CollectionProtocol::V2, CollectionKind::List, &[0, 0, 99]),
             Err(CollectionCodecError::TrailingBytes)
         );
+    }
+
+    #[test]
+    fn typed_map_transcode_uses_pair_count_and_recurses_by_schema() {
+        // Go's v2 map encoder declares two pairs here (not four alternating
+        // fields). The value type is list<blob>, so only the inner list is
+        // rewritten; its blob members remain opaque.
+        let schema = map(blob(), list(blob()));
+        let v2 = [
+            0, 2,                         // two map pairs
+            0, 1, b'a',                   // key 1
+            0, 5, 0, 1, 0, 1, b'x',       // list [blob("x")]
+            0, 1, b'b',                   // key 2
+            0, 6, 0, 1, 0, 0,             // list [blob("")]
+        ];
+        let got = transcode_cell(&schema, CollectionProtocol::V2, CollectionProtocol::V3OrNewer, &v2).unwrap();
+        let expected = [
+            0, 0, 0, 2,
+            0, 0, 0, 1, b'a',
+            0, 0, 0, 5, 0, 0, 0, 1, 0, 0, 0, 1, b'x',
+            0, 0, 0, 1, b'b',
+            0, 0, 0, 6, 0, 0, 0, 1, 0, 0, 0, 0,
+        ];
+        assert_eq!(got, expected);
+        assert_eq!(transcode_cell(&schema, CollectionProtocol::V3OrNewer, CollectionProtocol::V2, &got).unwrap(), v2);
+    }
+
+    #[test]
+    fn typed_transcode_preserves_scalar_blob_and_same_width_bytes() {
+        let opaque = [0, 0, 0, 1, 0, 0, 0, 1, b'z'];
+        assert_eq!(transcode_cell(&blob(), CollectionProtocol::V3OrNewer, CollectionProtocol::V2, &opaque).unwrap(), opaque);
+        let typed = list(blob());
+        assert_eq!(transcode_cell(&typed, CollectionProtocol::V3OrNewer, CollectionProtocol::V3OrNewer, &opaque).unwrap(), opaque);
+    }
+
+    #[test]
+    fn typed_transcode_propagates_bad_nested_payloads() {
+        let schema = list(list(blob()));
+        let malformed_outer = [0, 1, 0, 1, b'x'];
+        assert_eq!(transcode_cell(&schema, CollectionProtocol::V2, CollectionProtocol::V3OrNewer, &malformed_outer), Err(CollectionCodecError::Truncated));
+        let malformed_inner = [0, 1, 0, 3, 0, 1, 0];
+        assert_eq!(transcode_cell(&schema, CollectionProtocol::V2, CollectionProtocol::V3OrNewer, &malformed_inner), Err(CollectionCodecError::Truncated));
     }
 }
