@@ -25,6 +25,10 @@ on:
         description: "Format changed Matching panic/cache files and upload the patch only"
         type: boolean
         default: false
+      format_scylla_cql_files:
+        description: "Format the vendored scylla-cql codec files and upload the patch only"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -34,6 +38,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format-scylla-cql-files:
+    if: inputs.format_scylla_cql_files == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format vendored scylla-cql codec files
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml
+          git -C "$GITHUB_WORKSPACE" diff --binary -- rust/vendor/scylla-cql-2.0.0/src/frame/request/batch.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/execute.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/prepare.rs rust/vendor/scylla-cql-2.0.0/src/frame/request/query.rs rust/vendor/scylla-cql-2.0.0/src/frame/response/event.rs rust/vendor/scylla-cql-2.0.0/src/frame/response/result.rs > "$RUNNER_TEMP/scylla-cql-format.patch"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scylla-cql-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/scylla-cql-format.patch
+
   format-panic-files:
     if: inputs.format_panic_files == true
     runs-on: ubuntu-latest
@@ -61,7 +84,7 @@ jobs:
           path: ${{ runner.temp }}/panic-format.patch
 
   clippy-test:
-    if: inputs.format_panic_files != true
+    if: inputs.format_panic_files != true && inputs.format_scylla_cql_files != true
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
