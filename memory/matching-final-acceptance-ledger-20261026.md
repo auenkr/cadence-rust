@@ -56,3 +56,5 @@ at `eba0b437df9096d44b82be91af542d164c5c5123`. Fresh workspace run
 40375453720 and adaptive mixed run 40375459588 target that source. Any subsequent
 production contract fix requires a new reviewed pin and appropriately scoped
 validation; these runs cannot prove changes they do not contain.
+
+Independent Cassandra review subsequently confirmed a metric and quota-context label gap for gocql-valid UUID spellings. Backend-specific cache-key normalization is required; the prior telemetry-only closure is superseded. A Luna worker owns the fix, preserving SQL UUID panic behavior and strict real validation paths.
