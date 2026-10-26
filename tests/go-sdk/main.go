@@ -144,7 +144,15 @@ func main() {
 	}
 	defer dispatcher.Stop()
 	rpc := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// The adaptive Matching probe first waits for every load workflow to finish,
+	// then exercises retry/recovery workflows on the same scaled task list. Keep
+	// enough wall-clock budget for both phases when that load is present; the
+	// per-workflow execution timeouts remain unchanged.
+	ctxTimeout := time.Minute
+	if os.Getenv("CADENCE_MIXED_MATCHING_LOAD_IDS") != "" {
+		ctxTimeout = 3 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
 	if domain := os.Getenv("CADENCE_MIXED_MATCHING_DOMAIN"); domain != "" {
 		runMixedMatchingSDK(ctx, rpc, domain)
