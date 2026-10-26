@@ -25,6 +25,7 @@ pub struct Header { pub version: CqlProtocolVersion, pub direction: Direction, p
 impl Header {
     pub fn encode(self) -> io::Result<Vec<u8>> {
         validate_flags(self.version, self.flags)?;
+        validate_length(self.length)?;
         if self.version == CqlProtocolVersion::V2 && !(-128..=127).contains(&self.stream) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "v2 stream must fit signed i8"));
         }
@@ -48,7 +49,16 @@ impl Header {
         let (stream, opcode, len_at) = if version == CqlProtocolVersion::V2 { (tail[0] as i8 as i16, tail[1], 2) }
             else { (i16::from_be_bytes([tail[0], tail[1]]), tail[2], 3) };
         let length = u32::from_be_bytes(tail[len_at..len_at+4].try_into().unwrap());
+        validate_length(length)?;
         Ok(Self { version, direction, flags: prefix[1], stream, opcode, length })
+    }
+}
+
+fn validate_length(length: u32) -> io::Result<()> {
+    if length > i32::MAX as u32 {
+        Err(io::Error::new(io::ErrorKind::InvalidData, "negative CQL frame length"))
+    } else {
+        Ok(())
     }
 }
 
@@ -65,6 +75,18 @@ mod tests {
             for stream in streams { let h = Header { version:v,direction:Direction::Response,flags:0,stream,opcode:8,length:0x12345678 }; let bytes=h.encode().unwrap(); assert_eq!(bytes.len(),v.header_len()); assert_eq!(Header::decode(&mut bytes.as_slice(),Direction::Response).unwrap(),h); }
         }
         let h=Header{version:CqlProtocolVersion::V2,direction:Direction::Request,flags:0,stream:128,opcode:7,length:0}; assert!(h.encode().is_err());
+    }
+    #[test]
+    fn negative_wire_lengths_are_rejected() {
+        for version in [CqlProtocolVersion::V2, CqlProtocolVersion::V3, CqlProtocolVersion::V4] {
+            let header = Header { version, direction: Direction::Response,
+                flags: 0, stream: 0, opcode: 8, length: 0 };
+            let mut bytes = header.encode().unwrap();
+            let offset = bytes.len() - 4;
+            bytes[offset..].copy_from_slice(&u32::MAX.to_be_bytes());
+            assert!(Header::decode(&mut bytes.as_slice(), Direction::Response).is_err());
+            assert!(Header { length: u32::MAX, ..header }.encode().is_err());
+        }
     }
     #[test]
     fn custom_payload_flag_requires_v4() {
