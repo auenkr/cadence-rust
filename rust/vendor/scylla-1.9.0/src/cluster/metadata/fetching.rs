@@ -1492,12 +1492,14 @@ impl ControlConnection {
                 (ks, table, col, kind.to_owned(), position, cql_type)
             }))
             .map_err(|error| MetadataFetchError { error, table: "system.schema_columns" })
+            .left_stream()
         } else {
             self.query_filter_keyspace_name::<RowType>(
                 "SELECT keyspace_name, table_name, column_name, kind, position, type FROM system_schema.columns",
                 keyspaces_to_fetch,
             )
             .map_err(|error| MetadataFetchError { error, table: "system_schema.columns" })
+            .right_stream()
         };
 
         let empty_ok_map = Ok(HashMap::new());
