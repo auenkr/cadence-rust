@@ -291,7 +291,8 @@ jobs:
           echo "$result" > test.exit
           exit "$result"
       - name: Test vendored scylla-cql frame codecs directly
-        run: cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame::
+        run: |
+          cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame::
       - name: Compare live Go tally and Rust Matching emissions
         if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
         run: |
