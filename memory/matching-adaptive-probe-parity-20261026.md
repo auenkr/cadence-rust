@@ -14,7 +14,7 @@ The prior claim that Rust had a production gap because `ListTaskListPartitions` 
 
 ## Probe expectations
 
-The adaptive probe keeps genuine Go Frontend/History workflow-start traffic, requires a persisted adaptive write-partition increase and version increase, then starts the existing Go SDK worker/client against the changed queue. The SDK must complete all 24 load workflows, and the probe verifies exactly one workflow-completed event per execution.
+The adaptive probe keeps genuine Go Frontend/History workflow-start traffic, requires a persisted adaptive write-partition increase and version increase, then starts the existing Go SDK worker/client against the changed queue (the helper now honors `CADENCE_MIXED_MATCHING_TASK_LIST` rather than silently choosing a random queue). The SDK must complete all 24 load workflows, and the probe verifies exactly one workflow-completed event per execution.
 
 The partition-listing assertion is now independent: static `matching.numTasklistWritePartitions` is left at its default of one for the adaptive queue, and each Rust Matching node plus Go Frontend must list exactly the root key and agree. The persisted adaptive count/version remain separately asserted from `DescribeTaskList`. No production Rust listing implementation is changed.
 

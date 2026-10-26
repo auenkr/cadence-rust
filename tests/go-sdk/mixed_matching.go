@@ -37,7 +37,10 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 		fmt.Println("Existing Go SDK resumed and completed the pre-restart workflow/activity")
 		return
 	}
-	taskList := "mixed-sdk-" + uuid.NewString()
+	taskList := os.Getenv("CADENCE_MIXED_MATCHING_TASK_LIST")
+	if taskList == "" {
+		taskList = "mixed-sdk-" + uuid.NewString()
+	}
 	w := worker.New(rpc, domain, taskList, worker.Options{DisableStickyExecution: true})
 	w.RegisterWorkflow(EchoWorkflow)
 	w.RegisterActivity(EchoActivity)
