@@ -2884,8 +2884,6 @@ dependencies = [
 [[package]]
 name = "scylla-cql"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a398b0e78fb3872c4d5afc74e461d6b80dd69d030e13ddc7442e5f32c482e0da"
 dependencies = [
  "byteorder",
  "bytes",
