@@ -2,7 +2,7 @@
 
 Branch: `t3/typed-collection-cell-transcoding`  
 Commit: `842cc7d57acfc61a0f17ce4fc0e077f96f5d37d7`  
-CI: focused `scylla-cql-core` run at <https://github.com/auenkr/cadence-rust/actions/runs/40414546664> failed on Clippy. The current retry for the fixed commit is <https://github.com/auenkr/cadence-rust/actions/runs/40415052979>.
+CI: focused `scylla-cql-core` runs <https://github.com/auenkr/cadence-rust/actions/runs/40414546664> and <https://github.com/auenkr/cadence-rust/actions/runs/40415052979> both failed at Clippy; latest code commit tested was `babe75d3a56ad231e4aa0bb117e1a133c5f58f1b`.
 
 `scylla-cql-core::protocol_collections::transcode_cell` now accepts a typed
 `ColumnType`, source and destination `CollectionProtocol`, and cell bytes. It
@@ -37,7 +37,10 @@ typed map/list values, opaque blobs, v3+ identity, round-trip bytes, and
 malformed nested values. `git diff --check` passed. Cargo, Go, and rustfmt were
 not run on the host per project policy. The first CI attempt found and fixed a
 test element type inference issue and two Clippy style findings in this file.
-It also failed on unfulfilled `#[expect]` lints in unrelated core files
+The retry no longer reports findings in `protocol_collections.rs`. It still
+fails on unfulfilled `#[expect]` lints in unrelated core files
 (`deserialize/value.rs`, `frame/frame_errors.rs`, `frame/mod.rs`, and
-`deserialize/frame_slice.rs`) using the runner's Clippy. The first attempt
-stopped before Cargo tests. The retry's outcome still needs to be recorded.
+`deserialize/frame_slice.rs`) and a dead-code lint in
+`deserialize/value_tests.rs` using the runner's Clippy. The workflow stops
+before Cargo tests. No unrelated upstream files were changed to suppress those
+warnings.
