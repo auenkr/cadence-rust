@@ -134,3 +134,22 @@ parent fixed stop-before-join in e8669db4b. Cancelled40364944856 is not passing
 evidence. Worker latest retry40366940209 targets c027a0ae66b80586e139a234d1d2f314dfeb5e0f
 and was pending at latest check. Adaptive-scaler production probe is the other
 active Luna assignment, based on the final acceptance audit merged9a8505ceb.
+
+## Final production-wiring gap validation
+
+Acceptance auditd3fc88e1 (merged9a8505ceb) found no additional confirmed
+production mismatch, but required a real adaptive-scaler production probe.
+Worker branch t3/matching-adaptive-scaler-probe at
+908d316f8628ce0c6dac38bb5eab2ccbf444e6e0 now drives workflow task load,
+requires partition count/config version growth, checks Go Frontend listing,
+and runs Go SDK workflow/activity completion on the scaled queue.
+Dispatched https://github.com/auenkr/cadence-rust/actions/runs/40367121164
+on that exact source; confirmed in_progress. Independent Luna source review
+is active. No parallel mixed gate was running at dispatch.
+
+Other Luna assignment remains actual-writer shutdown regression, retry
+40366940209 on c027a0ae66b80586e139a234d1d2f314dfeb5e0f (pending at last check).
+Do not cite cancelled40364944856 or40366908572 as passing. Parent's
+stop-before-join test correction is e8669db4b; later worker commit adds bounds.
+Final stable source must include reviewed probe and regression/format changes,
+then fresh workspace and all serial mixed lanes. Matching remains incomplete.
