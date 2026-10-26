@@ -1,8 +1,7 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/scylla-cql-2.0.0"]
+exclude = ["vendor/scylla-cql-2.0.0", "vendor/scylla-cql-core-1.9.0", "vendor/scylla-1.9.0"]
 members = [
-    "vendor/scylla-cql-core-1.9.0",
     "crates/cadence-api",
     "crates/cadence-common",
     "crates/cadence-persistence",

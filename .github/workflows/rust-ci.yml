@@ -150,7 +150,7 @@ jobs:
         with:
           components: clippy
       - name: Check vendored CQL driver formatting
-        run: rustfmt --edition 2024 --config skip_children=true --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs
+        run: rustfmt --edition 2024 --config skip_children=true --check rust/vendor/scylla-cql-2.0.0/src/frame/mod.rs rust/vendor/scylla-1.9.0/src/lib.rs rust/vendor/scylla-1.9.0/src/network/connection.rs rust/vendor/scylla-1.9.0/src/client/session.rs rust/vendor/scylla-1.9.0/src/client/session_builder.rs
       - name: Format TLS-touched Rust files
         if: inputs.format_tls_files == true
         working-directory: rust
@@ -203,7 +203,6 @@ jobs:
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
       - name: Capture Go metered persistence wrapper output
-        if: inputs.package != 'scylla-cql'
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/matching-metrics-emission"
@@ -219,11 +218,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          if [ "$PKG" = "scylla-cql" ]; then
-            cargo fmt --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml -- --check > format.log 2>&1
-          else
-            cargo fmt --all -- --check > format.log 2>&1
-          fi
+          cargo fmt --all -- --check > format.log 2>&1
           echo "$?" > workspace-format.exit
           exit 0
         continue-on-error: true
@@ -272,11 +267,7 @@ jobs:
           set +e
           set -o pipefail
           if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
-          if [ "$PKG" = "scylla-cql" ]; then
-            cargo clippy --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml --all-targets -- -D warnings 2>&1 | tee clippy.log
-          else
-            cargo clippy $SEL --all-targets -- -D warnings 2>&1 | tee clippy.log
-          fi
+          cargo clippy $SEL --all-targets -- -D warnings 2>&1 | tee clippy.log
           result=${PIPESTATUS[0]}
           echo "$result" > clippy.exit
           exit "$result"
@@ -284,7 +275,7 @@ jobs:
         working-directory: rust
         run: |
           set +e
-          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs > fmt.log 2>&1
+          rustfmt --edition 2021 --check crates/cadence-service-core/src/openfeature/unleash_engine.rs crates/cadence-service-core/src/openfeature/unleash.rs ../rust/vendor/scylla-1.9.0/src/cluster/metadata/fetching.rs > fmt.log 2>&1
           result=$?
           echo "$result" > fmt.exit
           cat fmt.log
@@ -295,17 +286,48 @@ jobs:
           set +e
           set -o pipefail
           if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
-          if [ "$PKG" = "scylla-cql" ]; then
-            cargo test --manifest-path vendor/scylla-cql-2.0.0/Cargo.toml 2>&1 | tee test.log
-          else
-            cargo test $SEL 2>&1 | tee test.log
-          fi
+          cargo test $SEL 2>&1 | tee test.log
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
       - name: Test vendored scylla-cql frame codecs directly
         run: |
-          cargo test --manifest-path rust/vendor/scylla-cql-2.0.0/Cargo.toml --lib frame::
+          set +e
+          (cd rust && cargo test --manifest-path vendor/Cargo.toml -p scylla-cql --lib frame::) > rust/cql-frame-test.log 2>&1
+          result=$?
+          echo "$result" > rust/cql-frame-test.exit
+          cat rust/cql-frame-test.log
+          exit "$result"
+      - name: Test vendored driver protocol configuration and streams directly
+        working-directory: rust
+        run: |
+          set +e
+          set -uo pipefail
+          result=0
+          : > cql-driver-test.log
+          for test_name in \
+            client::session_builder::tests::default_session_builder \
+            client::session_builder::tests::session_builder_selects_protocol_version_in_session_config \
+            network::connection::tests::protocol_version_propagates_to_host_connection_and_startup_language_version \
+            network::connection::tests::v2_stream_allocator_uses_only_nonnegative_i8_ids; do
+            cargo test --manifest-path vendor/Cargo.toml -p scylla --lib "$test_name" -- --exact > cql-driver-case.log 2>&1
+            case_result=$?
+            cat cql-driver-case.log >> cql-driver-test.log
+            if [ "$case_result" -ne 0 ]; then result="$case_result"; break; fi
+            if ! grep -q 'test result: ok. 1 passed;' cql-driver-case.log; then result=1; break; fi
+          done
+          echo "$result" > cql-driver-test.exit
+          cat cql-driver-test.log
+          exit "$result"
+      - name: Test vendored scylla metadata readers directly
+        working-directory: rust
+        run: |
+          set +e
+          cargo test --manifest-path vendor/Cargo.toml -p scylla --lib cluster::metadata::fetching::tests:: > cql-metadata-test.log 2>&1
+          result=$?
+          echo "$result" > cql-metadata-test.exit
+          cat cql-metadata-test.log
+          exit "$result"
       - name: Compare live Go tally and Rust Matching emissions
         if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
         run: |
@@ -342,6 +364,9 @@ jobs:
             rust/fmt.log
             rust/matching-runtime-format.log
             rust/test.log
+            rust/cql-frame-test.log
+            rust/cql-driver-test.log
+            rust/cql-metadata-test.log
             rust/*.exit
             rust/commit.txt
             rust/target-dir.txt
