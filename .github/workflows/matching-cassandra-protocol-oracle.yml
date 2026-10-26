@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - protocol: 2
@@ -40,6 +41,30 @@ jobs:
         with:
           go-version: "1.25.14"
           cache: false
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.compare_rust == true
+      - name: Build optional Rust probe before starting Cassandra
+        if: inputs.compare_rust == true
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/matching-cassandra-rust-probe"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cassandra-protocol-target"
+          test ! -e "$CARGO_TARGET_DIR"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          printf '%s\n' "$CARGO_TARGET_DIR" > "$evidence/target-dir.txt"
+          printf 'cargo build --locked -p cadence-persistence --example matching_cassandra_protocol_probe\n' > "$evidence/build-command.txt"
+          set +e
+          rustfmt --edition 2021 --check rust/crates/cadence-persistence/examples/matching_cassandra_protocol_probe.rs > "$evidence/rustfmt.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/rustfmt.exit"
+          if [ "$result" -ne 0 ]; then cat "$evidence/rustfmt.log"; exit "$result"; fi
+          (cd rust && cargo build --locked -p cadence-persistence --example matching_cassandra_protocol_probe) > "$evidence/build.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/build.exit"
+          cat "$evidence/build.log"
+          if [ "$result" -ne 0 ]; then exit "$result"; fi
+          sha256sum "$CARGO_TARGET_DIR/debug/examples/matching_cassandra_protocol_probe" > "$evidence/rust-binary.sha256"
       - name: Start pinned Cassandra server
         env:
           IMAGE: ${{ matrix.image }}
@@ -80,11 +105,6 @@ jobs:
           echo "$result" > "$evidence/oracle.exit"
           cat "$evidence/oracle.log"
           exit "$result"
-      - name: Capture Cassandra server log
-        if: always()
-        run: docker logs matching-cassandra-oracle > "$RUNNER_TEMP/cassandra-server.log" 2>&1 || true
-      - uses: dtolnay/rust-toolchain@stable
-        if: inputs.compare_rust == true
       - name: Run optional Rust public-session protocol probe
         if: inputs.compare_rust == true
         env:
@@ -98,25 +118,18 @@ jobs:
           evidence="$RUNNER_TEMP/matching-cassandra-rust-probe"
           mkdir -p "$evidence"
           git rev-parse HEAD > "$evidence/source-sha.txt"
-          printf 'cargo run -p cadence-persistence --example matching_cassandra_protocol_probe\n' > "$evidence/command.txt"
+          printf '%s\n' "$RUNNER_TEMP/cassandra-protocol-target/debug/examples/matching_cassandra_protocol_probe" > "$evidence/command.txt"
           printf 'protocol=%s server=%s expect_range_delete_rejection=%s\n' \
             "$CASSANDRA_PROTO_VERSION" "$CASSANDRA_SERVER_VERSION" \
             "$CASSANDRA_EXPECT_RANGE_DELETE_REJECTION" > "$evidence/contract.txt"
-          rustfmt --edition 2021 --check rust/crates/cadence-persistence/examples/matching_cassandra_protocol_probe.rs \
-            > "$evidence/rustfmt.log" 2>&1
-          fmt_result=$?
-          echo "$fmt_result" > "$evidence/rustfmt.exit"
-          if [ "$fmt_result" -ne 0 ]; then cat "$evidence/rustfmt.log"; exit "$fmt_result"; fi
-          cd rust
-          cargo run -p cadence-persistence --example matching_cassandra_protocol_probe \
-            > "$evidence/probe.log" 2>&1
+          "$RUNNER_TEMP/cassandra-protocol-target/debug/examples/matching_cassandra_protocol_probe" > "$evidence/probe.log" 2>&1
           result=$?
           echo "$result" > "$evidence/probe.exit"
-          if [ -x target/debug/examples/matching_cassandra_protocol_probe ]; then
-            sha256sum target/debug/examples/matching_cassandra_protocol_probe > "$evidence/rust-binary.sha256"
-          fi
           cat "$evidence/probe.log"
           exit "$result"
+      - name: Capture Cassandra server log
+        if: always()
+        run: docker logs matching-cassandra-oracle > "$RUNNER_TEMP/cassandra-server.log" 2>&1 || true
       - name: Upload Rust protocol probe evidence
         if: always() && inputs.compare_rust == true
         uses: actions/upload-artifact@v4
