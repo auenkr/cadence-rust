@@ -205,6 +205,72 @@ async function listPartitions(ctx) {
   return { result: 'passed', transport: process.env.CADENCE_MATCHING_TRANSPORT || 'grpc', nodes: ctx.directClients.length, lists: results };
 }
 
+// CADENCE_PROBE_ADAPTIVE_SCALER exercises the production registry/config/scaler path.
+// The harness enables adaptive scaling only for this root decision task list and
+// lowers its QPS threshold/update interval. Workflows are scheduled by Go
+// Frontend/History, so Matching observes genuine production task-add traffic.
+async function adaptiveScaler(ctx) {
+  const taskList = 'production-adaptive-scaler-probe';
+  const request = { ...ctx.startRequest, taskList: { name: taskList },
+    workflowType: { name: 'main.EchoWorkflow' }, input: payload(JSON.stringify('adaptive-load')) };
+  const initial = await ownerRpc(ctx, 'DescribeTaskList', { domainId: ctx.domainId,
+    request: { taskList: { name: taskList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } });
+  const initialConfig = initial.partitionConfig || {};
+  const initialVersion = BigInt(initialConfig.version || '0');
+  const initialWrites = Object.keys(initialConfig.writePartitions || {}).length || 1;
+  const load = 24;
+  const loadExecutions = [];
+  for (let index = 0; index < load; index++) {
+    const workflowId = `${taskList}-${ctx.id}-${index}`;
+    const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+      ...request, workflowId, requestId: randomUUID(),
+    });
+    loadExecutions.push({ workflowId, runId: started.runId });
+  }
+  const deadline = Date.now() + 45000;
+  let updated;
+  while (Date.now() < deadline) {
+    updated = await ownerRpc(ctx, 'DescribeTaskList', { domainId: ctx.domainId,
+      request: { taskList: { name: taskList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } });
+    const config = updated.partitionConfig || {};
+    if (Object.keys(config.writePartitions || {}).length > initialWrites
+      && BigInt(config.version || '0') > initialVersion) break;
+    await sleep(250);
+  }
+  const config = updated?.partitionConfig || {};
+  const writeCount = Object.keys(config.writePartitions || {}).length;
+  assert(writeCount > initialWrites, `adaptive scaler did not increase write partitions (${initialWrites} -> ${writeCount})`);
+  assert(BigInt(config.version || '0') > initialVersion,
+    `adaptive scaler did not advance partition config version (${initialVersion} -> ${config.version || '0'})`);
+  const partitions = await ctx.call('WorkflowAPI', 'ListTaskListPartitions', { domain: ctx.domain, taskList: { name: taskList } });
+  assert.equal(partitions.decisionTaskListPartitions.length, writeCount,
+    'Go Frontend partition listing did not expose the scaler-updated partition set');
+
+  // Use the existing Go SDK worker/client on the changed queue. Its normal
+  // workflow and activity loop proves tasks scheduled after the update still
+  // traverse Go Frontend/History and Rust Matching successfully.
+  const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'),
+    env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: ctx.domain,
+      CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList,
+      CADENCE_MIXED_MATCHING_LOAD_IDS: JSON.stringify(loadExecutions.map(execution => execution.workflowId)) },
+    encoding: 'utf8', timeout: 180000 });
+  fs.writeFileSync(path.join(ctx.work, 'adaptive-scaler-sdk.log'), `${sdk.stdout || ''}\n${sdk.stderr || ''}`);
+  assert.equal(sdk.status, 0, `Go SDK did not complete work on the scaled task list: ${sdk.error || sdk.status}; see adaptive-scaler-sdk.log`);
+  let completedLoad = 0;
+  for (const workflowExecution of loadExecutions) {
+    const history = await ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain: ctx.domain, workflowExecution });
+    assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+      `adaptive load workflow ${workflowExecution.workflowId} did not complete exactly once`);
+    completedLoad++;
+  }
+  return { result: 'passed', taskList, enableAdaptiveScaler: true, cacheBackedPartitionCount: true,
+    scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
+    updated: { version: String(config.version), writePartitions: writeCount,
+      readPartitions: Object.keys(config.readPartitions || {}).length },
+    frontendDecisionPartitions: partitions.decisionTaskListPartitions.map(partition => partition.key),
+    sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update' };
+}
+
 // CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a Rust Matching restart and
 // every partition drains afterwards. ctx.restartRust() kills and restarts the primary Rust process.
 async function durableRestart(ctx) {
@@ -344,6 +410,7 @@ async function runProbeScenarios(ctx) {
   await runScenario('postgresGcDomain', 'CADENCE_PROBE_PG_GC_DOMAIN', postgresGcAndDomain, ctx, results);
   await runScenario('queryStandbyForwarding', 'CADENCE_PROBE_QUERY_STANDBY', queryStandby, ctx, results);
   await runScenario('listTaskListPartitions', 'CADENCE_PROBE_LIST_PARTITIONS', listPartitions, ctx, results);
+  await runScenario('adaptiveScaler', 'CADENCE_PROBE_ADAPTIVE_SCALER', adaptiveScaler, ctx, results);
   await runScenario('durableRestartDrain', 'CADENCE_PROBE_DURABLE_RESTART', durableRestart, ctx, results);
   await runScenario('autoConfigHint', 'CADENCE_PROBE_AUTO_CONFIG_HINT', autoConfigHint, ctx, results);
   await runScenario('activeOffer', 'CADENCE_PROBE_ACTIVE_OFFER', activeOffer, ctx, results);

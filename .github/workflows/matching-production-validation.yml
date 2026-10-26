@@ -5,7 +5,7 @@ on:
       lane:
         description: Supported deployment scenario
         type: choice
-        options: [postgres, thrift, shard-distributor, configstore, mysql-probes]
+        options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive-scaler]
         default: postgres
 concurrency:
   group: matching-production-validation
@@ -62,6 +62,7 @@ jobs:
             shard-distributor) extra=(--real-shard-distributor) ;;
             configstore) extra=(--matching-configstore) ;;
             mysql-probes) extra=(--matching-backlog-forward --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint) ;;
+            adaptive-scaler) extra=(--probe-adaptive-scaler) ;;
             *) exit 2 ;;
           esac
           printf '%q ' "$wrapper" out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" "${common[@]}" "${extra[@]}" > out/command.txt
