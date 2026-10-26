@@ -10,6 +10,24 @@ import sys
 from pathlib import Path
 
 
+# These outcomes are mandatory for every lane accepted by this checker. Keep
+# them tied to emitted SDK/lifecycle files; command-line assertions are only
+# additional checks and cannot replace this baseline.
+REQUIRED_SDK_OUTCOMES = {
+    "gate/run/rust-matching/go-sdk.log": (
+        "Existing Go SDK echo, activity retry, child, workflow retry, "
+        "workflow-task retry, activity timeout and signal passed through "
+        "Go Frontend/History and Rust Matching",
+    ),
+    "gate/run/rust-matching/restart-sdk.log": (
+        "Existing Go SDK resumed and completed the pre-restart workflow/activity",
+    ),
+    "gate/run/rust-matching/production-crash-recovery-sdk.log": (
+        "Existing Go SDK resumed and completed the pre-restart workflow/activity",
+    ),
+}
+
+
 def fail(message):
     raise ValueError(message)
 
@@ -39,9 +57,9 @@ def main():
     parser.add_argument("artifact_dir", type=Path, help="downloaded lane artifact directory")
     parser.add_argument("--expected-sha", required=True, help="full expected source commit SHA")
     parser.add_argument("--sdk-marker", action="append", default=[],
-                        help="literal emitted probe.log text proving a lane-specific SDK outcome; repeat as needed")
+                        help="additional literal text required in gate/run/probe.log (mandatory SDK outcomes are checked separately)")
     parser.add_argument("--lifecycle-json", action="append", default=[], metavar="PATH::KEY=VALUE",
-                        help="require an emitted key/value in JSON below gate/run (for example rust-matching/matching-shutdown.json::exitCode=0); repeat")
+                        help="additional emitted JSON assertion below gate/run (mandatory shutdown assertion is checked separately)")
     args = parser.parse_args()
     root = args.artifact_dir.resolve()
     if not re.fullmatch(r"[0-9a-fA-F]{40}", args.expected_sha):
@@ -71,6 +89,14 @@ def main():
         fail("results.json lacks a recorded topology description")
     if results.get("probeExitCode") != 0:
         fail(f"results.json probeExitCode must be 0, got {results.get('probeExitCode')!r}")
+    for relative, markers in REQUIRED_SDK_OUTCOMES.items():
+        evidence = read_text(root, relative)
+        for marker in markers:
+            if marker not in evidence:
+                fail(f"required SDK outcome absent from {relative}: {marker!r}")
+    shutdown = read_json(root, "gate/run/rust-matching/matching-shutdown.json")
+    if shutdown.get("exitCode") != 0:
+        fail(f"matching-shutdown.json exitCode must be 0, got {shutdown.get('exitCode')!r}")
     probe = read_text(root, "gate/run/probe.log")
     for marker in args.sdk_marker:
         if marker not in probe:
@@ -93,8 +119,6 @@ def main():
         if actual != wanted:
             fail(f"lifecycle evidence {relative}:{key} is {actual!r}, expected {wanted!r}")
     print(f"PASS recorded artifact checks: {root} (commit {commit}, binary sha256 {match.group(1)})")
-    if not args.sdk_marker and not args.lifecycle_json:
-        print("LIMIT: no lane-specific SDK/lifecycle assertions were supplied; this validates bundle identity, exits, topology and recorded probe status only.")
     return 0
 
 
