@@ -137,6 +137,7 @@ mod tests {
     #[test]
     fn protocol_v2_bytes_cover_empty_multiple_and_nested_list_set_map() {
         roundtrip(CollectionProtocol::V2, CollectionKind::List, &[], &[0, 0]);
+        roundtrip(CollectionProtocol::V2, CollectionKind::List, &[b""], &[0, 1, 0, 0]);
         roundtrip(CollectionProtocol::V2, CollectionKind::List, &[b"a", b"bc"], &[0, 2, 0, 1, b'a', 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[], &[0, 0]);
         roundtrip(CollectionProtocol::V2, CollectionKind::Map, &[b"k", b"v", b"x", b"y"], &[0, 4, 0, 1, b'k', 0, 1, b'v', 0, 1, b'x', 0, 1, b'y']);
@@ -147,6 +148,7 @@ mod tests {
     #[test]
     fn protocol_v3_bytes_cover_empty_multiple_and_nested_list_map() {
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[], &[0, 0, 0, 0]);
+        roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b""], &[0, 0, 0, 1, 0, 0, 0, 0]);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::List, &[b"a", b"bc"], &[0, 0, 0, 2, 0, 0, 0, 1, b'a', 0, 0, 0, 2, b'b', b'c']);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[], &[0, 0, 0, 0]);
         roundtrip(CollectionProtocol::V3OrNewer, CollectionKind::Map, &[b"k", b"v"], &[0, 0, 0, 2, 0, 0, 0, 1, b'k', 0, 0, 0, 1, b'v']);
@@ -161,7 +163,7 @@ mod tests {
         assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::List, &vec![b""; u16::MAX as usize + 1]), Err(CollectionCodecError::SizeOverflow));
         assert_eq!(encode_collection(CollectionProtocol::V2, CollectionKind::Map, &[b"k"]), Err(CollectionCodecError::OddMapElementCount));
         assert_eq!(decode_collection(CollectionProtocol::V2, CollectionKind::List, &[0]), Err(CollectionCodecError::Truncated));
-        assert_eq!(decode_collection(CollectionProtocol::V3OrNewer, CollectionKind::List, &[-1i32].map(|v| v as u8)), Err(CollectionCodecError::NegativeSize));
+        assert_eq!(decode_collection(CollectionProtocol::V3OrNewer, CollectionKind::List, &(-1i32).to_be_bytes()), Err(CollectionCodecError::NegativeSize));
         assert_eq!(decode_collection(CollectionProtocol::V2, CollectionKind::List, &[0, 0, 99]), Err(CollectionCodecError::TrailingBytes));
     }
 }
