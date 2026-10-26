@@ -460,10 +460,26 @@ pub(crate) fn calculate_token_for_partition_key(
 
 #[cfg(test)]
 mod tests {
+    use super::PartitionerName;
     use rand::Rng;
     use rand_pcg::Pcg32;
 
     use crate::test_utils::setup_tracing;
+
+    #[test]
+    fn partitioner_name_rejects_unsupported_partitioners() {
+        assert_eq!(
+            PartitionerName::from_str("org.apache.cassandra.dht.RandomPartitioner"),
+            Some(PartitionerName::Random)
+        );
+        for name in [
+            "org.apache.cassandra.dht.ByteOrderedPartitioner",
+            "org.apache.cassandra.dht.OrderPreservingPartitioner",
+            "",
+        ] {
+            assert_eq!(PartitionerName::from_str(name), None, "{name}");
+        }
+    }
 
     #[test]
     fn random_partitioner_matches_pinned_gocql_tokens() {

@@ -387,6 +387,10 @@ pub enum PeersMetadataError {
     /// All peers have empty token lists.
     #[error("All peers have empty token lists")]
     EmptyTokenLists,
+
+    /// `system.local` reports a partitioner this driver cannot route with.
+    #[error("Unsupported partitioner: {0}")]
+    UnsupportedPartitioner(String),
 }
 
 /// An error that occurred during keyspaces metadata fetch.

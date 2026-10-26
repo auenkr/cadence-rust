@@ -302,25 +302,37 @@ impl NodeInfoSource {
 }
 
 impl ControlConnection {
+    /// Reads the cluster-wide partitioner name configured in `system.local`.
+    async fn query_local_partitioner_name(&self) -> Result<Option<String>, MetadataFetchError> {
+        let table = "system.local";
+        let pager = self
+            .query_iter("SELECT partitioner FROM system.local WHERE key='local'", &())
+            .await
+            .map_err(|error| MetadataFetchError { error: error.into(), table })?;
+        let rows = pager
+            .rows_stream::<LocalPartitionerRow>()
+            .map_err(|error| MetadataFetchError { error: error.into(), table })?;
+        let rows = rows
+            .map_err(MetadataFetchErrorKind::NextRowError)
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(|error| MetadataFetchError { error, table })?;
+        Ok(rows.into_iter().next().and_then(|row| row.partitioner))
+    }
+}
+
+impl ControlConnection {
     async fn query_peers(
         &self,
         connect_port: u16,
     ) -> Result<(Vec<Peer>, Option<String>), MetadataError> {
         // Token strings are partitioner-specific. Fetch the configured
         // partitioner before interpreting either local or peer tokens.
-        let partitioner_pager = self.query_iter(
-            "SELECT partitioner FROM system.local WHERE key='local'", &()
-        ).await.map_err(|error| MetadataFetchError { error: error.into(), table: "system.local" })?;
-        let partitioner_rows = partitioner_pager.rows_stream::<LocalPartitionerRow>()
-            .map_err(|error| MetadataFetchError { error: error.into(), table: "system.local" })?;
-        let partitioner_rows = partitioner_rows
-            .map_err(MetadataFetchErrorKind::NextRowError)
-            .try_collect::<Vec<_>>().await
-            .map_err(|error| MetadataFetchError { error, table: "system.local" })?;
-        let partitioner = partitioner_rows
-            .into_iter().next().and_then(|row| row.partitioner)
-            .and_then(|name| PartitionerName::from_str(&name))
-            .unwrap_or_default();
+        let partitioner = match self.query_local_partitioner_name().await? {
+            Some(name) => PartitionerName::from_str(&name)
+                .ok_or(PeersMetadataError::UnsupportedPartitioner(name))?,
+            None => PartitionerName::default(),
+        };
         let peers_query_stream = self
             .query_iter(
                 "SELECT host_id, rpc_address, data_center, rack, tokens FROM system.peers",
@@ -1396,6 +1408,7 @@ impl ControlConnection {
                 error,
                 table: table_name,
             });
+        let cluster_partitioner = self.query_local_partitioner_name().await?;
         let mut result = HashMap::new();
 
         rows.map(|row_result| {
@@ -1405,7 +1418,7 @@ impl ControlConnection {
                 columns: HashMap::new(),
                 partition_key: vec![],
                 clustering_key: vec![],
-                partitioner: None,
+                partitioner: cluster_partitioner.clone(),
                 pk_column_specs: vec![],
             }));
 
@@ -1452,6 +1465,7 @@ impl ControlConnection {
                 table: "system_schema.views",
             });
 
+        let cluster_partitioner = self.query_local_partitioner_name().await?;
         let mut result = HashMap::new();
 
         rows.map(|row_result| {
@@ -1465,7 +1479,7 @@ impl ControlConnection {
                     columns: HashMap::new(),
                     partition_key: vec![],
                     clustering_key: vec![],
-                    partitioner: None,
+                    partitioner: cluster_partitioner.clone(),
                     pk_column_specs: vec![],
                 }))
                 .map(|table| MaterializedView {
@@ -1639,6 +1653,7 @@ impl ControlConnection {
         let mut all_partitioners = self
             .query_table_partitioners(keyspaces_to_fetch, legacy_schema)
             .await?;
+        let cluster_partitioner = self.query_local_partitioner_name().await?;
         let mut result = HashMap::new();
 
         'tables_loop: for ((keyspace_name, table_name), table_result) in tables_schema {
@@ -1706,7 +1721,8 @@ impl ControlConnection {
 
             let partitioner = all_partitioners
                 .remove(&keyspace_and_table_name)
-                .unwrap_or_default();
+                .flatten()
+                .or_else(|| cluster_partitioner.clone());
 
             // unwrap of get() result: all column names in `partition_key` are at this
             // point guaranteed to be present in `columns`. See the construction of `partition_key`
@@ -2038,6 +2054,24 @@ fn freeze_type(typ: PreColumnType) -> PreColumnType {
 
 impl ControlConnection {
     async fn query_table_partitioners(
+        &self,
+        keyspaces_to_fetch: &[String],
+        legacy_schema: bool,
+    ) -> Result<PerKsTable<Option<String>>, MetadataFetchError> {
+        let mut partitioners = self
+            .query_table_partitioners_raw(keyspaces_to_fetch, legacy_schema)
+            .await?;
+        // Ordinary Cassandra has no per-table partitioner column, so tables
+        // inherit the cluster-wide partitioner from system.local.
+        if let Some(cluster) = self.query_local_partitioner_name().await? {
+            for partitioner in partitioners.values_mut() {
+                partitioner.get_or_insert_with(|| cluster.clone());
+            }
+        }
+        Ok(partitioners)
+    }
+
+    async fn query_table_partitioners_raw(
         &self,
         keyspaces_to_fetch: &[String],
         legacy_schema: bool,
