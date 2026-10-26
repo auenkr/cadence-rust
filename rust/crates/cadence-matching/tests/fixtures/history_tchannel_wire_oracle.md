@@ -10,4 +10,6 @@ observed file and compare it with the reviewed fixture. The runner never
 overwrites the checked-in bytes. Its 25 named entries cover five Args wrappers,
 five Result wrappers (including the empty void result), seven exception
 Results, and present-versus-absent header, input, queries, and version histories.
-The Rust consumer remains explicitly ignored until selected with `--ignored`.
+The Rust consumer runs as part of the `cadence-matching` library tests. CI also
+regenerates the Go output and compares it byte-for-byte with this reviewed
+fixture before running Rust validation.

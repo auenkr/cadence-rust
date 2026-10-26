@@ -44,6 +44,25 @@ jobs:
         with:
           go-version: "1.25.14"
           cache: false
+      - name: Regenerate and compare History TChannel wire oracle
+        run: |
+          set +e
+          evidence="$RUNNER_TEMP/history-tchannel-wire-oracle"
+          mkdir -p "$evidence"
+          printf '%s\n' 'scripts/verify-history-tchannel-wire-oracle.sh' > "$evidence/command.txt"
+          git rev-parse HEAD > "$evidence/head-sha.txt"
+          scripts/verify-history-tchannel-wire-oracle.sh > "$evidence/verify.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/verify.exit"
+          cat "$evidence/verify.log"
+          exit "$result"
+      - name: Upload History TChannel wire oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-tchannel-wire-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/history-tchannel-wire-oracle
       - name: Run original Go malformed DescribeTaskList oracle
         working-directory: go
         run: |
