@@ -154,9 +154,20 @@ impl PartitionerHasher for RandomPartitionerHasher {
         let digest = Md5::digest(&self.0);
         let mut bytes = [0u8; 16];
         bytes.copy_from_slice(&digest);
-        let raw = u128::from_be_bytes(bytes);
-        // gocql's RandomPartitioner hashes to abs(signed big-endian MD5).
-        Token::random(if bytes[0] & 0x80 != 0 { 0u128.wrapping_sub(raw) } else { raw })
+        Token::random(random_token_from_signed_digest(bytes))
+    }
+}
+
+/// Converts a signed big-endian MD5 digest to Cassandra RandomPartitioner's
+/// non-negative token magnitude, matching gocql's `abs(big.Int)` behavior.
+fn random_token_from_signed_digest(bytes: [u8; 16]) -> u128 {
+    let raw = u128::from_be_bytes(bytes);
+    if bytes[0] & 0x80 != 0 {
+        // Wrapping negation is the absolute value of a two's-complement i128
+        // encoded in these bytes. For i128::MIN it correctly remains 2^127.
+        0u128.wrapping_sub(raw)
+    } else {
+        raw
     }
 }
 
@@ -472,6 +483,20 @@ mod tests {
         assert!(tokens.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(Token::random_from_decimal("170141183460469231731687303715884105729").is_none());
         assert!(Token::random_from_decimal("340282366920938463463374607431768211455").is_none());
+    }
+
+    #[test]
+    fn random_partitioner_uses_signed_absolute_value_not_sign_bit_masking() {
+        assert_eq!(random_token_from_signed_digest([0x80; 16]), 0x7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f80);
+        assert_eq!(random_token_from_signed_digest([0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 1u128 << 127);
+        assert_eq!(random_token_from_signed_digest([0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]), (1u128 << 127) - 1);
+    }
+
+    #[test]
+    fn random_partitioner_empty_key_is_not_the_ring_sentinel() {
+        let token = RandomPartitionerHasher::default().finish();
+        assert_eq!(token.random_decimal().as_deref(), Some("58332598431525814501020785164969033090"));
+        assert!(token > Token::random_from_decimal("-1").unwrap());
     }
 
     use super::{CDCPartitioner, Murmur3Partitioner, Partitioner, PartitionerHasher, PartitionerName, Token};
