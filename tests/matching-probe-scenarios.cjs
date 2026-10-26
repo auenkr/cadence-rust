@@ -279,12 +279,80 @@ async function adaptiveScaler(ctx) {
     completedLoad++;
   }
   assert.equal(completedLoad, load, 'not all 24 adaptive load workflows completed');
+
+  // Routing phase starts only after the SDK subprocess has exited and every
+  // load execution is terminal. Exercise the real adaptive queue: Frontend
+  // starts ordinary workflows on its root name, while polls target read IDs
+  // from the currently persisted config. This deliberately does not create a
+  // synthetic queue or copy its partition map.
+  const routingExecutions = [];
+  const routingEvidence = [];
+  const live = await ownerRpc(ctx, 'DescribeTaskList', { domainId: ctx.domainId,
+    request: { taskList: { name: taskList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } });
+  const eligibleReadIds = Object.keys(live.partitionConfig?.readPartitions || {}).map(Number).sort((a, b) => a - b);
+  assert(eligibleReadIds.length > 1, 'adaptive read config exposes no child read partition to exercise');
+  const routingPoll = async (partition, expected) => ownerRpc(ctx, 'PollForDecisionTask', {
+    domainId: ctx.domainId, pollerId: randomUUID(), request: {
+      domain: ctx.domain, taskList: { name: partition }, identity: `adaptive-routing-${expected}`,
+    },
+  });
+  try {
+    for (const readId of eligibleReadIds) {
+      const partition = readId === 0 ? taskList : partitionName(taskList, readId);
+      const workflowId = `${taskList}-routing-${ctx.id}-${readId}`;
+      const execution = { workflowId, runId: null };
+      routingExecutions.push(execution);
+      const started = await ctx.call('WorkflowAPI', 'StartWorkflowExecution', {
+        ...request, workflowId, requestId: randomUUID(),
+      });
+      execution.runId = started.runId;
+      const poll = routingPoll(partition, readId);
+      const deadline = Date.now() + 30000;
+      let task;
+      while (Date.now() < deadline) {
+        task = await Promise.race([poll, sleep(50).then(() => null)]);
+        if (task?.taskToken?.length) break;
+      }
+      assert(task?.taskToken?.length, `no decision task delivered for live read partition ${readId}`);
+      assert.equal(task.workflowExecution?.workflowId, workflowId,
+        `read partition ${readId} returned a different workflow`);
+      // Complete through the ordinary Go Frontend API after observing delivery
+      // from the requested live partition on the directly addressed Rust node.
+      await ctx.call('WorkerAPI', 'RespondDecisionTaskCompleted', { taskToken: task.taskToken, decisions: [] });
+      const history = await ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+        domain: ctx.domain, workflowExecution: { workflowId, runId: started.runId },
+      });
+      assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+        `routing workflow ${workflowId} did not complete exactly once`);
+      routingEvidence.push({ readId, requestedPartition: partition, workflowId, runId: started.runId,
+        matchingNode: ctx.directClients[0].tchannel, delivered: true, completed: true });
+    }
+  } finally {
+    for (const execution of routingExecutions) {
+      const readHistory = () => ctx.call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+        domain: ctx.domain, workflowExecution: execution,
+      });
+      const isTerminal = history => history?.history?.events?.some(event => event.workflowExecutionCompletedEventAttributes
+        || event.workflowExecutionFailedEventAttributes || event.workflowExecutionCanceledEventAttributes
+        || event.workflowExecutionTerminatedEventAttributes || event.workflowExecutionContinuedAsNewEventAttributes);
+      let history = await readHistory().catch(() => null);
+      if (!isTerminal(history)) {
+        await ctx.call('WorkflowAPI', 'TerminateWorkflowExecution', {
+          domain: ctx.domain, workflowExecution: execution, reason: 'adaptive routing probe cleanup',
+        }).catch(() => {});
+        history = await readHistory().catch(() => null);
+        assert(isTerminal(history), `routing workflow ${execution.workflowId}/${execution.runId} remained nonterminal after cleanup`);
+      }
+    }
+  }
   return { result: 'passed', taskList, enableAdaptiveScaler: true, cacheBackedPartitionCount: true,
     scheduledLoad: load, completedLoad, initial: { version: initialVersion.toString(), writePartitions: initialWrites },
     updated: { version: String(config.version), writePartitions: writeCount,
       readPartitions: Object.keys(config.readPartitions || {}).length },
     staticListing: goListing.decisionTaskListPartitions.map(partition => partition.key),
-    sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update' };
+    sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update',
+    routingExecutions, routingEvidence,
+    servingPartitionProof: 'requested live read partition delivered the expected task through the directly addressed Rust Matching node; current RPC response has no field identifying the internal partition that physically served after forwarding' };
 }
 
 // CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a Rust Matching restart and
