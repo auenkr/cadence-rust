@@ -26,6 +26,22 @@ pub enum SqlRunIdError {
 /// time.Time{}.UnixNano(), as written by the pinned Go SQL serializer.
 pub const GO_ZERO_TIME_NANOS: i64 = -6_795_364_578_871_345_152;
 impl TaskData {
+    /// google/uuid v1.6 Parse accepts four textual forms, including any two
+    /// wrapper bytes around the canonical 36-byte form. Keep this at the SQL
+    /// boundary so UUIDs accepted by Go never trigger the writer fatal path.
+    fn go_sql_uuid(raw: &str) -> std::result::Result<uuid::Uuid, String> {
+        let bytes = raw.as_bytes();
+        let value = match bytes.len() {
+            45 if bytes[..9].eq_ignore_ascii_case(b"urn:uuid:") => {
+                std::str::from_utf8(&bytes[9..]).map_err(|error| error.to_string())?
+            }
+            45 => return Err("invalid urn prefix".into()),
+            38 => std::str::from_utf8(&bytes[1..37]).map_err(|error| error.to_string())?,
+            32 | 36 => raw,
+            length => return Err(format!("invalid UUID length: {length}")),
+        };
+        uuid::Uuid::parse_str(value).map_err(|error| format!("invalid UUID {raw:?}: {error}"))
+    }
     /// Install the request RunID exactly as Go carries it (`TaskInfo.RunID` string),
     /// for every value: valid, noncanonical, malformed or empty. `run_id` is a best-effort
     /// parse for in-process readers only; stores must call `sql_run_id`/`cassandra_run_id`.
@@ -56,9 +72,7 @@ impl TaskData {
         match &self.raw_run_id {
             None => Ok(self.run_id.clone()),
             Some(raw) if raw.is_empty() => Ok(None),
-            Some(raw) => uuid::Uuid::parse_str(raw)
-                .map(|id| Some(id.as_bytes().to_vec()))
-                .map_err(|_| format!("invalid UUID {raw:?}")),
+            Some(raw) => Self::go_sql_uuid(raw).map(|id| Some(id.as_bytes().to_vec())),
         }
     }
     /// Go Cassandra passes the string to gocql `marshalUUID` -> `ParseUUID`: hyphens are
@@ -91,8 +105,8 @@ impl TaskData {
         data.run_id = match &self.raw_run_id {
             None => self.run_id.clone(),
             Some(raw) if raw.is_empty() => None,
-            Some(raw) => Some(uuid::Uuid::parse_str(raw).map_err(|error| SqlRunIdError::Malformed {
-                raw: raw.clone(), message: error.to_string(),
+            Some(raw) => Some(Self::go_sql_uuid(raw).map_err(|error| SqlRunIdError::Malformed {
+                raw: raw.clone(), message: error,
             })?.as_bytes().to_vec()),
         };
         data.raw_run_id = None;
@@ -398,6 +412,15 @@ mod tests {
         assert!(!cassandra_error.contains("SQL Matching"));
         let up = TaskData::default().with_request_run_id(&uuid::Uuid::from_u128(5).to_string().to_uppercase()).for_sql().unwrap();
         assert_eq!(up.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()));
+        let canonical = uuid::Uuid::from_u128(5).to_string();
+        for accepted in [format!("x{canonical}y"), canonical.replace('-', ""), format!("URN:UUID:{canonical}")] {
+            let decoded = TaskData::default().with_request_run_id(&accepted).for_sql().unwrap();
+            assert_eq!(decoded.run_id, Some(uuid::Uuid::from_u128(5).as_bytes().to_vec()), "{accepted}");
+        }
+        // Go checks the complete input length before stripping the URN prefix.
+        for rejected in [format!("urn:uuid:{}", canonical.replace('-', "")), format!("urn:uuid:{{{canonical}}}")] {
+            assert!(TaskData::default().with_request_run_id(&rejected).for_sql().is_err(), "{rejected}");
+        }
         assert_eq!(decode_task(&encode_task(&up).unwrap()).unwrap().raw_run_id, None);
     }
     #[test]

@@ -119,6 +119,44 @@ struct Inner {
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
 }
+
+/// Tracks writer actors that can still publish a fatal persistence result.
+/// Registry shutdown first stops their queues, then waits for this count to
+/// reach zero before the launcher makes its final fatal-channel decision.
+#[derive(Default)]
+pub(crate) struct WriterTracker {
+    active: std::sync::atomic::AtomicUsize,
+    idle: Notify,
+}
+
+pub(crate) struct WriterTaskGuard(Arc<WriterTracker>);
+
+impl WriterTracker {
+    pub(crate) fn start(self: &Arc<Self>) -> WriterTaskGuard {
+        self.active.fetch_add(1, Ordering::AcqRel);
+        WriterTaskGuard(self.clone())
+    }
+
+    pub(crate) async fn wait_idle(&self) {
+        loop {
+            let notified = self.idle.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.active.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+impl Drop for WriterTaskGuard {
+    fn drop(&mut self) {
+        if self.0.active.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.0.idle.notify_waiters();
+        }
+    }
+}
 #[derive(Clone)]
 pub struct TaskWriter {
     inner: Arc<Inner>,
@@ -173,6 +211,14 @@ impl TaskWriter {
         queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
     ) -> Self {
+        Self::new_with_fatal_channel(queue, notify, config, live_config, None, None)
+    }
+    pub(crate) fn new_with_fatal_channel(
+        queue: Arc<DurableTaskQueue>, notify: Arc<Notify>, config: WriterConfig,
+        live_config: Option<crate::matching_registry::WriterLiveConfig>,
+    fatal: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
+    tracker: Option<Arc<WriterTracker>>,
+    ) -> Self {
         let capacity = live_config.as_ref().map(|provider| provider().2)
             .unwrap_or(config.outstanding_appends);
         let capacity = usize::try_from(capacity)
@@ -199,7 +245,9 @@ impl TaskWriter {
         }));
         let weak = Arc::downgrade(&inner);
         let kind = queue.task_list_kind();
+        let task_guard = tracker.map(|tracker| tracker.start());
         tokio::spawn(async move {
+            let _task_guard = task_guard;
             let mut receiver = receiver;
             loop {
                 let first = if let Some(rendezvous) = &rendezvous {
@@ -254,6 +302,9 @@ impl TaskWriter {
                                 (&error, kind),
                                 (QueueError::Storage(StorageError::ConditionFailed(_)), 1)
                             );
+                        if let QueueError::Storage(StorageError::MalformedSqlMatchingRunId(cause)) = &error {
+                            if let Some(fatal) = &fatal { let _ = fatal.send(cause.clone()); }
+                        }
                         let status = match (&error, kind) {
                             (QueueError::Storage(StorageError::ConditionFailed(_)), 1) => {
                                 Status::internal("StickyTaskConditionFailedError")
@@ -379,12 +430,65 @@ impl TaskWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_inflight_writer_fatal_notification() {
+        let tracker = Arc::new(WriterTracker::default());
+        let guard = tracker.start();
+        let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
+        let cause = cadence_persistence::matching_blob::SqlRunIdError::Malformed {
+            raw: "delayed-malformed-run-id".into(),
+            message: "invalid UUID length: 26".into(),
+        };
+        let expected = cause.clone();
+        let (release_write, write_finished) = oneshot::channel();
+        let writer = tokio::spawn(async move {
+            let _guard = guard;
+            // This oneshot models an append blocked in its SQL operation. Its
+            // fatal result must be sent before actor exit drops the guard.
+            write_finished.await.unwrap();
+            fatal_tx.send(cause).unwrap();
+        });
+
+        let idle = tracker.wait_idle();
+        tokio::pin!(idle);
+        use std::future::Future;
+        let still_waiting = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(idle.as_mut().poll(cx).is_pending())
+        })
+        .await;
+        assert!(still_waiting, "shutdown must wait while a SQL append is active");
+
+        release_write.send(()).unwrap();
+        writer.await.unwrap();
+        idle.await;
+        assert_eq!(fatal_rx.try_recv().unwrap(), expected);
+    }
     use cadence_persistence::{
         matching_blob::{BlobEncoding, TaskData},
         matching_sqlite::{SqliteTaskStore, TaskListKey},
     };
     use std::num::NonZeroU32;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn standalone_fatal_channel_receives_typed_sql_run_id_failure_before_append_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(directory.path().join("fatal.db"), BlobEncoding::ThriftRW).unwrap());
+        let domain = Uuid::from_u128(9);
+        let queue = Arc::new(DurableTaskQueue::open(store, TaskListKey { domain_id: domain, name: "fatal".into(), task_type: 0 }, 0, NonZeroU32::new(100).unwrap(), 1).unwrap());
+        let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
+        let writer = TaskWriter::new_with_fatal_channel(queue, Arc::new(Notify::new()), WriterConfig::default(), None, Some(fatal_tx), None);
+        let error = writer.append(WriteTask {
+            data: TaskData::default().with_request_run_id("malformed-run-id"),
+            source_domain: domain,
+            schedule_to_start_seconds: 0,
+        }).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        let fatal = tokio::time::timeout(Duration::from_secs(1), fatal_rx.recv()).await.unwrap().unwrap();
+        assert!(matches!(fatal, cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "malformed-run-id"));
+        writer.stop();
+    }
 
     #[tokio::test]
     async fn zero_capacity_handoffs_are_fifo_and_never_overwrite_waiters() {

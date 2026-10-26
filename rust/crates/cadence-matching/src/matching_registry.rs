@@ -217,6 +217,8 @@ pub struct QueueRegistry {
     /// Go's signed, task-list-filtered `MaxTaskDeleteBatchSize` provider.
     max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
     writer_live: Option<WriterLiveProvider>,
+    fatal_writer: Option<tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>>,
+    writer_tracker: Arc<crate::matching_writer::WriterTracker>,
     metrics: crate::matching_metrics::MatchingMetrics,
 }
 /// Live adaptive-scaler configuration per domain/task-list/type, mirroring
@@ -773,6 +775,8 @@ impl QueueRegistry {
             idle_tasklist_check_interval: None,
             max_task_delete_batch_size: None,
             writer_live: None,
+            fatal_writer: None,
+            writer_tracker: Arc::new(crate::matching_writer::WriterTracker::default()),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
         }
     }
@@ -782,6 +786,13 @@ impl QueueRegistry {
     ) -> Self {
         self.metrics = metrics;
         self
+    }
+    pub(crate) fn with_fatal_writer(mut self, fatal: tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>) -> Self {
+        self.fatal_writer = Some(fatal);
+        self
+    }
+    pub(crate) async fn wait_for_writers(&self) {
+        self.writer_tracker.wait_idle().await;
     }
     pub(crate) fn with_local_poll_service(mut self, factory: LocalPollFactory) -> Self {
         self.local_poll_service = Some(factory);
@@ -1216,11 +1227,13 @@ impl QueueRegistry {
                     let writer_live = registry.writer_live.as_ref().map(|provider| {
                         scoped_writer_live(provider.clone(), lookup.0.to_string(), lookup.1.clone(), lookup.2)
                     });
-                    let writer = crate::matching_writer::TaskWriter::new_with_live_config(
+                    let writer = crate::matching_writer::TaskWriter::new_with_fatal_channel(
                         queue.clone(),
                         dispatcher.task_notification(),
                         crate::matching_writer::WriterConfig::default(),
                         writer_live,
+                        registry.fatal_writer.clone(),
+                        Some(registry.writer_tracker.clone()),
                     );
                     let min_burst = registry
                         .min_burst

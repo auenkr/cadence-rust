@@ -139,6 +139,18 @@ impl MatchingRuntime {
         }
         self
     }
+    pub(crate) fn with_fatal_writer(
+        mut self,
+        fatal: tokio::sync::mpsc::UnboundedSender<
+            cadence_persistence::matching_blob::SqlRunIdError,
+        >,
+    ) -> Self {
+        self.matching = self.matching.clone().with_fatal_writer(fatal.clone());
+        if let Some(registry) = self.registry.take() {
+            self.registry = Some(registry.with_fatal_writer(fatal));
+        }
+        self
+    }
 
     pub fn in_memory(state: crate::handlers::AppState, drain_duration: DrainDuration) -> Self {
         Self {
@@ -714,6 +726,13 @@ impl MatchingRuntime {
         } else {
             Ok(())
         };
+        // Registry shutdown stops every owner, but a writer actor may already
+        // be inside a blocking SQL append. Join those actors before the
+        // launcher samples its fatal-writer channel, so shutdown cannot race
+        // a late typed SQL failure notification.
+        if let Some(registry) = &self.registry {
+            registry.wait_for_writers().await;
+        }
         // Go Stop also stops every semaphore bucket, not only the ones the ring moved away.
         self.matching.stop_semaphores();
         let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
