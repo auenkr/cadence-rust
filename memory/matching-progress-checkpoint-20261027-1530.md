@@ -52,3 +52,12 @@ workers for independent remaining tasks. Worker starts are currently held:
 host load repeatedly exceeds 6, with 3.7–4.0 GiB available. No local heavy
 validation, polling loop, or new worker was started while above the guard.
 Do not terminate unrelated host workloads to evade that guard.
+
+At 15:31 UTC host load fell to 5.74 with 4.0 GiB available. Started three
+Luna medium/default-tier delegates (shared checkout, disjoint ownership):
+- ecee3cda-35a9-4cc4-a35d-cb2807f85811: complete concurrent delivery/live
+  range-stealing regressions; owns matching_concurrent_go_parity.rs and its note.
+- ba76decd-660c-4dde-9c0e-5639c4affb92: read-only current NewConfig field audit.
+- 8232ab5c-efc8-4675-9b1a-bdbce829028d: read-only ignored-test reconciliation.
+Their completions wake the parent automatically; do not poll delegated tasks.
+Focused run 40531087779 reached Test after passing Clippy; no result credited yet.
