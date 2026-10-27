@@ -70,3 +70,21 @@ Extend an existing production lane (no topology change) as follows:
 This is an execution recipe, not runtime evidence. The current test and probe
 evidence boundaries above remain in force until the extension is implemented
 and run on Actions.
+
+## Implementation status (2026-10-27)
+
+Implemented as opt-in `--matching-cold-domain-metric-probe` in
+`tests/run-go-service-baseline.py`, requiring production Matching and the
+Prometheus exporter. It adds an exact `matching.domainrps=0` filter for a
+per-run domain before Rust Matching starts. The compat probe registers and
+describes that domain afterward, directly calls Matching `AddDecisionTask`
+with a unique task list and caller label, asserts gRPC `RESOURCE_EXHAUSTED`,
+and records the rejection. Existing Prometheus scrape capture requires a
+positive `cadence_requests_per_tl` sample matching operation, caller, gRPC
+transport, canonical domain, and `tasklist`; the exporter semantics artifact
+records the matching sample beside the rejection status.
+
+Syntax checks passed: Python AST parse, `node --check`, and `git diff --check`.
+No service runtime, Cargo/Go command, Actions workflow, or mixed gate was run;
+parent owns serial validation. This is not runtime evidence until that gate
+passes.

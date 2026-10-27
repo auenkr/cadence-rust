@@ -50,6 +50,7 @@ parser.add_argument('--matching-transport', choices=('grpc', 'thrift'), default=
 parser.add_argument('--matching-rpc-tls', action='store_true', help='enable verified TLS on the production Rust Matching gRPC listener and Go Matching outbound using an ephemeral test CA')
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
+parser.add_argument('--matching-cold-domain-metric-probe', action='store_true', help='opt-in production Prometheus probe for a late-registered exact-domain quota rejection and canonical request metric')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
 parser.add_argument('--postgres', action='store_true', help='run production Rust Matching and original Go services against the same Go-configured PostgreSQL schema; requires CADENCE_POSTGRES_* settings')
 parser.add_argument('--cassandra', action='store_true', help='run production Rust Matching and original Go services on the same Go-schema Cassandra keyspaces (container managed by tests/gates/run-cassandra-lane.sh; implies the two-node failure-recovery probe)')
@@ -177,11 +178,38 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
         request_lines = sorted(request_lines)
         if not request_lines:
             raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
+
+    cold_probe_path = work / 'matching-cold-domain-metric-probe.json'
+    cold_probe = json.loads(cold_probe_path.read_text()) if cold_probe_path.is_file() else None
+    if cold_probe is not None:
+        labels = {
+            'caller': 'cadence-cold-domain-metric-probe', 'transport': 'grpc',
+            'cadence_service': 'cadence-matching', 'domain': cold_probe['domain'],
+            'operation': 'AddDecisionTask', 'tasklist': cold_probe['taskList'],
+        }
+        cold_samples = []
+        cold_snapshots = gzip.open(snapshots_path, 'rt', encoding='utf-8') if snapshots_path.is_file() else None
+        cold_scrapes = (json.loads(line)['body'] for line in cold_snapshots if line.strip()) if cold_snapshots else iter([])
+        for scrape in cold_scrapes:
+            for line in scrape.splitlines():
+                if 'cadence_requests_per_tl' not in line:
+                    continue
+                if all(f'{key}="{re.sub(r"[^A-Za-z0-9_]", "_", value)}"' in line for key, value in labels.items()):
+                    match = re.search(r'\s([-+0-9.eE]+)$', line)
+                    if match and float(match.group(1)) > 0:
+                        cold_samples.append(line)
+        if cold_snapshots:
+            cold_snapshots.close()
+        if cold_probe.get('grpcCode') != 8 or not cold_samples:
+            raise RuntimeError('cold-domain probe did not record RESOURCE_EXHAUSTED and its positive canonical AddDecisionTask Prometheus sample')
         semantic = {'format': exporter, 'sampleCount': sample_count,
                     'requiredMetrics': list(required), 'expectedDomain': expected_domain,
                     'prometheusExpectedLabels': prometheus_labels,
                     'positiveRequiredMetricSamples': {key: len(value) for key, value in metric_values.items()},
                     'requestSamples': request_lines}
+        if cold_probe is not None:
+            semantic['coldDomainQuotaProbe'] = {'domain': cold_probe['domain'], 'taskList': cold_probe['taskList'],
+                'grpcCode': cold_probe['grpcCode'], 'metricSamples': sorted(set(cold_samples))}
     elif exporter == 'statsd':
         captured = [json.loads(line) for line in (work / 'statsd-packets.json').read_text().splitlines() if line.strip()]
         packets = [item['base64'] for item in captured]
@@ -413,6 +441,8 @@ postgres_cert = os.environ.get('CADENCE_POSTGRES_CERT_FILE', '')
 postgres_key = os.environ.get('CADENCE_POSTGRES_KEY_FILE', '')
 if args.matching_exporter and not production_matching:
     parser.error('--matching-exporter requires --rust-production-binary')
+if args.matching_cold_domain_metric_probe and (not production_matching or args.matching_exporter != 'prometheus'):
+    parser.error('--matching-cold-domain-metric-probe requires production Rust Matching with --matching-exporter prometheus')
 mysql_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
 mysql_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
 mysql_password = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
@@ -492,6 +522,11 @@ config = work / 'config'
 config.mkdir(exist_ok=True)
 dynamic_config = work / 'dynamic-config.yaml'
 dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+cold_domain_name = f'matching-cold-{secrets.token_hex(8)}' if args.matching_cold_domain_metric_probe else None
+if cold_domain_name:
+    dynamic_text += ('\nmatching.domainrps:\n'
+        '  - value: 0\n'
+        f'    constraints: {{domainName: {cold_domain_name}}}\n')
 if production_matching or args.rust_matching or args.matching_restart or args.adaptive_go_control:
     dynamic_text += (
         '\nsystem.enableTasklistIsolation:\n'
@@ -1056,8 +1091,10 @@ try:
                     probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
                 probe_environment = None
+                if args.matching_cold_domain_metric_probe:
+                    probe_environment = {**os.environ, 'CADENCE_MATCHING_COLD_DOMAIN': cold_domain_name}
                 if args.adaptive_go_control and args.probe_adaptive_retry_only:
-                    probe_environment = {**os.environ, 'CADENCE_ADAPTIVE_RETRY_ONLY': '1'}
+                    probe_environment = {**(probe_environment or os.environ), 'CADENCE_ADAPTIVE_RETRY_ONLY': '1'}
                 udp_capture = None
                 udp_thread = None
                 udp_packets = []
@@ -1112,6 +1149,8 @@ try:
                         'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                         'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
                         'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    if args.matching_cold_domain_metric_probe:
+                        probe_environment['CADENCE_MATCHING_COLD_DOMAIN'] = cold_domain_name
                     if args.postgres:
                         pg_host, pg_port = postgres_addr.rsplit(':', 1)
                         probe_environment.update({

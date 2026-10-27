@@ -378,6 +378,7 @@ function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeI
 const { observeProductionMySqlDomain, verifyProductionMySqlTaskGc, verifyTaskListBlobDecoder } = require('./matching-mysql-gate.cjs');
 async function run() {
   const id = process.env.CADENCE_MATCHING_TEST_ID || randomUUID();
+  const work = path.resolve(process.argv[5]);
   const domain = `service-compat-${id}`, taskList = { name: `tasks-${id}` };
   // Go's worker registers cadence-system at startup; two concurrent SQL domain registrations race on
   // domain_metadata's notification_version and the loser fails before writing anything, so retry.
@@ -388,6 +389,29 @@ async function run() {
     }
   }
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
+  const coldDomain = process.env.CADENCE_MATCHING_COLD_DOMAIN;
+  if (coldDomain) {
+    assert(productionMode, 'cold-domain quota probe requires production Matching');
+    await call('DomainAPI', 'RegisterDomain', { name: coldDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    const canonicalDomain = await call('DomainAPI', 'DescribeDomain', { name: coldDomain });
+    const coldTaskList = `cold-domain-${id}`;
+    const metadata = new grpc.Metadata();
+    metadata.set('rpc-service', 'cadence-matching');
+    metadata.set('rpc-encoding', 'proto');
+    metadata.set('rpc-caller', 'cadence-cold-domain-metric-probe');
+    const rejected = await new Promise(resolve => clients.Matching.AddDecisionTask({
+      domainId: canonicalDomain.domain.id,
+      workflowExecution: { workflowId: `cold-${id}`, runId: randomUUID() },
+      taskList: { name: coldTaskList }, scheduleId: '1',
+      scheduleToStartTimeout: { seconds: '10' }, source: 'TASK_SOURCE_HISTORY',
+    }, metadata, { deadline: Date.now() + 20000 }, error => resolve(error)));
+    assert(rejected, 'exact zero domain RPS must reject direct AddDecisionTask');
+    assert.equal(rejected.code, grpc.status.RESOURCE_EXHAUSTED, `expected RESOURCE_EXHAUSTED, got ${rejected.message}`);
+    fs.writeFileSync(path.join(work, 'matching-cold-domain-metric-probe.json'), `${JSON.stringify({
+      domain: canonicalDomain.domain.name, domainId: canonicalDomain.domain.id,
+      taskList: coldTaskList, grpcCode: rejected.code, grpcMessage: rejected.message,
+    }, null, 2)}\n`);
+  }
   let pageTokenDomain, domainPages = 0;
   if (cassandraGate) {
     pageTokenDomain = `service-compat-page-${id}`;
@@ -405,7 +429,6 @@ async function run() {
     assert(listedDomainNames.has(domain) && listedDomainNames.has(pageTokenDomain),
       'Go Cassandra domain enumeration must return both registered domains through opaque page tokens');
   }
-  const work = path.resolve(process.argv[5]);
   fs.mkdirSync(work, { recursive: true });
   const ready = path.join(work, 'ready'), stop = path.join(work, 'stop'), fixture = path.join(work, 'fixture.json');
   if (!productionMode) {
