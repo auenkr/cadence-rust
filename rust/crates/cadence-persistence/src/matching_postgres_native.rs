@@ -96,9 +96,12 @@ impl PostgresTaskStore {
             Ok(row) => row
                 .map(|row| {
                     Ok((
-                        row.try_get(1).map_err(|e| lg(normalize_postgres_error(e)))?,
-                        row.try_get(4).map_err(|e| lg(normalize_postgres_error(e)))?,
-                        row.try_get(5).map_err(|e| lg(normalize_postgres_error(e)))?,
+                        row.try_get(1)
+                            .map_err(|e| lg(normalize_postgres_error(e)))?,
+                        row.try_get(4)
+                            .map_err(|e| lg(normalize_postgres_error(e)))?,
+                        row.try_get(5)
+                            .map_err(|e| lg(normalize_postgres_error(e)))?,
                     ))
                 })
                 .transpose(),
@@ -301,8 +304,8 @@ impl MatchingTaskStoreBytes for PostgresTaskStore {
         for (domain, task) in tasks {
             let mut data = task.data.for_sql()?;
             data.created_nanos = now_nanos;
-            let encoded = encode_task_bytes(&data)
-                .map_err(|e| lg(StorageError::BackendConfiguration(e)))?;
+            let encoded =
+                encode_task_bytes(&data).map_err(|e| lg(StorageError::BackendConfiguration(e)))?;
             let bytes = write_encoding.encode(&encoded).map_err(lg)?;
             let encoding = write_encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
@@ -410,8 +413,13 @@ impl MatchingTaskStoreBytes for PostgresTaskStore {
         let mut client = self.pool_bytes(key).checkout().map_err(lg)?;
         let ty = task_type(key)?;
         let name = RawText(key.name.as_bytes());
-        let params: &[&(dyn ToSql + Sync)] =
-            &[&shard, &key.domain_id.as_bytes().as_slice(), &name, &ty, &range];
+        let params: &[&(dyn ToSql + Sync)] = &[
+            &shard,
+            &key.domain_id.as_bytes().as_slice(),
+            &name,
+            &ty,
+            &range,
+        ];
         let result = client.execute(DELETE_TASK_LIST, params);
         let affected = pg_poison(&mut client, result)?;
         if affected != 1 {
@@ -434,7 +442,11 @@ mod tests {
     }
 
     fn key(name: &[u8]) -> TaskListKeyBytes {
-        TaskListKeyBytes { domain_id: Uuid::nil(), name: GoString::from(name), task_type: 0 }
+        TaskListKeyBytes {
+            domain_id: Uuid::nil(),
+            name: GoString::from(name),
+            task_type: 0,
+        }
     }
 
     #[test]
@@ -486,10 +498,9 @@ mod tests {
             7,
         );
         match (stale_range_bytes(&k, 7), legacy) {
-            (
-                BytesError::ConditionFailed { message: a },
-                StorageError::ConditionFailed(b),
-            ) => assert_eq!(a.as_bytes(), b.as_bytes()),
+            (BytesError::ConditionFailed { message: a }, StorageError::ConditionFailed(b)) => {
+                assert_eq!(a.as_bytes(), b.as_bytes())
+            }
             _ => panic!("unexpected stale-range classification"),
         }
     }
@@ -517,7 +528,8 @@ mod tests {
         let env = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.into());
         let store = PostgresTaskStore::connect(PostgresTaskStoreConfig {
             shards: vec![PostgresShardConfig {
-                connect_addr: std::env::var("CADENCE_POSTGRES_ADDR").expect("CADENCE_POSTGRES_ADDR"),
+                connect_addr: std::env::var("CADENCE_POSTGRES_ADDR")
+                    .expect("CADENCE_POSTGRES_ADDR"),
                 user: env("CADENCE_POSTGRES_USER", "postgres"),
                 password: env("CADENCE_POSTGRES_PASSWORD", ""),
                 database_name: env("CADENCE_POSTGRES_DATABASE", "cadence"),
@@ -533,33 +545,49 @@ mod tests {
         })
         .unwrap();
         let domain = Uuid::new_v4();
-        let k = |name: &[u8]| TaskListKeyBytes { domain_id: domain, name: GoString::from(name), task_type: 0 };
+        let k = |name: &[u8]| TaskListKeyBytes {
+            domain_id: domain,
+            name: GoString::from(name),
+            task_type: 0,
+        };
 
         // Invalid UTF-8 is rejected by the server (Go/lib/pq sends the same
         // bytes), classified like any unknown backend error, and writes nothing.
         let bad = k(b"\xff");
-        let err = MatchingTaskStoreBytes::lease(&store, &bad, 0, 1).unwrap_err();
+        let err = MatchingTaskStoreBytes::lease(&store, &bad, 0, 0, 1).unwrap_err();
         assert!(err.is_transient(), "{err}");
         assert!(MatchingTaskStoreBytes::get_task_list(&store, &bad).is_err());
 
         // U+FFFD is a different, valid key and does not alias \xff / \xfe.
         let repl = k("\u{fffd}".as_bytes());
-        let leased = MatchingTaskStoreBytes::lease(&store, &repl, 0, 1).unwrap();
+        let leased = MatchingTaskStoreBytes::lease(&store, &repl, 0, 0, 1).unwrap();
         assert_eq!(leased.range_id, 1);
         assert!(MatchingTaskStoreBytes::get_task_list(&store, &k(b"\xfe")).is_err());
 
         // Lease fencing and stale tokens.
-        assert!(MatchingTaskStoreBytes::lease(&store, &repl, 99, 2).is_err());
-        let second = MatchingTaskStoreBytes::lease(&store, &repl, 1, 2).unwrap();
+        assert!(MatchingTaskStoreBytes::lease(&store, &repl, 0, 99, 2).is_err());
+        let second = MatchingTaskStoreBytes::lease(&store, &repl, 0, 1, 2).unwrap();
         assert_eq!(second.range_id, 2);
-        assert!(MatchingTaskStoreBytes::update_task_list(&store, &repl, 1, TaskListDataBytes::default(), 3).is_err());
+        assert!(MatchingTaskStoreBytes::update_task_list(
+            &store,
+            &repl,
+            1,
+            TaskListDataBytes::default(),
+            3
+        )
+        .is_err());
 
         // Native write, legacy read of the same valid row.
         let task = AllocatedTaskBytes {
             task_id: 1,
-            data: TaskDataBytes { workflow_id: GoString::from("wf"), schedule_id: 5, ..Default::default() },
+            data: TaskDataBytes {
+                workflow_id: GoString::from("wf"),
+                schedule_id: 5,
+                ..Default::default()
+            },
         };
-        MatchingTaskStoreBytes::create_tasks_with_domains(&store, &repl, 2, 10, &[(domain, &task)]).unwrap();
+        MatchingTaskStoreBytes::create_tasks_with_domains(&store, &repl, 2, 10, &[(domain, &task)])
+            .unwrap();
         let legacy_key = crate::matching_task_store::TaskListKey {
             domain_id: domain,
             name: "\u{fffd}".into(),
@@ -570,8 +598,14 @@ mod tests {
         assert_eq!(legacy[0].data.workflow_id, "wf");
         let native = MatchingTaskStoreBytes::get_tasks(&store, &repl, 0, 10, 10).unwrap();
         assert_eq!(native[0].data.workflow_id.as_bytes(), b"wf");
-        assert_eq!(MatchingTaskStoreBytes::task_list_size(&store, &repl, 0).unwrap(), 1);
-        assert_eq!(MatchingTaskStoreBytes::complete_tasks_less_than(&store, &repl, 1, 10).unwrap(), 1);
+        assert_eq!(
+            MatchingTaskStoreBytes::task_list_size(&store, &repl, 0).unwrap(),
+            1
+        );
+        assert_eq!(
+            MatchingTaskStoreBytes::complete_tasks_less_than(&store, &repl, 1, 10).unwrap(),
+            1
+        );
         MatchingTaskStoreBytes::delete_task_list(&store, &repl, 2).unwrap();
     }
 }

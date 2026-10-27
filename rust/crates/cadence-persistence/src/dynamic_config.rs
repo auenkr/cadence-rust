@@ -236,7 +236,11 @@ fn filters_match_context(
     domain: Option<&str>,
     task_list: Option<(&str, i32)>,
 ) -> bool {
-    filters_match_context_bytes(value, domain, task_list.map(|(name, kind)| (name.as_bytes(), kind)))
+    filters_match_context_bytes(
+        value,
+        domain,
+        task_list.map(|(name, kind)| (name.as_bytes(), kind)),
+    )
 }
 
 fn filters_match_context_bytes(
@@ -277,7 +281,11 @@ fn selected_context(
     domain: Option<&str>,
     task_list: Option<(&str, i32)>,
 ) -> Option<Value> {
-    selected_context_bytes(values, domain, task_list.map(|(name, kind)| (name.as_bytes(), kind)))
+    selected_context_bytes(
+        values,
+        domain,
+        task_list.map(|(name, kind)| (name.as_bytes(), kind)),
+    )
 }
 
 fn selected_context_bytes(
@@ -841,13 +849,28 @@ mod tests {
             entry(json!(41), &[("taskListName", json!("�"))]),
         ];
         for invalid_name in [&[0xff][..], &[0xfe][..]] {
-            assert_eq!(task_list_integer_bytes(&values, None, invalid_name, 0, 9), 4);
+            assert_eq!(
+                task_list_integer_bytes(&values, None, invalid_name, 0, 9),
+                4
+            );
             assert!(task_list_boolean_bytes(&[], None, invalid_name, 0, true));
-            assert_eq!(task_list_float_bytes(&[], None, invalid_name, 0, 1.25), 1.25);
-            assert_eq!(task_list_duration_bytes(&values, None, invalid_name, 0, 17), 17);
+            assert_eq!(
+                task_list_float_bytes(&[], None, invalid_name, 0, 1.25),
+                1.25
+            );
+            assert_eq!(
+                task_list_duration_bytes(&values, None, invalid_name, 0, 17),
+                17
+            );
         }
-        assert_eq!(task_list_integer_bytes(&values, None, "�".as_bytes(), 0, 9), 42);
-        assert_eq!(task_list_integer_bytes(&values, Some("d"), "�".as_bytes(), 0, 9), 43);
+        assert_eq!(
+            task_list_integer_bytes(&values, None, "�".as_bytes(), 0, 9),
+            42
+        );
+        assert_eq!(
+            task_list_integer_bytes(&values, Some("d"), "�".as_bytes(), 0, 9),
+            43
+        );
         let duration_values = vec![entry(
             json!("3s"),
             &[("taskListName", json!("�")), ("taskType", json!(0))],
@@ -876,7 +899,10 @@ mod tests {
             ),
         ];
         assert_eq!(task_list_integer_bytes(&values, Some("d"), b"q", 0, 1), 7);
-        assert_eq!(task_list_integer_bytes(&values, Some("elsewhere"), b"q", 0, 1), 6);
+        assert_eq!(
+            task_list_integer_bytes(&values, Some("elsewhere"), b"q", 0, 1),
+            6
+        );
         assert_eq!(task_list_integer_bytes(&[], Some("d"), b"\xff", 1, 12), 12);
     }
 

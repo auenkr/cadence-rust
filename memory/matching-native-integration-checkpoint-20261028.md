@@ -29,3 +29,5 @@ Remaining: native backend implementations, handler/queue/History/token adoption,
 Commit b243fd999 contains the SQLite/MySQL/PostgreSQL native stores, dynamic config byte helpers, activity-scheduled dispatch adapter, retained raw lease error messages, and runner-generated formatting patch. Each remains unverified. New CI: https://github.com/auenkr/cadence-rust/actions/runs/40584900096 at head b243fd999 (resolve full SHA with git), fresh uncached target, five affected crates, format_matching_parity_files=true. Pending at dispatch.
 
 Previous replacement 40583973417 concluded failure: clippy chunks_exact_to_as_chunks in native_wire_edges.rs. That lint was fixed in b243fd999. No Go or Cargo command ran locally. The pinned IDL submodule was initialized with git only to inspect source field definitions.
+
+Run 40584900096 concluded failure in clippy: four PostgreSQL ignored-test lease calls omitted the kind argument; native.rs had a second chunks_exact_to_as_chunks lint. Corrected both and applied the runner formatting patch. Added and registered the five non-decision native Thrift response encoders; production dispatch is unchanged. Next CI required.

@@ -9,11 +9,11 @@
 //! Go. Lease-renewal errors retain the original name in a raw-byte message.
 
 use super::*;
+use crate::matching_blob::TaskListDataBytes;
 use crate::matching_native_task_store::{
     AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError as BytesError,
     Result as BytesResult, TaskListKeyBytes, TaskListRecordBytes,
 };
-use crate::matching_blob::TaskListDataBytes;
 
 fn leg<E: Into<StorageError>>(error: E) -> BytesError {
     BytesError::Legacy(error.into())
@@ -26,24 +26,36 @@ impl MySqlTaskStore {
     }
 
     fn database_shard_bytes(&self, key: &TaskListKeyBytes) -> i32 {
-        crate::matching_task_store::go_db_shard_id_bytes(&key.domain_id, key.name.as_bytes(), self.n_shards)
+        crate::matching_task_store::go_db_shard_id_bytes(
+            &key.domain_id,
+            key.name.as_bytes(),
+            self.n_shards,
+        )
     }
 
     fn write_encoding_bytes(&self) -> BytesResult<BlobEncoding> {
         self.write_encoding().map_err(leg)
     }
 
-    fn encode_task_list_bytes(&self, data: &TaskListDataBytes) -> BytesResult<(Vec<u8>, &'static str)> {
+    fn encode_task_list_bytes(
+        &self,
+        data: &TaskListDataBytes,
+    ) -> BytesResult<(Vec<u8>, &'static str)> {
         let encoding = self.write_encoding_bytes()?;
         Ok((
-            encoding.encode(&blob::encode_task_list_bytes(data)).map_err(leg)?,
+            encoding
+                .encode(&blob::encode_task_list_bytes(data))
+                .map_err(leg)?,
             encoding.as_str(),
         ))
     }
 
     fn decode_task_list_row_bytes(row: (i64, Vec<u8>, String)) -> BytesResult<TaskListRecordBytes> {
         let (range_id, bytes, encoding) = row;
-        let encoded = BlobEncoding::parse(&encoding).map_err(leg)?.decode(&bytes).map_err(leg)?;
+        let encoded = BlobEncoding::parse(&encoding)
+            .map_err(leg)?
+            .decode(&bytes)
+            .map_err(leg)?;
         Ok(TaskListRecordBytes {
             range_id,
             data: blob::decode_task_list_bytes(&encoded).map_err(leg)?,
@@ -61,7 +73,12 @@ impl MySqlTaskStore {
         let row: Option<Row> = connection
             .exec_first(
                 SELECT_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         Ok(row.map(|(_, range_id, _, _, data, encoding)| (range_id, data, encoding)))
@@ -77,7 +94,12 @@ impl MySqlTaskStore {
         let range: Option<i64> = transaction
             .exec_first(
                 LOCK_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, discard)))?;
         match range {
@@ -85,7 +107,9 @@ impl MySqlTaskStore {
             Some(range) => Err(leg(StorageError::ConditionFailed(format!(
                 "Task list range ID was {range} when it was should have been {expected_range}"
             )))),
-            None => Err(leg(StorageError::ConditionFailed("Task list does not exist.".into()))),
+            None => Err(leg(StorageError::ConditionFailed(
+                "Task list does not exist.".into(),
+            ))),
         }
     }
 }
@@ -100,7 +124,9 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
 
     fn get_task_list(&self, key: &TaskListKeyBytes) -> BytesResult<TaskListRecordBytes> {
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
-        let row = self.read_task_list_row_bytes(&mut connection, key)?.ok_or_else(|| leg(StorageError::NotFound))?;
+        let row = self
+            .read_task_list_row_bytes(&mut connection, key)?
+            .ok_or_else(|| leg(StorageError::NotFound))?;
         Self::decode_task_list_row_bytes(row)
     }
 
@@ -114,9 +140,7 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         let shard_id = self.database_shard_bytes(key);
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
         let discard = connection.discard.clone();
-        let stale = |got: i64| {
-            BytesError::lease_renewal(key, got)
-        };
+        let stale = |got: i64| BytesError::lease_renewal(key, got);
         let mut current = match self.read_task_list_row_bytes(&mut connection, key)? {
             Some((range_id, bytes, encoding)) => {
                 // Go checks the requested range before decoding persisted data.
@@ -126,12 +150,24 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
                 Self::decode_task_list_row_bytes((range_id, bytes, encoding))?
             }
             None => {
-                let data = TaskListDataBytes { kind, last_updated_nanos: now_nanos, ..Default::default() };
+                let data = TaskListDataBytes {
+                    kind,
+                    last_updated_nanos: now_nanos,
+                    ..Default::default()
+                };
                 let (bytes, encoding) = self.encode_task_list_bytes(&data)?;
                 connection
                     .exec_drop(
                         INSERT_TASK_LIST,
-                        (shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, 0_i64, bytes, encoding),
+                        (
+                            shard_id,
+                            key.domain_id.as_bytes().as_slice(),
+                            key.name.as_bytes(),
+                            key.task_type,
+                            0_i64,
+                            bytes,
+                            encoding,
+                        ),
                     )
                     .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
                 TaskListRecordBytes { range_id: 0, data }
@@ -151,16 +187,29 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         transaction
             .exec_drop(
                 UPDATE_TASK_LIST,
-                (current.range_id, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type),
+                (
+                    current.range_id,
+                    bytes,
+                    encoding,
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         if transaction.affected_rows() != 1 {
             return Err(leg(StorageError::Backend {
                 kind: BackendErrorKind::Permanent,
-                message: format!("lease update affected {} rows instead of 1", transaction.affected_rows()),
+                message: format!(
+                    "lease update affected {} rows instead of 1",
+                    transaction.affected_rows()
+                ),
             }));
         }
-        transaction.commit().map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
+        transaction
+            .commit()
+            .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(false, Ordering::Release);
         current.data.kind = kind;
         Ok(current)
@@ -174,7 +223,11 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         now_nanos: i64,
     ) -> BytesResult<()> {
         data.last_updated_nanos = now_nanos;
-        data.expiry_nanos = if matches!(data.kind, 1 | 2) { now_nanos.wrapping_add(86_400_000_000_000) } else { 0 };
+        data.expiry_nanos = if matches!(data.kind, 1 | 2) {
+            now_nanos.wrapping_add(86_400_000_000_000)
+        } else {
+            0
+        };
         let shard_id = self.database_shard_bytes(key);
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
         let discard = connection.discard.clone();
@@ -187,16 +240,29 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         transaction
             .exec_drop(
                 UPDATE_TASK_LIST,
-                (range, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type),
+                (
+                    range,
+                    bytes,
+                    encoding,
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         if transaction.affected_rows() != 1 {
             return Err(leg(StorageError::Backend {
                 kind: BackendErrorKind::Permanent,
-                message: format!("task-list update affected {} rows instead of 1", transaction.affected_rows()),
+                message: format!(
+                    "task-list update affected {} rows instead of 1",
+                    transaction.affected_rows()
+                ),
             }));
         }
-        transaction.commit().map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
+        transaction
+            .commit()
+            .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(false, Ordering::Release);
         Ok(())
     }
@@ -221,17 +287,29 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
             let mut data = task.data.for_sql()?;
             data.created_nanos = now_nanos;
             let bytes = encoding
-                .encode(&blob::encode_task_bytes(&data).map_err(|m| leg(StorageError::BackendConfiguration(m)))?)
+                .encode(
+                    &blob::encode_task_bytes(&data)
+                        .map_err(|m| leg(StorageError::BackendConfiguration(m)))?,
+                )
                 .map_err(leg)?;
             transaction
                 .exec_drop(
                     INSERT_TASK,
-                    (domain.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, task.task_id, bytes, encoding.as_str()),
+                    (
+                        domain.as_bytes().as_slice(),
+                        key.name.as_bytes(),
+                        key.task_type,
+                        task.task_id,
+                        bytes,
+                        encoding.as_str(),
+                    ),
                 )
                 .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         }
         Self::lock_and_check_bytes(&mut transaction, &discard, shard_id, key, range)?;
-        transaction.commit().map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
+        transaction
+            .commit()
+            .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         discard.store(false, Ordering::Release);
         Ok(())
     }
@@ -248,13 +326,26 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         let rows: Vec<(i64, Vec<u8>, String)> = connection
             .exec(
                 SELECT_TASKS,
-                (key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, read_level, max_read_level, batch_size),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                    read_level,
+                    max_read_level,
+                    batch_size,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         rows.into_iter()
             .map(|(task_id, bytes, encoding)| {
-                let encoded = BlobEncoding::parse(&encoding).map_err(leg)?.decode(&bytes).map_err(leg)?;
-                Ok(AllocatedTaskBytes { task_id, data: blob::decode_task_bytes(&encoded).map_err(leg)? })
+                let encoded = BlobEncoding::parse(&encoding)
+                    .map_err(leg)?
+                    .decode(&bytes)
+                    .map_err(leg)?;
+                Ok(AllocatedTaskBytes {
+                    task_id,
+                    data: blob::decode_task_bytes(&encoded).map_err(leg)?,
+                })
             })
             .collect()
     }
@@ -265,13 +356,20 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         let size: Option<i64> = connection
             .exec_first(
                 COUNT_TASKS,
-                (key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, ack_level),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                    ack_level,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
-        size.ok_or_else(|| leg(StorageError::Backend {
-            kind: BackendErrorKind::Permanent,
-            message: "COUNT(*) returned no row".into(),
-        }))
+        size.ok_or_else(|| {
+            leg(StorageError::Backend {
+                kind: BackendErrorKind::Permanent,
+                message: "COUNT(*) returned no row".into(),
+            })
+        })
     }
 
     fn complete_task(&self, key: &TaskListKeyBytes, task_id: i64) -> BytesResult<()> {
@@ -280,12 +378,22 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         connection
             .exec_drop(
                 DELETE_TASK,
-                (key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, task_id),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                    task_id,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))
     }
 
-    fn complete_tasks_less_than(&self, key: &TaskListKeyBytes, inclusive_task_id: i64, limit: i64) -> BytesResult<usize> {
+    fn complete_tasks_less_than(
+        &self,
+        key: &TaskListKeyBytes,
+        inclusive_task_id: i64,
+        limit: i64,
+    ) -> BytesResult<usize> {
         if limit == 0 {
             return Err(leg(StorageError::MissingLimit));
         }
@@ -294,13 +402,21 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         connection
             .exec_drop(
                 RANGE_DELETE_TASKS,
-                (key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, inclusive_task_id, limit),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                    inclusive_task_id,
+                    limit,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
-        usize::try_from(connection.affected_rows()).map_err(|error| leg(StorageError::Backend {
-            kind: BackendErrorKind::Permanent,
-            message: format!("MySQL affected-row count did not fit usize: {error}"),
-        }))
+        usize::try_from(connection.affected_rows()).map_err(|error| {
+            leg(StorageError::Backend {
+                kind: BackendErrorKind::Permanent,
+                message: format!("MySQL affected-row count did not fit usize: {error}"),
+            })
+        })
     }
 
     fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> BytesResult<()> {
@@ -310,7 +426,13 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         connection
             .exec_drop(
                 DELETE_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), key.name.as_bytes(), key.task_type, range),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    key.name.as_bytes(),
+                    key.task_type,
+                    range,
+                ),
             )
             .map_err(|error| leg(normalize_mysql_error_on_lease(error, &discard)))?;
         let affected = connection.affected_rows();
@@ -329,7 +451,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn key(name: &[u8]) -> TaskListKeyBytes {
-        TaskListKeyBytes { domain_id: Uuid::nil(), name: GoString::from(name), task_type: 0 }
+        TaskListKeyBytes {
+            domain_id: Uuid::nil(),
+            name: GoString::from(name),
+            task_type: 0,
+        }
     }
 
     #[test]
@@ -348,7 +474,10 @@ mod tests {
     fn shard_hash_uses_raw_bytes_and_matches_legacy_for_utf8() {
         let d = Uuid::nil();
         let legacy = crate::matching_task_store::go_db_shard_id(&d, "queue", 16);
-        assert_eq!(crate::matching_task_store::go_db_shard_id_bytes(&d, b"queue", 16), legacy);
+        assert_eq!(
+            crate::matching_task_store::go_db_shard_id_bytes(&d, b"queue", 16),
+            legacy
+        );
         // Replacement rune hashes its three UTF-8 bytes, not the single byte ff.
         let mut input = d.to_string().into_bytes();
         input.extend_from_slice(b"_\xff");
@@ -376,8 +505,13 @@ mod tests {
         assert_eq!(decoded.workflow_id.as_bytes(), b"wf\xff");
 
         let legacy = TaskData {
-            workflow_id: "wf".into(), run_id: None, raw_run_id: None, schedule_id: 1,
-            expiry_nanos: 2, created_nanos: 3, partition_config: None,
+            workflow_id: "wf".into(),
+            run_id: None,
+            raw_run_id: None,
+            schedule_id: 1,
+            expiry_nanos: 2,
+            created_nanos: 3,
+            partition_config: None,
         };
         assert_eq!(
             blob::encode_task_bytes(&TaskDataBytes::from(legacy.clone())).unwrap(),
@@ -390,9 +524,13 @@ mod tests {
         let task = AllocatedTaskBytes {
             task_id: 1,
             data: TaskDataBytes {
-                workflow_id: GoString::default(), run_id: None,
+                workflow_id: GoString::default(),
+                run_id: None,
                 raw_run_id: Some(GoString::from(&b"\xff\xfe"[..])),
-                schedule_id: 0, expiry_nanos: 0, created_nanos: 0, partition_config: None,
+                schedule_id: 0,
+                expiry_nanos: 0,
+                created_nanos: 0,
+                partition_config: None,
             },
         };
         let err: BytesError = task.data.for_sql().unwrap_err().into();
@@ -409,7 +547,9 @@ mod tests {
         assert!(!err.is_transient());
         let err = BytesError::lease_renewal(&key(b"\xffq"), 7);
         assert!(!err.is_transient());
-        let BytesError::ConditionFailed { message } = err else { panic!("wrong error category") };
+        let BytesError::ConditionFailed { message } = err else {
+            panic!("wrong error category")
+        };
         assert_eq!(message.as_bytes(), b"leaseTaskList:renew failed:taskList:\xffq, taskListType:0, haveRangeID:0, gotRangeID:7");
     }
 }

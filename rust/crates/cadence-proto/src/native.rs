@@ -377,7 +377,9 @@ mod tests {
         for input_hex in ["0a01ff", "0a02c0af", "0a00"] {
             let input: Vec<u8> = input_hex
                 .as_bytes()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
                 .collect();
             let mut buf = &input[..];

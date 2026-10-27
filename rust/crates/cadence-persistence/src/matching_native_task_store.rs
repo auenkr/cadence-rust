@@ -123,8 +123,16 @@ impl MatchingTaskStoreBytesError {
     pub fn lease_renewal(key: &TaskListKeyBytes, got_range: i64) -> Self {
         let mut message = b"leaseTaskList:renew failed:taskList:".to_vec();
         message.extend_from_slice(key.name.as_bytes());
-        message.extend_from_slice(format!(", taskListType:{}, haveRangeID:0, gotRangeID:{got_range}", key.task_type).as_bytes());
-        Self::ConditionFailed { message: GoString::from(message) }
+        message.extend_from_slice(
+            format!(
+                ", taskListType:{}, haveRangeID:0, gotRangeID:{got_range}",
+                key.task_type
+            )
+            .as_bytes(),
+        );
+        Self::ConditionFailed {
+            message: GoString::from(message),
+        }
     }
 }
 pub type Result<T> = std::result::Result<T, MatchingTaskStoreBytesError>;

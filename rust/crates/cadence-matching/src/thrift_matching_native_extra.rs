@@ -137,20 +137,41 @@ fn timestamp(s: &Struct, id: i16) -> Option<prost_types::Timestamp> {
 }
 
 fn float(s: &Struct, id: i16) -> f64 {
-    s.fields.iter().rev().find_map(|(f, v)| match v {
-        Value::F64(value) if *f == id => Some(*value),
-        _ => None,
-    }).unwrap_or_default()
+    s.fields
+        .iter()
+        .rev()
+        .find_map(|(f, v)| match v {
+            Value::F64(value) if *f == id => Some(*value),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 fn retry_policy(s: &Struct) -> a::RetryPolicy {
-    let reasons = s.fields.iter().rev().find_map(|(f, v)| match v {
-        Value::List(values) if *f == 50 => Some(values),
-        _ => None,
-    }).and_then(|values| values.iter().map(GoString::from_value).collect::<Result<Vec<_>, _>>().ok()).unwrap_or_default();
+    let reasons = s
+        .fields
+        .iter()
+        .rev()
+        .find_map(|(f, v)| match v {
+            Value::List(values) if *f == 50 => Some(values),
+            _ => None,
+        })
+        .and_then(|values| {
+            values
+                .iter()
+                .map(GoString::from_value)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()
+        })
+        .unwrap_or_default();
     // Go's types model makes retry intervals scalar before protobuf mapping,
     // so an absent interval still produces a present zero Duration.
-    let interval = |id| Some(prost_types::Duration { seconds: i64::from(integer(s, id).unwrap_or_default()), nanos: 0 });
+    let interval = |id| {
+        Some(prost_types::Duration {
+            seconds: i64::from(integer(s, id).unwrap_or_default()),
+            nanos: 0,
+        })
+    };
     a::RetryPolicy {
         initial_interval: interval(10),
         backoff_coefficient: float(s, 20),
@@ -164,15 +185,34 @@ fn retry_policy(s: &Struct) -> a::RetryPolicy {
 
 fn scheduled_activity_event(s: &Struct) -> Result<a::HistoryEvent, Error> {
     if integer(s, 30) != Some(9) {
-        return Err(Error::Invalid("Native dispatch only decodes activity-scheduled history events".into()));
+        return Err(Error::Invalid(
+            "Native dispatch only decodes activity-scheduled history events".into(),
+        ));
     }
-    let attributes = obj(s, 130).ok_or_else(|| Error::Invalid("History event attributes are missing.".into()))?;
-    let header = obj(attributes, 120).map(|header| {
-        Ok::<_, Error>(a::Header { fields: byte_map(header, 10)?.into_iter().map(|(key, value)| (key, a::Payload { data: value.into_bytes() })).collect() })
-    }).transpose()?;
+    let attributes = obj(s, 130)
+        .ok_or_else(|| Error::Invalid("History event attributes are missing.".into()))?;
+    let header = obj(attributes, 120)
+        .map(|header| {
+            Ok::<_, Error>(a::Header {
+                fields: byte_map(header, 10)?
+                    .into_iter()
+                    .map(|(key, value)| {
+                        (
+                            key,
+                            a::Payload {
+                                data: value.into_bytes(),
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+        })
+        .transpose()?;
     let attributes = a::ActivityTaskScheduledEventAttributes {
         activity_id: raw(attributes, 10)?,
-        activity_type: obj(attributes, 20).map(|value| a::ActivityType { name: raw(value, 10).unwrap_or_default() }),
+        activity_type: obj(attributes, 20).map(|value| a::ActivityType {
+            name: raw(value, 10).unwrap_or_default(),
+        }),
         domain: raw(attributes, 25)?,
         task_list: obj(attributes, 30).map(list),
         input: payload(attributes, 40),
@@ -185,9 +225,13 @@ fn scheduled_activity_event(s: &Struct) -> Result<a::HistoryEvent, Error> {
         header,
     };
     Ok(a::HistoryEvent {
-        event_id: int64(s, 10), event_time: timestamp(s, 20),
-        version: int64(s, 35), task_id: int64(s, 36),
-        attributes: Some(a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)),
+        event_id: int64(s, 10),
+        event_time: timestamp(s, 20),
+        version: int64(s, 35),
+        task_id: int64(s, 36),
+        attributes: Some(
+            a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes),
+        ),
     })
 }
 
@@ -356,23 +400,66 @@ mod tests {
             (10, raw_value()),
             (20, Value::Struct(st(vec![(10, raw_value())]))),
             (25, raw_value()),
-            (30, Value::Struct(st(vec![(10, raw_value()), (20, Value::I32(0))]))),
-            (40, raw_value()), (45, Value::I32(0)), (50, Value::I32(2)),
-            (55, Value::I32(3)), (60, Value::I32(4)), (90, Value::I64(8)),
-            (110, Value::Struct(st(vec![(20, Value::F64(2.5)), (40, Value::I32(6)),
-                (50, Value::List(vec![raw_value()])), (70, Value::F64(0.2))]))),
-            (120, Value::Struct(st(vec![(10, Value::Map(vec![(raw_value(), raw_value())]))]))),
+            (
+                30,
+                Value::Struct(st(vec![(10, raw_value()), (20, Value::I32(0))])),
+            ),
+            (40, raw_value()),
+            (45, Value::I32(0)),
+            (50, Value::I32(2)),
+            (55, Value::I32(3)),
+            (60, Value::I32(4)),
+            (90, Value::I64(8)),
+            (
+                110,
+                Value::Struct(st(vec![
+                    (20, Value::F64(2.5)),
+                    (40, Value::I32(6)),
+                    (50, Value::List(vec![raw_value()])),
+                    (70, Value::F64(0.2)),
+                ])),
+            ),
+            (
+                120,
+                Value::Struct(st(vec![(10, Value::Map(vec![(raw_value(), raw_value())]))])),
+            ),
         ]);
-        let event = st(vec![(10, Value::I64(11)), (20, Value::I64(-1)),
-            (30, Value::I32(9)), (35, Value::I64(12)), (36, Value::I64(13)),
-            (130, Value::Struct(attributes))]);
-        let request = add_activity_task(&st(vec![(80, Value::Struct(st(vec![(10, Value::Struct(event))])))] )).unwrap();
-        let event = request.activity_task_dispatch_info.unwrap().scheduled_event.unwrap();
+        let event = st(vec![
+            (10, Value::I64(11)),
+            (20, Value::I64(-1)),
+            (30, Value::I32(9)),
+            (35, Value::I64(12)),
+            (36, Value::I64(13)),
+            (130, Value::Struct(attributes)),
+        ]);
+        let request = add_activity_task(&st(vec![(
+            80,
+            Value::Struct(st(vec![(10, Value::Struct(event))])),
+        )]))
+        .unwrap();
+        let event = request
+            .activity_task_dispatch_info
+            .unwrap()
+            .scheduled_event
+            .unwrap();
         assert_eq!((event.event_id, event.version, event.task_id), (11, 12, 13));
-        assert_eq!(event.event_time, Some(prost_types::Timestamp { seconds: -1, nanos: 999_999_999 }));
-        let Some(a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) = event.attributes else { panic!("wrong event attributes") };
+        assert_eq!(
+            event.event_time,
+            Some(prost_types::Timestamp {
+                seconds: -1,
+                nanos: 999_999_999
+            })
+        );
+        let Some(a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) =
+            event.attributes
+        else {
+            panic!("wrong event attributes")
+        };
         assert_eq!(attributes.activity_id.as_bytes(), &[0xff, 0xfe]);
-        assert_eq!(attributes.activity_type.unwrap().name.as_bytes(), &[0xff, 0xfe]);
+        assert_eq!(
+            attributes.activity_type.unwrap().name.as_bytes(),
+            &[0xff, 0xfe]
+        );
         assert_eq!(attributes.domain.as_bytes(), &[0xff, 0xfe]);
         assert_eq!(attributes.task_list.unwrap().name.as_bytes(), &[0xff, 0xfe]);
         assert_eq!(attributes.input.unwrap().data, [0xff, 0xfe]);
@@ -385,27 +472,60 @@ mod tests {
         assert_eq!(policy.backoff_coefficient, 2.5);
         assert_eq!(policy.maximum_attempts, 6);
         assert_eq!(policy.jitter_coefficient, 0.2);
-        assert_eq!(policy.non_retryable_error_reasons[0].as_bytes(), &[0xff, 0xfe]);
-        assert_eq!(policy.initial_interval, Some(prost_types::Duration { seconds: 0, nanos: 0 }));
+        assert_eq!(
+            policy.non_retryable_error_reasons[0].as_bytes(),
+            &[0xff, 0xfe]
+        );
+        assert_eq!(
+            policy.initial_interval,
+            Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 0
+            })
+        );
         assert_eq!(policy.maximum_interval, policy.initial_interval);
         assert_eq!(policy.expiration_interval, policy.initial_interval);
-        assert_eq!(attributes.header.unwrap().fields[&GoString::from(&[0xff, 0xfe][..])].data, [0xff, 0xfe]);
+        assert_eq!(
+            attributes.header.unwrap().fields[&GoString::from(&[0xff, 0xfe][..])].data,
+            [0xff, 0xfe]
+        );
     }
 
     #[test]
     fn scheduled_activity_absent_fields_and_wrong_typed_duplicates() {
-        let event = st(vec![(30, Value::I32(9)), (130, Value::Struct(st(vec![
-            (10, Value::Bytes(vec![0xff])), (10, Value::I32(1)),
-            (110, Value::Struct(st(vec![(50, Value::List(vec![Value::Bytes(vec![0xff])])), (50, Value::List(vec![Value::I32(1)]))]))),
-        ])))]);
+        let event = st(vec![
+            (30, Value::I32(9)),
+            (
+                130,
+                Value::Struct(st(vec![
+                    (10, Value::Bytes(vec![0xff])),
+                    (10, Value::I32(1)),
+                    (
+                        110,
+                        Value::Struct(st(vec![
+                            (50, Value::List(vec![Value::Bytes(vec![0xff])])),
+                            (50, Value::List(vec![Value::I32(1)])),
+                        ])),
+                    ),
+                ])),
+            ),
+        ]);
         let event = scheduled_activity_event(&event).unwrap();
         assert!(event.event_time.is_none());
-        let Some(a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) = event.attributes else { panic!("wrong event attributes") };
+        let Some(a::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) =
+            event.attributes
+        else {
+            panic!("wrong event attributes")
+        };
         assert_eq!(attributes.activity_id.as_bytes(), &[0xff]);
         assert!(attributes.input.is_none());
         assert!(attributes.schedule_to_close_timeout.is_none());
         assert!(attributes.header.is_none());
-        assert!(attributes.retry_policy.unwrap().non_retryable_error_reasons.is_empty());
+        assert!(attributes
+            .retry_policy
+            .unwrap()
+            .non_retryable_error_reasons
+            .is_empty());
     }
 
     fn st(f: Vec<(i16, Value)>) -> Struct {

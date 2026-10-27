@@ -95,3 +95,5 @@ pub mod thrift_matching;
 pub mod thrift_matching_native;
 #[allow(dead_code)] // Native request adapters await shared handler integration.
 pub mod thrift_matching_native_extra;
+#[allow(dead_code)] // Native response adapters await shared handler integration.
+pub mod thrift_matching_native_responses;
