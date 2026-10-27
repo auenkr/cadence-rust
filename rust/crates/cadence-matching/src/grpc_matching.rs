@@ -2035,9 +2035,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
                         Response::new(response)
-                    }).map_err(|error| {
+                    }).inspect_err(|error| {
                         adaptive_scaler_trace(&guard.key.task_list, "poll_error", &format!("poller_id={} elapsed_ms={} code={:?}", guard.key.poller, poll_started.elapsed().as_millis(), error.code()));
-                        error
                     }),
                 _=failover.changed()=>{
                     if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
@@ -2060,9 +2059,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
-                })).map(|response| {
+                })).inspect(|_| {
                     adaptive_scaler_trace(&guard.key.task_list, "poll_cancelled", &format!("poller_id={} elapsed_ms={}", guard.key.poller, poll_started.elapsed().as_millis()));
-                    response
                 }),
             };
         }
