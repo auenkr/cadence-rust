@@ -8,6 +8,9 @@ use cadence_thrift::{protocol::Reader, TType};
 use std::time::Duration;
 use tonic::{Code, Status};
 
+#[path = "matching_history_tchannel_native.rs"]
+mod native;
+
 const HISTORY_SERVICE: &str = "cadence-history";
 
 #[derive(Clone, Debug)]
@@ -2619,6 +2622,53 @@ mod typed_codec_tests {
         assert_eq!(activity_error.code(), Code::NotFound);
         assert_eq!(activity_error.message(), "activity missing");
         let _ = peer.stop_and_read();
+
+        // Exercise real generated Go decoders/encoders with non-UTF-8 strings.
+        use cadence_common::go_string::GoString;
+        use cadence_proto::native as n;
+        let raw = |value: &[u8]| GoString::from(value);
+        let (peer, address) = GoPeer::start("raw");
+        let client = TChannelHistoryClient::new(address);
+        let execution = n::api::WorkflowExecution {
+            workflow_id: raw(b"workflow-\xfe"), run_id: raw(b"run-\xfd"),
+        };
+        let task_list = n::api::TaskList { name: raw(b"queue-\xfa"), ..Default::default() };
+        let decision = client.record_decision_task_started_native(
+            &n::history::RecordDecisionTaskStartedRequest {
+                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution.clone()),
+                schedule_id: 51, task_id: 52, request_id: raw(b"decision-\xfc"),
+                poll_request: Some(n::api::PollForDecisionTaskRequest {
+                    task_list: Some(task_list.clone()), identity: raw(b"worker-\xfb"), ..Default::default()
+                }),
+            }, Duration::from_secs(3),
+        ).await.unwrap();
+        assert_eq!(decision.workflow_type.unwrap().name.as_bytes(), b"type-\xff");
+        let query = &decision.queries[&b"query-\xfe"[..]];
+        assert_eq!(query.query_type.as_bytes(), b"query-type-\xfd");
+        assert_eq!(query.query_args.as_ref().unwrap().data, [0xff, 0x00]);
+        let activity = client.record_activity_task_started_native(
+            &n::history::RecordActivityTaskStartedRequest {
+                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution),
+                schedule_id: 61, task_id: 62, request_id: raw(b"activity-\xfc"),
+                poll_request: Some(n::api::PollForActivityTaskRequest {
+                    task_list: Some(task_list), identity: raw(b"worker-\xfb"), ..Default::default()
+                }),
+            }, Duration::from_secs(3),
+        ).await.unwrap();
+        assert_eq!(activity.workflow_domain.as_bytes(), b"workflow-domain-\xff");
+        assert_eq!(activity.heartbeat_details.unwrap().data, [0xfe, 0x00]);
+        let Some(n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) = activity.scheduled_event.unwrap().attributes else { panic!("missing activity attributes") };
+        assert_eq!(attributes.activity_id.as_bytes(), b"activity-\xfd");
+        assert_eq!(attributes.input.unwrap().data, [0xfc, 0x00]);
+        let retry = attributes.retry_policy.unwrap();
+        assert_eq!(retry.non_retryable_error_reasons[0].as_bytes(), b"reason-\xfb");
+        assert_eq!(retry.initial_interval, Some(prost_types::Duration { seconds: 0, nanos: 0 }));
+        assert_eq!(retry.maximum_interval, retry.initial_interval);
+        assert_eq!(retry.expiration_interval, retry.initial_interval);
+        assert_eq!(attributes.header.unwrap().fields[&b"header-\xfa"[..]].data, [0xf9, 0x00]);
+        let calls = peer.stop_and_read();
+        assert_eq!(calls.lines().filter(|line| !line.is_empty()).count(), 2);
+
     }
 
     #[test]

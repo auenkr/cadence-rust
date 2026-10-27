@@ -4,9 +4,9 @@
 //! `String`. Declared as a child module of `matching_history` so it can use the
 //! client's private connection state.
 //!
-//! Remaining gap: TChannel raw calls need a byte-valued Thrift History client;
-//! with `with_tchannel_outbound` these methods return `Unimplemented` before any
-//! RPC or retry and never fall back through UTF-8 conversion.
+//! With `with_tchannel_outbound` the calls go through the byte-preserving
+//! Thrift mapping in `matching_history_tchannel_native.rs`; no path converts
+//! identifiers through UTF-8.
 use super::{HistoryConnection, MatchingHistoryClient};
 use cadence_api::tasktoken::{JsonTaskTokenSerializer, TaskTokenBytes};
 use cadence_common::go_string::GoString;
@@ -59,10 +59,6 @@ fn execution(task: &AllocatedTaskBytes) -> Result<n::api::WorkflowExecution, Sta
         workflow_id: task.data.workflow_id.clone(),
         run_id,
     })
-}
-
-fn unsupported_tchannel() -> Status {
-    Status::unimplemented("Raw-byte TChannel History calls are not implemented.")
 }
 
 pub(super) fn decision_response(
@@ -195,9 +191,6 @@ impl MatchingHistoryClient {
         poll: n::api::PollForDecisionTaskRequest,
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForDecisionTaskResponse, Status> {
-        if self.tchannel_peer_resolver.is_some() {
-            return Err(unsupported_tchannel());
-        }
         let execution = execution(task)?;
         let payload = n::history::RecordDecisionTaskStartedRequest {
             domain_id: domain_id.clone(),
@@ -227,7 +220,11 @@ impl MatchingHistoryClient {
                                 )
                                 .await
                             }
-                            HistoryConnection::Tchannel(..) => Err(unsupported_tchannel()),
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .record_decision_task_started_native(request.get_ref(), timeout)
+                                    .await
+                            }
                         }
                     },
                 ),
@@ -253,9 +250,6 @@ impl MatchingHistoryClient {
         poll: n::api::PollForActivityTaskRequest,
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForActivityTaskResponse, Status> {
-        if self.tchannel_peer_resolver.is_some() {
-            return Err(unsupported_tchannel());
-        }
         let execution = execution(task)?;
         let payload = n::history::RecordActivityTaskStartedRequest {
             domain_id: domain_id.clone(),
@@ -285,7 +279,11 @@ impl MatchingHistoryClient {
                                 )
                                 .await
                             }
-                            HistoryConnection::Tchannel(..) => Err(unsupported_tchannel()),
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .record_activity_task_started_native(request.get_ref(), timeout)
+                                    .await
+                            }
                         }
                     },
                 ),
@@ -471,29 +469,6 @@ mod tests {
         );
         // Malformed bytes route without UTF-8 conversion.
         resolver.workflow_bytes(b"\xff\xfe").unwrap();
-    }
-
-    #[tokio::test]
-    async fn tchannel_raw_call_is_explicitly_unsupported() {
-        let resolver = Arc::new(
-            MatchingHistoryPeerResolver::new(
-                16,
-                NamedPort::Tchannel,
-                Arc::new(Members(Vec::new())),
-            )
-            .unwrap(),
-        );
-        let client = MatchingHistoryClient::new(
-            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
-            Duration::from_secs(1),
-            1 << 20,
-        )
-        .with_tchannel_outbound(resolver);
-        let error = client
-            .start_decision_native(&raw(b"d"), &task(), Default::default())
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), tonic::Code::Unimplemented);
     }
 
     type Captured = Arc<Mutex<Option<n::history::RecordDecisionTaskStartedRequest>>>;

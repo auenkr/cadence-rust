@@ -68,6 +68,16 @@ func (p *peer) GetMutableState(ctx context.Context, request *history.GetMutableS
 
 func (p *peer) RecordDecisionTaskStarted(ctx context.Context, request *history.RecordDecisionTaskStartedRequest) (*history.RecordDecisionTaskStartedResponse, error) {
 	p.observe(ctx)
+	if p.mode == "raw" {
+		if request.GetDomainUUID() != "domain-\xff" || request.WorkflowExecution == nil || request.WorkflowExecution.GetWorkflowId() != "workflow-\xfe" || request.WorkflowExecution.GetRunId() != "run-\xfd" || request.GetRequestId() != "decision-\xfc" || request.PollRequest == nil || request.PollRequest.GetIdentity() != "worker-\xfb" || request.PollRequest.TaskList == nil || request.PollRequest.TaskList.GetName() != "queue-\xfa" {
+			panic("raw decision request bytes changed")
+		}
+		return &history.RecordDecisionTaskStartedResponse{
+			ScheduledEventId: int64Ptr(21), StartedEventId: int64Ptr(22),
+			WorkflowType: &shared.WorkflowType{Name: stringPtr("type-\xff")},
+			Queries: map[string]*shared.WorkflowQuery{"query-\xfe": {QueryType: stringPtr("query-type-\xfd"), QueryArgs: []byte{0xff, 0x00}}},
+		}, nil
+	}
 	if request.GetDomainUUID() != "domain-id" || request.WorkflowExecution == nil || request.WorkflowExecution.GetWorkflowId() != "workflow-id" || request.WorkflowExecution.GetRunId() != "run-id" || request.GetScheduleId() != 51 || request.GetTaskId() != 52 || request.GetRequestId() != "decision-request" {
 		panic("RecordDecisionTaskStarted request fields did not survive Rust Thrift mapping")
 	}
@@ -79,6 +89,22 @@ func (p *peer) RecordDecisionTaskStarted(ctx context.Context, request *history.R
 
 func (p *peer) RecordActivityTaskStarted(ctx context.Context, request *history.RecordActivityTaskStartedRequest) (*history.RecordActivityTaskStartedResponse, error) {
 	p.observe(ctx)
+	if p.mode == "raw" {
+		if request.GetDomainUUID() != "domain-\xff" || request.WorkflowExecution == nil || request.WorkflowExecution.GetWorkflowId() != "workflow-\xfe" || request.WorkflowExecution.GetRunId() != "run-\xfd" || request.GetRequestId() != "activity-\xfc" || request.PollRequest == nil || request.PollRequest.GetIdentity() != "worker-\xfb" || request.PollRequest.TaskList == nil || request.PollRequest.TaskList.GetName() != "queue-\xfa" {
+			panic("raw activity request bytes changed")
+		}
+		eventType := shared.EventTypeActivityTaskScheduled
+		return &history.RecordActivityTaskStartedResponse{
+			WorkflowDomain: stringPtr("workflow-domain-\xff"), HeartbeatDetails: []byte{0xfe, 0x00},
+			ScheduledEvent: &shared.HistoryEvent{EventId: int64Ptr(31), EventType: &eventType,
+				ActivityTaskScheduledEventAttributes: &shared.ActivityTaskScheduledEventAttributes{
+					ActivityId: stringPtr("activity-\xfd"), Input: []byte{0xfc, 0x00},
+					RetryPolicy: &shared.RetryPolicy{NonRetriableErrorReasons: []string{"reason-\xfb"}},
+					Header: &shared.Header{Fields: map[string][]byte{"header-\xfa": {0xf9, 0x00}}},
+				},
+			},
+		}, nil
+	}
 	if request.GetDomainUUID() != "domain-id" || request.WorkflowExecution == nil || request.WorkflowExecution.GetWorkflowId() != "workflow-id" || request.WorkflowExecution.GetRunId() != "run-id" || request.GetScheduleId() != 61 || request.GetTaskId() != 62 || request.GetRequestId() != "activity-request" {
 		panic("RecordActivityTaskStarted request fields did not survive Rust Thrift mapping")
 	}
