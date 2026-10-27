@@ -187,8 +187,8 @@ async fn add_decision_task_swallows_ordinary_domain_resolver_failure() {
         Request::new(request),
     )
     .await
-    .expect_err("an empty task list should reach ordinary request validation");
+    .expect_err("an unknown domain should reach ordinary domain validation");
 
-    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    assert_eq!(error.code(), tonic::Code::NotFound);
     assert!(!crate::matching_panic::is_captured_panic(&error));
 }
