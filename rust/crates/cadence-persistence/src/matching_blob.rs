@@ -210,7 +210,7 @@ fn parse_go_uuid_bytes(raw: &[u8]) -> std::result::Result<uuid::Uuid, String> {
 fn parse_cassandra_uuid_bytes(raw: &[u8]) -> std::result::Result<[u8; 16], String> {
     let mut out = [0u8; 16]; let mut j = 0usize;
     for &b in raw {
-        if b == b'-' && j % 2 == 0 { continue; }
+        if b == b'-' && j & 1 == 0 { continue; }
         let digit = match b { b'0'..=b'9' => b-b'0', b'a'..=b'f' => b-b'a'+10, b'A'..=b'F' => b-b'A'+10, _ => return Err(format!("invalid UUID bytes {raw:?}")) };
         if j >= 32 { return Err(format!("invalid UUID bytes {raw:?}")); }
         out[j/2] |= digit << (4-(j%2)*4); j += 1;

@@ -91,3 +91,5 @@ pub mod matching_throttled_logger;
 pub mod matching_writer;
 #[allow(clippy::result_large_err)]
 pub mod thrift_matching;
+#[allow(dead_code)] // Native adapters await native Matching handler integration.
+pub mod thrift_matching_native;

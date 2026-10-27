@@ -1,5 +1,6 @@
 //! Cadence public and internal protobuf APIs, generated from upstream IDLs.
 pub mod native;
+pub mod native_service;
 pub mod task_list_partition;
 pub mod task_list_status;
 // Preserve generated tonic signatures, protobuf oneofs, and upstream IDL docs.

@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::path::Path;
 
+#[path = "native_wire.rs"]
+mod wire;
+
 type Messages = BTreeMap<String, Definition>;
 
 #[derive(Clone)]
@@ -398,6 +401,7 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
             }
             text.push_str(if outbound { "}) } }\n" } else { "} } }\n" });
         }
+        text.push_str(&wire::implementation(&messages, definition));
         tree.insert(&definition.modules, &text);
         for (index, oneof) in message.oneof_decl.iter().enumerate() {
             let alternatives: Vec<_> = message

@@ -212,6 +212,11 @@ jobs:
             crates/cadence-persistence/src/matching_task_store.rs
             crates/cadence-proto/build.rs
             crates/cadence-proto/build/native_model.rs
+            crates/cadence-proto/build/native_wire.rs
+            crates/cadence-proto/build/native_service.rs
+            crates/cadence-proto/src/native_service.rs
+            crates/cadence-proto/tests/native_matching_transport.rs
+            crates/cadence-matching/src/thrift_matching_native.rs
             crates/cadence-proto/src/lib.rs
             crates/cadence-proto/src/native.rs
             crates/cadence-matching/src/grpc_matching.rs

@@ -10,6 +10,11 @@ prost = "0.13"
 prost-types = "0.13"
 tonic = "0.12"
 
+[dev-dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+
 [build-dependencies]
 heck = "0.5"
 prost = "0.13"
