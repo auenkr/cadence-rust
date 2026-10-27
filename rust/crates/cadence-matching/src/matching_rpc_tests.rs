@@ -5719,7 +5719,8 @@ async fn matching_rpc_native_partition_concurrent_versions_and_fencing() {
         )
         .await
         .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Unavailable);
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert!(error.details().is_empty());
     assert!(root.queue.is_stopped());
     assert_eq!(root.partitions.get().unwrap().version, 2);
 }

@@ -1643,6 +1643,9 @@ mod tests {
                 .expect("reader never reported the invariant violation")
                 .unwrap();
             assert!(detail.contains(expected), "{detail}");
+            // The registry's owner shutdown stops all reader loops after the
+            // fatal notification. This standalone fixture owns that shutdown.
+            reader.stop();
             tokio::time::timeout(Duration::from_secs(2), reader.wait_stopped())
                 .await
                 .expect("reader pump must stop after the fatal report");

@@ -1395,7 +1395,7 @@ mod tests {
                 .await
                 .expect("throttled, not a panic");
             let (name, message) = error.expect("ServiceBusy exception");
-            assert_eq!(name, "serviceBusyError", "{method}");
+            assert_eq!(name, "ServiceBusyError", "{method}");
             assert_eq!(message, "Matching host rps exceeded", "{method}");
         }
         let counted = |operation: &str| {
