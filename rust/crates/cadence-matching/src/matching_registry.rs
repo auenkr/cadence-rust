@@ -1900,7 +1900,23 @@ impl QueueRegistry {
                 ..AggregateMetrics::default()
             }
         };
+        let observed_qps = metrics.total_qps;
         let prepared = scaler.tick_prepare(config, now, &current.write_partitions, &metrics);
+        if std::env::var("CADENCE_MATCHING_RETRY_TRACE_TASK_LIST").as_deref()
+            == Ok(root.name.as_str())
+        {
+            eprintln!(
+                "matching_retry_boundary ts={} task_list={} boundary=scaler_tick qps={:.3} old_read={} old_write={} new_write={} upscale_rps={:.3} update_interval_nanos={}",
+                now,
+                root.name,
+                observed_qps,
+                current.read_partitions.len(),
+                current.write_partitions.len(),
+                prepared.write.len(),
+                config.upscale_rps,
+                config.update_interval_nanos,
+            );
+        }
         let name = cadence_common::task_list::TaskListName::parse(&root.name)
             .map_err(Status::invalid_argument)?;
         let write_for_describe = prepared.write.clone();

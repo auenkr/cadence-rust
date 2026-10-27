@@ -1831,6 +1831,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             });
         }
         let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
+        retry_boundary_trace(&task_list, "poll_received", &format!("poller_id={}", r.poller_id));
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -1962,6 +1963,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                     }
                 }=>
                     result.map(|mut response| {
+                        retry_boundary_trace(&guard.key.task_list, "poll_returned", &format!("task_token_present={} workflow={} run={} started_event_id={}",
+                            !response.task_token.is_empty(),
+                            response.workflow_execution.as_ref().map_or("", |execution| execution.workflow_id.as_str()),
+                            response.workflow_execution.as_ref().map_or("", |execution| execution.run_id.as_str()),
+                            response.started_event_id));
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
@@ -2278,6 +2284,14 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     log_received_add_task("Received AddDecisionTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 0, r.schedule_id);
+                    retry_boundary_trace(
+                        r.task_list.as_ref().map_or("", |list| list.name.as_str()),
+                        "add_received",
+                        &format!("workflow={} run={} schedule_id={}",
+                            r.workflow_execution.as_ref().map_or("", |execution| execution.workflow_id.as_str()),
+                            r.workflow_execution.as_ref().map_or("", |execution| execution.run_id.as_str()),
+                            r.schedule_id),
+                    );
                     task_list_name(
                         r.task_list
                             .as_ref()
@@ -2401,6 +2415,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 })
                                 .await?;
                             if let Some(partition_config) = matched {
+                                retry_boundary_trace(&list.name, "add_sync_matched", &format!("forwarded={forwarded}"));
                                 // Go records the handler-level latency only when AddTask sync matched.
                                 self.metrics.handler_sync_match_latency(
                                     "AddDecisionTask",
@@ -2420,6 +2435,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         // Go `errRemoteSyncMatchFailed`: a forwarded add never persists;
                         // the child partition keeps the task when sync matching fails.
                         if forwarded {
+                            retry_boundary_trace(&list.name, "add_forward_failed", "forwarded=true");
                             return Err(Self::remote_sync_failed());
                         }
                         queue
@@ -2431,6 +2447,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     .unwrap_or_default(),
                             )
                             .await?;
+                        retry_boundary_trace(&list.name, "add_enqueued", "forwarded=false");
                         return Ok(Response::new(m::AddDecisionTaskResponse {
                             partition_config: queue
                                 .partitions
@@ -4138,6 +4155,24 @@ fn log_received_add_task(
             ),
         ],
     );
+}
+
+/// Opt-in boundary tracing for adaptive workflow-task retry investigations.
+/// Set CADENCE_MATCHING_RETRY_TRACE_TASK_LIST to the root queue name. Child
+/// partitions recognized by `TaskListName::parse` are included. Task payloads
+/// and tokens are never emitted.
+fn retry_boundary_trace(task_list: &str, boundary: &str, fields: &str) {
+    let Ok(root) = std::env::var("CADENCE_MATCHING_RETRY_TRACE_TASK_LIST") else {
+        return;
+    };
+    if cadence_common::task_list::TaskListName::parse(task_list)
+        .is_ok_and(|parsed| parsed.root() == root)
+    {
+        eprintln!(
+            "matching_retry_boundary ts={} task_list={} boundary={} {}",
+            matching_now(), task_list, boundary, fields
+        );
+    }
 }
 
 /// Go `engine.go` "Emitting tasklist counter on ..." event.

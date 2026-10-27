@@ -1115,6 +1115,7 @@ try:
                             probe_environment[name] = '1'
                     if args.probe_adaptive_retry_only:
                         probe_environment['CADENCE_ADAPTIVE_RETRY_ONLY'] = '1'
+                        probe_environment['CADENCE_MATCHING_RETRY_TRACE_TASK_LIST'] = 'production-adaptive-scaler-probe'
                     if args.matching_configstore:
                         seed_values = {
                             'matching.longPollExpirationInterval': '"2s"',
