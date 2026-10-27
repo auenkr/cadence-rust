@@ -21,3 +21,14 @@ The earlier decision's successful `poll_returned` on partition 72 does not estab
 Bounded audit: no demonstrated reader/forwarder correctness defect yet. The specific candidate is Rust's fixed 2s per-forward timeout versus Go's dynamically computed dispatch-context deadline, not the SDK's 60s decision wait. To determine whether this explains the incident, record for this task and each attempt: child/parent tasklist, attempt start and end timestamps, exact gRPC status including deadline/cancellation, whether the parent Add accepted/enqueued it, and whether the durable row was completed/acked. Correlate those records with task token return and the computed Go-equivalent dispatch deadline. A Rust attempt that is canceled at 2s while the Go-equivalent deadline remains live would establish the behavioral divergence; absence of that condition would rule it out for this trace. Keep all existing scenario budgets and routing assertions unchanged.
 
 Validation: read-only source and captured-artifact audit; no Cargo/Go commands and no mixed-cluster run were started. Existing diagnostic evidence is from Actions run 40469125507, explicitly `acceptanceEligible:false`; it is not acceptance evidence for a code change.
+
+## Parent correction: the two-second child timeout matches Go
+
+The comparison above omitted the caller of `ForwardTask`.
+`go/service/matching/tasklist/matcher.go:375` in `MustOffer` explicitly creates
+`childCtx, cancel := context.WithTimeout(ctx, time.Second*2)` and passes that
+context to `tm.fwdr.ForwardTask(childCtx, task)`. Its failed-forward local offer
+also waits for the same child context. Rust's two-second forward deadline plus
+outer dispatch deadline therefore matches this Go layering. The claim of a
+concrete timeout source difference is superseded; do not change this timeout.
+Per-attempt status/ack traces may still discriminate the observed delivery lag.
