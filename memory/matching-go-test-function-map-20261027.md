@@ -31,7 +31,7 @@ Rust paths are under `rust/crates/cadence-matching/src` unless noted.
 - `TestTaskReaderBatchSizeValidation` (4): COVERED. `matching_reader_batch_size_fallback_sizes_group_buffer_like_go`.
 
 ## tasklist/task_list_limiter_test.go (`TestTaskListLimiter`, 12 cases)
-- EQUIV. `tests/fixtures/matching-rate.json` (11 cases) via `cadence-common/src/matching_rate.rs` `matching_rate_original_go_report_sequences`, plus `matching_limiter.rs` `report_divides_by_live_partition_count`, `report_limit_returns_go_rate_gauge_updates`, `default_limit_and_report_divide_by_partitions`. The 12 Go rows are not individually named or asserted (11 fixture cases vs 12 Go rows). TEST-GAP at row level.
+- COVERED. `cadence-matching/tests/matching_partial_upgrade_d.rs` `task_list_limiter_matches_go_limit_table` asserts all 12 named Go cases (`no update`, `take lower`, `take lowest`, `ignore higher`, `take higher after ttl`, `keep lower if reported within ttl`, `taker higher if lower not recently reported`, three partition recalculation on TTL expiry cases, `recalculate partitions on early updates`, and `recalculate partitions even when keeping lower limit`). The 11-row matching-rate fixture is a separate report sequence fixture; it does not imply a missing limiter row.
 
 ## liveness/liveness_test.go (in `go/service/matching/liveness/`)
 - TestIsAlive_No/Yes, TestMarkAlive_Noop/Updated: COVERED by fixture `cadence-common/src/liveness.rs` `original_go_liveness_fixtures` (`tests/fixtures/matching-liveness.json`). The Rust type is pull-based, with explicit `now`. The mocked clock is a MOCK shape.

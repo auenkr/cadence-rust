@@ -1837,21 +1837,20 @@ mod tests {
         stop(queue, grouped).await;
     }
 
-    /// Go TestRateLimitErrorsFromTasklistDispatch: a throttled dispatch is
-    /// retried (counted as a buffer throttle) and the task is neither
-    /// dropped nor acked. Go injects `dispatchTask`; Rust has no hook, so a
-    /// zero-rate limiter produces the same throttled outcome (`wait_until`).
+    /// Reader-boundary recovery analogue for Go's
+    /// `TestConcurrentAddAndPollActivitiesWithZeroDispatch`: throttling keeps
+    /// the durable head unacked, and restoring the reported rate after TTL
+    /// lets that same task reach a poller. This does not reproduce Go's
+    /// concurrent RPC scenario.
     #[tokio::test]
-    async fn matching_reader_retries_throttled_dispatch_without_acking() {
+    async fn matching_reader_zero_dispatch_recovers_same_durable_task_after_ttl() {
         let (_directory, queue, reader, wake) = fixture(0, 1);
         reader.stop();
         reader.wait_stopped().await;
-        let clock: crate::matching_limiter::Clock = Arc::new(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as i64
-        });
+        let clock_now = Arc::new(AtomicI64::new(now()));
+        let clock_value = clock_now.clone();
+        let clock: crate::matching_limiter::Clock =
+            Arc::new(move || clock_value.load(Ordering::SeqCst));
         let limiter = Arc::new(TaskListLimiter::new(
             clock,
             0.0,
@@ -1864,7 +1863,7 @@ mod tests {
             wake.clone(),
             ReaderConfig::default(),
             Arc::new(|| true),
-            limiter,
+            limiter.clone(),
             IsolationConfig::default(),
         );
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
@@ -1900,6 +1899,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(queue.levels().1, 0, "throttled task must not be acked");
+        assert_eq!(queue.levels().0, 1, "durable task remains readable");
+
+        clock_now.fetch_add(
+            crate::matching_limiter::TASK_DISPATCH_RPS_TTL_NANOS + 1,
+            Ordering::SeqCst,
+        );
+        limiter.report_limit(100.0);
+        let delivered = tokio::time::timeout(Duration::from_secs(3), reader.poll())
+            .await
+            .expect("restored dispatch rate should deliver the pending task")
+            .expect("reader should return the durable task");
+        assert_eq!(delivered.data.schedule_id, 3);
+        assert_eq!(queue.levels().1, 1, "accepted task is acknowledged");
         stop(queue, reader).await;
     }
 

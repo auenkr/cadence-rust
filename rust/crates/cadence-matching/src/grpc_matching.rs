@@ -3574,6 +3574,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 ),
                 async {
             self.check_rpc_quota(crate::matching_quota::MatchingRpc::RefreshTaskListPartitionConfig, Some(&request.get_ref().domain_id), None)?;
+                    let caller_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
                     let domain = self.domain_name(&r.domain_id)?;
                     let task_list = r.task_list.unwrap_or_default();
@@ -3596,7 +3597,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         registry
-                            .refresh_partition_config(
+                            .refresh_partition_config_with_deadline(
                                 cadence_persistence::matching_sqlite::TaskListKey {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
@@ -3605,6 +3606,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 },
                                 queue,
                                 r.partition_config.map(partition_config_from_proto),
+                                caller_deadline,
                             )
                             .await?;
                         return Ok(Response::new(m::RefreshTaskListPartitionConfigResponse {}));

@@ -5,6 +5,9 @@
 //! dependencies. The production domain cache can be attached through the
 //! cache-aware constructors; membership discovery/eviction remains a separate
 //! adapter, so this owner does not represent complete Go Matching parity.
+#[cfg(test)]
+#[path = "matching_failover_callback_tests.rs"]
+mod failover_callback_tests;
 use crate::{admin::DynamicConfigOverlay, grpc_matching::Matching};
 use cadence_persistence::matching_task_store::MatchingTaskStore;
 use std::{

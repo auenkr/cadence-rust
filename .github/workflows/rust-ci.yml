@@ -196,6 +196,7 @@ jobs:
             crates/cadence-matching/src/matching_registry.rs
             crates/cadence-matching/src/lib.rs
             crates/cadence-matching/src/matching_partition_cancellation_tests.rs
+            crates/cadence-matching/src/matching_failover_callback_tests.rs
             crates/cadence-common/src/backoff.rs
           )
           existing=()

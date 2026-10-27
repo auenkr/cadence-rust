@@ -1,5 +1,12 @@
 # Matching concurrent delivery and live lease stealing — 2026-10-27
 
+Parent correction: the public add RPCs DO expose `partition_config` (consumed
+by grpc_matching.rs). The source now includes concurrent decision delivery and
+activity/decision isolation cases using this field. Helpers retry empty polls,
+bound completion, shut down registries, assert persisted rows are GC'd and join
+the History server. These additions await CI; the worker scope below is the
+earlier checkpoint, not the current test inventory.
+
 Scope: `rust/crates/cadence-matching/tests/matching_concurrent_go_parity.rs`.
 No production code was changed.
 

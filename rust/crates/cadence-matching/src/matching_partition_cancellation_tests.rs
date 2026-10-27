@@ -19,9 +19,18 @@ struct BlockedPartitionStore {
     entered: tokio::sync::Notify,
     released: (Mutex<bool>, Condvar),
     updates: AtomicUsize,
+    read_failure: Mutex<Option<BackendErrorKind>>,
+    reads: AtomicUsize,
 }
 impl MatchingTaskStore for BlockedPartitionStore {
     fn get_task_list(&self, key: &TaskListKey) -> StoreResult<TaskListRecord> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(kind) = *self.read_failure.lock().unwrap() {
+            return Err(MatchingTaskStoreError::Backend {
+                kind,
+                message: "partition refresh failed".into(),
+            });
+        }
         self.inner.get_task_list(key)
     }
     fn lease(
@@ -104,6 +113,8 @@ async fn dropped_partition_update_without_deadline_cancels_retry_and_counts_fail
         entered: tokio::sync::Notify::new(),
         released: (Mutex::new(false), Condvar::new()),
         updates: AtomicUsize::new(0),
+        read_failure: Mutex::new(None),
+        reads: AtomicUsize::new(0),
     });
     let sink = Arc::new(RecordingMetricSink::default());
     let history = MatchingHistoryClient::new(
@@ -164,4 +175,55 @@ async fn dropped_partition_update_without_deadline_cancels_retry_and_counts_fail
         1
     );
     registry.shutdown(3).await.unwrap();
+}
+
+/// Go RefreshTaskListPartitionConfig returns the last persistence error through
+/// handleErr; cancellation stops retry waiting without stopping the manager.
+#[tokio::test]
+async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller() {
+    use cadence_api::types::DomainInfo;
+    use cadence_proto::matching::matching_api_server::MatchingApi;
+    for kind in [BackendErrorKind::Permanent, BackendErrorKind::Timeout, BackendErrorKind::Throttled] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(BlockedPartitionStore {
+            inner: Arc::new(SqliteTaskStore::create(directory.path().join("refresh.db"), BlobEncoding::ThriftRW).unwrap()),
+            entered: tokio::sync::Notify::new(),
+            released: (Mutex::new(true), Condvar::new()),
+            updates: AtomicUsize::new(1),
+            read_failure: Mutex::new(None),
+            reads: AtomicUsize::new(0),
+        });
+        let history = MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1), 1024,
+        );
+        let registry = QueueRegistry::new(store.clone(), history, NonZeroU32::new(100).unwrap());
+        let key = TaskListKey { domain_id: Uuid::from_u128(1), name: "refresh-failure".into(), task_type: 0 };
+        let state = crate::handlers::AppState::default();
+        state.domains.create(DomainInfo { name: "refresh-domain".into(), uuid: key.domain_id.to_string(), ..Default::default() }, Default::default(), Default::default(), false).unwrap();
+        let matching = Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(5));
+        let handle = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: key.name.clone(), kind: 1, ..Default::default() }, 0).await.unwrap();
+        let cached = StoredPartitionConfig { version: 7, read_partitions: HashMap::from([(0, vec![])]), write_partitions: HashMap::from([(0, vec![])]) };
+        handle.partitions.push(&cached);
+        store.reads.store(0, Ordering::SeqCst);
+        *store.read_failure.lock().unwrap() = Some(kind);
+        let mut request = Request::new(m::RefreshTaskListPartitionConfigRequest {
+            domain_id: key.domain_id.to_string(), task_list: Some(p::TaskList { name: key.name.clone(), kind: 1, ..Default::default() }), task_list_type: 1, ..Default::default()
+        });
+        request.set_timeout(Duration::ZERO);
+        let status = matching.refresh_task_list_partition_config(request).await.unwrap_err();
+        if kind == BackendErrorKind::Throttled {
+            assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+            assert!(!status.details().is_empty());
+        } else {
+            assert_eq!(status.code(), tonic::Code::Internal);
+            assert!(status.details().is_empty());
+        }
+        assert!(status.message().contains("partition refresh failed"));
+        assert_eq!(store.reads.load(Ordering::SeqCst), 1, "expired caller still runs first read, then cancels retry waiting");
+        assert_eq!(handle.partitions.get().unwrap(), cached);
+        assert!(!handle.queue.is_stopped(), "refresh failure does not stop the Go manager");
+        *store.read_failure.lock().unwrap() = None;
+        registry.shutdown(3).await.unwrap();
+    }
 }

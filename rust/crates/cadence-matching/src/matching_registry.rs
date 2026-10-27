@@ -2297,11 +2297,22 @@ impl QueueRegistry {
     }
     pub async fn refresh_partition_config(
         &self,
-        mut key: TaskListKey,
+        key: TaskListKey,
         handle: QueueHandle,
         config: Option<cadence_persistence::StoredPartitionConfig>,
     ) -> Result<(), Status> {
+        self.refresh_partition_config_with_deadline(key, handle, config, None).await
+    }
+    pub async fn refresh_partition_config_with_deadline(
+        &self,
+        mut key: TaskListKey,
+        handle: QueueHandle,
+        config: Option<cadence_persistence::StoredPartitionConfig>,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<(), Status> {
         let store = self.store.clone();
+        let caller_cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _cancel_on_drop = PartitionUpdateCancellation(caller_cancelled.clone());
         tokio::task::spawn_blocking(move || {
             if let Some(config) = config {
                 handle.partitions.push(&config);
@@ -2311,7 +2322,11 @@ impl QueueRegistry {
                 .map_err(Status::invalid_argument)?
                 .root()
                 .into();
-            handle.partitions.refresh(store.as_ref(), &key)
+            let deadline = caller_deadline.map(tokio::time::Instant::into_std);
+            handle.partitions.refresh_until(store.as_ref(), &key, || {
+                caller_cancelled.load(std::sync::atomic::Ordering::Acquire)
+                    || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+            })
         })
         .await
         .map_err(|error| Status::internal(error.to_string()))?

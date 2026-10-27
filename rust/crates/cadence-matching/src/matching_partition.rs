@@ -140,7 +140,7 @@ impl PartitionCache {
             match cadence_persistence::matching_retry::persistence(|| store.get_task_list(&root)) {
                 Ok(info) => info.data.adaptive_partition_config,
                 Err(StorageError::NotFound) => None,
-                Err(error) => return Err(Status::unavailable(error.to_string())),
+                Err(error) => return Err(update_failure_status(&error)),
             }
         };
         Ok(Self(Mutex::new(config.map(from_storage))))
@@ -163,11 +163,19 @@ impl PartitionCache {
         }
     }
     pub fn refresh(&self, store: &dyn MatchingTaskStore, root: &TaskListKey) -> Result<(), Status> {
+        self.refresh_until(store, root, || false)
+    }
+    pub fn refresh_until(
+        &self,
+        store: &dyn MatchingTaskStore,
+        root: &TaskListKey,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<(), Status> {
         // Explicit reload replaces even a newer cache and can clear it.
-        let config = cadence_persistence::matching_retry::persistence(|| store.get_task_list(root))
+        let config = cadence_persistence::matching_retry::persistence_until(|| store.get_task_list(root), cancelled)
             .map_err(|error| match error {
                 StorageError::NotFound => Status::not_found(error.to_string()),
-                _ => Status::unavailable(error.to_string()),
+                _ => update_failure_status(&error),
             })?
             .data
             .adaptive_partition_config
