@@ -14,7 +14,7 @@ use cadence_matching::{
     grpc_matching::Matching, matching_history::MatchingHistoryClient,
     matching_registry::QueueRegistry, thrift_matching::dispatch,
 };
-use cadence_proto::{api as p, matching as m};
+use cadence_proto::{api as p, history as h, matching as m};
 use cadence_service_core::handlers::AppState;
 use cadence_thrift::{Struct, Value};
 use cadence_api::types::DomainInfo;
@@ -24,7 +24,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tonic::{Code, Request};
+use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
 const DOMAIN: &str = "test-domain";
@@ -67,8 +67,14 @@ fn now_nanos() -> i64 {
 }
 
 fn registry(store: Arc<SqliteTaskStore>) -> QueueRegistry {
+    registry_with_history(store, "http://127.0.0.1:1")
+}
+
+fn registry_with_history(store: Arc<SqliteTaskStore>, history: &str) -> QueueRegistry {
     let history = MatchingHistoryClient::new(
-        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        tonic::transport::Endpoint::from_shared(history.to_string())
+            .unwrap()
+            .connect_lazy(),
         Duration::from_secs(1),
         4 * 1024 * 1024,
     );
@@ -84,13 +90,17 @@ struct Durable {
 }
 
 fn durable() -> Durable {
+    durable_with_history("http://127.0.0.1:1")
+}
+
+fn durable_with_history(history: &str) -> Durable {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(
         SqliteTaskStore::create(dir.path().join("queue.db"), BlobEncoding::ThriftRW).unwrap(),
     );
-    let queues = registry(store.clone());
+    let queues = registry_with_history(store.clone(), history);
     let matching = Matching::with_durable_queues(state, queues.clone(), Duration::from_secs(10));
     Durable {
         _dir: dir,
@@ -428,9 +438,9 @@ async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_upda
 // returned". A decision added while a poller waits is delivered, and AddDecisionTask succeeds. The
 // MustOffer-error and standby-completion cases are not ported here.
 #[tokio::test]
-#[ignore = "parity gap: with a waiting decision poller, AddDecisionTask returns Ok but the poller is not handed the task; it ends at its ~7s wait with an empty response (auto_config_hint poller_wait_time_in_ms 6995). Go hands the task to MustOffer. Suspected cause, unverified: this fixture's History peer is unreachable (127.0.0.1:1), so delivery may depend on History StartWorkflow"]
 async fn go_dispatch_task_active_offer_without_error_reaches_poller() {
-    let durable = durable();
+    let history = start_history().await;
+    let durable = durable_with_history(&history);
     let matching = durable.matching.clone();
     let poll = tokio::spawn(async move {
         let mut request = Request::new(m::PollForDecisionTaskRequest {
@@ -467,6 +477,38 @@ async fn go_dispatch_task_active_offer_without_error_reaches_poller() {
     durable.matching.add_decision_task(add).await.unwrap();
     let response = poll.await.unwrap().unwrap().into_inner();
     assert!(!response.task_token.is_empty(), "poll returned {response:?}");
+    assert_eq!(response.started_event_id, 10, "{response:?}");
+}
+
+/// Reachable History peer: the sync-matched task is started via RecordDecisionTaskStarted.
+struct StartingHistory;
+
+#[tonic::async_trait]
+impl h::history_api_server::HistoryApi for StartingHistory {
+    async fn record_decision_task_started(
+        &self,
+        request: Request<h::RecordDecisionTaskStartedRequest>,
+    ) -> Result<Response<h::RecordDecisionTaskStartedResponse>, Status> {
+        let request = request.into_inner();
+        Ok(Response::new(h::RecordDecisionTaskStartedResponse {
+            scheduled_event_id: request.schedule_id,
+            started_event_id: request.schedule_id + 1,
+            ..Default::default()
+        }))
+    }
+}
+
+async fn start_history() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(h::history_api_server::HistoryApiServer::new(StartingHistory))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    format!("http://{address}")
 }
 
 // ---------------------------------------------------------------------------
