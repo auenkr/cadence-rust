@@ -10,6 +10,25 @@ use std::{
 };
 use tokio::sync::{mpsc, watch, Notify};
 
+// Deliberately opt-in and probe-specific: production task traffic is silent
+// unless the adaptive-scaler probe sets this exact value.
+fn adaptive_reader_trace(task_list: &str, event: &str, fields: std::fmt::Arguments<'_>) {
+    if std::env::var("CADENCE_MATCHING_ADAPTIVE_TRACE").as_deref()
+        == Ok("production-adaptive-scaler-probe")
+        && cadence_common::task_list::TaskListName::parse(task_list)
+            .is_ok_and(|parsed| parsed.root() == "production-adaptive-scaler-probe")
+    {
+        eprintln!("matching_adaptive_trace task_list={task_list} {event} {fields}");
+    }
+}
+
+fn reader_partition_parts(name: &str) -> (&str, &str) {
+    match name.rsplit_once('/') {
+        Some((root, leaf)) if leaf.parse::<u32>().is_ok() => (root, "child"),
+        _ => (name, "root"),
+    }
+}
+
 /// Go `matching.getTasksBatchSize` property default. Go's reader falls back to
 /// it whenever the live value is not positive.
 pub const DEFAULT_TASKS_BATCH_SIZE: i64 = 1000;
@@ -559,6 +578,18 @@ impl TaskReader {
                     };
                     let Some(task) = task else { break };
                     let dispatch_started = std::time::Instant::now();
+                    let trace_list = dispatch_metrics
+                        .lock()
+                        .expect("matching reader metrics lock")
+                        .as_ref()
+                        .map(|metrics| metrics.context.task_list.clone())
+                        .unwrap_or_default();
+                    let (trace_root, trace_partition) = reader_partition_parts(&trace_list);
+                    adaptive_reader_trace(&trace_list, "reader_head_dispatch_begin", format_args!(
+                        "root_partition={} partition={} workflow_id={} run_id={} schedule_id={} task_id={}",
+                        trace_root, trace_partition, task.data.workflow_id, task.data.run_id_string(),
+                        task.data.schedule_id, task.task_id,
+                    ));
                     let mut dispatch_attempt = 0u64;
                     loop {
                         // Go rechecks expiry at each dispatch attempt, including
@@ -713,10 +744,27 @@ impl TaskReader {
                                     None => return Attempt::Stopped,
                                 };
                                 let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                                let forward_started = std::time::Instant::now();
                                 let result = tokio::select! {
                                     result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())) => result,
                                     _ = dispatch_stop.changed() => return Attempt::Stopped,
                                 };
+                                let forward_status = match &result {
+                                    Ok(Ok(())) => "ok".to_owned(),
+                                    Ok(Err(error)) => format!("error:{error:?}"),
+                                    Err(_) => "deadline_exceeded".to_owned(),
+                                };
+                                let parent_destination = match trace_list.rsplit_once('/') {
+                                    Some((root, leaf)) if leaf.parse::<u32>().is_ok() => root.to_owned(),
+                                    _ => String::new(),
+                                };
+                                adaptive_reader_trace(&trace_list, "reader_forward_attempt", format_args!(
+                                    "root_partition={} partition={} parent_destination={} workflow_id={} run_id={} schedule_id={} task_id={} elapsed_ms={} status={} outer_dispatch_deadline_ms={} child_forward_deadline_ms=2000",
+                                    trace_root, trace_partition, parent_destination, task.data.workflow_id,
+                                    task.data.run_id_string(), task.data.schedule_id, task.task_id,
+                                    forward_started.elapsed().as_millis(), forward_status,
+                                    deadline.map(|at| at.saturating_sub(dispatch_limiter.now()).max(0) / 1_000_000).unwrap_or(-1),
+                                ));
                                 drop(token);
                                 match result {
                                     Ok(Ok(())) => return Attempt::Forwarded(attempt),
@@ -779,7 +827,12 @@ impl TaskReader {
                                 attempt_started.elapsed(),
                             );
                         }
-                        match outcome {
+                        adaptive_reader_trace(&trace_list, "reader_head_dispatch_end", format_args!(
+                            "root_partition={} partition={} workflow_id={} run_id={} schedule_id={} task_id={} outcome={:?} elapsed_ms={}",
+                            trace_root, trace_partition, task.data.workflow_id, task.data.run_id_string(),
+                            task.data.schedule_id, task.task_id, outcome, dispatch_started.elapsed().as_millis(),
+                        ));
+                        match &outcome {
                             Attempt::Offered => {
                                 if let Some(reader_metrics) = dispatch_metrics
                                     .lock()
@@ -796,7 +849,7 @@ impl TaskReader {
                             }
                             Attempt::OfferedAfterForwardRetry(attempt) => {
                                 if let Some(metrics) = dispatch_metrics.lock().expect("matching reader metrics lock").as_ref() {
-                                    metrics.metrics.async_match_local(&metrics.context, Some(attempt), dispatch_started.elapsed());
+                                    metrics.metrics.async_match_local(&metrics.context, Some(*attempt), dispatch_started.elapsed());
                                 }
                                 break;
                             }
@@ -808,13 +861,21 @@ impl TaskReader {
                                 {
                                     reader_metrics.metrics.async_match_forward(
                                         &reader_metrics.context,
-                                        attempt,
+                                        *attempt,
                                         dispatch_started.elapsed(),
                                     );
                                 }
                                 let queue = dispatch_queue.clone();
                                 let id = task.task_id;
-                                if !matches!(crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
+                                let completion = crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await;
+                                let completion_ok = matches!(&completion, Ok(Ok(_)));
+                                adaptive_reader_trace(&trace_list, "reader_durable_completion", format_args!(
+                                    "root_partition={} partition={} workflow_id={} run_id={} schedule_id={} task_id={} outcome={}",
+                                    trace_root, trace_partition, task.data.workflow_id, task.data.run_id_string(),
+                                    task.data.schedule_id, task.task_id,
+                                    if completion_ok { "acknowledged" } else { "failed" },
+                                ));
+                                if !completion_ok {
                                     dispatch_queue.stop();
                                     break 'dispatch;
                                 }
@@ -828,7 +889,7 @@ impl TaskReader {
                                 {
                                     reader_metrics.metrics.async_match_local_after_forward_failure(
                                         &reader_metrics.context,
-                                        attempt,
+                                        *attempt,
                                         dispatch_started.elapsed(),
                                     );
                                 }
