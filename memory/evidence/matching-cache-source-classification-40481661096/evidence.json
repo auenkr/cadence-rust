@@ -1,0 +1,10 @@
+{
+  "runUrl": "https://github.com/auenkr/cadence-rust/actions/runs/40481661096",
+  "headSha": "7a159cea82fdbdfe36e3a3d1c607acba5aff3bef",
+  "conclusion": "success",
+  "scope": "cadence-matching focused; predates integrated native name resolver and error mapping; not final acceptance",
+  "hashes": {
+    "clippy.log": "efdb6f8dc980f2bf67634d3f2a0940bee9f9239027c654abd42fdc81899f4909",
+    "test.log": "f22cf286e8b1369f6c69b4b8114011275b22899f7301fa49be40adcaa1924cd6"
+  }
+}
