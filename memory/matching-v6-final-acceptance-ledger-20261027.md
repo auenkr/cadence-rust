@@ -85,3 +85,28 @@ and sticky-kind lease errors, missing typed backend transient failures. A worker
 is repairing it with a backend-timeout regression. Separate workers resolve
 Thrift nil/wrong-type wire decoding and the audit's crash-vs-unload deviations.
 V7 is deferred until all confirmed fixes and tests are reviewed.
+
+## Source corrections and focused CI (14:51 UTC)
+
+- 4d792720e fixes backend transient rewrite retries and adds typed backend tests.
+- 992546428 introduces Matching-local Go-compatible Thrift field normalization
+  and nil-request startup/metrics/quota ordering; shared persistence decoders
+  remain untouched. Focused CI 40523891312 failed compilation in new tests:
+  SQLite inherent CreateTasks signature shadowed the trait, and an async test
+  borrowed a temporary Struct. Neither was a production failure.
+- 4a5bd569a fixes those compile errors, removes a nonexistent schema test case,
+  corrects duplicate container/argument semantics, and maps failed partition
+  updates to Go Internal or typed ServiceBusy rather than Unavailable.
+- Focused formatting + Clippy/tests run:
+  https://github.com/auenkr/cadence-rust/actions/runs/40525224830
+  head 4a5bd569a861fc4264d07270a3edf0c34e4f0b42, pending at dispatch.
+  Cancelled duplicate automatic push run 40525218300. Download the
+  matching-format-patch artifact and apply/reconcile after current edits settle;
+  all formatting must be performed on CI, never locally.
+
+Three active Sonnet low-effort workers: 2cae7802 reader host-fatal wiring and
+regression (all required runtime files now granted); 8255bd8a original Go test
+function mapping; 386136a8 partition deadlines and failure metrics trace.
+The earlier audit's 'intentional, accepted divergence' for reader invariant
+crashes was NOT authorized by the user and is not accepted. Go logger.Fatal
+behavior must be preserved; wiring is in progress. No source pin cut yet.
