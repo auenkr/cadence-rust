@@ -46,10 +46,10 @@ jobs:
       - name: Run Go Frontend/History/Worker with TLS Rust Matching
         run: |
           set +e
-          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --matching-rpc-tls --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3' > out/command.txt
+          printf '%s\n' 'tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" --matching-rpc-tls --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --evidence-dir out/gate/evidence' > out/command.txt
           tests/gates/run-mysql-lane.sh out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" \
             --matching-rpc-tls --matching-restart --matching-failure-recovery \
-            --matching-idle-check-seconds 3 > out/gate.log 2>&1
+            --matching-idle-check-seconds 3 --evidence-dir out/gate/evidence > out/gate.log 2>&1
           result=$?
           echo "$result" > out/gate.exit
           tail -80 out/gate.log | cut -c1-300

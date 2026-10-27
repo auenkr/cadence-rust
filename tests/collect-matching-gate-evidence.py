@@ -96,8 +96,18 @@ def collect(args):
                  'production-idle-recovery-sdk.log', 'production-crash-recovery-sdk.log',
                  'production-failure-recovery-checkpoints.json',
                  'matching-cold-domain-metric-probe.json',
-                 'gc-backlog-sdk.log', 'db-observations.json', 'matching-shutdown.json'):
+                 'gc-backlog-sdk.log', 'db-observations.json', 'matching-shutdown.json',
+                 'matching-tls-handshakes.json'):
         path = source / 'gate/run/rust-matching' / name
+        if path.is_file():
+            selected.append(path)
+    # These are the redacted effective Rust Matching configs emitted beside
+    # the probe. Retain only their content-safe snapshot; hostname and runtime
+    # certificate identity are recorded in matching-tls-handshakes.json.
+    for relative in ('config-redacted/rust-matching.yaml',
+                     'config-redacted/rust-matching-secondary.yaml',
+                     'config-hashes.json', 'binaries.json', 'matching-tls-handshakes.json'):
+        path = source / 'gate/evidence' / relative
         if path.is_file():
             selected.append(path)
     # Keep large logs in the downloaded artifact; retain their content hashes.
