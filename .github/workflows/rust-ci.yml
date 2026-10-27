@@ -178,6 +178,10 @@ jobs:
         run: |
           set -euo pipefail
           files=(
+            crates/cadence-common/src/go_string.rs
+            crates/cadence-common/src/lib.rs
+            crates/cadence-api/src/lib.rs
+            crates/cadence-thrift/src/value.rs
             crates/cadence-matching/src/grpc_matching.rs
             crates/cadence-matching/src/thrift_matching.rs
             crates/cadence-matching/src/matching_writer.rs

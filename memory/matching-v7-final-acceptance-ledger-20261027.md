@@ -5,6 +5,9 @@ in the v5/v6 ledgers; their results remain historical evidence.
 
 Final ref: `matching-acceptance-20261027-v7`.
 Final SHA: `f5963951befb12dc64b72bb366c44a464939b87a`.
+User now explicitly requires raw-byte Thrift string parity. Source work is
+reopened; see matching-raw-byte-string-progress-20261027.md. V7 is baseline
+evidence, and remaining v7 dispatches are held pending a corrected candidate.
 Never credit an old-pin result to this candidate. Any source correction after
 the pin requires a new immutable candidate and same-pin gate reruns.
 
@@ -72,7 +75,7 @@ matching exit files and cleanup proof. Job conclusion alone is insufficient.
 | PostgreSQL | [40541390213](https://github.com/auenkr/cadence-rust/actions/runs/40541390213), v7 tag | PASS: reviewed exact source/binary identity, SDK, GC/domain, standby query, partitions, durable restart/drain, crash/idle recovery and container removal; compact evidence matching-v7-postgres-40541390213 |
 | MySQL probes | [40542820380](https://github.com/auenkr/cadence-rust/actions/runs/40542820380), v7 tag | PASS: reviewed exact source/binary, Go schema (no missing/extra tables), GC/domain, SDK, forwarding/query/partitions, restart/drain/crash/idle and cleanup; evidence matching-v7-mysql-probes-40542820380 |
 | Thrift | [40543897866](https://github.com/auenkr/cadence-rust/actions/runs/40543897866), v7 tag | PASS: reviewed actual Thrift/TChannel topology, SDK/query/isolation/config hints, restart/drain/crash/idle, exits and cleanup; evidence matching-v7-thrift-40543897866; malformed UTF-8 limitation remains open |
-| Configstore | [40544961371](https://github.com/auenkr/cadence-rust/actions/runs/40544961371), v7 tag | Running; evidence pending |
+| Configstore | [40544961371](https://github.com/auenkr/cadence-rust/actions/runs/40544961371), v7 tag | PASS: reviewed seeded2000ms/observed2009ms poll, SDK/restart/drain/crash/idle and cleanup; evidence matching-v7-configstore-40544961371 |
 | Shard distributor | Not dispatched | Pending |
 | Two-node MySQL | Not dispatched | Pending |
 | Cassandra | Not dispatched | Pending |

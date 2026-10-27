@@ -40,6 +40,7 @@ pub fn is_compatible(_client_version: &str) -> bool {
 
 pub use enums::*;
 pub use errors::CadenceError;
+pub use cadence_common::go_string::GoString;
 pub use types::{
     DataBlob, RetryPolicy, StartWorkflowExecutionRequest, StartWorkflowExecutionResponse, TaskList,
     WorkflowExecution, WorkflowType,

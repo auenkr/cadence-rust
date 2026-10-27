@@ -6,6 +6,7 @@
 //! compatibility with newer IDL revisions.
 
 use crate::protocol::{Error, Reader, Result, TType, Writer};
+use cadence_api::GoString;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -34,6 +35,36 @@ impl Struct {
     }
 
     // -- getters used by generated-style converters -------------------------
+
+    /// Decode Go's byte-valued Thrift string without UTF-8 validation.
+    pub fn opt_go_string(&self, id: i16) -> Result<Option<GoString>> {
+        match self.get(id) {
+            None => Ok(None),
+            Some(value) => GoString::from_value(value).map(Some),
+        }
+    }
+
+    pub fn req_go_string(&self, id: i16, default: &[u8]) -> Result<GoString> {
+        Ok(self.opt_go_string(id)?.unwrap_or_else(|| GoString::from(default)))
+    }
+
+    /// Map keys retain raw bytes and duplicate keys are last-wins, like Go.
+    pub fn opt_map_go_string<T>(&self, id: i16) -> Result<Option<std::collections::HashMap<GoString, T>>>
+    where
+        T: FromValue,
+    {
+        match self.get(id) {
+            None => Ok(None),
+            Some(Value::Map(items)) => {
+                let mut map = std::collections::HashMap::with_capacity(items.len());
+                for (key, value) in items {
+                    map.insert(GoString::from_value(key)?, T::from_value(value)?);
+                }
+                Ok(Some(map))
+            }
+            Some(value) => Err(Error::Invalid(format!("field {id}: expected map, got {value:?}"))),
+        }
+    }
 
     pub fn opt_string(&self, id: i16) -> Result<Option<String>> {
         match self.get(id) {
@@ -197,6 +228,15 @@ impl Struct {
 /// Convert a decoded value into a Rust type (for list/map elements).
 pub trait FromValue: Sized {
     fn from_value(v: &Value) -> Result<Self>;
+}
+
+impl FromValue for GoString {
+    fn from_value(value: &Value) -> Result<Self> {
+        match value {
+            Value::Bytes(bytes) => Ok(Self::from(bytes.clone())),
+            _ => Err(Error::Invalid(format!("expected string, got {value:?}"))),
+        }
+    }
 }
 
 impl FromValue for String {
@@ -425,6 +465,12 @@ pub trait ToValue {
     fn to_value(&self) -> Value;
 }
 
+impl ToValue for GoString {
+    fn to_value(&self) -> Value {
+        Value::Bytes(self.as_bytes().to_vec())
+    }
+}
+
 impl ToValue for String {
     fn to_value(&self) -> Value {
         Value::Bytes(self.as_bytes().to_vec())
@@ -562,6 +608,40 @@ pub fn read_struct(r: &mut Reader<'_>) -> Result<Struct> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn go_string_wire_roundtrip_preserves_invalid_utf8_and_nul() {
+        let raw = GoString::from(vec![0xff, 0, 0xc0, 0xaf, 0xfe]);
+        let original = Struct { fields: vec![(10, raw.to_value())] };
+        let mut writer = Writer::new();
+        write_struct(&mut writer, &original);
+        let bytes = writer.into_bytes();
+        let mut reader = Reader::new(&bytes);
+        let decoded = read_struct(&mut reader).unwrap();
+        assert_eq!(decoded.req_go_string(10, b"").unwrap(), raw);
+        assert!(decoded.req_string(10, "").is_err());
+        assert_eq!(decoded.opt_go_string(20).unwrap(), None);
+        assert_eq!(decoded.req_go_string(20, &[0xfe]).unwrap().as_bytes(), &[0xfe]);
+        assert_eq!(reader.remaining(), 0);
+        let mut writer = Writer::new();
+        write_struct(&mut writer, &decoded);
+        assert_eq!(writer.into_bytes(), bytes);
+    }
+
+    #[test]
+    fn go_string_map_keys_are_lossless_and_duplicate_keys_are_last_wins() {
+        let value = Struct { fields: vec![(10, Value::Map(vec![
+            (Value::Bytes(vec![0xff]), Value::Bytes(vec![1])),
+            (Value::Bytes(vec![0xfe]), Value::Bytes(vec![2])),
+            (Value::Bytes(vec![0xff]), Value::Bytes(vec![3])),
+            (Value::Bytes("\u{fffd}".as_bytes().to_vec()), Value::Bytes(vec![4])),
+        ]))] };
+        let map = value.opt_map_go_string::<GoString>(10).unwrap().unwrap();
+        assert_eq!(map.len(), 3);
+        assert_eq!(map.get([0xff_u8].as_slice()).unwrap().as_bytes(), &[3]);
+        assert_eq!(map.get([0xfe_u8].as_slice()).unwrap().as_bytes(), &[2]);
+        assert_eq!(map.get("\u{fffd}".as_bytes()).unwrap().as_bytes(), &[4]);
+    }
 
     #[test]
     fn struct_round_trip() {
