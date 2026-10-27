@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
