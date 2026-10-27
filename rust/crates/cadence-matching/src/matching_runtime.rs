@@ -141,9 +141,7 @@ impl MatchingRuntime {
     }
     pub(crate) fn with_fatal_writer(
         mut self,
-        fatal: tokio::sync::mpsc::UnboundedSender<
-            cadence_persistence::matching_blob::SqlRunIdError,
-        >,
+        fatal: crate::matching_fatal::MatchingFatalSender,
     ) -> Self {
         self.matching = self.matching.clone().with_fatal_writer(fatal.clone());
         if let Some(registry) = self.registry.take() {
@@ -1384,8 +1382,68 @@ mod tests {
         assert_eq!(append_error.code(), tonic::Code::Internal);
         assert!(matches!(
             fatal_rx.try_recv().expect("fatal cause must be available when runtime shutdown returns"),
-            cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. }
-                if raw == "runtime-delayed-malformed-run-id"
+            crate::matching_fatal::MatchingFatal::SqlRunId(
+                cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. }
+            ) if raw == "runtime-delayed-malformed-run-id"
         ));
+    }
+    #[tokio::test]
+    async fn runtime_reader_invariant_violation_reaches_fatal_channel_before_shutdown_returns() {
+        let directory = tempfile::tempdir().unwrap();
+        let sqlite = Arc::new(
+            SqliteTaskStore::create(
+                directory.path().join("reader-fatal.db"),
+                BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
+        );
+        // Out-of-order rows: Go ackManager.ReadItem rejects 4 after 5.
+        let store = Arc::new(crate::matching_fatal::test_support::ScriptedReadStore {
+            inner: sqlite,
+            script: std::sync::Mutex::new(Some(vec![5, 4])),
+        });
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            channel,
+            Duration::from_millis(10),
+            1024,
+        );
+        let (fatal_tx, mut fatal_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut runtime = MatchingRuntime::with_durable_queues(
+            crate::handlers::AppState::default(),
+            store,
+            history,
+            NonZeroU32::new(100).unwrap(),
+            Duration::from_secs(1),
+            Arc::new(|| Duration::ZERO),
+        )
+        .with_fatal_writer(fatal_tx);
+        let key = TaskListKey {
+            domain_id: uuid::Uuid::from_u128(11),
+            name: "runtime-reader-fatal".into(),
+            task_type: 0,
+        };
+        let handle = runtime
+            .registry
+            .as_ref()
+            .expect("durable runtime registry")
+            .get(key.clone(), 0, 1)
+            .await
+            .unwrap();
+        handle
+            .enqueue(TaskData::default(), key.domain_id, 0)
+            .await
+            .unwrap();
+        let fatal = tokio::time::timeout(Duration::from_secs(5), fatal_rx.recv())
+            .await
+            .expect("reader invariant violation never reached the host fatal channel")
+            .unwrap();
+        assert!(matches!(
+            &fatal,
+            crate::matching_fatal::MatchingFatal::ReaderInvariant(detail)
+                if detail.contains("less than or equal to current read level")
+        ));
+        runtime.shutdown().await.unwrap();
+        assert!(fatal_rx.try_recv().is_err(), "a single violation reports once");
     }
 }

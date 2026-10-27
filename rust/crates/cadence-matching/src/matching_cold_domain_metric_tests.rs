@@ -110,8 +110,7 @@ async fn name_lookup_preserves_domain_cache_error_classification() {
             source,
             Arc::new(ManualClock::default()),
         ));
-        let matching = Matching::new(crate::handlers::AppState::default())
-            .with_domain_cache(cache);
+        let matching = Matching::new(crate::handlers::AppState::default()).with_domain_cache(cache);
         let status = m::matching_api_server::MatchingApi::list_task_list_partitions(
             &matching,
             Request::new(m::ListTaskListPartitionsRequest {
@@ -128,7 +127,10 @@ async fn name_lookup_preserves_domain_cache_error_classification() {
         assert_eq!(status.message(), message);
         let details = DomainLookupStatusDetails::decode(status.details()).unwrap();
         assert_eq!(
-            details.details.first().map(|detail| detail.type_url.as_str()),
+            details
+                .details
+                .first()
+                .map(|detail| detail.type_url.as_str()),
             detail_type,
         );
     }
@@ -136,11 +138,12 @@ async fn name_lookup_preserves_domain_cache_error_classification() {
 
 #[tokio::test]
 async fn empty_name_lookup_is_bad_request() {
-    let matching = Matching::new(crate::handlers::AppState::default())
-        .with_domain_cache(Arc::new(MatchingDomainCache::with_clock(
+    let matching = Matching::new(crate::handlers::AppState::default()).with_domain_cache(Arc::new(
+        MatchingDomainCache::with_clock(
             Arc::new(LateDomainSource::default()),
             Arc::new(ManualClock::default()),
-        )));
+        ),
+    ));
     let status = m::matching_api_server::MatchingApi::list_task_list_partitions(
         &matching,
         Request::new(m::ListTaskListPartitionsRequest {
@@ -171,8 +174,8 @@ async fn name_based_listing_handlers_read_through_cold_domain_cache() {
         // Go and Rust suppress another scan within one second of a successful
         // refresh. Model registration after that interval without sleeping.
         clock.0.store(1, Ordering::SeqCst);
-        let matching = Matching::new(crate::handlers::AppState::default())
-            .with_domain_cache(cache.clone());
+        let matching =
+            Matching::new(crate::handlers::AppState::default()).with_domain_cache(cache.clone());
 
         let call = if handler == "GetTaskListsByDomain" {
             let response = m::matching_api_server::MatchingApi::get_task_lists_by_domain(
@@ -247,7 +250,10 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
 
     let source = Arc::new(LateDomainSource::default());
     let clock = Arc::new(ManualClock::default());
-    let cache = Arc::new(MatchingDomainCache::with_clock(source.clone(), clock.clone()));
+    let cache = Arc::new(MatchingDomainCache::with_clock(
+        source.clone(),
+        clock.clone(),
+    ));
     cache.refresh_domains().expect("initial empty cache scan");
     assert_eq!(cache.cached_domain_name(DOMAIN_ID), None);
 
@@ -268,11 +274,9 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
     // The empty task list is rejected after MatchingApi has resolved the domain
     // and emitted its inbound metric. Calling the real trait method exercises
     // that ordering and the cache resolver installed by with_domain_cache.
-    let _ = m::matching_api_server::MatchingApi::add_decision_task(
-        &matching,
-        Request::new(request),
-    )
-    .await;
+    let _ =
+        m::matching_api_server::MatchingApi::add_decision_task(&matching, Request::new(request))
+            .await;
 
     let event = sink
         .events()
@@ -280,13 +284,18 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
         .find(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST)
         .expect("AddDecisionTask request metric emitted");
     assert_eq!(
-        event.tags.get(crate::matching_metrics::DOMAIN_TAG).map(String::as_str),
+        event
+            .tags
+            .get(crate::matching_metrics::DOMAIN_TAG)
+            .map(String::as_str),
         Some(DOMAIN_NAME),
         "the metric must use the canonical name learned by cache read-through"
     );
     assert_eq!(&*source.calls.lock().unwrap(), &[format!("id:{DOMAIN_ID}")]);
     assert_eq!(
-        matching.domain_name(DOMAIN_ID).expect("cold domain published"),
+        matching
+            .domain_name(DOMAIN_ID)
+            .expect("cold domain published"),
         DOMAIN_NAME,
         "cold discoveries must reach the domain view used by quotas and workflow handlers"
     );
@@ -303,12 +312,10 @@ async fn add_decision_task_captures_domain_resolver_panic_from_blocking_task() {
         ..Default::default()
     };
 
-    let error = m::matching_api_server::MatchingApi::add_decision_task(
-        &matching,
-        Request::new(request),
-    )
-    .await
-    .expect_err("resolver panic must be returned as a captured handler error");
+    let error =
+        m::matching_api_server::MatchingApi::add_decision_task(&matching, Request::new(request))
+            .await
+            .expect_err("resolver panic must be returned as a captured handler error");
 
     assert_eq!(error.code(), tonic::Code::Unknown);
     assert_eq!(
@@ -327,12 +334,10 @@ async fn add_decision_task_swallows_ordinary_domain_resolver_failure() {
         ..Default::default()
     };
 
-    let error = m::matching_api_server::MatchingApi::add_decision_task(
-        &matching,
-        Request::new(request),
-    )
-    .await
-    .expect_err("an unknown domain should reach ordinary domain validation");
+    let error =
+        m::matching_api_server::MatchingApi::add_decision_task(&matching, Request::new(request))
+            .await
+            .expect_err("an unknown domain should reach ordinary domain validation");
 
     assert_eq!(error.code(), tonic::Code::NotFound);
     assert!(!crate::matching_panic::is_captured_panic(&error));

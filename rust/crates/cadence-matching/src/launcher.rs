@@ -1691,15 +1691,16 @@ pub async fn run(
                 },
                 signal = shutdown_signal() => (None, Some(signal)),
                 fatal = fatal_writer_rx.recv() => {
-                    let detail = fatal.map(|cause| cause.to_string()).unwrap_or_else(|| "Matching writer fatal channel closed".into());
-                    (Some(Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)))), None)
+                    let fatal = fatal
+                        .map(|cause| FatalExit::from_cause(&cause))
+                        .unwrap_or_else(|| FatalExit::Sql("Matching writer fatal channel closed".into()));
+                    (Some(Err(fatal.into_error())), None)
                 },
             };
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .and_then(|error| error.downcast_ref::<SqlMatchingWriterFatal>())
-                .map(|fatal| fatal.0.clone());
+                .and_then(|error| FatalExit::from_error(error));
             // On a signal, or after one listener exits, the remaining listener
             // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
@@ -1752,7 +1753,7 @@ pub async fn run(
                 fatal_writer = fatal_writer_rx
                     .try_recv()
                     .ok()
-                    .map(|cause| cause.to_string());
+                    .map(|cause| FatalExit::from_cause(&cause));
             }
             let mut shutdown_errors = Vec::new();
             if let Some(Err(error)) = serving_result {
@@ -1780,13 +1781,13 @@ pub async fn run(
                 }
             }
             if !shutdown_errors.is_empty() {
-                if let Some(detail) = fatal_writer {
-                    return Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)));
+                if let Some(fatal) = fatal_writer {
+                    return Err(fatal.into_error());
                 }
                 anyhow::bail!("Matching shutdown failed: {}", shutdown_errors.join("; "));
             }
-            if let Some(detail) = fatal_writer {
-                return Err(anyhow::Error::new(SqlMatchingWriterFatal(detail)));
+            if let Some(fatal) = fatal_writer {
+                return Err(fatal.into_error());
             }
             println!("shutting down");
         }
@@ -1806,6 +1807,42 @@ pub async fn run(
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("fatal SQL Matching writer persistence error: {0}")]
 pub struct SqlMatchingWriterFatal(pub String);
+
+/// Go `task_reader.go` `logger.Fatal` on an ackManager invariant violation.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("fatal Matching task reader invariant error: {0}")]
+pub struct MatchingReaderFatal(pub String);
+
+/// Rendered fatal cause the launcher re-emits after graceful shutdown.
+enum FatalExit {
+    Sql(String),
+    Reader(String),
+}
+
+impl FatalExit {
+    fn from_cause(cause: &crate::matching_fatal::MatchingFatal) -> Self {
+        match cause {
+            crate::matching_fatal::MatchingFatal::SqlRunId(_) => Self::Sql(cause.to_string()),
+            crate::matching_fatal::MatchingFatal::ReaderInvariant(detail) => {
+                Self::Reader(detail.clone())
+            }
+        }
+    }
+    fn from_error(error: &anyhow::Error) -> Option<Self> {
+        if let Some(fatal) = error.downcast_ref::<MatchingReaderFatal>() {
+            return Some(Self::Reader(fatal.0.clone()));
+        }
+        error
+            .downcast_ref::<SqlMatchingWriterFatal>()
+            .map(|fatal| Self::Sql(fatal.0.clone()))
+    }
+    fn into_error(self) -> anyhow::Error {
+        match self {
+            Self::Sql(detail) => anyhow::Error::new(SqlMatchingWriterFatal(detail)),
+            Self::Reader(detail) => anyhow::Error::new(MatchingReaderFatal(detail)),
+        }
+    }
+}
 
 #[cfg(test)]
 mod matching_http_listener_tests {

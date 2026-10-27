@@ -803,7 +803,8 @@ pub async fn dispatch(
         args,
         deadline,
         crate::matching_metrics::InboundMetricContext::default(),
-    ).await
+    )
+    .await
 }
 
 pub async fn dispatch_with_context(
@@ -813,10 +814,10 @@ pub async fn dispatch_with_context(
     deadline: Instant,
     context: crate::matching_metrics::InboundMetricContext,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
-    matching.inbound_metrics().with_inbound_context(
-        context,
-        dispatch_inner(matching, procedure, args, deadline),
-    ).await
+    matching
+        .inbound_metrics()
+        .with_inbound_context(context, dispatch_inner(matching, procedure, args, deadline))
+        .await
 }
 
 async fn dispatch_inner(
@@ -829,9 +830,20 @@ async fn dispatch_inner(
         .ok_or_else(|| format!("Unknown Matching procedure {procedure}"))?;
     if method.service == "Meta" {
         matching.wait_started().await;
-        return Ok((Struct { fields: vec![(0, Value::Struct(Struct {
-            fields: vec![(1, Value::Bool(true)), (2, Value::Bytes(b"matching good".to_vec()))],
-        }))] }, None));
+        return Ok((
+            Struct {
+                fields: vec![(
+                    0,
+                    Value::Struct(Struct {
+                        fields: vec![
+                            (1, Value::Bool(true)),
+                            (2, Value::Bytes(b"matching good".to_vec())),
+                        ],
+                    }),
+                )],
+            },
+            None,
+        ));
     }
     if method.service != "MatchingService" {
         return Err("Unknown Matching service".into());
@@ -844,12 +856,14 @@ async fn dispatch_inner(
     // error, which the transport reports as an unexpected error.
     matching.wait_started().await;
     let empty = Struct::default();
-    let request = match args.fields.iter().rev().find_map(|(id, value)| {
-        match (id, value) {
+    let request = match args
+        .fields
+        .iter()
+        .rev()
+        .find_map(|(id, value)| match (id, value) {
             (1, Value::Struct(value)) => Some(value),
             _ => None,
-        }
-    }) {
+        }) {
         Some(v) => v,
         _ => {
             use crate::matching_quota::MatchingRpc as Rpc;
@@ -953,7 +967,10 @@ pub fn router_with_procedures(matching: Matching, procedures: Vec<String>) -> ax
     let limit = matching.frontend.state.grpc_max_message_size;
     axum::Router::new()
         .route("/", axum::routing::post(http_handler_with_procedures))
-        .route("/{*rest}", axum::routing::post(http_handler_with_procedures))
+        .route(
+            "/{*rest}",
+            axum::routing::post(http_handler_with_procedures),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(limit))
         .with_state((
             std::sync::Arc::new(matching),
@@ -1066,28 +1083,45 @@ mod tests {
 
     #[tokio::test]
     async fn matching_inbound_metrics_count_native_and_thrift_dispatch_once_each() {
-        use crate::matching_metrics::{MetricKind, MetricValue, RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
+        use crate::matching_metrics::{
+            MetricKind, MetricValue, RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST,
+        };
         use std::sync::Arc;
 
         let sink = Arc::new(RecordingMetricSink::default());
         let state = crate::handlers::AppState::default();
-        state.domains.create(
-            cadence_api::types::DomainInfo { name: "domain-a".into(), uuid: "00000000-0000-0000-0000-000000000001".into(), ..Default::default() },
-            Default::default(),
-            Default::default(),
-            false,
-        ).unwrap();
+        state
+            .domains
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "domain-a".into(),
+                    uuid: "00000000-0000-0000-0000-000000000001".into(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
         let matching = Matching::new(state).with_metrics(sink.clone());
-        let request = m::GetTaskListsByDomainRequest { domain: "domain-a".into() };
+        let request = m::GetTaskListsByDomainRequest {
+            domain: "domain-a".into(),
+        };
         let mut request = Request::new(request);
-        request.metadata_mut().insert("rpc-caller", "sdk-client".parse().unwrap());
-        m::matching_api_server::MatchingApi::get_task_lists_by_domain(
-            &matching,
-            request,
-        ).await.unwrap();
+        request
+            .metadata_mut()
+            .insert("rpc-caller", "sdk-client".parse().unwrap());
+        m::matching_api_server::MatchingApi::get_task_lists_by_domain(&matching, request)
+            .await
+            .unwrap();
 
         let thrift_args = Struct {
-            fields: vec![(1, Value::Struct(Struct { fields: vec![(10, text("domain-a"))] }))],
+            fields: vec![(
+                1,
+                Value::Struct(Struct {
+                    fields: vec![(10, text("domain-a"))],
+                }),
+            )],
         };
         dispatch_with_context(
             &matching,
@@ -1098,17 +1132,45 @@ mod tests {
                 caller: Some("worker-client".into()),
                 transport: Some("http".into()),
             },
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let events = sink.events();
-        let requests = events.iter().filter(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST).collect::<Vec<_>>();
-        assert_eq!(requests.len(), 2, "one event for each logical transport request");
-        assert!(requests.iter().all(|event| event.tags.get("operation").map(String::as_str) == Some("GetTaskListsByDomain")));
-        assert_eq!(requests[0].tags.get("caller").map(String::as_str), Some("sdk-client"));
-        assert_eq!(requests[0].tags.get("transport").map(String::as_str), Some("grpc"));
-        assert_eq!(requests[1].tags.get("caller").map(String::as_str), Some("worker-client"));
-        assert_eq!(requests[1].tags.get("transport").map(String::as_str), Some("http"));
-        assert!(events.iter().filter(|event| event.name == "cadence_latency_per_tl").all(|event| event.kind == MetricKind::Timer && matches!(event.value, MetricValue::Duration(_))));
+        let requests = events
+            .iter()
+            .filter(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            requests.len(),
+            2,
+            "one event for each logical transport request"
+        );
+        assert!(requests
+            .iter()
+            .all(|event| event.tags.get("operation").map(String::as_str)
+                == Some("GetTaskListsByDomain")));
+        assert_eq!(
+            requests[0].tags.get("caller").map(String::as_str),
+            Some("sdk-client")
+        );
+        assert_eq!(
+            requests[0].tags.get("transport").map(String::as_str),
+            Some("grpc")
+        );
+        assert_eq!(
+            requests[1].tags.get("caller").map(String::as_str),
+            Some("worker-client")
+        );
+        assert_eq!(
+            requests[1].tags.get("transport").map(String::as_str),
+            Some("http")
+        );
+        assert!(events
+            .iter()
+            .filter(|event| event.name == "cadence_latency_per_tl")
+            .all(|event| event.kind == MetricKind::Timer
+                && matches!(event.value, MetricValue::Duration(_))));
     }
     #[test]
     fn matching_thrift_preserves_nanos_and_internal_decision_field_ids() {
@@ -1196,7 +1258,9 @@ mod tests {
         // Untyped NotFound: thriftrw requires EntityNotExistsError.activeClusters (4).
         let (wire, error) = application_error(method, Status::not_found("gone"));
         assert_eq!(error.unwrap().0, "EntityNotExistsError");
-        let Value::Struct(details) = wire.get(3).unwrap() else { panic!("wrong field") };
+        let Value::Struct(details) = wire.get(3).unwrap() else {
+            panic!("wrong field")
+        };
         assert_eq!(details.opt_string(1).unwrap().as_deref(), Some("gone"));
         assert_eq!(details.opt_string(2).unwrap().as_deref(), Some(""));
         assert_eq!(details.opt_string(3).unwrap().as_deref(), Some(""));
@@ -1204,7 +1268,9 @@ mod tests {
         // Untyped ResourceExhausted: Go always sends ServiceBusyError.reason (2).
         let (wire, error) = application_error(method, Status::resource_exhausted("busy"));
         assert_eq!(error.unwrap().0, "ServiceBusyError");
-        let Value::Struct(details) = wire.get(6).unwrap() else { panic!("wrong field") };
+        let Value::Struct(details) = wire.get(6).unwrap() else {
+            panic!("wrong field")
+        };
         assert_eq!(details.opt_string(2).unwrap().as_deref(), Some(""));
         // DomainNotActiveError without decodable details still carries 2-5.
         let add = cadence_thrift::find_method("MatchingService::AddDecisionTask").unwrap();
@@ -1216,7 +1282,9 @@ mod tests {
         );
         let (wire, error) = application_error(add, status);
         assert_eq!(error.unwrap().0, "DomainNotActiveError");
-        let Value::Struct(details) = wire.get(5).unwrap() else { panic!("wrong field") };
+        let Value::Struct(details) = wire.get(5).unwrap() else {
+            panic!("wrong field")
+        };
         assert!(matches!(details.get(5), Some(Value::List(v)) if v.is_empty()));
         assert!(details.get(2).is_some() && details.get(3).is_some() && details.get(4).is_some());
     }
@@ -1224,15 +1292,18 @@ mod tests {
     fn matching_thrift_captured_panic_is_not_a_declared_exception() {
         // Go: CapturePanic returns a plain fmt error, which thrift.FromError passes through.
         // The same untyped status from another source stays a typed InternalServiceError.
-        let method = cadence_thrift::service::find_method("MatchingService::AddActivityTask").unwrap();
+        let method =
+            cadence_thrift::service::find_method("MatchingService::AddActivityTask").unwrap();
         let panic = Status::unknown(r#"panic object is not error: "boom""#);
         assert!(crate::matching_panic::is_captured_panic(&panic));
         let (_, error) = application_error(method, Status::unknown("fake unhandled error"));
         assert_eq!(error.unwrap().0, "InternalServiceError");
-        assert!(!crate::matching_panic::is_captured_panic(&Status::unknown("fake unhandled error")));
-        assert!(!crate::matching_panic::is_captured_panic(&Status::internal(
-            r#"panic object is not error: "boom""#
+        assert!(!crate::matching_panic::is_captured_panic(&Status::unknown(
+            "fake unhandled error"
         )));
+        assert!(!crate::matching_panic::is_captured_panic(
+            &Status::internal(r#"panic object is not error: "boom""#)
+        ));
     }
 
     #[tokio::test]
@@ -1242,7 +1313,9 @@ mod tests {
         // error; every other method reads through nil-safe getters like an empty request.
         let matching = Matching::new(crate::handlers::AppState::default());
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        let wrong_type = Struct { fields: vec![(1, Value::I32(7))] };
+        let wrong_type = Struct {
+            fields: vec![(1, Value::I32(7))],
+        };
         for method in [
             "PollForDecisionTask",
             "PollForActivityTask",
@@ -1260,9 +1333,14 @@ mod tests {
             }
         }
         // Nil-safe in Go: handled as an empty request, never a transport error.
-        let (_, error) = dispatch(&matching, "MatchingService::CancelOutstandingPoll", &wrong_type, deadline)
-            .await
-            .expect("nil-safe method");
+        let (_, error) = dispatch(
+            &matching,
+            "MatchingService::CancelOutstandingPoll",
+            &wrong_type,
+            deadline,
+        )
+        .await
+        .expect("nil-safe method");
         assert!(error.is_none_or(|(_, message)| !message.contains("Invalid request argument")));
     }
 
@@ -1302,10 +1380,17 @@ mod tests {
             if method == "PollForDecisionTask" {
                 // Shares the worker bucket already spent by AddDecisionTask.
                 let (_, error) = first.expect("throttled, not a panic");
-                assert!(error.unwrap().1.contains("Matching host rps exceeded"), "{method}");
+                assert!(
+                    error.unwrap().1.contains("Matching host rps exceeded"),
+                    "{method}"
+                );
                 continue;
             }
-            assert_eq!(first.unwrap_err(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE, "{method}");
+            assert_eq!(
+                first.unwrap_err(),
+                crate::matching_panic::NIL_DEREFERENCE_MESSAGE,
+                "{method}"
+            );
             let (_, error) = dispatch(&matching, &procedure, &nil, deadline)
                 .await
                 .expect("throttled, not a panic");
@@ -1332,7 +1417,12 @@ mod tests {
         let matching = Matching::new(crate::handlers::AppState::default()).with_start_pending();
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let args = Struct::default();
-        let pending = dispatch(&matching, "MatchingService::AddActivityTask", &args, deadline);
+        let pending = dispatch(
+            &matching,
+            "MatchingService::AddActivityTask",
+            &args,
+            deadline,
+        );
         tokio::pin!(pending);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(100), &mut pending)
@@ -1341,7 +1431,10 @@ mod tests {
             "must wait for Start() like Go's startWG"
         );
         matching.mark_started();
-        assert_eq!(pending.await.unwrap_err(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE);
+        assert_eq!(
+            pending.await.unwrap_err(),
+            crate::matching_panic::NIL_DEREFERENCE_MESSAGE
+        );
     }
 
     fn field(s: &Struct, id: i16) -> Option<&Value> {
@@ -1355,19 +1448,27 @@ mod tests {
         let args = Struct {
             fields: vec![
                 (10, text("domain")),
-                (20, Value::I32(1)),        // execution: struct expected
-                (30, structure(vec![(10, Value::I32(5)), (20, Value::I32(2))])), // taskList: name i32, kind i32 ok
-                (40, Value::I32(9)),        // scheduleId i64 expected, sent i32
-                (50, Value::I64(9)),        // scheduleToStart i32 expected, sent i64
-                (59, Value::I16(1)),        // source (enum i32), sent i16
-                (60, Value::I64(3)),        // forwardedFrom string expected
+                (20, Value::I32(1)), // execution: struct expected
+                (
+                    30,
+                    structure(vec![(10, Value::I32(5)), (20, Value::I32(2))]),
+                ), // taskList: name i32, kind i32 ok
+                (40, Value::I32(9)), // scheduleId i64 expected, sent i32
+                (50, Value::I64(9)), // scheduleToStart i32 expected, sent i64
+                (59, Value::I16(1)), // source (enum i32), sent i16
+                (60, Value::I64(3)), // forwardedFrom string expected
                 (70, Value::List(vec![text("a")])), // partitionConfig map expected
             ],
         };
         let out = normalize("matching.AddDecisionTaskRequest", &args);
-        assert_eq!(out.fields.iter().map(|(id, _)| *id).collect::<Vec<_>>(), vec![10, 30]);
+        assert_eq!(
+            out.fields.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![10, 30]
+        );
         // Nested struct is normalised too: TaskList.name is binary (id 10), kind i32 (id 20).
-        let Some(Value::Struct(list)) = field(&out, 30) else { panic!() };
+        let Some(Value::Struct(list)) = field(&out, 30) else {
+            panic!()
+        };
         assert_eq!(list.fields, vec![(20, Value::I32(2))]);
         // The strict getter would have widened or rejected these; the normalised struct is absent.
         assert!(args.opt_i64(40).unwrap().is_some());
@@ -1384,7 +1485,11 @@ mod tests {
         let cases: Vec<(&str, i16, Value)> = vec![
             ("matching.PollForDecisionTaskRequest", 10, Value::I32(1)),
             ("matching.PollForDecisionTaskRequest", 15, Value::I64(1)),
-            ("matching.PollForDecisionTaskRequest", 20, Value::Bytes(vec![])),
+            (
+                "matching.PollForDecisionTaskRequest",
+                20,
+                Value::Bytes(vec![]),
+            ),
             ("matching.PollForDecisionTaskRequest", 30, Value::Bool(true)),
             ("matching.PollForDecisionTaskRequest", 40, Value::I32(1)),
             ("matching.PollForActivityTaskRequest", 20, Value::I32(1)),
@@ -1396,8 +1501,16 @@ mod tests {
             ("matching.AddActivityTaskRequest", 80, Value::Bytes(vec![])),
             ("matching.QueryWorkflowRequest", 20, Value::I32(1)),
             ("matching.QueryWorkflowRequest", 30, Value::I32(1)),
-            ("matching.RespondQueryTaskCompletedRequest", 30, Value::I32(1)),
-            ("matching.RespondQueryTaskCompletedRequest", 40, Value::Bytes(vec![])),
+            (
+                "matching.RespondQueryTaskCompletedRequest",
+                30,
+                Value::I32(1),
+            ),
+            (
+                "matching.RespondQueryTaskCompletedRequest",
+                40,
+                Value::Bytes(vec![]),
+            ),
             ("matching.CancelOutstandingPollRequest", 20, Value::I16(1)),
             ("matching.CancelOutstandingPollRequest", 20, Value::I64(1)),
             ("matching.DescribeTaskListRequest", 10, Value::I32(1)),
@@ -1421,15 +1534,24 @@ mod tests {
             ("shared.HistoryEvent", 10, Value::I32(1)),
         ];
         for (name, id, wrong) in cases {
-            let input = Struct { fields: vec![(id, wrong)] };
+            let input = Struct {
+                fields: vec![(id, wrong)],
+            };
             assert!(
                 normalize(name, &input).fields.is_empty(),
                 "{name} field {id} should be skipped"
             );
         }
         // Right-typed fields survive unchanged.
-        let ok = Struct { fields: vec![(40, Value::I64(7)), (10, text("d"))] };
-        assert_eq!(normalize("matching.AddDecisionTaskRequest", &ok).fields.len(), 2);
+        let ok = Struct {
+            fields: vec![(40, Value::I64(7)), (10, text("d"))],
+        };
+        assert_eq!(
+            normalize("matching.AddDecisionTaskRequest", &ok)
+                .fields
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -1440,27 +1562,47 @@ mod tests {
         let good_map = Value::Map(vec![(text("k"), text("v"))]);
         let out = normalize(
             "matching.AddDecisionTaskRequest",
-            &Struct { fields: vec![(70, bad_map.clone())] },
+            &Struct {
+                fields: vec![(70, bad_map.clone())],
+            },
         );
         assert!(out.fields.is_empty());
         let out = normalize(
             "matching.AddDecisionTaskRequest",
-            &Struct { fields: vec![(70, good_map.clone()), (70, bad_map), (10, Value::I32(1)), (10, text("d"))] },
+            &Struct {
+                fields: vec![
+                    (70, good_map.clone()),
+                    (70, bad_map),
+                    (10, Value::I32(1)),
+                    (10, text("d")),
+                ],
+            },
         );
         assert_eq!(out.fields, vec![(10, text("d"))]);
 
         let info = structure(vec![
-            (10, structure(vec![(10, Value::I32(1)), (20, Value::I64(2))])), // HistoryEvent: eventId i64
-            (70, structure(vec![(10, Value::I64(1))])),                       // WorkflowType.name wrong
+            (
+                10,
+                structure(vec![(10, Value::I32(1)), (20, Value::I64(2))]),
+            ), // HistoryEvent: eventId i64
+            (70, structure(vec![(10, Value::I64(1))])), // WorkflowType.name wrong
         ]);
         let out = normalize(
             "matching.AddActivityTaskRequest",
-            &Struct { fields: vec![(80, info)] },
+            &Struct {
+                fields: vec![(80, info)],
+            },
         );
-        let Some(Value::Struct(info)) = field(&out, 80) else { panic!() };
-        let Some(Value::Struct(event)) = field(info, 10) else { panic!() };
+        let Some(Value::Struct(info)) = field(&out, 80) else {
+            panic!()
+        };
+        let Some(Value::Struct(event)) = field(info, 10) else {
+            panic!()
+        };
         assert_eq!(event.fields, vec![(20, Value::I64(2))]);
-        let Some(Value::Struct(workflow_type)) = field(info, 70) else { panic!() };
+        let Some(Value::Struct(workflow_type)) = field(info, 70) else {
+            panic!()
+        };
         assert!(workflow_type.fields.is_empty());
     }
 
@@ -1470,17 +1612,29 @@ mod tests {
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let valid = structure(vec![(10, text("domain"))]);
         let expected = dispatch(
-            &matching, "MatchingService::AddDecisionTask",
-            &Struct { fields: vec![(1, valid.clone())] }, deadline,
-        ).await;
+            &matching,
+            "MatchingService::AddDecisionTask",
+            &Struct {
+                fields: vec![(1, valid.clone())],
+            },
+            deadline,
+        )
+        .await;
         for fields in [
             vec![(1, Value::I32(1)), (1, valid.clone())],
             vec![(1, valid.clone()), (1, Value::I32(1))],
             vec![(1, structure(vec![])), (1, valid)],
         ] {
-            assert_eq!(dispatch(
-                &matching, "MatchingService::AddDecisionTask", &Struct { fields }, deadline,
-            ).await, expected);
+            assert_eq!(
+                dispatch(
+                    &matching,
+                    "MatchingService::AddDecisionTask",
+                    &Struct { fields },
+                    deadline,
+                )
+                .await,
+                expected
+            );
         }
     }
 
@@ -1488,7 +1642,10 @@ mod tests {
     fn matching_tchannel_dispatch_failures_use_go_error_codes() {
         // Go TChannel: ErrCodeUnexpected (0x05) for a captured panic, ErrCodeBadRequest (0x06)
         // for an unknown procedure.
-        assert_eq!(tchannel_error_code(r#"panic object is not error: "boom""#), 0x05);
+        assert_eq!(
+            tchannel_error_code(r#"panic object is not error: "boom""#),
+            0x05
+        );
         assert_eq!(tchannel_error_code("Unknown Matching procedure X"), 0x06);
     }
 
@@ -1497,10 +1654,15 @@ mod tests {
         // Go yarpc HTTP: plain error -> status 500, Rpc-Error-Code unknown, message plus newline.
         use axum::response::IntoResponse;
         let response = transport_failure(r#"panic object is not error: "boom""#.into());
-        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
         assert_eq!(response.headers().get("Rpc-Error-Code").unwrap(), "unknown");
         assert_eq!(response.headers().get("Rpc-Status").unwrap(), "error");
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert_eq!(body.as_ref(), b"panic object is not error: \"boom\"\n");
         let other = transport_failure("Unknown Matching procedure X".into()).into_response();
         assert!(other.headers().get("Rpc-Error-Code").is_none());
@@ -1585,10 +1747,8 @@ mod tests {
         };
         use tower::ServiceExt;
         let matching = Matching::new(crate::handlers::AppState::default());
-        let app = router_with_procedures(
-            matching,
-            vec!["MatchingService::DescribeTaskList".into()],
-        );
+        let app =
+            router_with_procedures(matching, vec!["MatchingService::DescribeTaskList".into()]);
         let request = |procedure: &str| {
             Request::post("/")
                 .header("Rpc-Service", "cadence-matching")

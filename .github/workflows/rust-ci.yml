@@ -187,8 +187,18 @@ jobs:
             crates/cadence-matching/src/launcher.rs
             crates/cadence-matching/src/matching_cold_domain_metric_tests.rs
             crates/cadence-matching/tests/matching_partial_upgrade_e.rs
+            crates/cadence-matching/src/matching_fatal.rs
+            crates/cadence-matching/src/main.rs
+            crates/cadence-matching/src/matching_standby.rs
+            crates/cadence-matching/src/matching_membership_go_tests.rs
+            crates/cadence-matching/tests/matching_concurrent_go_parity.rs
+            crates/cadence-persistence/src/matching_retry.rs
           )
-          rustfmt --edition 2021 --config skip_children=true "${files[@]}"
+          existing=()
+          for file in "${files[@]}"; do
+            if [[ -f "$file" ]]; then existing+=("$file"); fi
+          done
+          rustfmt --edition 2021 --config skip_children=true "${existing[@]}"
           git diff --binary -- "${files[@]}" > "$RUNNER_TEMP/matching-format.patch"
       - name: Upload Matching parity formatting patch
         if: always() && inputs.format_matching_parity_files == true

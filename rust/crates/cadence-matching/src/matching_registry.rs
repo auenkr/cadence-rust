@@ -218,7 +218,7 @@ pub struct QueueRegistry {
     max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
     writer_live: Option<WriterLiveProvider>,
     fatal_writer: Option<
-        tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>,
+        crate::matching_fatal::MatchingFatalSender,
     >,
     writer_tracker: Arc<crate::matching_writer::WriterTracker>,
     metrics: crate::matching_metrics::MatchingMetrics,
@@ -791,9 +791,7 @@ impl QueueRegistry {
     }
     pub(crate) fn with_fatal_writer(
         mut self,
-        fatal: tokio::sync::mpsc::UnboundedSender<
-            cadence_persistence::matching_blob::SqlRunIdError,
-        >,
+        fatal: crate::matching_fatal::MatchingFatalSender,
     ) -> Self {
         self.fatal_writer = Some(fatal);
         self
@@ -1453,7 +1451,12 @@ impl QueueRegistry {
                             )),
                         }
                     });
-                    let reader = crate::matching_reader::TaskReader::with_dispatch_check_metrics_forwarding(
+                    let reader_fatal = registry.fatal_writer.clone().map(|fatal| -> crate::matching_reader::ReaderFatalSink {
+                        Arc::new(move |detail| {
+                            let _ = fatal.send(crate::matching_fatal::MatchingFatal::ReaderInvariant(detail));
+                        })
+                    });
+                    let reader = crate::matching_reader::TaskReader::with_fatal_invariant_sink(
                         queue.clone(),
                         dispatcher.task_notification(),
                         reader_config,
@@ -1492,6 +1495,7 @@ impl QueueRegistry {
                             },
                         )),
                         backlog_forward,
+                        reader_fatal,
                     );
                     let read_stop = reader.stop_signal();
                         let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(

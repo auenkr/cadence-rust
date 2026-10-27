@@ -325,6 +325,10 @@ struct Inner {
     metric_context: Arc<Mutex<Option<ReaderMetricContext>>>,
     backlog_forward: Arc<Mutex<Option<BacklogForward>>>,
 }
+/// Go `addSingleTaskToBuffer` calls `logger.Fatal` when `ackManager.ReadItem`
+/// fails (duplicate or non-increasing task id). The sink must terminate the host
+/// gracefully; the reader only reports the cause and stops its queue.
+pub type ReaderFatalSink = Arc<dyn Fn(String) + Send + Sync>;
 pub type BacklogForwardResult = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>>;
 pub type BacklogForwardCall = Arc<dyn Fn(AllocatedTask) -> BacklogForwardResult + Send + Sync>;
 #[derive(Clone)]
@@ -516,6 +520,29 @@ impl TaskReader {
             crate::matching_metrics::PollMetricContext,
         )>,
         backlog_forward: Option<BacklogForward>,
+    ) -> Self {
+        Self::with_fatal_invariant_sink(
+            queue, wake, config, active, limiter, isolation, dispatch_check, metric_context,
+            backlog_forward, None,
+        )
+    }
+    // The fatal sink is a constructor argument, not a setter: the pump task is
+    // spawned below and may admit a duplicate row immediately.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_fatal_invariant_sink(
+        queue: Arc<DurableTaskQueue>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: IsolationConfig,
+        dispatch_check: Option<DispatchCheck>,
+        metric_context: Option<(
+            crate::matching_metrics::MatchingMetrics,
+            crate::matching_metrics::PollMetricContext,
+        )>,
+        backlog_forward: Option<BacklogForward>,
+        fatal_invariant: Option<ReaderFatalSink>,
     ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
@@ -999,6 +1026,11 @@ impl TaskReader {
                         Ok(Some(task)) => task,
                         Ok(None) => break,
                         Err(error) => {
+                            if let cadence_persistence::matching_queue::QueueError::ReaderState(detail) = &error {
+                                if let Some(sink) = &fatal_invariant {
+                                    sink(detail.clone());
+                                }
+                            }
                             if !queue.is_stopped() {
                                 eprintln!("Matching backlog admission failed: {error}");
                                 queue.stop();
@@ -1419,6 +1451,144 @@ mod tests {
         queue.append(&[TaskData::default()], now()).unwrap();
         wait_read(&queue, 1).await;
         stop(queue, reader).await;
+    }
+    // --- Go task_reader.go logger.Fatal on ackManager.ReadItem failure ---
+    fn scripted_queue(
+        ids: Vec<i64>,
+    ) -> (tempfile::TempDir, Arc<DurableTaskQueue>) {
+        let directory = tempfile::tempdir().unwrap();
+        let sqlite = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let store = Arc::new(crate::matching_fatal::test_support::ScriptedReadStore {
+            inner: sqlite,
+            script: std::sync::Mutex::new(Some(ids)),
+        });
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store,
+                TaskListKey {
+                    domain_id: Uuid::from_u128(1),
+                    name: "reader-fatal".into(),
+                    task_type: 0,
+                },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                now(),
+            )
+            .unwrap(),
+        );
+        // Raise max_read_level so the pump scans; the scripted rows replace the real one.
+        queue.append(&[TaskData::default()], now()).unwrap();
+        (directory, queue)
+    }
+    fn scripted_reader(
+        queue: &Arc<DurableTaskQueue>,
+        sink: ReaderFatalSink,
+    ) -> TaskReader {
+        TaskReader::with_fatal_invariant_sink(
+            queue.clone(),
+            Arc::new(Notify::new()),
+            ReaderConfig {
+                batch_size: NonZeroU32::new(3).unwrap(),
+                read_range_size: 100,
+                ..ReaderConfig::default()
+            },
+            Arc::new(|| true),
+            Arc::new(TaskListLimiter::with_defaults()),
+            IsolationConfig::default(),
+            None,
+            None,
+            None,
+            Some(sink),
+        )
+    }
+    #[tokio::test]
+    async fn matching_reader_reports_fatal_for_duplicate_and_out_of_order_rows() {
+        for (ids, expected) in [
+            (vec![1, 1], "less than or equal to current read level"),
+            (vec![3, 2], "less than or equal to current read level"),
+        ] {
+            let (_directory, queue) = scripted_queue(ids);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let reader = scripted_reader(
+                &queue,
+                Arc::new(move |detail| {
+                    let _ = tx.send(detail);
+                }),
+            );
+            let detail = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("reader never reported the invariant violation")
+                .unwrap();
+            assert!(detail.contains(expected), "{detail}");
+            tokio::time::timeout(Duration::from_secs(2), reader.wait_stopped())
+                .await
+                .expect("reader pump must stop after the fatal report");
+            assert!(queue.is_stopped());
+        }
+    }
+    #[tokio::test]
+    async fn matching_reader_ordinary_rows_do_not_report_fatal() {
+        let (_directory, queue) = scripted_queue(vec![1, 2, 3]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let reader = scripted_reader(
+            &queue,
+            Arc::new(move |detail| {
+                let _ = tx.send(detail);
+            }),
+        );
+        wait_read(&queue, 3).await;
+        assert!(rx.try_recv().is_err());
+        assert!(!queue.is_stopped());
+        stop(queue, reader).await;
+        assert!(rx.try_recv().is_err());
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn matching_reader_completion_waits_for_fatal_sink() {
+        let (_directory, queue) = scripted_queue(vec![1, 1]);
+        let release = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let delivered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (sink_release, sink_entered, sink_delivered) =
+            (release.clone(), entered.clone(), delivered.clone());
+        let reader = scripted_reader(
+            &queue,
+            Arc::new(move |_| {
+                sink_entered.store(true, Ordering::SeqCst);
+                let (lock, changed) = &*sink_release;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = changed.wait(open).unwrap();
+                }
+                sink_delivered.store(true, Ordering::SeqCst);
+            }),
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !entered.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("fatal sink never invoked");
+        reader.stop();
+        // Registry owner_work joins readers with wait_stopped; it must not
+        // return while the fatal notification is still being delivered.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), reader.wait_stopped())
+                .await
+                .is_err()
+        );
+        {
+            let (lock, changed) = &*release;
+            *lock.lock().unwrap() = true;
+            changed.notify_all();
+        }
+        tokio::time::timeout(Duration::from_secs(2), reader.wait_stopped())
+            .await
+            .unwrap();
+        assert!(delivered.load(Ordering::SeqCst));
     }
     async fn stop(queue: Arc<DurableTaskQueue>, reader: TaskReader) {
         reader.stop();

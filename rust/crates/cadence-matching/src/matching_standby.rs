@@ -79,6 +79,13 @@ impl Drop for CompletionCancellation<'_> {
     }
 }
 
+/// Go `common.CreateTaskCompleterRetryPolicy`: 1s initial, 10s maximum, 300s expiration.
+fn completer_retry_policy() -> ExponentialRetryPolicy {
+    ExponentialRetryPolicy::new(Duration::from_secs(1))
+        .with_maximum_interval(Duration::from_secs(10))
+        .with_expiration_interval(Duration::from_secs(300))
+}
+
 pub fn checker(
     domains: cadence_persistence::InMemoryDomainStore,
     cluster: String,
@@ -103,10 +110,7 @@ pub fn checker(
                 armed: true,
             };
             let domain = key.domain_id.to_string();
-            let policy = ExponentialRetryPolicy::new(Duration::from_secs(1))
-                .with_maximum_interval(Duration::from_secs(10))
-                .with_expiration_interval(Duration::from_secs(300));
-            let mut retrier = Retrier::new(policy);
+            let mut retrier = Retrier::new(completer_retry_policy());
             loop {
                 let result: Result<Option<bool>, Status> = async {
                     if domains
@@ -293,6 +297,43 @@ mod tests {
                 .count(),
             5
         );
+    }
+
+    // Go `TestCompleteTaskIfStarted` error rows (domain cache / History failure) retry until the
+    // 300s expiration, then return the error. `Retrier` reads the real clock, so the policy is
+    // driven here with explicit elapsed times instead of a wall-clock sleep.
+    #[test]
+    fn standby_completer_retry_policy_backs_off_then_gives_up_after_expiration() {
+        use rand::SeedableRng;
+        let policy = completer_retry_policy();
+        assert_eq!(policy.expiration(), Duration::from_secs(300));
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let mut elapsed = Duration::ZERO;
+        let mut delays = Vec::new();
+        for attempt in 0.. {
+            let Some(delay) = policy.compute_next_delay(&mut rng, elapsed, attempt) else {
+                break;
+            };
+            delays.push(delay);
+            elapsed += delay;
+            assert!(attempt < 200, "policy never gave up");
+        }
+        // Jitter keeps 80%..100% of the nominal 1,2,4,8,10,10... interval. The final delay is
+        // clamped to the time left before expiration, so only its upper bound is fixed.
+        let last = delays.len() - 1;
+        for (attempt, delay) in delays.iter().enumerate() {
+            let nominal = (1u64 << attempt.min(4)).min(10) as f64;
+            let secs = delay.as_secs_f64();
+            assert!(
+                (attempt == last || secs >= nominal * 0.8 - 1e-6) && secs <= nominal + 1e-6,
+                "attempt {attempt}: {secs}s vs nominal {nominal}s"
+            );
+        }
+        assert!(delays.len() > 25, "retries for minutes, got {}", delays.len());
+        assert!(elapsed <= Duration::from_secs(300));
+        assert!(policy
+            .compute_next_delay(&mut rng, Duration::from_secs(301), 3)
+            .is_none());
     }
 
     fn state() -> h::DescribeWorkflowExecutionResponse {

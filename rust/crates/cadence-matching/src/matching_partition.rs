@@ -285,7 +285,11 @@ mod tests {
                 SqliteTaskStore::create(directory.path().join("queue.db"), BlobEncoding::ThriftRW)
                     .unwrap(),
             );
-            let key = TaskListKey { domain_id: uuid::Uuid::from_u128(1), name: "tl".into(), task_type: 0 };
+            let key = TaskListKey {
+                domain_id: uuid::Uuid::from_u128(1),
+                name: "tl".into(),
+                task_type: 0,
+            };
             let queue = DurableTaskQueue::open(
                 store.clone(),
                 key.clone(),
@@ -298,7 +302,12 @@ mod tests {
             (directory, store, key, queue, cache)
         };
         let persisted = |store: &SqliteTaskStore, key: &TaskListKey| {
-            store.get_task_list(key).unwrap().data.adaptive_partition_config.map(from_storage)
+            store
+                .get_task_list(key)
+                .unwrap()
+                .data
+                .adaptive_partition_config
+                .map(from_storage)
         };
 
         // "success - nil original config, request of one partition": no-op, nothing persisted.
@@ -315,7 +324,14 @@ mod tests {
         assert_eq!(cache.get().unwrap().version, 1);
         let (old, new) = cache.update(&queue, request(3, 1), 4).unwrap().unwrap();
         assert_eq!(old.unwrap().version, 1);
-        assert_eq!((new.version, new.read_partitions.len(), new.write_partitions.len()), (2, 3, 1));
+        assert_eq!(
+            (
+                new.version,
+                new.read_partitions.len(),
+                new.write_partitions.len()
+            ),
+            (2, 3, 1)
+        );
         assert_eq!(
             serde_json::to_value(persisted(&store, &key)).unwrap(),
             serde_json::to_value(cache.get()).unwrap()

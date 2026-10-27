@@ -5,19 +5,19 @@
 //! `wrappers/thrift/thrift_handler_test.go`. Go's gomock managers are not
 //! reproduced. Where a Go assertion needs one, the test is `#[ignore]` with the
 //! gap named.
+use cadence_api::types::DomainInfo;
+use cadence_matching::{
+    grpc_matching::Matching, matching_history::MatchingHistoryClient,
+    matching_registry::QueueRegistry, thrift_matching::dispatch,
+};
 use cadence_persistence::{
     matching_blob::BlobEncoding,
     matching_sqlite::{SqliteTaskStore, TaskListKey},
     StoredPartitionConfig,
 };
-use cadence_matching::{
-    grpc_matching::Matching, matching_history::MatchingHistoryClient,
-    matching_registry::QueueRegistry, thrift_matching::dispatch,
-};
 use cadence_proto::{api as p, history as h, matching as m};
 use cadence_service_core::handlers::AppState;
 use cadence_thrift::{Struct, Value};
-use cadence_api::types::DomainInfo;
 use m::matching_api_server::MatchingApi;
 use std::{
     num::NonZeroU32,
@@ -138,7 +138,14 @@ async fn go_refresh_partition_config_from_request_ignores_older_version() {
         .await
         .unwrap();
     let cached = handle.partitions.get().unwrap();
-    assert_eq!((cached.version, cached.read_partitions.len(), cached.write_partitions.len()), (2, 3, 3));
+    assert_eq!(
+        (
+            cached.version,
+            cached.read_partitions.len(),
+            cached.write_partitions.len()
+        ),
+        (2, 3, 3)
+    );
     // Go "ignore older version": the cached version 3 with two partitions survives a version 2 push.
     durable
         .queues
@@ -151,7 +158,14 @@ async fn go_refresh_partition_config_from_request_ignores_older_version() {
         .await
         .unwrap();
     let cached = handle.partitions.get().unwrap();
-    assert_eq!((cached.version, cached.read_partitions.len(), cached.write_partitions.len()), (3, 2, 2));
+    assert_eq!(
+        (
+            cached.version,
+            cached.read_partitions.len(),
+            cached.write_partitions.len()
+        ),
+        (3, 2, 2)
+    );
 }
 
 // Go cases "success - refresh from database" and "failed to refresh from database".
@@ -190,7 +204,10 @@ async fn go_refresh_partition_config_from_database_replaces_cache() {
         .unwrap();
     let cached = root.partitions.get().unwrap();
     assert_eq!(cached.version, stored.version);
-    assert_eq!((cached.read_partitions.len(), cached.write_partitions.len()), (10, 10));
+    assert_eq!(
+        (cached.read_partitions.len(), cached.write_partitions.len()),
+        (10, 10)
+    );
     // A failed storage read leaves the cache untouched. Go injects "some error" through a mock;
     // Rust surfaces a missing row as NotFound.
     let error = durable
@@ -293,7 +310,11 @@ async fn go_manager_start_root_adopts_persisted_partition_config() {
     let handle = restarted.get(list, 0, now_nanos()).await.unwrap();
     let cached = handle.partitions.get().unwrap();
     assert_eq!(
-        (cached.version, cached.read_partitions.len(), cached.write_partitions.len()),
+        (
+            cached.version,
+            cached.read_partitions.len(),
+            cached.write_partitions.len()
+        ),
         (1, 2, 2)
     );
 }
@@ -319,7 +340,11 @@ async fn go_manager_start_non_root_reads_root_partition_config() {
         .unwrap();
     let cached = child.partitions.get().unwrap();
     assert_eq!(
-        (cached.version, cached.read_partitions.len(), cached.write_partitions.len()),
+        (
+            cached.version,
+            cached.read_partitions.len(),
+            cached.write_partitions.len()
+        ),
         (1, 3, 3)
     );
 }
@@ -335,8 +360,12 @@ async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_upda
     let child_service = child.matching.clone();
     let child_server = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(m::matching_api_server::MatchingApiServer::new(child_service))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(child_listener))
+            .add_service(m::matching_api_server::MatchingApiServer::new(
+                child_service,
+            ))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
+                child_listener,
+            ))
             .await
             .unwrap();
     });
@@ -406,7 +435,10 @@ async fn go_manager_start_root_pushes_loaded_config_to_remote_child_without_upda
         .unwrap();
 
     let restarted = registry(parent.store.clone()).with_membership(membership);
-    let _root = restarted.get(key(TASK_LIST, 0), 0, now_nanos()).await.unwrap();
+    let _root = restarted
+        .get(key(TASK_LIST, 0), 0, now_nanos())
+        .await
+        .unwrap();
 
     // The real gRPC RefreshTaskListPartitionConfig handler on the child must
     // load and cache the root's persisted config. No parent Update RPC occurs
@@ -476,7 +508,10 @@ async fn go_dispatch_task_active_offer_without_error_reaches_poller() {
     add.set_timeout(Duration::from_secs(8));
     durable.matching.add_decision_task(add).await.unwrap();
     let response = poll.await.unwrap().unwrap().into_inner();
-    assert!(!response.task_token.is_empty(), "poll returned {response:?}");
+    assert!(
+        !response.task_token.is_empty(),
+        "poll returned {response:?}"
+    );
     assert_eq!(response.started_event_id, 10, "{response:?}");
 }
 
@@ -503,7 +538,9 @@ async fn start_history() -> String {
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(h::history_api_server::HistoryApiServer::new(StartingHistory))
+            .add_service(h::history_api_server::HistoryApiServer::new(
+                StartingHistory,
+            ))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await
             .unwrap();

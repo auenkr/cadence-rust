@@ -245,7 +245,7 @@ impl TaskWriter {
         config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
         fatal: Option<
-            tokio::sync::mpsc::UnboundedSender<cadence_persistence::matching_blob::SqlRunIdError>,
+            crate::matching_fatal::MatchingFatalSender,
         >,
         tracker: Option<Arc<WriterTracker>>,
     ) -> Self {
@@ -354,7 +354,7 @@ impl TaskWriter {
                             &error
                         {
                             if let Some(fatal) = &fatal {
-                                let _ = fatal.send(cause.clone());
+                                let _ = fatal.send(crate::matching_fatal::MatchingFatal::SqlRunId(cause.clone()));
                             }
                         }
                         let status = match (&error, kind) {
@@ -561,7 +561,7 @@ mod tests {
             .await
             .expect("writer actor did not exit after stop");
         assert!(
-            matches!(fatal_rx.try_recv().unwrap(), cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "delayed-malformed-run-id")
+            matches!(fatal_rx.try_recv().unwrap(), crate::matching_fatal::MatchingFatal::SqlRunId(cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. }) if raw == "delayed-malformed-run-id")
         );
     }
     use cadence_persistence::{
@@ -616,7 +616,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            matches!(fatal, cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. } if raw == "malformed-run-id")
+            matches!(fatal, crate::matching_fatal::MatchingFatal::SqlRunId(cadence_persistence::matching_blob::SqlRunIdError::Malformed { raw, .. }) if raw == "malformed-run-id")
         );
         writer.stop();
     }

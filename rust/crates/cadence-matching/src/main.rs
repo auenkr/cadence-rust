@@ -16,6 +16,11 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("{error:#}");
             std::process::exit(2);
         }
+        // Go zap Logger.Fatal (task reader invariant) exits with status 1.
+        Err(error) if error.downcast_ref::<cadence_matching::launcher::MatchingReaderFatal>().is_some() => {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
         result => result,
     }
 }
