@@ -514,14 +514,39 @@ impl Matching {
             let domains = self.frontend.state.domains.clone();
             let name = name.to_owned();
             return match tokio::task::spawn_blocking(move || {
-                let domain = cache.get_domain(&name).map_err(|error| error.to_string())?;
+                let domain = cache.get_domain(&name)?;
                 domains.insert_matching_metadata_if_missing(&domain);
-                Ok::<_, String>(domain.info.uuid)
+                Ok::<_, crate::matching_domain_cache::DomainCacheError>(domain.info.uuid)
             })
             .await
             {
                 Ok(Ok(id)) => Ok(id),
-                Ok(Err(error)) => Err(crate::grpc::domain_not_found(error)),
+                Ok(Err(error)) => Err(match error {
+                    crate::matching_domain_cache::DomainCacheError::EmptyName => {
+                        Status::invalid_argument("Domain name is empty")
+                    }
+                    crate::matching_domain_cache::DomainCacheError::EmptyId => {
+                        Status::invalid_argument("DomainID is empty.")
+                    }
+                    crate::matching_domain_cache::DomainCacheError::SourceClassified {
+                        message,
+                        class: crate::matching_domain_cache::DomainErrorClass::NotFound,
+                    } => crate::grpc::domain_not_found(message),
+                    crate::matching_domain_cache::DomainCacheError::SourceClassified {
+                        message,
+                        class: crate::matching_domain_cache::DomainErrorClass::BadRequest,
+                    } => Status::invalid_argument(message),
+                    crate::matching_domain_cache::DomainCacheError::SourceClassified { message, .. }
+                    | crate::matching_domain_cache::DomainCacheError::Source(message) => {
+                        Status::internal(message)
+                    }
+                    crate::matching_domain_cache::DomainCacheError::ExistsButNotLoaded(_) => {
+                        Status::internal("DefaultDomainCache encounter case where domain exists but cannot be loaded")
+                    }
+                    crate::matching_domain_cache::DomainCacheError::Stopped => {
+                        Status::internal("domain cache is stopped")
+                    }
+                }),
                 Err(error) if error.is_panic() => {
                     std::panic::resume_unwind(error.into_panic())
                 }
