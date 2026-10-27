@@ -40,6 +40,16 @@ https://github.com/auenkr/cadence-rust/actions/runs/40475730254,
 source866b210d4 (pending at dispatch). Runs40474658191 and40474883530 are
 superseded. No runtime result is inferred from either fixture correction.
 
+Subsequent test runs40476193408 (older trace branch) and40476277002
+(resolver regression branch) failed tests, not compilation. The former still
+had the superseded metadata-bound fixture; the latter's ordinary resolver-miss
+case expected InvalidArgument but correctly reached domain quota resolution
+and returned NotFound. Master52a42dd45 fixes that test expectation; its
+captured resolver-panic case passed. Combined focused clean-target CI:
+https://github.com/auenkr/cadence-rust/actions/runs/40477160902
+at52a42dd45 (pending at dispatch), including Go SDK fixture checks.
+Later traces and optional probe additions still require final workspace CI.
+
 Merged baseline branch `t3/matching-cold-cache-metrics` at005b7849f was verified
 an ancestor of pushed master, clean and inactive, then its worktree
 `/home/auenkr/.t3/worktrees/cadence-rust/t3-6d878a3e`, local branch and remote
