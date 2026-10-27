@@ -47,6 +47,35 @@ def collect(args):
             continue
         if isinstance(row, dict) and 'result' in row:
             scenarios.append(row)
+    # Keep this as an evidence inventory: requested command-line flags are not
+    # results, and log-file presence alone does not prove an SDK scenario passed.
+    work = source / 'gate/run/rust-matching'
+    sdk_names = ('go-sdk.log', 'restart-sdk.log', 'graceful-drain-sdk.log',
+                 'adaptive-scaler-sdk.log', 'adaptive-scaler-retry-only-sdk.log',
+                 'production-idle-recovery-sdk.log', 'production-crash-recovery-sdk.log',
+                 'gc-backlog-sdk.log')
+    sdk_evidence = {name: {'status': 'present' if (work / name).is_file() else 'missing'}
+                    for name in sdk_names}
+    cleanup = {}
+    for path in sorted((source / 'gate').glob('*container-cleanup.txt')):
+        content = path.read_text(errors='replace').strip()
+        cleanup[path.name] = {
+            'status': 'present' if content else 'empty',
+            'recordedOutput': content or None,
+            'sha256': sha256_file(path),
+        }
+    recovery_names = ('matching-shutdown.json', 'production-failure-recovery-checkpoints.json',
+                      'db-observations.json')
+    recovery_evidence = {}
+    for name in recovery_names:
+        path = work / name
+        if not path.is_file():
+            recovery_evidence[name] = {'status': 'missing'}
+            continue
+        try:
+            recovery_evidence[name] = {'status': 'present', 'recorded': json.loads(path.read_text())}
+        except (ValueError, OSError):
+            recovery_evidence[name] = {'status': 'present-unparsed', 'sha256': sha256_file(path)}
     if gate_exit == 0:
         if build_exit != 0 or runtime.get('runExitCode') != 0 or runtime.get('probeExitCode') != 0:
             raise ValueError('successful gate contradicts recorded build/runtime/probe exits')
@@ -64,7 +93,9 @@ def collect(args):
     selected.extend(sorted((source / 'gate').glob('*container-cleanup.txt')))
     for name in ('adaptive-scaler-sdk.log', 'adaptive-scaler-retry-only-sdk.log',
                  'go-sdk.log', 'restart-sdk.log', 'graceful-drain-sdk.log',
-                 'db-observations.json', 'matching-shutdown.json'):
+                 'production-idle-recovery-sdk.log', 'production-crash-recovery-sdk.log',
+                 'production-failure-recovery-checkpoints.json',
+                 'gc-backlog-sdk.log', 'db-observations.json', 'matching-shutdown.json'):
         path = source / 'gate/run/rust-matching' / name
         if path.is_file():
             selected.append(path)
@@ -83,9 +114,13 @@ def collect(args):
     report = {'runUrl': args.run_url, 'lane': args.lane, 'headSha': head,
               'binarySha256': binary.split()[0], 'buildExit': build_exit,
               'gateExit': gate_exit, 'runtimeResults': runtime,
-              'observedProbeResults': scenarios, 'retainedFiles': retained,
+              'observedProbeResults': scenarios,
+              'sdkEvidenceFiles': sdk_evidence,
+              'recoveryEvidence': recovery_evidence,
+              'databaseCleanup': cleanup,
+              'retainedFiles': retained,
               'originalFileSha256': hashes, 'serviceAcceptance': False,
-              'reviewRequired': 'Inspect actual lane-specific scenarios and source parity ledger.'}
+              'reviewRequired': 'Inspect actual lane-specific result rows, SDK/recovery evidence, cleanup output, and source parity ledger. Missing files and requested flags are not execution evidence.'}
     (destination / 'collection.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({'headSha': head, 'gateExit': gate_exit, 'output': str(destination),
                       'serviceAcceptance': False}))
