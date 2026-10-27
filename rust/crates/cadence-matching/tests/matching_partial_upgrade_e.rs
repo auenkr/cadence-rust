@@ -605,7 +605,9 @@ async fn go_thrift_handler_routes_each_tested_method() {
                         )],
                     }
                 } else {
-                    Struct::default()
+                    // Exercise routing with a present request. A missing
+                    // argument takes Go's captured nil-pointer panic path.
+                    Struct { fields: vec![(1, Value::Struct(Struct::default()))] }
                 },
                 deadline,
             ),
