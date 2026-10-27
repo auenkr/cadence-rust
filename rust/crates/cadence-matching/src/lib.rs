@@ -53,7 +53,6 @@ pub mod matching_domain_cache;
 pub mod matching_domain_uuid;
 #[cfg(test)]
 mod matching_dyncfg_defaults_tests;
-#[allow(clippy::result_large_err)]
 pub mod matching_fatal;
 #[allow(clippy::result_large_err)]
 pub mod matching_fault_injection;
@@ -88,6 +87,7 @@ pub mod matching_sync;
 pub mod matching_task_info_log;
 pub mod matching_task_store;
 pub mod matching_throttled_logger;
+#[allow(clippy::result_large_err)]
 pub mod matching_writer;
 #[allow(clippy::result_large_err)]
 pub mod thrift_matching;

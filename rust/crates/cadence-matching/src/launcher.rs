@@ -1700,7 +1700,7 @@ pub async fn run(
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .and_then(|error| FatalExit::from_error(error));
+                .and_then(FatalExit::from_error);
             // On a signal, or after one listener exits, the remaining listener
             // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
