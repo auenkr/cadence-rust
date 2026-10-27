@@ -45,6 +45,13 @@ func TestGenerateHistoryTChannelWireOracle(t *testing.T) {
 	if output == "" {
 		t.Skip("set CADENCE_THRIFT_WIRE_FIXTURE_OUT to generate pinned Go ThriftRW wire fixtures")
 	}
+	// Match the reviewed fixture's fixed timestamps; testdata otherwise uses
+	// time.Now at package initialization, making a fresh oracle incomparable.
+	testdata.Timestamp1 = 1792476472
+	testdata.Timestamp2 = testdata.Timestamp1 + 1
+	testdata.Timestamp3 = testdata.Timestamp1 + 2
+	testdata.Timestamp4 = testdata.Timestamp1 + 3
+	testdata.Timestamp5 = testdata.Timestamp1 + 4
 	fixtures := []historyWireFixture{
 		encodeHistoryWireFixture(t, "get_mutable_state_request", history.HistoryService_GetMutableState_Helper.Args(FromHistoryGetMutableStateRequest(&testdata.HistoryGetMutableStateRequest))),
 		encodeHistoryWireFixture(t, "get_mutable_state_response", historySuccess(history.HistoryService_GetMutableState_Helper.WrapResponse(FromHistoryGetMutableStateResponse(&testdata.HistoryGetMutableStateResponse), nil))),

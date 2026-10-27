@@ -27,5 +27,5 @@ if [[ ! -f "$expected" ]]; then
   trap - EXIT
   exit 2
 fi
-diff -u "$expected" "$observed"
+python3 "$repo_root/scripts/compare-history-tchannel-wire-fixtures.py" "$expected" "$observed"
 echo "Pinned Go History TChannel oracle matches the reviewed fixture."
