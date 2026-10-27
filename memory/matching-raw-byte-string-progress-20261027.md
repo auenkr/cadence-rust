@@ -33,8 +33,10 @@ Required integration work:
    partition maps are currently String-based. Hash original bytes; preserve
    original Thrift blob bytes and backend parameter/error semantics. Follow
    Go's distinct SQL/Cassandra malformed-run-ID handling.
-4. Outbound native Thrift must reproduce original bytes. Protobuf rejects
-   invalid strings at its own boundary. JSON/task-token handling needs Go's
+4. Outbound native Thrift must reproduce original bytes. The pinned Go gogo
+   protobuf codec also accepts invalid strings (confirmed by the 2026-10-28
+   runtime oracle); Rust's public String model cannot represent those values.
+   JSON/task-token handling needs Go's
    actual encoding/json semantics, rather than applying lossless bytes as a
    new JSON wire format. Sorting, limits, metrics and error quoting require
    explicit review wherever current code assumes UTF-8.

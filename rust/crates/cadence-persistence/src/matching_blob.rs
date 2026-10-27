@@ -2,6 +2,7 @@
 //! These are raw Thrift structs, unlike history branch tokens (no 0x59 prefix).
 use cadence_thrift::{value::read_struct, Error, Reader, Result, Struct, TType, Value, Writer};
 use serde::{Deserialize, Serialize};
+use cadence_common::go_string::GoString;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +18,41 @@ pub struct TaskData {
     pub expiry_nanos: i64,
     pub created_nanos: i64,
     pub partition_config: Option<BTreeMap<String, String>>,
+}
+
+/// Byte-preserving form of Go's SQL Matching task blob. Use this at the native
+/// Thrift boundary; conversion to the legacy UTF-8 model is explicitly fallible.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskDataBytes {
+    pub workflow_id: GoString,
+    pub run_id: Option<Vec<u8>>,
+    /// Runtime-only request RunID, kept distinct from the persisted UUID bytes.
+    pub raw_run_id: Option<GoString>,
+    pub schedule_id: i64,
+    pub expiry_nanos: i64,
+    pub created_nanos: i64,
+    pub partition_config: Option<BTreeMap<GoString, GoString>>,
+}
+impl TryFrom<TaskDataBytes> for TaskData {
+    type Error = std::string::FromUtf8Error;
+    fn try_from(value: TaskDataBytes) -> std::result::Result<Self, Self::Error> {
+        let workflow_id = value.workflow_id.into_utf8()?;
+        let partition_config = value.partition_config.map(|map| {
+            map.into_iter().map(|(k, v)| Ok((k.into_utf8()?, v.into_utf8()?)))
+                .collect::<std::result::Result<BTreeMap<_, _>, Self::Error>>()
+        }).transpose()?;
+        let raw_run_id = value.raw_run_id.map(GoString::into_utf8).transpose()?;
+        Ok(Self { workflow_id, run_id: value.run_id, raw_run_id, schedule_id: value.schedule_id,
+            expiry_nanos: value.expiry_nanos, created_nanos: value.created_nanos, partition_config })
+    }
+}
+impl From<TaskData> for TaskDataBytes {
+    fn from(value: TaskData) -> Self {
+        Self { workflow_id: value.workflow_id.into(), run_id: value.run_id,
+            raw_run_id: value.raw_run_id.map(GoString::from), schedule_id: value.schedule_id,
+            expiry_nanos: value.expiry_nanos, created_nanos: value.created_nanos,
+            partition_config: value.partition_config.map(|m| m.into_iter().map(|(k,v)| (k.into(),v.into())).collect()) }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SqlRunIdError {
@@ -129,6 +165,8 @@ impl TaskData {
 pub struct Partition {
     pub isolation_groups: Option<Vec<String>>,
 }
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartitionBytes { pub isolation_groups: Option<Vec<GoString>> }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartitionConfig {
     pub version: i64,
@@ -137,6 +175,12 @@ pub struct PartitionConfig {
     pub read_partitions: Option<BTreeMap<i32, Partition>>,
     pub write_partitions: Option<BTreeMap<i32, Partition>>,
 }
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartitionConfigBytes {
+    pub version: i64, pub num_read_partitions: i32, pub num_write_partitions: i32,
+    pub read_partitions: Option<BTreeMap<i32, PartitionBytes>>,
+    pub write_partitions: Option<BTreeMap<i32, PartitionBytes>>,
+}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskListData {
     pub kind: i16,
@@ -144,6 +188,32 @@ pub struct TaskListData {
     pub expiry_nanos: i64,
     pub last_updated_nanos: i64,
     pub adaptive_partition_config: Option<PartitionConfig>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskListDataBytes { pub kind: i16, pub ack_level: i64, pub expiry_nanos: i64,
+    pub last_updated_nanos: i64, pub adaptive_partition_config: Option<PartitionConfigBytes> }
+impl TryFrom<TaskListDataBytes> for TaskListData {
+    type Error = std::string::FromUtf8Error;
+    fn try_from(v: TaskListDataBytes) -> std::result::Result<Self, Self::Error> {
+        fn convert(m: Option<BTreeMap<i32, PartitionBytes>>) -> std::result::Result<Option<BTreeMap<i32, Partition>>, std::string::FromUtf8Error> {
+            m.map(|m| m.into_iter().map(|(k,p)| Ok((k, Partition { isolation_groups: p.isolation_groups.map(|g| g.into_iter().map(GoString::into_utf8).collect()).transpose()? })) ).collect()).transpose()
+        }
+        let adaptive_partition_config = v.adaptive_partition_config.map(|c| Ok::<_, Self::Error>(PartitionConfig { version:c.version,
+            num_read_partitions:c.num_read_partitions, num_write_partitions:c.num_write_partitions,
+            read_partitions:convert(c.read_partitions)?, write_partitions:convert(c.write_partitions)? })).transpose()?;
+        Ok(Self { kind:v.kind, ack_level:v.ack_level, expiry_nanos:v.expiry_nanos, last_updated_nanos:v.last_updated_nanos, adaptive_partition_config })
+    }
+}
+impl From<TaskListData> for TaskListDataBytes {
+    fn from(v: TaskListData) -> Self {
+        fn convert(m: Option<BTreeMap<i32, Partition>>) -> Option<BTreeMap<i32, PartitionBytes>> {
+            m.map(|m| m.into_iter().map(|(k,p)| (k, PartitionBytes { isolation_groups:p.isolation_groups.map(|g| g.into_iter().map(GoString::from).collect()) })).collect())
+        }
+        Self { kind:v.kind, ack_level:v.ack_level, expiry_nanos:v.expiry_nanos, last_updated_nanos:v.last_updated_nanos,
+            adaptive_partition_config:v.adaptive_partition_config.map(|c| PartitionConfigBytes { version:c.version,
+                num_read_partitions:c.num_read_partitions, num_write_partitions:c.num_write_partitions,
+                read_partitions:convert(c.read_partitions), write_partitions:convert(c.write_partitions) }) }
+    }
 }
 
 fn i64_field(w: &mut Writer, id: i16, value: i64) {
@@ -310,6 +380,68 @@ pub fn decode_task_list(bytes: &[u8]) -> Result<TaskListData> {
         last_updated_nanos: i64_value(&s, 16),
         adaptive_partition_config,
     })
+}
+
+/// Encode a task using original Go string bytes. `raw_run_id` remains runtime
+/// metadata and is never substituted for the persisted UUID field.
+pub fn encode_task_bytes(data: &TaskDataBytes) -> std::result::Result<Vec<u8>, String> {
+    if data.raw_run_id.is_some() { return Err("resolve raw RunID with TaskData::for_sql first".into()); }
+    let mut w = Writer::new();
+    w.write_field_begin(TType::String, 10); w.write_bytes(data.workflow_id.as_bytes());
+    if let Some(run) = &data.run_id { w.write_field_begin(TType::String, 12); w.write_bytes(run); }
+    i64_field(&mut w, 13, data.schedule_id); i64_field(&mut w, 14, data.expiry_nanos); i64_field(&mut w, 15, data.created_nanos);
+    if let Some(config) = &data.partition_config {
+        w.write_field_begin(TType::Map, 17); w.write_map_begin(TType::String, TType::String, config.len());
+        for (key, value) in config { w.write_bytes(key.as_bytes()); w.write_bytes(value.as_bytes()); }
+    }
+    w.write_field_stop(); Ok(w.into_bytes())
+}
+pub fn decode_task_bytes(bytes: &[u8]) -> Result<TaskDataBytes> {
+    let s = read_struct(&mut Reader::new(bytes))?;
+    let partition_config = match s.get(17) {
+        Some(Value::Map(values)) => Some(values.iter().map(|(k,v)| {
+            let (Value::Bytes(k), Value::Bytes(v)) = (k,v) else { return Err(Error::Invalid("expected string in matching blob".into())); };
+            Ok((GoString::from(k.clone()), GoString::from(v.clone())))
+        }).collect::<Result<_>>()?), _ => None,
+    };
+    let workflow_id = match s.get(10) { Some(Value::Bytes(v)) => GoString::from(v.clone()), _ => GoString::default() };
+    Ok(TaskDataBytes { workflow_id, run_id: match s.get(12) { Some(Value::Bytes(v)) => Some(v.clone()), _ => None },
+        raw_run_id:None, schedule_id:i64_value(&s,13), expiry_nanos:i64_value(&s,14), created_nanos:i64_value(&s,15), partition_config })
+}
+fn write_partitions_bytes(w: &mut Writer, config: &PartitionConfigBytes) {
+    i64_field(w,10,config.version); i32_field(w,12,config.num_read_partitions); i32_field(w,14,config.num_write_partitions);
+    for (id,map) in [(16,&config.read_partitions),(18,&config.write_partitions)] {
+        if let Some(map)=map { w.write_field_begin(TType::Map,id); w.write_map_begin(TType::I32,TType::Struct,map.len());
+            for (key,metadata) in map { w.write_i32(*key); if let Some(groups)=&metadata.isolation_groups {
+                w.write_field_begin(TType::List,10); w.write_list_begin(TType::String,groups.len());
+                for group in groups { w.write_bytes(group.as_bytes()); }
+            } w.write_field_stop(); }
+        }
+    } w.write_field_stop();
+}
+pub fn encode_task_list_bytes(data: &TaskListDataBytes) -> Vec<u8> {
+    let mut w=Writer::new(); w.write_field_begin(TType::I16,10); w.write_i16(data.kind);
+    i64_field(&mut w,12,data.ack_level); i64_field(&mut w,14,data.expiry_nanos); i64_field(&mut w,16,data.last_updated_nanos);
+    if let Some(config)=&data.adaptive_partition_config { w.write_field_begin(TType::Struct,18); write_partitions_bytes(&mut w,config); }
+    w.write_field_stop(); w.into_bytes()
+}
+fn read_partitions_bytes(s: &Struct,id:i16) -> Result<Option<BTreeMap<i32,PartitionBytes>>> {
+    let Some(Value::Map(values))=s.get(id) else { return Ok(None); };
+    values.iter().map(|(key,value)| {
+        let (Value::I32(key),Value::Struct(metadata))=(key,value) else { return Err(Error::Invalid("invalid matching partition entry".into())); };
+        let isolation_groups=match metadata.get(10) { Some(Value::List(values)) => Some(values.iter().map(|value| match value {
+            Value::Bytes(bytes)=>Ok(GoString::from(bytes.clone())), _=>Err(Error::Invalid("expected string in matching blob".into()))
+        }).collect::<Result<_>>()?), _=>None };
+        Ok((*key,PartitionBytes{isolation_groups}))
+    }).collect::<Result<_>>().map(Some)
+}
+pub fn decode_task_list_bytes(bytes: &[u8]) -> Result<TaskListDataBytes> {
+    let s=read_struct(&mut Reader::new(bytes))?;
+    let adaptive_partition_config=match s.get(18) { Some(Value::Struct(c))=>Some(PartitionConfigBytes {
+        version:i64_value(c,10), num_read_partitions:i32_value(c,12), num_write_partitions:i32_value(c,14),
+        read_partitions:read_partitions_bytes(c,16)?, write_partitions:read_partitions_bytes(c,18)? }), _=>None };
+    Ok(TaskListDataBytes { kind:match s.get(10){Some(Value::I16(v))=>*v,_=>0}, ack_level:i64_value(&s,12),
+        expiry_nanos:i64_value(&s,14), last_updated_nanos:i64_value(&s,16), adaptive_partition_config })
 }
 
 /// SQL data_encoding values used by the pinned Go parser.
@@ -526,5 +658,46 @@ mod tests {
         }
         assert!(BlobEncoding::ThriftRWSnappy.decode(&[255]).is_err());
         assert!(BlobEncoding::parse("json").is_err());
+    }
+    #[test]
+    fn raw_task_blob_round_trips_arbitrary_thrift_strings_without_aliasing() {
+        let mut config = BTreeMap::new();
+        config.insert(GoString::from(vec![0xff]), GoString::from(vec![0xfe, 0]));
+        config.insert(GoString::from(vec![0xfe]), GoString::from("distinct"));
+        config.insert(GoString::from("\u{fffd}"), GoString::from("value"));
+        let data = TaskDataBytes { workflow_id: GoString::from(vec![0xff, 0, 0xfe]),
+            partition_config:Some(config), ..Default::default() };
+        let encoded=encode_task_bytes(&data).unwrap();
+        let decoded=decode_task_bytes(&encoded).unwrap();
+        assert_eq!(decoded,data);
+        assert_eq!(decoded.workflow_id.as_bytes(), &[0xff,0,0xfe]);
+        assert_eq!(decoded.partition_config.as_ref().unwrap().len(),3);
+        assert_eq!(decoded.partition_config.as_ref().unwrap().get(&GoString::from(vec![0xff])).unwrap().as_bytes(), &[0xfe,0]);
+        assert_eq!(decoded.partition_config.as_ref().unwrap().get(&GoString::from(vec![0xfe])).unwrap().as_bytes(), b"distinct");
+    }
+    #[test]
+    fn raw_task_list_bytes_preserve_groups_and_absent_empty_containers() {
+        let absent=TaskListDataBytes::default();
+        let decoded=decode_task_list_bytes(&encode_task_list_bytes(&absent)).unwrap();
+        assert_eq!(decoded,absent);
+        let empty=TaskListDataBytes { adaptive_partition_config:Some(PartitionConfigBytes {
+            read_partitions:Some(BTreeMap::new()), write_partitions:Some(BTreeMap::new()), ..Default::default() }), ..Default::default() };
+        let decoded=decode_task_list_bytes(&encode_task_list_bytes(&empty)).unwrap();
+        assert_eq!(decoded,empty);
+        let mut partitions=BTreeMap::new();
+        partitions.insert(1,PartitionBytes { isolation_groups:Some(vec![GoString::from(vec![0xff]),GoString::from(vec![0xfe]),GoString::from("\u{fffd}"),GoString::from(vec![0])]) });
+        let value=TaskListDataBytes { adaptive_partition_config:Some(PartitionConfigBytes { read_partitions:Some(partitions), ..Default::default() }), ..Default::default() };
+        assert_eq!(decode_task_list_bytes(&encode_task_list_bytes(&value)).unwrap(),value);
+    }
+    #[test]
+    fn valid_utf8_raw_and_legacy_entry_points_encode_identically() {
+        let task=TaskData { workflow_id:"workflow-\u{fffd}".into(), partition_config:Some(BTreeMap::from([("key".into(),"value".into())])), ..Default::default() };
+        let raw=TaskDataBytes::from(task.clone());
+        assert_eq!(encode_task_bytes(&raw).unwrap(),encode_task(&task).unwrap());
+        assert_eq!(TaskData::try_from(decode_task_bytes(&encode_task_bytes(&raw).unwrap()).unwrap()).unwrap(),task);
+        let list=TaskListData { adaptive_partition_config:Some(PartitionConfig { read_partitions:Some(BTreeMap::from([(2,Partition { isolation_groups:Some(vec!["group".into()]) })])), ..Default::default() }), ..Default::default() };
+        let raw=TaskListDataBytes::from(list.clone());
+        assert_eq!(encode_task_list_bytes(&raw),encode_task_list(&list));
+        assert_eq!(TaskListData::try_from(decode_task_list_bytes(&encode_task_list_bytes(&raw)).unwrap()).unwrap(),list);
     }
 }

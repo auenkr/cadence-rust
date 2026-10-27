@@ -1,5 +1,5 @@
-//! Go strings are byte sequences. UTF-8 is a transport constraint, not an
-//! invariant of a Thrift string or a Matching identifier.
+//! Go strings are byte sequences. UTF-8 is not an invariant of a Matching
+//! identifier, including on the pinned Go Thrift and gogo protobuf paths.
 
 use std::borrow::Borrow;
 use std::str::Utf8Error;
@@ -7,8 +7,9 @@ use std::str::Utf8Error;
 /// Lossless representation for Go `string` values on Matching's Thrift path.
 ///
 /// Equality, ordering and hashing operate on the original bytes. In particular,
-/// invalid UTF-8 never becomes the Unicode replacement character. Callers must
-/// explicitly validate UTF-8 when crossing a protobuf string boundary.
+/// invalid UTF-8 never becomes the Unicode replacement character. Conversion
+/// to Rust's public protobuf `String` fields requires explicit UTF-8 validation;
+/// native Go-compatible transport paths must preserve the original bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GoString(Vec<u8>);
 
@@ -36,6 +37,68 @@ impl GoString {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Quote these bytes as a Go `encoding/json` string value.
+    ///
+    /// Go replaces each invalid UTF-8 byte separately before JSON escaping.
+    /// This returns the quoted JSON text (including its surrounding quotes);
+    /// it does not define serde serialization for `GoString`.
+    pub fn go_json_string(&self) -> String {
+        let mut out = String::with_capacity(self.0.len() + 2);
+        out.push('"');
+        let mut offset = 0;
+        while offset < self.0.len() {
+            let first = self.0[offset];
+            let width = match first {
+                0x00..=0x7f => 1,
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => 0,
+            };
+            let decoded = (width != 0)
+                .then(|| self.0.get(offset..offset + width))
+                .flatten()
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(|s| s.chars().next());
+            if let Some(ch) = decoded {
+                push_go_json_char(&mut out, ch);
+                offset += width;
+            } else {
+                // Go emits an escape for invalid bytes but writes a valid
+                // UTF-8 replacement rune literally. Preserve that distinction.
+                out.push_str("\\ufffd");
+                offset += 1;
+            }
+        }
+        out.push('"');
+        out
+    }
+}
+
+fn push_go_json_char(out: &mut String, ch: char) {
+    match ch {
+        '"' => out.push_str("\\\""),
+        '\\' => out.push_str("\\\\"),
+        '\u{0008}' => out.push_str("\\b"),
+        '\u{000c}' => out.push_str("\\f"),
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        '<' => out.push_str("\\u003c"),
+        '>' => out.push_str("\\u003e"),
+        '&' => out.push_str("\\u0026"),
+        '\u{2028}' => out.push_str("\\u2028"),
+        '\u{2029}' => out.push_str("\\u2029"),
+        c if c <= '\u{001f}' => {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let n = c as usize;
+            out.push_str("\\u00");
+            out.push(HEX[n >> 4] as char);
+            out.push(HEX[n & 0xf] as char);
+        }
+        c => out.push(c),
     }
 }
 
@@ -79,6 +142,50 @@ impl Borrow<[u8]> for GoString {
 mod tests {
     use super::GoString;
     use std::collections::{BTreeSet, HashMap};
+
+    fn check_json(bytes: &[u8], expected: &str) {
+        assert_eq!(GoString::from(bytes).go_json_string(), expected);
+    }
+
+    #[test]
+    fn go_json_string_matches_encoding_json_for_malformed_sequences() {
+        check_json(&[0xff], "\"\\ufffd\"");
+        check_json(&[0xe1, 0x80, 0xff], "\"\\ufffd\\ufffd\\ufffd\"");
+        check_json(&[0xc0, 0xaf], "\"\\ufffd\\ufffd\"");
+        check_json(&[0xe2, 0x82], "\"\\ufffd\\ufffd\"");
+        check_json(&[0xf0, 0x28, 0x8c, 0x28], "\"\\ufffd(\\ufffd(\"");
+        check_json(&[0xef, 0xbf, 0xbd], "\"�\"");
+    }
+
+    #[test]
+    fn go_json_string_matches_encoding_json_escaping() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        let value = GoString::from(bytes);
+        let quoted = value.go_json_string();
+        let parsed: String = serde_json::from_str(&quoted).unwrap();
+        assert_eq!(parsed.chars().count(), 256);
+        assert_eq!(parsed.chars().take(128).collect::<String>().as_bytes(), &(0u8..=127).collect::<Vec<_>>());
+        check_json(b"<>&", "\"\\u003c\\u003e\\u0026\"");
+        check_json("\u{2028}\u{2029}".as_bytes(), "\"\\u2028\\u2029\"");
+        check_json("é雪🙂".as_bytes(), "\"é雪🙂\"");
+        check_json(b"\0\x08\x0c\n\r\t\"\\", "\"\\u0000\\b\\f\\n\\r\\t\\\"\\\\\"");
+    }
+
+    #[test]
+    fn go_json_string_matches_configured_go_oracle_fixture() {
+        let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else {
+            return;
+        };
+        let fixture = std::fs::read_to_string(path).unwrap();
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&fixture).unwrap();
+        assert!(!rows.is_empty(), "Go raw string oracle fixture was empty");
+        for row in rows {
+            let hex = row["hex"].as_str().expect("oracle row hex");
+            let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect::<Vec<_>>();
+            let want = row["jsonText"].as_str().expect("oracle row jsonText");
+            assert_eq!(GoString::from(bytes).go_json_string(), want, "oracle input {hex}");
+        }
+    }
 
     #[test]
     fn go_string_preserves_every_byte_and_requires_explicit_utf8_validation() {

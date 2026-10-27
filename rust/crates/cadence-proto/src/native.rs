@@ -35,8 +35,16 @@ mod tests {
     #[test]
     fn native_matching_trait_covers_the_full_matching_rpc_surface() {
         assert_eq!(NATIVE_MATCHING_METHODS.len(), 13);
-        for method in ["PollForDecisionTask", "AddActivityTask", "AcquireSemaphore", "RefreshTaskListPartitionConfig"] {
-            assert!(NATIVE_MATCHING_METHODS.contains(&method), "missing {method}");
+        for method in [
+            "PollForDecisionTask",
+            "AddActivityTask",
+            "AcquireSemaphore",
+            "RefreshTaskListPartitionConfig",
+        ] {
+            assert!(
+                NATIVE_MATCHING_METHODS.contains(&method),
+                "missing {method}"
+            );
         }
     }
 

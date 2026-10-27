@@ -1,0 +1,6 @@
+test native::tests::native_matching_nested_identity_does_not_require_utf8 ... ok
+test native::tests::native_matching_trait_covers_the_full_matching_rpc_surface ... ok
+test native::tests::native_matching_preserves_invalid_string_map_entries_until_protobuf_boundary ... ok
+test native::tests::native_matching_roundtrips_valid_public_protobuf_requests ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

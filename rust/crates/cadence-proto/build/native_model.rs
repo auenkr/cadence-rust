@@ -351,7 +351,11 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
         for outbound in [false, true] {
             let source = path(definition, outbound);
             let target = path(definition, !outbound);
-            let binding = if message.field.is_empty() { "_value" } else { "value" };
+            let binding = if message.field.is_empty() {
+                "_value"
+            } else {
+                "value"
+            };
             if outbound {
                 writeln!(text, "impl TryFrom<{source}> for {target} {{ type Error = crate::native::NativeStringError; fn try_from({binding}: {source}) -> Result<Self, Self::Error> {{ Ok(Self {{")?;
             } else {
@@ -470,17 +474,25 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
         String::from("// Generated from Matching's reachable protobuf descriptors.\n");
     tree.emit(&mut generated, &[]);
     for file in &set.file {
-        if file.package() != "uber.cadence.matching.v1" { continue; }
+        if file.package() != "uber.cadence.matching.v1" {
+            continue;
+        }
         for service in &file.service {
-            if service.name() != "MatchingAPI" { continue; }
-            generated.push_str("#[::tonic::async_trait]\npub trait NativeMatchingApi: Send + Sync + 'static {\n");
+            if service.name() != "MatchingAPI" {
+                continue;
+            }
+            generated.push_str(
+                "#[::tonic::async_trait]\npub trait NativeMatchingApi: Send + Sync + 'static {\n",
+            );
             for method in &service.method {
                 let input = path(&messages[method.input_type()], true);
                 let output = path(&messages[method.output_type()], true);
                 writeln!(generated, "async fn {}(&self, request: ::tonic::Request<{input}>) -> Result<::tonic::Response<{output}>, ::tonic::Status>;", method.name().to_snake_case())?;
             }
             generated.push_str("}\npub const NATIVE_MATCHING_METHODS: &[&str] = &[\n");
-            for method in &service.method { writeln!(generated, "{:?},", method.name())?; }
+            for method in &service.method {
+                writeln!(generated, "{:?},", method.name())?;
+            }
             generated.push_str("];\n");
         }
     }
