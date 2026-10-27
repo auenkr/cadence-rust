@@ -12,6 +12,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::pin;
 use std::task::Poll;
 
+#[path = "go_isprint_tables.rs"]
+mod go_isprint_tables;
+
 /// Awaits `future`. A panic while it is polled is logged and returned as `Err(message)`.
 /// Typed through the `Result` bound so `?` inside `future` keeps its error type.
 pub async fn capture<T, E>(
@@ -62,15 +65,68 @@ pub fn is_captured_panic_message(message: &str) -> bool {
 
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     let value = if let Some(text) = payload.downcast_ref::<&str>() {
-        format!("{text:?}")
+        go_quote(text)
     } else if let Some(text) = payload.downcast_ref::<String>() {
-        format!("{text:?}")
+        go_quote(text)
     } else {
         "<non-string panic payload>".to_string()
     };
     let message = format!("panic object is not error: {value}");
     eprintln!("ERROR Panic is captured operation={operation} error={message}");
     message
+}
+
+/// Go strconv.Quote, matching the pinned Go 1.25.14 implementation.
+fn go_quote(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\u{0007}' => quoted.push_str("\\a"),
+            '\u{0008}' => quoted.push_str("\\b"),
+            '\u{000c}' => quoted.push_str("\\f"),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            '\u{000b}' => quoted.push_str("\\v"),
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            c if !go_is_print(c) => {
+                let n = c as u32;
+                if n < 0x20 || n == 0x7f {
+                    quoted.push_str(&format!("\\x{n:02x}"));
+                } else if n < 0x10000 {
+                    quoted.push_str(&format!("\\u{n:04x}"));
+                } else {
+                    quoted.push_str(&format!("\\U{n:08x}"));
+                }
+            }
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+// Exact Go 1.25.14 strconv.IsPrint lookup. The static data comes from the
+// upstream generated tables in go_isprint_tables.rs, not Rust Unicode APIs.
+fn go_is_print(ch: char) -> bool {
+    use go_isprint_tables::*;
+    let n = ch as u32;
+    if n <= 0xff {
+        return (0x20..=0x7e).contains(&n) || ((0xa1..=0xff).contains(&n) && n != 0xad);
+    }
+    if n < 0x10000 {
+        in_ranges(PRINT16, n) && NOT_PRINT16.binary_search(&(n as u16)).is_err()
+    } else {
+        in_ranges(PRINT32, n)
+            && (n >= 0x20000 || NOT_PRINT32.binary_search(&((n - 0x10000) as u16)).is_err())
+    }
+}
+
+fn in_ranges<T: Copy + Ord + Into<u32>>(ranges: &[T], value: u32) -> bool {
+    let i = ranges.partition_point(|range| (*range).into() < value);
+    i < ranges.len() && i % 2 == 1 && value <= ranges[i].into()
 }
 
 /// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
@@ -189,5 +245,19 @@ mod tests {
             capture_sync::<()>("test", || std::panic::panic_any(42_u8)),
             Err("panic object is not error: <non-string panic payload>".to_string())
         );
+    }
+
+    #[test]
+    fn go_12514_panic_quote_oracle_matches() {
+        let Ok(path) = std::env::var("MATCHING_GO_PANIC_ORACLE") else {
+            return;
+        };
+        let fixture = std::fs::read_to_string(path).expect("read pinned Go panic quote oracle");
+        for line in fixture.lines() {
+            let (hex, expected) = line.split_once('\t').expect("oracle row delimiter");
+            let scalar = u32::from_str_radix(hex, 16).expect("oracle codepoint");
+            let ch = char::from_u32(scalar).expect("valid Go oracle scalar");
+            assert_eq!(go_quote(&ch.to_string()), expected, "U+{scalar:04X}");
+        }
     }
 }

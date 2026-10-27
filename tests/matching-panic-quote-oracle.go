@@ -1,0 +1,23 @@
+// Copyright 2026. This is a focused compatibility oracle for Matching's
+// recovered panic wire strings. Go version is pinned by rust-ci.yml.
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	points := []rune{
+		0x0000, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x000c, 0x000d,
+		0x001f, 0x0020, 0x0022, 0x005c, 0x007e, 0x007f, 0x0085,
+		0x00a0, 0x00ad, 0x0301, 0x034f, 0xfe0f, 0x061c, 0x200b,
+		0x2028, 0x2060, 0x0378, 0xe000, 0xfdd0, 0xfffe, 0x1f600,
+		0x1d173, 0xe0100, 0x10ffff,
+	}
+	for _, r := range points {
+		if _, err := fmt.Fprintf(os.Stdout, "%06x\t%#v\n", r, string(r)); err != nil {
+			panic(err)
+		}
+	}
+}
