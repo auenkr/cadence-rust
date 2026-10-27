@@ -44,6 +44,15 @@ an ancestor of pushed master, clean and inactive, then its worktree
 `/home/auenkr/.t3/worktrees/cadence-rust/t3-6d878a3e`, local branch and remote
 branch were removed. Source and review evidence remain in master.
 
+Also removed clean, inactive, merged worktrees/branches after verifying their
+remote heads in `git branch -r --merged origin/master`:
+`t3/matching-single-lane` atdb5ca9f984b1e940c83278eda3016114b3af59d1
+(`/home/auenkr/.t3/worktrees/cadence-rust/t3-74d71833`) and
+`t3/go-domain-cache-uuid-oracle` at121ba50d616f9527eb5759f10c8e3ce2ab1f4362
+(`/home/auenkr/.t3/worktrees/cadence-rust/t3-d52880f4`). Local and remote refs
+were deleted; commits and evidence remain in pushed master. Their completed
+worker tasks were no longer using either worktree.
+
 - **Cassandra normalization is not a mandatory acceptance change.** The Go
   oracle confirms raw-string cache lookup after the persistence existence
   check. The prior ledger's requirement to normalize recognized UUID spellings
