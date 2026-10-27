@@ -7,6 +7,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[derive(prost::Message)]
+struct DomainLookupStatusDetails {
+    #[prost(message, repeated, tag = "3")]
+    details: Vec<prost_types::Any>,
+}
+
 const DOMAIN_ID: &str = "00000000-0000-0000-0000-000000000042";
 const DOMAIN_NAME: &str = "created-after-cache-scan";
 
@@ -81,6 +87,7 @@ impl DomainMetadataSource for LateDomainSource {
 #[tokio::test]
 async fn name_lookup_preserves_domain_cache_error_classification() {
     use crate::matching_domain_cache::DomainErrorClass;
+    use prost::Message;
 
     for (error, code, message, detail_type) in [
         (
@@ -120,8 +127,9 @@ async fn name_lookup_preserves_domain_cache_error_classification() {
         .expect_err("cold domain source error must reach the caller");
         assert_eq!(status.code(), code);
         assert_eq!(status.message(), message);
+        let details = DomainLookupStatusDetails::decode(status.details()).unwrap();
         assert_eq!(
-            status.details().first().map(|detail| detail.type_url.as_str()),
+            details.details.first().map(|detail| detail.type_url.as_str()),
             detail_type,
         );
     }
@@ -196,7 +204,7 @@ async fn name_based_listing_handlers_read_through_cold_domain_cache() {
             "name:created-after-cache-scan"
         };
         assert_eq!(&*source.calls.lock().unwrap(), &[call]);
-        assert_eq!(matching.domain_name(DOMAIN_ID).as_deref(), Some(DOMAIN_NAME));
+        assert_eq!(matching.domain_name(DOMAIN_ID).unwrap(), DOMAIN_NAME);
     }
 }
 

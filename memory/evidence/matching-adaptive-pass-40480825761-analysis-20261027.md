@@ -4,9 +4,10 @@
 
 This is useful single-node diagnostic evidence, not acceptance. The adaptive
 SDK probe passed (24/24 load workflows, routing evidence, and SDK scenarios),
-but `acceptanceEligible=false`; the gate exited 2 because its separate
-post-probe GC backlog check retained one pending task (`acksCoverRemovedRows`
-false). The lane intentionally omitted two-instance failure recovery.
+and `acceptanceEligible=false`; the recorded gate exit is 0, as are build,
+run and probe exits. The retained pending GC task is intentional probe residue;
+`acksCoverRemovedRows=false` does not by itself establish a failed assertion.
+The lane intentionally omitted two-instance failure recovery.
 
 No concrete adaptive QPS, durable-reader, or child-delivery defect is
 established by this comparison. In the prior failing run 40476881898, the SDK
@@ -63,8 +64,8 @@ decision-started event exists. No production or harness change is justified
 by this single passing diagnostic.
 
 The single-node diagnostic ran Go Frontend/History/Worker and Rust Matching;
-it did not validate two-node failure recovery, and its gate is not clean due
-to the independent GC backlog assertion. It does not establish Matching
+it did not validate two-node failure recovery. The gate passed at its recorded
+pin, but does not establish Matching
 service completion or parity.
 
 ## Provenance
