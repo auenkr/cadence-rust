@@ -343,6 +343,7 @@ pub struct TaskReader {
     inner: Arc<Inner>,
 }
 /// Outcome of one dispatch attempt for the head task.
+#[derive(Debug)]
 enum Attempt {
     /// Handed off to a poller.
     Offered,
