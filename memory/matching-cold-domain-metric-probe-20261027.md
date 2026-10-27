@@ -108,3 +108,13 @@ sample plus recorded status8 succeeds; a sample naming an unrelated domain
 fails. These checks validate the assertion wiring only, not live persistence,
 quota rejection, exporter delivery or mixed service behavior. Runtime evidence
 remains required.
+
+
+Quota review follow-up: matching.domainworkerrps=0 falls back to the host rate,
+so c06aa9b1e uses a positive domain rate of1 and sends two concurrent calls.
+It selects an actual RESOURCE_EXHAUSTED outcome and records that request's
+unique task list, which the exporter must match. The admitted call can warm
+the cache before the rejected call; this proves late registration/read-through
+and tagged rejection in one scenario, not that the rejected call was itself
+the first cold lookup. The first live mixed run is40478120133 on
+c06aa9b1e70632e216a2bf868c89b06d0c44fc0e, pending at dispatch.

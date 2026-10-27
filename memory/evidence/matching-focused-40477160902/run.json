@@ -1,6 +1,6 @@
 {
   "url": "https://github.com/auenkr/cadence-rust/actions/runs/40477160902",
-  "headSha": "52a42dd45",
+  "headSha": "52a42dd453cb52d280d2f85988f50177924507aa",
   "conclusion": "success",
   "package": "cadence-matching",
   "cleanTarget": true,
