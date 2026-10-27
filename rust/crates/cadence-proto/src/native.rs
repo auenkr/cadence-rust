@@ -9,7 +9,11 @@ pub struct NativeStringError {
 
 impl std::fmt::Display for NativeStringError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "invalid UTF-8 at protobuf string field {}", self.field)
+        write!(
+            formatter,
+            "invalid UTF-8 at protobuf string field {}",
+            self.field
+        )
     }
 }
 
@@ -33,7 +37,8 @@ mod tests {
         let original = crate::matching::AddDecisionTaskRequest {
             domain_id: "domain".into(),
             workflow_execution: Some(crate::api::WorkflowExecution {
-                workflow_id: "workflow".into(), run_id: "run".into(),
+                workflow_id: "workflow".into(),
+                run_id: "run".into(),
             }),
             partition_config: [("key".to_owned(), "value".to_owned())].into(),
             ..Default::default()
@@ -46,8 +51,17 @@ mod tests {
     #[test]
     fn native_matching_preserves_invalid_string_map_entries_until_protobuf_boundary() {
         let mut native = matching::AddDecisionTaskRequest::default();
-        native.partition_config.insert(GoString::from(vec![0xff]), GoString::from(vec![0xfe]));
-        assert_eq!(native.partition_config.get([0xff_u8].as_slice()).unwrap().as_bytes(), &[0xfe]);
+        native
+            .partition_config
+            .insert(GoString::from(vec![0xff]), GoString::from(vec![0xfe]));
+        assert_eq!(
+            native
+                .partition_config
+                .get([0xff_u8].as_slice())
+                .unwrap()
+                .as_bytes(),
+            &[0xfe]
+        );
         let error = crate::matching::AddDecisionTaskRequest::try_from(native).unwrap_err();
         assert_eq!(error.bytes, vec![0xff]);
         assert!(error.field.ends_with("partition_config.key"));
@@ -60,7 +74,10 @@ mod tests {
             identity: GoString::from(vec![0xff, 0, 0xfe]),
             ..Default::default()
         });
-        assert_eq!(native.request.as_ref().unwrap().identity.as_bytes(), &[0xff, 0, 0xfe]);
+        assert_eq!(
+            native.request.as_ref().unwrap().identity.as_bytes(),
+            &[0xff, 0, 0xfe]
+        );
         let error = crate::matching::PollForDecisionTaskRequest::try_from(native).unwrap_err();
         assert_eq!(error.bytes, vec![0xff, 0, 0xfe]);
         assert!(error.field.ends_with("identity"));

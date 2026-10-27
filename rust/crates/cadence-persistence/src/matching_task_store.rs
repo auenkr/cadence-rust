@@ -192,7 +192,9 @@ pub(crate) mod go_sql_pin {
         while index < chars.len() {
             if chars[index] == ':' {
                 index += 1;
-                while index < chars.len() && (chars[index].is_ascii_lowercase() || chars[index] == '_') {
+                while index < chars.len()
+                    && (chars[index].is_ascii_lowercase() || chars[index] == '_')
+                {
                     index += 1;
                 }
                 number += 1;
@@ -247,18 +249,24 @@ mod tests {
         let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else {
             return;
         };
-        let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let rows: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let domain = Uuid::parse_str("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11").unwrap();
         let rows = rows.as_array().unwrap();
         assert!(rows.len() >= 8);
         for row in rows {
             let hex = row["hex"].as_str().unwrap();
-            let name: Vec<u8> = (0..hex.len()).step_by(2)
+            let name: Vec<u8> = (0..hex.len())
+                .step_by(2)
                 .map(|offset| u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap())
                 .collect();
             let hash = row["hash32"].as_u64().unwrap() as u32;
             for shards in [1_usize, 2, 4, 16, 1000] {
-                assert_eq!(go_db_shard_id_bytes(&domain, &name, shards), (hash % shards as u32) as i32, "raw name {hex}");
+                assert_eq!(
+                    go_db_shard_id_bytes(&domain, &name, shards),
+                    (hash % shards as u32) as i32,
+                    "raw name {hex}"
+                );
             }
         }
     }
@@ -269,7 +277,8 @@ mod tests {
     #[test]
     fn db_shard_id_matches_go_farm_hash32_vectors() {
         let id = Uuid::parse_str("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11").unwrap();
-        let long = "/__cadence_sys/partition/1/with/a/very/long/name/that/goes/past/sixty/four/bytes/ok";
+        let long =
+            "/__cadence_sys/partition/1/with/a/very/long/name/that/goes/past/sixty/four/bytes/ok";
         for (domain, name, hash) in [
             (id, "my-task-list", 1_266_640_152_u32),
             (id, long, 168_198_957),
