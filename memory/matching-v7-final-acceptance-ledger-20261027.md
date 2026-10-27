@@ -50,8 +50,11 @@ pass is a prerequisite, not same-pin workspace acceptance.
 
 Fresh uncached workspace CI is now dispatched at the v7 tag:
 [40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017).
-Run head and artifact exits are not yet reviewed. All mixed lanes remain
-undispatched. Use the explicit two-node Prometheus/cold-domain arguments in
+Run head and downloaded artifact commit match v7; Clippy/test exits are zero,
+fresh target is /home/runner/work/_temp/cargo-target-final. All four live
+metric comparisons match. Compact evidence:
+`memory/evidence/matching-v7-workspace-40539581017/`. PostgreSQL is dispatched;
+all subsequent mixed lanes remain undispatched. Use the explicit two-node Prometheus/cold-domain arguments in
 `matching-v7-two-node-dispatch-review-20261027.md` to preserve the v5 checks.
 
 ## Required runtime evidence
@@ -65,8 +68,8 @@ matching exit files and cleanup proof. Job conclusion alone is insufficient.
 
 | Requirement | Run | Reviewed result |
 | --- | --- | --- |
-| Fresh uncached workspace Clippy followed by tests | [40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017), v7 tag | Running; evidence pending |
-| PostgreSQL | Not dispatched | Pending |
+| Fresh uncached workspace Clippy followed by tests | [40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017), v7 tag | PASS: reviewed fresh target, exact commit, Clippy0/test0; 52 suite summaries retained |
+| PostgreSQL | [40541390213](https://github.com/auenkr/cadence-rust/actions/runs/40541390213), v7 tag | Running; evidence pending |
 | MySQL probes | Not dispatched | Pending |
 | Thrift | Not dispatched | Pending |
 | Configstore | Not dispatched | Pending |
