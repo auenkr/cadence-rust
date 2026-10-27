@@ -118,8 +118,10 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
     let matching = Matching::new(crate::handlers::AppState::default())
         .with_metrics(sink.clone())
         .with_domain_cache(cache.clone());
-    let mut request = m::AddDecisionTaskRequest::default();
-    request.domain_id = DOMAIN_ID.into();
+    let request = m::AddDecisionTaskRequest {
+        domain_id: DOMAIN_ID.into(),
+        ..Default::default()
+    };
 
     // The empty task list is rejected after MatchingApi has resolved the domain
     // and emitted its inbound metric. Calling the real trait method exercises
