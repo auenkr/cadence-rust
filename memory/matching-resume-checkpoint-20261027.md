@@ -65,3 +65,21 @@ estimate, not a completion promise or a defensible percentage of code remaining.
 No local Cargo or Go validation is allowed. Use only public-repo standard Linux
 Actions runners and keep evidence compact. Resource check at resume: load 0.54,
 approximately 4.1 GiB available RAM; no local heavy workload was started.
+
+## Follow-up at 07:50 UTC
+
+PostgreSQL run40468419712 succeeded; inspected runtime results, compact proof in
+`memory/evidence/matching-postgres-v3-40468419712/`. Its recorded preliminary and
+acceptanceEligible:false labels are preserved. This closes one candidate lane,
+not full service acceptance.
+
+Diagnostic tag `matching-retry-trace-20261027-v1` pins instrumentation source
+`7d072c25422c165c92e6912d4210de7b8bb741a4`. Focused CI40468304743 succeeded.
+Adaptive retry-only mixed diagnostic40469125507 is now running on that tag.
+The worker completed at34346568b with memory-only follow-up corrections; source
+instrumentation matches the tested pin. The retry-timing error was corrected.
+
+The cache caller-oracle draft was checkpointed/pushed as1a91d94f3 on
+t3/go-domain-cache-oracle, explicitly unverified. The stalled cache and collector
+tasks are being cancelled/replaced; do not treat their old running labels as
+active useful work or modify their preserved branches speculatively.
