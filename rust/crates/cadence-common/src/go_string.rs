@@ -164,11 +164,17 @@ mod tests {
         let quoted = value.go_json_string();
         let parsed: String = serde_json::from_str(&quoted).unwrap();
         assert_eq!(parsed.chars().count(), 256);
-        assert_eq!(parsed.chars().take(128).collect::<String>().as_bytes(), &(0u8..=127).collect::<Vec<_>>());
+        assert_eq!(
+            parsed.chars().take(128).collect::<String>().as_bytes(),
+            &(0u8..=127).collect::<Vec<_>>()
+        );
         check_json(b"<>&", "\"\\u003c\\u003e\\u0026\"");
         check_json("\u{2028}\u{2029}".as_bytes(), "\"\\u2028\\u2029\"");
         check_json("é雪🙂".as_bytes(), "\"é雪🙂\"");
-        check_json(b"\0\x08\x0c\n\r\t\"\\", "\"\\u0000\\b\\f\\n\\r\\t\\\"\\\\\"");
+        check_json(
+            b"\0\x08\x0c\n\r\t\"\\",
+            "\"\\u0000\\b\\f\\n\\r\\t\\\"\\\\\"",
+        );
     }
 
     #[test]
@@ -181,9 +187,16 @@ mod tests {
         assert!(!rows.is_empty(), "Go raw string oracle fixture was empty");
         for row in rows {
             let hex = row["hex"].as_str().expect("oracle row hex");
-            let bytes = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect::<Vec<_>>();
+            let bytes = (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                .collect::<Vec<_>>();
             let want = row["jsonText"].as_str().expect("oracle row jsonText");
-            assert_eq!(GoString::from(bytes).go_json_string(), want, "oracle input {hex}");
+            assert_eq!(
+                GoString::from(bytes).go_json_string(),
+                want,
+                "oracle input {hex}"
+            );
         }
     }
 

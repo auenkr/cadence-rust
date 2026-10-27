@@ -11,9 +11,12 @@ import (
 
 	farm "github.com/dgryski/go-farm"
 	"github.com/gogo/protobuf/proto"
+	"github.com/google/uuid"
+	"github.com/gocql/gocql"
 	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
 	matchingv1 "github.com/uber/cadence/.gen/proto/matching/v1"
 	"github.com/uber/cadence/common"
+	"github.com/uber/cadence/service/matching/tasklist"
 	"go.uber.org/yarpc/encoding/protobuf"
 )
 
@@ -98,6 +101,23 @@ func protobufCases(raw []byte) map[string]interface{} {
 	}
 }
 
+func identifierCase(raw []byte) map[string]interface{} {
+	id, err := tasklist.NewIdentifier("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11", string(raw), 0)
+	row := map[string]interface{}{"inputHex": hex.EncodeToString(raw), "errorHex": ""}
+	if err != nil {
+		row["errorHex"] = hex.EncodeToString([]byte(err.Error()))
+		return row
+	}
+	row["rootHex"] = hex.EncodeToString([]byte(id.GetRoot()))
+	row["partition"] = id.Partition()
+	parents := map[string]string{}
+	for _, degree := range []int{0, 1, 2, 8, 9223372036854775807} {
+		parents[fmt.Sprint(degree)] = hex.EncodeToString([]byte(id.Parent(degree)))
+	}
+	row["parentsHex"] = parents
+	return row
+}
+
 func main() {
 	names := [][]byte{
 		{}, {'x'}, {0}, {0xff}, {0xfe}, {0xef, 0xbf, 0xbd},
@@ -106,6 +126,10 @@ func main() {
 	allBytes := make([]byte, 256)
 	for i := range allBytes { allBytes[i] = byte(i) }
 	names = append(names, allBytes)
+	canonical := []byte("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11")
+	names = append(names, canonical, []byte("e1b8e2d35c1f4a779b0a6a0a1f0e5d11"), append([]byte("URN:UUID:"), canonical...))
+	wrapped := append([]byte{0xff}, canonical...)
+	names = append(names, append(wrapped, 0xfe))
 	rows := make([]map[string]interface{}, 0, len(names))
 	for _, raw := range names {
 		encoded, err := json.Marshal(string(raw))
@@ -118,6 +142,10 @@ func main() {
 			ScheduleID: -7, ScheduleAttempt: 9, ActivityID: string(raw), ActivityType: string(raw),
 		})
 		if err != nil { panic(err) }
+		googleID, googleErr := uuid.Parse(string(raw))
+		cassandraID, cassandraErr := gocql.ParseUUID(string(raw))
+		partitionName := append([]byte("/__cadence_sys/"), raw...)
+		partitionName = append(partitionName, []byte("/7")...)
 		queryJSON, err := common.NewJSONTaskTokenSerializer().SerializeQueryTaskToken(&common.QueryTaskToken{
 			DomainID: string(raw), WorkflowID: string(raw), RunID: string(raw), TaskList: string(raw), TaskID: string(raw),
 		})
@@ -128,6 +156,9 @@ func main() {
 			"jsonText": string(encoded),
 			"protobuf": protobufCases(raw),
 			"taskTokenJSON": string(taskJSON), "queryTokenJSON": string(queryJSON),
+			"googleUUID": map[string]interface{}{"error": errorText(googleErr), "uuidHex": hex.EncodeToString(googleID[:])},
+			"cassandraUUID": map[string]interface{}{"error": errorText(cassandraErr), "uuidHex": hex.EncodeToString(cassandraID[:])},
+			"taskList": identifierCase(raw), "taskListPartition": identifierCase(partitionName),
 		})
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {

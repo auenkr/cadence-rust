@@ -55,6 +55,9 @@ impl From<TaskData> for TaskDataBytes {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid SQL Matching RunID bytes {raw:?}: {message}")]
+pub struct SqlRunIdBytesError { pub raw: GoString, pub message: String }
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SqlRunIdError {
     #[error("invalid SQL Matching RunID {raw:?}: {message}")]
     Malformed { raw: String, message: String },
@@ -159,6 +162,61 @@ impl TaskData {
         };
         self
     }
+}
+
+impl TaskDataBytes {
+    /// Keep Go's request RunID bytes untouched until the selected backend parses them.
+    pub fn with_request_run_id(mut self, run_id: GoString) -> Self {
+        self.raw_run_id = Some(run_id);
+        self.run_id = None;
+        self
+    }
+    /// Return raw request bytes, otherwise the canonical textual form of persisted UUID bytes.
+    pub fn run_id_bytes(&self) -> Vec<u8> {
+        if let Some(raw) = &self.raw_run_id { return raw.as_bytes().to_vec(); }
+        self.run_id.as_deref().and_then(|b| uuid::Uuid::from_slice(b).ok())
+            .map(|id| id.to_string().into_bytes()).unwrap_or_default()
+    }
+    pub fn sql_run_id(&self) -> std::result::Result<Option<Vec<u8>>, SqlRunIdBytesError> {
+        let Some(raw) = &self.raw_run_id else { return Ok(self.run_id.clone()); };
+        if raw.is_empty() { return Ok(None); }
+        parse_go_uuid_bytes(raw.as_bytes()).map(|id| Some(id.as_bytes().to_vec()))
+            .map_err(|message| SqlRunIdBytesError { raw: raw.clone(), message })
+    }
+    pub fn cassandra_run_id(&self) -> std::result::Result<Option<Vec<u8>>, String> {
+        let Some(raw) = &self.raw_run_id else { return Ok(self.run_id.clone()); };
+        parse_cassandra_uuid_bytes(raw.as_bytes()).map(|id| Some(id.to_vec()))
+    }
+    pub fn for_sql(&self) -> std::result::Result<Self, SqlRunIdBytesError> {
+        let mut data = self.clone();
+        data.run_id = self.sql_run_id()?;
+        data.raw_run_id = None;
+        Ok(data)
+    }
+}
+
+fn parse_go_uuid_bytes(raw: &[u8]) -> std::result::Result<uuid::Uuid, String> {
+    let part = match raw.len() {
+        45 if raw[..9].eq_ignore_ascii_case(b"urn:uuid:") => &raw[9..],
+        45 => return Err("invalid urn prefix".into()),
+        // google/uuid v1.6 checks only the length and parses bytes 1..37.
+        38 => &raw[1..37],
+        32 | 36 => raw,
+        n => return Err(format!("invalid UUID length: {n}")),
+    };
+    let text = std::str::from_utf8(part).map_err(|e| format!("invalid UUID bytes: {e}"))?;
+    uuid::Uuid::parse_str(text).map_err(|e| format!("invalid UUID: {e}"))
+}
+fn parse_cassandra_uuid_bytes(raw: &[u8]) -> std::result::Result<[u8; 16], String> {
+    let mut out = [0u8; 16]; let mut j = 0usize;
+    for &b in raw {
+        if b == b'-' && j % 2 == 0 { continue; }
+        let digit = match b { b'0'..=b'9' => b-b'0', b'a'..=b'f' => b-b'a'+10, b'A'..=b'F' => b-b'A'+10, _ => return Err(format!("invalid UUID bytes {raw:?}")) };
+        if j >= 32 { return Err(format!("invalid UUID bytes {raw:?}")); }
+        out[j/2] |= digit << (4-(j%2)*4); j += 1;
+    }
+    if j != 32 { return Err(format!("invalid UUID bytes {raw:?}")); }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,6 +569,58 @@ impl std::fmt::Debug for EncodingSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_run_id_resolution_matches_pinned_go_uuid_parsers() {
+        let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else { return; };
+        let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        fn unhex(value: &serde_json::Value) -> Vec<u8> {
+            let hex = value.as_str().unwrap();
+            (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
+        }
+        for row in rows.as_array().unwrap() {
+            let raw = unhex(&row["hex"]);
+            let task = TaskDataBytes::default().with_request_run_id(raw.clone().into());
+            if raw.is_empty() {
+                assert_eq!(task.sql_run_id().unwrap(), None);
+            } else if row["googleUUID"]["error"] == "" {
+                assert_eq!(task.sql_run_id().unwrap(), Some(unhex(&row["googleUUID"]["uuidHex"])));
+            } else {
+                assert_eq!(task.sql_run_id().unwrap_err().raw.as_bytes(), raw);
+            }
+            if row["cassandraUUID"]["error"] == "" {
+                assert_eq!(task.cassandra_run_id().unwrap(), Some(unhex(&row["cassandraUUID"]["uuidHex"])));
+            } else {
+                assert!(task.cassandra_run_id().is_err(), "raw RunID {}", row["hex"]);
+            }
+        }
+    }
+    #[test]
+    fn raw_run_id_uses_go_uuid_parsing_and_retains_error_bytes() {
+        let id = uuid::Uuid::from_u128(0x1234);
+        let canonical = id.to_string();
+        let mut accepted = vec![canonical.as_bytes().to_vec(), canonical.replace('-', "").into_bytes(),
+            format!("URN:UUID:{canonical}").into_bytes()];
+        let mut wrapped = vec![0xff]; wrapped.extend_from_slice(canonical.as_bytes()); wrapped.push(0xfe);
+        accepted.push(wrapped);
+        for bytes in accepted {
+            let task = TaskDataBytes::default().with_request_run_id(GoString::from(bytes.clone()));
+            assert_eq!(task.run_id_bytes(), bytes);
+            assert_eq!(task.for_sql().unwrap().run_id, Some(id.as_bytes().to_vec()));
+        }
+        for bytes in [vec![0xff], vec![0xfe], vec![0xff, b'x'], b"bad".to_vec()] {
+            let task = TaskDataBytes::default().with_request_run_id(GoString::from(bytes.clone()));
+            let err = task.for_sql().unwrap_err();
+            assert_eq!(err.raw.as_bytes(), bytes);
+            assert!(task.cassandra_run_id().is_err());
+            assert!(encode_task_bytes(&task).unwrap_err().contains("resolve raw RunID"));
+        }
+        let empty = TaskDataBytes::default().with_request_run_id(GoString::default());
+        assert_eq!(empty.sql_run_id().unwrap(), None);
+        assert!(empty.cassandra_run_id().is_err());
+        let hyphenated = GoString::from(b"00-00-00-00-00-00-00-00-00-00-00-00-00-ab-cd-ef".to_vec());
+        assert_eq!(TaskDataBytes::default().with_request_run_id(hyphenated).cassandra_run_id().unwrap(), Some(uuid::Uuid::from_u128(0xabcdef).as_bytes().to_vec()));
+    }
     #[test]
     fn request_run_id_keeps_every_raw_string() {
         let valid = uuid::Uuid::from_u128(9);

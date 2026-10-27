@@ -3,8 +3,8 @@
 //!
 //! JSON field names match Go exactly (`domainId`, `workflowId`, ...).
 
-use serde::{Deserialize, Serialize};
 use cadence_common::go_string::GoString;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskToken {
@@ -109,7 +109,9 @@ impl JsonTaskTokenSerializer {
     }
 
     pub fn serialize_query_token(token: &QueryTaskToken) -> Result<Vec<u8>, serde_json::Error> {
-        Ok(Self::serialize_query_token_bytes(&QueryTaskTokenBytes::from(token)))
+        Ok(Self::serialize_query_token_bytes(
+            &QueryTaskTokenBytes::from(token),
+        ))
     }
 
     /// Go `json.Marshal` uses struct declaration order and replaces invalid
@@ -136,7 +138,8 @@ impl JsonTaskTokenSerializer {
             token.run_id.go_json_string(),
             token.task_list.go_json_string(),
             token.task_id.go_json_string(),
-        ).into_bytes()
+        )
+        .into_bytes()
     }
 
     pub fn deserialize_query_token(data: &[u8]) -> Result<QueryTaskToken, serde_json::Error> {
@@ -153,36 +156,75 @@ mod tests {
         let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else {
             return;
         };
-        let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let rows: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         for row in rows.as_array().unwrap() {
             let hex = row["hex"].as_str().unwrap();
-            let raw = GoString::from((0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect::<Vec<_>>());
+            let raw = GoString::from(
+                (0..hex.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+                    .collect::<Vec<_>>(),
+            );
             let token = TaskTokenBytes {
-                domain_id: raw.clone(), workflow_id: raw.clone(), workflow_type: raw.clone(), run_id: raw.clone(),
-                schedule_id: -7, schedule_attempt: 9, activity_id: raw.clone(), activity_type: raw.clone(),
+                domain_id: raw.clone(),
+                workflow_id: raw.clone(),
+                workflow_type: raw.clone(),
+                run_id: raw.clone(),
+                schedule_id: -7,
+                schedule_attempt: 9,
+                activity_id: raw.clone(),
+                activity_type: raw.clone(),
             };
-            assert_eq!(JsonTaskTokenSerializer::serialize_bytes(&token), row["taskTokenJSON"].as_str().unwrap().as_bytes(), "task token input {hex}");
+            assert_eq!(
+                JsonTaskTokenSerializer::serialize_bytes(&token),
+                row["taskTokenJSON"].as_str().unwrap().as_bytes(),
+                "task token input {hex}"
+            );
             let query = QueryTaskTokenBytes {
-                domain_id: raw.clone(), workflow_id: raw.clone(), run_id: raw.clone(), task_list: raw.clone(), task_id: raw,
+                domain_id: raw.clone(),
+                workflow_id: raw.clone(),
+                run_id: raw.clone(),
+                task_list: raw.clone(),
+                task_id: raw,
             };
-            assert_eq!(JsonTaskTokenSerializer::serialize_query_token_bytes(&query), row["queryTokenJSON"].as_str().unwrap().as_bytes(), "query token input {hex}");
+            assert_eq!(
+                JsonTaskTokenSerializer::serialize_query_token_bytes(&query),
+                row["queryTokenJSON"].as_str().unwrap().as_bytes(),
+                "query token input {hex}"
+            );
         }
     }
 
     #[test]
     fn task_token_json_replaces_invalid_bytes_only_at_serialization() {
-        let token = TaskTokenBytes { workflow_id: vec![0xe1, 0x80, 0xff].into(), ..Default::default() };
+        let token = TaskTokenBytes {
+            workflow_id: vec![0xe1, 0x80, 0xff].into(),
+            ..Default::default()
+        };
         let bytes = JsonTaskTokenSerializer::serialize_bytes(&token);
-        assert!(String::from_utf8(bytes.clone()).unwrap().contains("\"workflowId\":\"\\ufffd\\ufffd\\ufffd\""));
+        assert!(String::from_utf8(bytes.clone())
+            .unwrap()
+            .contains("\"workflowId\":\"\\ufffd\\ufffd\\ufffd\""));
         assert_eq!(token.workflow_id.as_bytes(), &[0xe1, 0x80, 0xff]);
-        assert_eq!(JsonTaskTokenSerializer::deserialize(&bytes).unwrap().workflow_id, "���");
+        assert_eq!(
+            JsonTaskTokenSerializer::deserialize(&bytes)
+                .unwrap()
+                .workflow_id,
+            "���"
+        );
     }
 
     #[test]
     fn public_token_serializer_uses_go_html_escaping() {
-        let token = TaskToken { workflow_id: "<>&\u{2028}\u{2029}".into(), ..Default::default() };
+        let token = TaskToken {
+            workflow_id: "<>&\u{2028}\u{2029}".into(),
+            ..Default::default()
+        };
         let bytes = JsonTaskTokenSerializer::serialize(&token).unwrap();
-        assert!(String::from_utf8(bytes.clone()).unwrap().contains("\"workflowId\":\"\\u003c\\u003e\\u0026\\u2028\\u2029\""));
+        assert!(String::from_utf8(bytes.clone())
+            .unwrap()
+            .contains("\"workflowId\":\"\\u003c\\u003e\\u0026\\u2028\\u2029\""));
         assert_eq!(JsonTaskTokenSerializer::deserialize(&bytes).unwrap(), token);
     }
 

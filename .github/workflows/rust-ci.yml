@@ -108,7 +108,7 @@ jobs:
           mkdir -p "$evidence"
           git rev-parse HEAD > "$evidence/source-sha.txt"
           go version > "$evidence/go-version.txt"
-          go list -m github.com/gogo/protobuf github.com/uber/cadence-idl go.uber.org/yarpc > "$evidence/modules.txt"
+          go list -m github.com/gogo/protobuf github.com/uber/cadence-idl go.uber.org/yarpc github.com/google/uuid github.com/gocql/gocql > "$evidence/modules.txt"
           gofmt -w ../tests/matching-raw-string-oracle.go
           git diff --binary -- ../tests/matching-raw-string-oracle.go > "$evidence/go-format.patch"
           set +e
@@ -204,6 +204,7 @@ jobs:
           set -euo pipefail
           files=(
             crates/cadence-common/src/go_string.rs
+            crates/cadence-common/src/task_list.rs
             crates/cadence-api/src/tasktoken.rs
             crates/cadence-common/src/lib.rs
             crates/cadence-api/src/lib.rs
