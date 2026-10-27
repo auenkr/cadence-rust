@@ -1,0 +1,16 @@
+AssertionError [ERR_ASSERTION]: Go SDK retry-only scenario failed: 1; see adaptive-scaler-retry-only-sdk.log
+
+1 !== 0
+
+    at adaptiveScaler (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:282:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async runScenario (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:516:19)
+    at async runProbeScenarios (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:525:3)
+    at async main (/home/runner/work/cadence-rust/cadence-rust/tests/matching-adaptive-go-control.cjs:59:26) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

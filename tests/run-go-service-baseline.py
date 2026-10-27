@@ -1051,7 +1051,7 @@ try:
                 elif args.adaptive_go_control:
                     probe = ['node', str(root / 'tests/matching-adaptive-go-control.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}',
-                        f'127.0.0.1:{ports["MATCHING_PORT"]}', str(work)]
+                        f'127.0.0.1:{ports["FRONTEND_PORT"]}', str(work), f'127.0.0.1:{ports["MATCHING_PORT"]}']
                 else:
                     probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']

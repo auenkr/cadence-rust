@@ -1,0 +1,35 @@
+{
+  "serverLogSha256": "f300d2548c79c95864c66829980b253e966410247d891fd448ef04fb1241bd95",
+  "samples": [
+    {
+      "ts": "2026-10-27T08:18:30.365Z",
+      "msg": "adaptive scaler is updating number of partitions",
+      "wf-task-list-name": "production-adaptive-scaler-probe",
+      "current-qps": 12,
+      "num-read-partitions": 12,
+      "num-write-partitions": 12,
+      "read-changed": true,
+      "write-changed": true
+    },
+    {
+      "ts": "2026-10-27T08:18:31.380Z",
+      "msg": "adaptive scaler is updating number of partitions",
+      "wf-task-list-name": "production-adaptive-scaler-probe",
+      "current-qps": 72,
+      "num-read-partitions": 72,
+      "num-write-partitions": 72,
+      "read-changed": true,
+      "write-changed": true
+    },
+    {
+      "ts": "2026-10-27T08:18:32.440Z",
+      "msg": "adaptive scaler is updating number of partitions",
+      "wf-task-list-name": "production-adaptive-scaler-probe",
+      "current-qps": 216,
+      "num-read-partitions": 216,
+      "num-write-partitions": 216,
+      "read-changed": true,
+      "write-changed": true
+    }
+  ]
+}

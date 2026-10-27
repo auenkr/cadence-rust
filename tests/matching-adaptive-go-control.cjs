@@ -19,6 +19,7 @@ const frontendPeer = process.argv[2];
 const matchingPeer = process.argv[3];
 const tchannelPeer = process.argv[4];
 const work = process.argv[5];
+const matchingTchannelPeer = process.argv[6];
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI'].map(name => [name, new api[name](frontendPeer, grpc.credentials.createInsecure())]));
 const matching = new schema.matching.v1.MatchingAPI(matchingPeer, grpc.credentials.createInsecure());
 function call(service, method, request) {
@@ -52,8 +53,8 @@ async function main() {
   const startRequest = { domain, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: 'unused' },
     executionStartToCloseTimeout: { seconds: '300' }, taskStartToCloseTimeout: { seconds: '10' },
     input: { data: Buffer.from(JSON.stringify('adaptive-load')) } };
-  const directClients = [{ client: matching, tchannel: tchannelPeer }];
-  // The shared probe's SDK child uses process.argv[6] for its Matching TChannel endpoint.
+  const directClients = [{ client: matching, tchannel: matchingTchannelPeer }];
+  // The existing Go SDK sends public workflow calls to Frontend over TChannel.
   process.argv[6] = tchannelPeer;
   process.env.CADENCE_PROBE_ADAPTIVE_SCALER = '1';
   const probeScenarios = await runProbeScenarios({ grpc, call, directClients, domain, domainId, id, startRequest, work,
