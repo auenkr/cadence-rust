@@ -1,0 +1,493 @@
+{
+  "runUrl": "https://github.com/auenkr/cadence-rust/actions/runs/40474255482",
+  "lane": "adaptive",
+  "headSha": "5808e205a1b58b2169084b2e46eaea219f8b7cf2",
+  "binarySha256": "468f9306660ffd1d1693be8d43995187e52fabbfd682059a488ddc35cc05ae9c",
+  "buildExit": 0,
+  "gateExit": 1,
+  "runtimeResults": {
+    "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+    "goMatchingStarted": false,
+    "rustServices": [
+      "matching"
+    ],
+    "goServices": [
+      "frontend",
+      "history",
+      "worker"
+    ],
+    "rustProductionBinary": "/tmp/cargo-target-final-40474255482/debug/cadence-matching",
+    "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+    "historyTransport": "grpc",
+    "matchingTransport": "grpc",
+    "rustDynamicConfigFile": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-dynamic-config.yaml",
+    "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+    "acceptanceEligible": false,
+    "persistence": null,
+    "shardDistributor": null,
+    "serverCommand": [
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/cadence-server",
+      "--config",
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/config",
+      "--zone",
+      "mysql",
+      "start",
+      "--auto-setup",
+      "--services",
+      "frontend,history,worker"
+    ],
+    "artifactsDirectory": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+    "workerReadiness": {
+      "required": true,
+      "marker": "\"msg\":\"worker started\"",
+      "observed": true
+    },
+    "probeExitCode": 1,
+    "goServicesPid": 8827,
+    "goServicesAliveAfterProbe": true,
+    "matchingExporter": null,
+    "matchingExporterAddress": null,
+    "goSchemaOnly": {
+      "presentTables": [
+        "active_cluster_selection_policy",
+        "activity_info_maps",
+        "buffered_events",
+        "buffered_replication_task_maps",
+        "child_execution_info_maps",
+        "cluster_config",
+        "cross_cluster_tasks",
+        "current_executions",
+        "domain_audit_log",
+        "domain_metadata",
+        "domains",
+        "executions",
+        "history_node",
+        "history_tree",
+        "queue",
+        "queue_metadata",
+        "replication_tasks",
+        "replication_tasks_dlq",
+        "request_cancel_info_maps",
+        "schema_update_history",
+        "schema_version",
+        "shards",
+        "signal_info_maps",
+        "signals_requested_sets",
+        "task_lists",
+        "tasks",
+        "timer_info_maps",
+        "timer_tasks",
+        "transfer_tasks"
+      ],
+      "goSchemaTables": [
+        "active_cluster_selection_policy",
+        "activity_info_maps",
+        "buffered_events",
+        "buffered_replication_task_maps",
+        "child_execution_info_maps",
+        "cluster_config",
+        "cross_cluster_tasks",
+        "current_executions",
+        "domain_audit_log",
+        "domain_metadata",
+        "domains",
+        "executions",
+        "history_node",
+        "history_tree",
+        "queue",
+        "queue_metadata",
+        "replication_tasks",
+        "replication_tasks_dlq",
+        "request_cancel_info_maps",
+        "shards",
+        "signal_info_maps",
+        "signals_requested_sets",
+        "task_lists",
+        "tasks",
+        "timer_info_maps",
+        "timer_tasks",
+        "transfer_tasks"
+      ],
+      "goSetupTables": [
+        "schema_update_history",
+        "schema_version"
+      ],
+      "missingGoTables": []
+    },
+    "runExitCode": 1,
+    "failure": "RuntimeError: Go baseline probe failed; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/probe.log"
+  },
+  "observedProbeResults": [],
+  "sdkEvidenceFiles": {
+    "go-sdk.log": {
+      "status": "missing"
+    },
+    "restart-sdk.log": {
+      "status": "present"
+    },
+    "graceful-drain-sdk.log": {
+      "status": "present"
+    },
+    "adaptive-scaler-sdk.log": {
+      "status": "present"
+    },
+    "adaptive-scaler-retry-only-sdk.log": {
+      "status": "present"
+    },
+    "production-idle-recovery-sdk.log": {
+      "status": "present"
+    },
+    "production-crash-recovery-sdk.log": {
+      "status": "present"
+    },
+    "gc-backlog-sdk.log": {
+      "status": "missing"
+    }
+  },
+  "recoveryEvidence": {
+    "matching-shutdown.json": {
+      "status": "present",
+      "recorded": {
+        "signal": "SIGTERM",
+        "sigtermSentUnixNs": 1793090343083000000,
+        "exitCode": 0,
+        "childSignal": null,
+        "completedAtUnixNs": 1793090353444000000
+      }
+    },
+    "production-failure-recovery-checkpoints.json": {
+      "status": "present",
+      "recorded": {
+        "topology": "two Rust Matching hosts with Go Frontend/History/Worker",
+        "sameRingOwnershipMap": [
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:12023",
+            "secondaryOwner": "127.0.0.1:12023"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20292",
+            "secondaryOwner": "127.0.0.1:20292"
+          }
+        ],
+        "idleEviction": {
+          "taskList": "production-idle-f3ff85d6-c1cd-4074-b8d7-cfd355741788",
+          "releasedWithEmptyResponse": true,
+          "sdkCompletedWorkflow": "production-idle-recovery-f3ff85d6-c1cd-4074-b8d7-cfd355741788",
+          "completionEvents": 1
+        },
+        "crashRecovery": {
+          "taskList": "production-crash-f3ff85d6-c1cd-4074-b8d7-cfd355741788",
+          "crashedPid": 8895,
+          "crashedHostIndex": 0,
+          "survivorPid": 8915,
+          "workflowId": "production-crash-recovery-f3ff85d6-c1cd-4074-b8d7-cfd355741788",
+          "completionEvents": 1,
+          "rangeBefore": 1,
+          "rangeAfter": 2,
+          "ackBefore": 0,
+          "ackAfter": 1,
+          "queuedRowsAfterCompletion": 0
+        },
+        "cassandraDomainPageToken": null
+      }
+    },
+    "db-observations.json": {
+      "status": "missing"
+    }
+  },
+  "databaseCleanup": {
+    "mysql-container-cleanup.txt": {
+      "status": "present",
+      "recordedOutput": "cadence-rust-gate-mysql-lane-20261027T083611-8262",
+      "sha256": "06a7daeb606919db7c46040c208889073d746ad6624232a6b005cc20c866c936"
+    }
+  },
+  "retainedFiles": [
+    "commit.txt",
+    "binary.sha256",
+    "build.exit",
+    "gate.exit",
+    "gate/run/results.json",
+    "gate/run/probe.log",
+    "command.txt",
+    "gate/run/run.exit",
+    "gate/mysql-container-cleanup.txt",
+    "gate/run/rust-matching/adaptive-scaler-sdk.log",
+    "gate/run/rust-matching/adaptive-scaler-retry-only-sdk.log",
+    "gate/run/rust-matching/restart-sdk.log",
+    "gate/run/rust-matching/graceful-drain-sdk.log",
+    "gate/run/rust-matching/production-idle-recovery-sdk.log",
+    "gate/run/rust-matching/production-crash-recovery-sdk.log",
+    "gate/run/rust-matching/production-failure-recovery-checkpoints.json",
+    "gate/run/rust-matching/matching-shutdown.json"
+  ],
+  "originalFileSha256": {
+    "commit.txt": "0376af6fe0aafcd9129581394516242581b55891b7e6e6daf47cc453b44087ec",
+    "binary.sha256": "867cb39722c63fcd39e280efa334770d58ef32238bf77add5715b750af68d07c",
+    "build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "gate.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "gate/run/results.json": "e8f46b0e8aa8db3f4e4ba2629cf3569e53d331442fe8a978edf02726153aeb74",
+    "gate/run/probe.log": "d7ff709c9db7e0deb406842c61c7b5b6aeabe1110450a994979beaa12c22fd2b",
+    "command.txt": "8148c2a46963c988b5239a0f6c95aee69773817d15ba0a113e81e2afe35578a3",
+    "gate/run/run.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "gate/mysql-container-cleanup.txt": "06a7daeb606919db7c46040c208889073d746ad6624232a6b005cc20c866c936",
+    "gate/run/rust-matching/adaptive-scaler-sdk.log": "e8a9e2bd1b62fcc43beea1a46d018722f703603d5e5ae4c357953b4a912b0c0c",
+    "gate/run/rust-matching/adaptive-scaler-retry-only-sdk.log": "46133d921ec9561d0ff7a5920349e10fda249c555c20fcde87a1b82912d6084e",
+    "gate/run/rust-matching/restart-sdk.log": "463d5a27d7d7f887f0dfbf52af4382cee20b44d392f2887687b118af32b86f9d",
+    "gate/run/rust-matching/graceful-drain-sdk.log": "b3feebed88584d6a7ca12aee6f67fec2740eb8a8b83400093a3901c690c9ccc2",
+    "gate/run/rust-matching/production-idle-recovery-sdk.log": "a98130ce3d875014c2c8ae99ece86ef872e0d9c5601874d48b47c0b587f868cd",
+    "gate/run/rust-matching/production-crash-recovery-sdk.log": "2dcdc9f732901f1cfd74a82caa7fa6ba8ffc2b871cd90e69791c2c5c8fc9664f",
+    "gate/run/rust-matching/production-failure-recovery-checkpoints.json": "e070ca2f69b098f2f33a055b63a43564d613fe45711979c16f4e47a7171b8d64",
+    "gate/run/rust-matching/matching-shutdown.json": "aaed44fada8e1707bb2fcce3b074794821315b5e7578164bed8db67b46566c1b"
+  },
+  "serviceAcceptance": false,
+  "reviewRequired": "Inspect actual lane-specific result rows, SDK/recovery evidence, cleanup output, and source parity ledger. Missing files and requested flags are not execution evidence."
+}

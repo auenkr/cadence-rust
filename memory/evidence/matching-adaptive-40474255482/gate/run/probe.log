@@ -1,0 +1,35 @@
+{"pacedListOwner":{"label":"before-paced-poll","primaryOwner":"127.0.0.1:12023","secondaryOwner":"127.0.0.1:12023","agree":true}}
+{"pacedListOwner":{"label":"before-paced-describe","primaryOwner":"127.0.0.1:12023","secondaryOwner":"127.0.0.1:12023","agree":true}}
+adaptive retry-only subprocess passed in 58856ms on production-adaptive-scaler-probe
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: Go SDK did not complete work on the scaled task list: 1; see adaptive-scaler-sdk.log
+
+1 !== 0
+
+    at adaptiveScaler (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:291:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async runScenario (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:516:19)
+    at async runProbeScenarios (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:525:3)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1530:22) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: Go SDK did not complete work on the scaled task list: 1; see adaptive-scaler-sdk.log
+
+1 !== 0
+
+    at adaptiveScaler (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:291:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async runScenario (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:516:19)
+    at async runProbeScenarios (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:525:3)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1530:22) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
