@@ -50,3 +50,25 @@ panic quoting and cache caller-oracle work; it is a diagnostic run, not final
 Matching acceptance. No other mixed gate was active at dispatch. Inspect actual
 retry-only/full-suite histories, timing, all24 completion checks and live queue
 routing results before drawing a conclusion. Preserve binary SHA256.
+
+## Provisional acceptance source v3
+
+Immutable tag matching-acceptance-20261027-v3 points to
+ff3b638b49190f7653c2de3b062232d7ccc57f07. Fresh workspace CI with SDK compile
+checks enabled is running at
+https://github.com/auenkr/cadence-rust/actions/runs/40467005617.
+This is a provisional candidate, not acceptance. Pending Go cache caller-oracle
+evidence or the adaptive diagnostic result may require further source changes
+and a new tag; never move this tag to conceal such changes.
+
+The candidate integrates worker9740bd025 +4ef51d867 pinned-Go quote tables.
+Parent review fixed the lower-bound lookup (printable range starts and singleton
+ranges were incorrectly excluded), added boundary comparisons, and exported the
+Go oracle path in the *same* Test step before cargo test. The worker's earlier
+CI only appended the path to GITHUB_ENV in that step, so its Rust oracle test
+could return early without a comparison. Do not cite it as Go-vs-Rust quote
+proof. Candidate run40467005617 must establish the actual comparison. Superseded
+master runs40466893618 and40466720993 were cancelled.
+
+The running adaptive diagnostic run40465991711 predates these production changes;
+regardless of its outcome it cannot satisfy final-candidate mixed acceptance.
