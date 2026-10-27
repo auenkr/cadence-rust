@@ -226,9 +226,7 @@ pub struct QueueRegistry {
     /// Go's signed, task-list-filtered `MaxTaskDeleteBatchSize` provider.
     max_task_delete_batch_size: Option<TaskDeleteBatchSizeProvider>,
     writer_live: Option<WriterLiveProvider>,
-    fatal_writer: Option<
-        crate::matching_fatal::MatchingFatalSender,
-    >,
+    fatal_writer: Option<crate::matching_fatal::MatchingFatalSender>,
     writer_tracker: Arc<crate::matching_writer::WriterTracker>,
     metrics: crate::matching_metrics::MatchingMetrics,
 }
@@ -1049,131 +1047,141 @@ impl QueueRegistry {
             }
             let registry = self.clone();
             owner_work(move |readers| {
-            let lookup = (key.domain_id, key.name.clone(), key.task_type);
-            // Go registers a manager before Start performs lease I/O. Serialize
-            // startup by queue identity while keeping unrelated owners usable.
-            // Weak entries cannot retain every task-list name ever encountered.
-            let startup = {
-                let mut gates = registry
-                    .startups
-                    .lock()
-                    .expect("Matching startup gates lock");
-                gates.retain(|_, gate| gate.strong_count() > 0);
-                match gates.get(&lookup).and_then(Weak::upgrade) {
-                    Some(gate) => gate,
+                let lookup = (key.domain_id, key.name.clone(), key.task_type);
+                // Go registers a manager before Start performs lease I/O. Serialize
+                // startup by queue identity while keeping unrelated owners usable.
+                // Weak entries cannot retain every task-list name ever encountered.
+                let startup = {
+                    let mut gates = registry
+                        .startups
+                        .lock()
+                        .expect("Matching startup gates lock");
+                    gates.retain(|_, gate| gate.strong_count() > 0);
+                    match gates.get(&lookup).and_then(Weak::upgrade) {
+                        Some(gate) => gate,
+                        None => {
+                            let gate = Arc::new(Mutex::new(()));
+                            gates.insert(lookup.clone(), Arc::downgrade(&gate));
+                            gate
+                        }
+                    }
+                };
+                let _starting = startup.lock().expect("Matching queue startup lock");
+                let mut state = registry.state.lock().expect("Matching registry lock");
+                if state.stopped {
+                    return Err(Status::unavailable("Matching registry stopped."));
+                }
+                let cached = state
+                    .owners
+                    .get(&lookup)
+                    .is_some_and(|owner| !owner.queue.is_stopped());
+                registry.check_task_list_ownership(&key.name, cached)?;
+                if state
+                    .owners
+                    .get(&lookup)
+                    .is_some_and(|owner| owner.queue.is_stopped())
+                {
+                    if let Some(owner) = state.owners.remove(&lookup) {
+                        registry
+                            .metrics
+                            .task_list_managers_gauge(state.owners.len());
+                        drop(state);
+                        if let Err(error) = owner.finish(now, readers) {
+                            eprintln!("Matching stopped owner cleanup failed: {error}");
+                        }
+                        state = registry.state.lock().expect("Matching registry lock");
+                        if state.stopped {
+                            return Err(Status::unavailable("Matching registry stopped."));
+                        }
+                    }
+                }
+                let owner = match state.owners.get(&lookup) {
+                    Some(owner) => owner.clone(),
                     None => {
-                        let gate = Arc::new(Mutex::new(()));
-                        gates.insert(lookup.clone(), Arc::downgrade(&gate));
-                        gate
-                    }
-                }
-            };
-            let _starting = startup.lock().expect("Matching queue startup lock");
-            let mut state = registry.state.lock().expect("Matching registry lock");
-            if state.stopped {
-                return Err(Status::unavailable("Matching registry stopped."));
-            }
-            let cached = state
-                .owners
-                .get(&lookup)
-                .is_some_and(|owner| !owner.queue.is_stopped());
-            registry.check_task_list_ownership(&key.name, cached)?;
-            if state
-                .owners
-                .get(&lookup)
-                .is_some_and(|owner| owner.queue.is_stopped())
-            {
-                if let Some(owner) = state.owners.remove(&lookup) {
-                    registry.metrics.task_list_managers_gauge(state.owners.len());
-                    drop(state);
-                    if let Err(error) = owner.finish(now, readers) {
-                        eprintln!("Matching stopped owner cleanup failed: {error}");
-                    }
-                    state = registry.state.lock().expect("Matching registry lock");
-                    if state.stopped {
-                        return Err(Status::unavailable("Matching registry stopped."));
-                    }
-                }
-            }
-            let owner = match state.owners.get(&lookup) {
-                Some(owner) => owner.clone(),
-                None => {
-                    drop(state);
-                    let domain = key.domain_id.to_string();
-                    let metric_context = crate::matching_metrics::PollMetricContext {
-                        domain: registry
-                            .domain_metadata
-                            .as_ref()
-                            .and_then(|(domains, _)| {
-                                domains
+                        drop(state);
+                        let domain = key.domain_id.to_string();
+                        let metric_context =
+                            crate::matching_metrics::PollMetricContext {
+                                domain: registry
+                                    .domain_metadata
+                                    .as_ref()
+                                    .and_then(|(domains, _)| {
+                                        domains
                                     .describe(&cadence_api::service_types::DescribeDomainRequest {
                                         name: None,
                                         uuid: Some(domain.clone()),
                                     })
                                     .ok()
                                     .and_then(|response| response.domain_info.map(|info| info.name))
-                            })
-                            .filter(|name| !name.is_empty())
-                            .unwrap_or_else(|| "_unknown_".to_owned()),
-                        task_list: lookup.1.clone(),
-                        task_list_kind: i32::from(kind),
-                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
-                        poller_isolation_group: String::new(),
-                    };
-                    registry.metrics.lease_request(&metric_context);
-                    let opened = DurableTaskQueue::open(
+                                    })
+                                    .filter(|name| !name.is_empty())
+                                    .unwrap_or_else(|| "_unknown_".to_owned()),
+                                task_list: lookup.1.clone(),
+                                task_list_kind: i32::from(kind),
+                                task_type: if lookup.2 == 1 {
+                                    "activity_task"
+                                } else {
+                                    "decision_task"
+                                },
+                                poller_isolation_group: String::new(),
+                            };
+                        registry.metrics.lease_request(&metric_context);
+                        let opened = DurableTaskQueue::open(
                             registry.store.clone(),
                             key.clone(),
                             kind,
                             registry.range_size,
                             now,
                         );
-                    let queue = match opened {
-                        Ok(queue) => Arc::new(queue),
-                        Err(error) => {
-                            registry.metrics.lease_failure(&metric_context);
-                            return Err(Status::unavailable(error.to_string()));
-                        }
-                    };
-                    let lease_metrics = registry.metrics.clone();
-                    let lease_context = metric_context.clone();
-                    queue.set_lease_observer(Arc::new(move |success| {
-                        lease_metrics.lease_attempt(&lease_context, !success);
-                    }));
-                    let condition_metrics = registry.metrics.clone();
-                    let condition_context = metric_context.clone();
-                    queue.set_condition_failed_observer(Arc::new(move || {
-                        condition_metrics.condition_failed(&condition_context);
-                    }));
-                    {
-                        let provider = registry.max_task_delete_batch_size.clone();
-                        let domain = domain.clone();
-                        let name = lookup.1.clone();
-                        let task_type = lookup.2;
-                        queue.set_gc_batch_size_provider(Arc::new(move || {
-                            provider.as_ref().map(|p| p(&domain, &name, task_type)).unwrap_or(100)
+                        let queue = match opened {
+                            Ok(queue) => Arc::new(queue),
+                            Err(error) => {
+                                registry.metrics.lease_failure(&metric_context);
+                                return Err(Status::unavailable(error.to_string()));
+                            }
+                        };
+                        let lease_metrics = registry.metrics.clone();
+                        let lease_context = metric_context.clone();
+                        queue.set_lease_observer(Arc::new(move |success| {
+                            lease_metrics.lease_attempt(&lease_context, !success);
                         }));
-                    }
-                    let partitions = match crate::matching_partition::PartitionCache::load(
-                        registry.store.as_ref(),
+                        let condition_metrics = registry.metrics.clone();
+                        let condition_context = metric_context.clone();
+                        queue.set_condition_failed_observer(Arc::new(move || {
+                            condition_metrics.condition_failed(&condition_context);
+                        }));
+                        {
+                            let provider = registry.max_task_delete_batch_size.clone();
+                            let domain = domain.clone();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
+                            queue.set_gc_batch_size_provider(Arc::new(move || {
+                                provider
+                                    .as_ref()
+                                    .map(|p| p(&domain, &name, task_type))
+                                    .unwrap_or(100)
+                            }));
+                        }
+                        let partitions = match crate::matching_partition::PartitionCache::load(
+                            registry.store.as_ref(),
                             &queue,
                             &key,
                             kind,
                         ) {
-                        Ok(cache) => Arc::new(cache),
+                            Ok(cache) => Arc::new(cache),
                             Err(error) => {
                                 queue.stop();
                                 return Err(error);
                             }
-                    };
-                    let count_partitions: crate::matching_limiter::PartitionCount = {
-                        let provider = registry.partition_count.clone();
-                        let enabled = registry.cache_enabled.clone();
-                        let cache = partitions.clone();
-                        let domain_id = key.domain_id.to_string();
-                        let task_list = key.name.clone();
-                        let task_type = key.task_type;
-                        Arc::new(move || {
+                        };
+                        let count_partitions: crate::matching_limiter::PartitionCount = {
+                            let provider = registry.partition_count.clone();
+                            let enabled = registry.cache_enabled.clone();
+                            let cache = partitions.clone();
+                            let domain_id = key.domain_id.to_string();
+                            let task_list = key.name.clone();
+                            let task_type = key.task_type;
+                            Arc::new(move || {
                                 let root =
                                     cadence_common::task_list::TaskListName::parse(&task_list)
                                         .expect("validated queue name");
@@ -1184,82 +1192,87 @@ impl QueueRegistry {
                                         .get()
                                         .map(|config| config.read_partitions.len() as i64)
                                         .unwrap_or(1);
-                            }
-                            provider
-                                .as_ref()
-                                .map(|provider| provider(&domain_id, &task_list, task_type))
-                                .unwrap_or(1)
-                                .max(1)
-                        })
-                    };
+                                }
+                                provider
+                                    .as_ref()
+                                    .map(|provider| provider(&domain_id, &task_list, task_type))
+                                    .unwrap_or(1)
+                                    .max(1)
+                            })
+                        };
                         let idle_ttl_nanos = registry
                             .idle_tasklist_check_interval
                             .as_ref()
                             .map(|provider| provider(&domain, &lookup.1, lookup.2))
                             .unwrap_or(300_000_000_000)
                             .max(1);
-                    let liveness = Arc::new(cadence_common::liveness::Liveness::new(
-                        registry_now(),
+                        let liveness = Arc::new(cadence_common::liveness::Liveness::new(
+                            registry_now(),
                             idle_ttl_nanos,
-                    ));
+                        ));
                         let next_ack_update =
                             registry.update_ack_interval.as_ref().map(|provider| {
                                 let nanos = provider(&domain, &lookup.1, lookup.2).max(1) as u64;
                                 tokio::time::Instant::now() + std::time::Duration::from_nanos(nanos)
                             });
-                    // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
-                    // cfg.QPSTrackerInterval(domain, taskList, type), ...)`.
-                    let qps = Arc::new(cadence_common::qps::EmaQpsTracker::new(
-                        QPS_TRACKER_EXP,
-                        std::time::Duration::from_nanos(
-                            registry
-                                .qps_interval
-                                .as_ref()
-                                .map(|provider| {
+                        // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
+                        // cfg.QPSTrackerInterval(domain, taskList, type), ...)`.
+                        let qps = Arc::new(cadence_common::qps::EmaQpsTracker::new(
+                            QPS_TRACKER_EXP,
+                            std::time::Duration::from_nanos(
+                                registry
+                                    .qps_interval
+                                    .as_ref()
+                                    .map(|provider| {
                                         provider(&lookup.0.to_string(), &lookup.1, lookup.2)
-                                })
-                                .unwrap_or(DEFAULT_QPS_TRACKER_INTERVAL_NANOS)
-                                .max(1) as u64,
-                        ),
-                        registry.qps_clock.clone(),
-                    ));
-                    let activity_domain = domain.clone();
-                    let metadata = registry.domain_metadata.clone();
-                    let activity = Arc::new(move || {
-                        metadata.as_ref().is_none_or(|(domains, cluster)| {
-                            domains
-                                .is_active_in(&activity_domain, cluster)
-                                .unwrap_or(true)
-                        })
-                    });
+                                    })
+                                    .unwrap_or(DEFAULT_QPS_TRACKER_INTERVAL_NANOS)
+                                    .max(1) as u64,
+                            ),
+                            registry.qps_clock.clone(),
+                        ));
+                        let activity_domain = domain.clone();
+                        let metadata = registry.domain_metadata.clone();
+                        let activity = Arc::new(move || {
+                            metadata.as_ref().is_none_or(|(domains, cluster)| {
+                                domains
+                                    .is_active_in(&activity_domain, cluster)
+                                    .unwrap_or(true)
+                            })
+                        });
                         let dispatcher = TaskDispatcher::new(
                             queue.clone(),
                             registry.history.clone(),
                             domain.clone(),
                         )
-                            .with_liveness(liveness.clone());
-                    let writer_live = registry.writer_live.as_ref().map(|provider| {
-                        scoped_writer_live(provider.clone(), lookup.0.to_string(), lookup.1.clone(), lookup.2)
-                    });
-                    let writer = crate::matching_writer::TaskWriter::new_with_fatal_channel(
-                        queue.clone(),
-                        dispatcher.task_notification(),
-                        crate::matching_writer::WriterConfig::default(),
-                        writer_live,
-                        registry.fatal_writer.clone(),
-                        Some(registry.writer_tracker.clone()),
-                    );
-                    let min_burst = registry
-                        .min_burst
-                        .as_ref()
-                        .map(|provider| provider(&domain, &lookup.1, lookup.2))
-                        .unwrap_or(crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE);
-                    let limiter = Arc::new(
+                        .with_liveness(liveness.clone());
+                        let writer_live = registry.writer_live.as_ref().map(|provider| {
+                            scoped_writer_live(
+                                provider.clone(),
+                                lookup.0.to_string(),
+                                lookup.1.clone(),
+                                lookup.2,
+                            )
+                        });
+                        let writer = crate::matching_writer::TaskWriter::new_with_fatal_channel(
+                            queue.clone(),
+                            dispatcher.task_notification(),
+                            crate::matching_writer::WriterConfig::default(),
+                            writer_live,
+                            registry.fatal_writer.clone(),
+                            Some(registry.writer_tracker.clone()),
+                        );
+                        let min_burst = registry
+                            .min_burst
+                            .as_ref()
+                            .map(|provider| provider(&domain, &lookup.1, lookup.2))
+                            .unwrap_or(crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE);
+                        let limiter = Arc::new(
                             crate::matching_limiter::TaskListLimiter::with_partitions_and_burst(
                                 count_partitions,
                                 min_burst,
                             ),
-                    );
+                        );
                         let pollers =
                             Arc::new(Mutex::new(cadence_common::poller::Manager::default()));
                         let isolation = registry
@@ -1276,13 +1289,13 @@ impl QueueRegistry {
                                 )
                             })
                             .unwrap_or_default();
-                    let sync_groups = isolation.groups.clone();
-                    let isolation_select = isolation.select.clone();
-                    let sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync> = {
-                        let provider = registry.sync_wait.clone();
-                        let domain = lookup.0.to_string();
-                        let name = lookup.1.clone();
-                        let task_type = lookup.2;
+                        let sync_groups = isolation.groups.clone();
+                        let isolation_select = isolation.select.clone();
+                        let sync_wait: Arc<dyn Fn() -> std::time::Duration + Send + Sync> = {
+                            let provider = registry.sync_wait.clone();
+                            let domain = lookup.0.to_string();
+                            let name = lookup.1.clone();
+                            let task_type = lookup.2;
                             Arc::new(move || {
                                 std::time::Duration::from_nanos(
                                     provider
@@ -1292,82 +1305,83 @@ impl QueueRegistry {
                                         .max(0) as u64,
                                 )
                             })
-                    };
-                    let reader_config = crate::matching_reader::ReaderConfig {
-                        live: registry
-                            .reader_live
-                            .as_ref()
-                            .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
-                        ..crate::matching_reader::ReaderConfig::default()
-                    };
-                    let forward_tasks = Arc::new(crate::matching_forward::RequestTokens::new({
-                            let provider = registry.forward_tasks.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
+                        };
+                        let reader_config = crate::matching_reader::ReaderConfig {
+                            live: registry
+                                .reader_live
+                                .as_ref()
+                                .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
+                            ..crate::matching_reader::ReaderConfig::default()
+                        };
+                        let forward_tasks =
+                            Arc::new(crate::matching_forward::RequestTokens::new({
+                                let provider = registry.forward_tasks.clone();
+                                let domain = domain.clone();
+                                let name = lookup.1.clone();
+                                let task_type = lookup.2;
                                 Arc::new(move || {
                                     provider
                                         .as_ref()
                                         .map(|p| p(&domain, &name, task_type))
                                         .unwrap_or(1)
                                 })
-                        }));
+                            }));
                         let forward_rate = Arc::new(crate::matching_forward::ForwardRate::new(
-                                {
-                            let provider = registry.forward_rate.clone();
-                            let domain = domain.clone();
-                            let name = lookup.1.clone();
-                            let task_type = lookup.2;
-                                    Arc::new(move || {
-                                        provider
-                                            .as_ref()
-                                            .map(|p| p(&domain, &name, task_type))
-                                            .unwrap_or(10)
-                                    })
-                                },
-                                now,
-                            ));
-                    let forward = {
-                        // Go `forwarder` refuses sticky task lists; only a
-                        // real child partition forwards polls to its parent.
-                        // Sticky names never carry a partition suffix, so the
-                        // root check subsumes the kind refusal below.
-                            let name = cadence_common::task_list::TaskListName::parse(&lookup.1)
-                                .map_err(Status::invalid_argument)?;
-                        if kind == 1 || name.is_root() {
-                            None
-                        } else {
-                            let max_outstanding: crate::matching_forward::Count = {
-                                let provider = registry.forward_polls.clone();
+                            {
+                                let provider = registry.forward_rate.clone();
                                 let domain = domain.clone();
                                 let name = lookup.1.clone();
                                 let task_type = lookup.2;
+                                Arc::new(move || {
+                                    provider
+                                        .as_ref()
+                                        .map(|p| p(&domain, &name, task_type))
+                                        .unwrap_or(10)
+                                })
+                            },
+                            now,
+                        ));
+                        let forward = {
+                            // Go `forwarder` refuses sticky task lists; only a
+                            // real child partition forwards polls to its parent.
+                            // Sticky names never carry a partition suffix, so the
+                            // root check subsumes the kind refusal below.
+                            let name = cadence_common::task_list::TaskListName::parse(&lookup.1)
+                                .map_err(Status::invalid_argument)?;
+                            if kind == 1 || name.is_root() {
+                                None
+                            } else {
+                                let max_outstanding: crate::matching_forward::Count = {
+                                    let provider = registry.forward_polls.clone();
+                                    let domain = domain.clone();
+                                    let name = lookup.1.clone();
+                                    let task_type = lookup.2;
                                     Arc::new(move || {
                                         provider
                                             .as_ref()
                                             .map(|provider| provider(&domain, &name, task_type))
                                             .unwrap_or(1)
                                     })
-                            };
-                            let parent_key = TaskListKey {
-                                domain_id: key.domain_id,
-                                name: lookup.1.clone(),
-                                task_type: key.task_type,
-                            };
-                            let resolve_domain = domain.clone();
-                            // Owners live in registry.state; retaining that
-                            // same Arc here would form an owner/registry cycle.
-                            let resolve_state = Arc::downgrade(&registry.state);
-                            let mut resolve_registry = registry.clone();
-                            resolve_registry.state = Arc::new(Mutex::new(State::default()));
-                            Some(crate::matching_dispatch::ForwardState::new(
-                                move || {
-                                    let mut resolve_registry = resolve_registry.clone();
-                                    let state = resolve_state.upgrade();
-                                    let parent_key = parent_key.clone();
-                                    let domain = resolve_domain.clone();
-                                    Box::pin(async move {
-                                        resolve_registry.state = state?;
+                                };
+                                let parent_key = TaskListKey {
+                                    domain_id: key.domain_id,
+                                    name: lookup.1.clone(),
+                                    task_type: key.task_type,
+                                };
+                                let resolve_domain = domain.clone();
+                                // Owners live in registry.state; retaining that
+                                // same Arc here would form an owner/registry cycle.
+                                let resolve_state = Arc::downgrade(&registry.state);
+                                let mut resolve_registry = registry.clone();
+                                resolve_registry.state = Arc::new(Mutex::new(State::default()));
+                                Some(crate::matching_dispatch::ForwardState::new(
+                                    move || {
+                                        let mut resolve_registry = resolve_registry.clone();
+                                        let state = resolve_state.upgrade();
+                                        let parent_key = parent_key.clone();
+                                        let domain = resolve_domain.clone();
+                                        Box::pin(async move {
+                                            resolve_registry.state = state?;
                                             let degree = resolve_registry
                                                 .forward_degree
                                                 .as_ref()
@@ -1399,79 +1413,113 @@ impl QueueRegistry {
                                             )
                                             .await
                                             .map(|dispatcher| (dispatcher, parent))
-                                    })
-                                        as std::pin::Pin<
-                                            Box<
-                                                dyn std::future::Future<
+                                        })
+                                            as std::pin::Pin<
+                                                Box<
+                                                    dyn std::future::Future<
                                                             Output = Option<(
                                                                 crate::matching_dispatch::Parent,
                                                                 String,
                                                             )>,
-                                                    > + Send,
-                                            >,
-                                        >
-                                },
-                                max_outstanding,
-                                forward_tasks.clone(),
-                                forward_rate.clone(),
-                                lookup.1.clone(),
-                                {
-                                    let provider = registry.local_poll_wait.clone();
-                                    let domain = domain.clone();
-                                    let name = lookup.1.clone();
-                                    let task_type = lookup.2;
+                                                        > + Send,
+                                                >,
+                                            >
+                                    },
+                                    max_outstanding,
+                                    forward_tasks.clone(),
+                                    forward_rate.clone(),
+                                    lookup.1.clone(),
+                                    {
+                                        let provider = registry.local_poll_wait.clone();
+                                        let domain = domain.clone();
+                                        let name = lookup.1.clone();
+                                        let task_type = lookup.2;
                                         Arc::new(move || {
                                             provider
                                                 .as_ref()
                                                 .map(|provider| provider(&domain, &name, task_type))
                                                 .unwrap_or(10_000_000)
                                         })
+                                    },
+                                ))
+                            }
+                        };
+                        let forward = forward.map(|state| {
+                            state.with_task_metrics(
+                                registry.metrics.clone(),
+                                crate::matching_metrics::PollMetricContext {
+                                    domain: domain.clone(),
+                                    task_list: lookup.1.clone(),
+                                    task_list_kind: i32::from(kind),
+                                    task_type: if lookup.2 == 1 {
+                                        "activity_task"
+                                    } else {
+                                        "decision_task"
+                                    },
+                                    poller_isolation_group: String::new(),
                                 },
-                            ))
-                        }
-                    };
-                    let forward = forward.map(|state| state.with_task_metrics(
-                        registry.metrics.clone(),
-                        crate::matching_metrics::PollMetricContext {
-                            domain: domain.clone(), task_list: lookup.1.clone(), task_list_kind: i32::from(kind),
-                            task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
-                            poller_isolation_group: String::new(),
-                        },
-                    ));
-                    let backlog_forward = forward.clone().map(|forward_state| {
-                        let forward_domain = domain.clone();
-                        let forward_task_type = lookup.2;
-                        let forward_kind = kind;
-                        let local_wait_provider = registry.local_poll_wait.clone();
-                        let local_wait_domain = domain.clone();
-                        let local_wait_name = lookup.1.clone();
-                        let local_wait_type = lookup.2;
-                        crate::matching_reader::BacklogForward {
-                            tokens: forward_state.add_tokens(),
-                            forward: Arc::new(move |task| {
-                                let forward_state = forward_state.clone();
-                                let domain = forward_domain.clone();
-                                Box::pin(async move {
-                                    forward_state.forward_backlog_task(task, &domain, &domain, forward_task_type, forward_kind).await
+                            )
+                        });
+                        let backlog_forward = forward.clone().map(|forward_state| {
+                            let forward_domain = domain.clone();
+                            let forward_task_type = lookup.2;
+                            let forward_kind = kind;
+                            let local_wait_provider = registry.local_poll_wait.clone();
+                            let local_wait_domain = domain.clone();
+                            let local_wait_name = lookup.1.clone();
+                            let local_wait_type = lookup.2;
+                            crate::matching_reader::BacklogForward {
+                                tokens: forward_state.add_tokens(),
+                                forward: Arc::new(move |task| {
+                                    let forward_state = forward_state.clone();
+                                    let domain = forward_domain.clone();
+                                    Box::pin(async move {
+                                        forward_state
+                                            .forward_backlog_task(
+                                                task,
+                                                &domain,
+                                                &domain,
+                                                forward_task_type,
+                                                forward_kind,
+                                            )
+                                            .await
+                                    })
+                                }),
+                                local_wait: Arc::new(move || {
+                                    std::time::Duration::from_nanos(
+                                        local_wait_provider
+                                            .as_ref()
+                                            .map(|p| {
+                                                p(
+                                                    &local_wait_domain,
+                                                    &local_wait_name,
+                                                    local_wait_type,
+                                                )
+                                            })
+                                            .unwrap_or(10_000_000)
+                                            .max(0) as u64,
+                                    )
+                                }),
+                            }
+                        });
+                        let reader_fatal = registry.fatal_writer.clone().map(
+                            |fatal| -> crate::matching_reader::ReaderFatalSink {
+                                Arc::new(move |detail| {
+                                    let _ = fatal.send(
+                                        crate::matching_fatal::MatchingFatal::ReaderInvariant(
+                                            detail,
+                                        ),
+                                    );
                                 })
-                            }),
-                            local_wait: Arc::new(move || std::time::Duration::from_nanos(
-                                local_wait_provider.as_ref().map(|p| p(&local_wait_domain, &local_wait_name, local_wait_type)).unwrap_or(10_000_000).max(0) as u64
-                            )),
-                        }
-                    });
-                    let reader_fatal = registry.fatal_writer.clone().map(|fatal| -> crate::matching_reader::ReaderFatalSink {
-                        Arc::new(move |detail| {
-                            let _ = fatal.send(crate::matching_fatal::MatchingFatal::ReaderInvariant(detail));
-                        })
-                    });
-                    let reader = crate::matching_reader::TaskReader::with_fatal_invariant_sink(
-                        queue.clone(),
-                        dispatcher.task_notification(),
-                        reader_config,
-                        activity,
-                        limiter.clone(),
-                        isolation,
+                            },
+                        );
+                        let reader = crate::matching_reader::TaskReader::with_fatal_invariant_sink(
+                            queue.clone(),
+                            dispatcher.task_notification(),
+                            reader_config,
+                            activity,
+                            limiter.clone(),
+                            isolation,
                             registry.domain_metadata.as_ref().map(|(domains, cluster)| {
                                 crate::matching_standby::checker(
                                     domains.clone(),
@@ -1484,100 +1532,104 @@ impl QueueRegistry {
                                         domain: domain.clone(),
                                         task_list: lookup.1.clone(),
                                         task_list_kind: i32::from(kind),
-                                        task_type: if lookup.2 == 1 { "activity_task" } else { "decision_task" },
+                                        task_type: if lookup.2 == 1 {
+                                            "activity_task"
+                                        } else {
+                                            "decision_task"
+                                        },
                                         poller_isolation_group: String::new(),
                                     },
                                 )
                             }),
-                        Some((
-                            registry.metrics.clone(),
-                            crate::matching_metrics::PollMetricContext {
-                                domain: domain.clone(),
-                                task_list: lookup.1.clone(),
-                                task_list_kind: i32::from(kind),
-                                task_type: if lookup.2 == 1 {
-                                    "activity_task"
-                                } else {
-                                    "decision_task"
+                            Some((
+                                registry.metrics.clone(),
+                                crate::matching_metrics::PollMetricContext {
+                                    domain: domain.clone(),
+                                    task_list: lookup.1.clone(),
+                                    task_list_kind: i32::from(kind),
+                                    task_type: if lookup.2 == 1 {
+                                        "activity_task"
+                                    } else {
+                                        "decision_task"
+                                    },
+                                    poller_isolation_group: String::new(),
                                 },
-                                poller_isolation_group: String::new(),
-                            },
-                        )),
-                        backlog_forward,
-                        reader_fatal,
-                    );
-                    let read_stop = reader.stop_signal();
+                            )),
+                            backlog_forward,
+                            reader_fatal,
+                        );
+                        let read_stop = reader.stop_signal();
                         let sync_matcher = Arc::new(crate::matching_sync::SyncMatcher::new(
                             &sync_groups,
                             read_stop.subscribe(),
                         ));
-                    let wake = registry.changed.clone();
-                    let stopped = writer.stop_signal();
-                    queue.set_stop_waker(Arc::new(move || {
-                        let _ = stopped.send(true);
-                        read_stop.send_replace(true);
-                        wake.notify_waiters();
-                    }));
-                    let mut dispatcher = dispatcher
-                        .with_writer(writer.clone())
-                        .with_reader(reader.clone())
-                        .with_sync_matcher(sync_matcher.clone())
-                        .with_pollers(pollers.clone());
-                    if let Some(forward) = forward {
-                        dispatcher = dispatcher.with_forward(forward);
-                    }
-                    let owner = Arc::new(Owner {
-                        forward_tasks,
-                        forward_rate,
-                        dispatcher,
-                        writer,
-                        reader,
-                        limiter,
-                        queue,
-                        pollers,
-                        queries: Arc::new(crate::matching_query::QueryChannel::with_index(
-                            registry.query_index.clone(),
-                        )),
-                        qps,
-                        partitions,
-                        sync_matcher,
-                        isolation_select,
-                        sync_wait,
-                        created: now,
+                        let wake = registry.changed.clone();
+                        let stopped = writer.stop_signal();
+                        queue.set_stop_waker(Arc::new(move || {
+                            let _ = stopped.send(true);
+                            read_stop.send_replace(true);
+                            wake.notify_waiters();
+                        }));
+                        let mut dispatcher = dispatcher
+                            .with_writer(writer.clone())
+                            .with_reader(reader.clone())
+                            .with_sync_matcher(sync_matcher.clone())
+                            .with_pollers(pollers.clone());
+                        if let Some(forward) = forward {
+                            dispatcher = dispatcher.with_forward(forward);
+                        }
+                        let owner = Arc::new(Owner {
+                            forward_tasks,
+                            forward_rate,
+                            dispatcher,
+                            writer,
+                            reader,
+                            limiter,
+                            queue,
+                            pollers,
+                            queries: Arc::new(crate::matching_query::QueryChannel::with_index(
+                                registry.query_index.clone(),
+                            )),
+                            qps,
+                            partitions,
+                            sync_matcher,
+                            isolation_select,
+                            sync_wait,
+                            created: now,
                             idle_ttl_nanos,
-                        last_update: Mutex::new(tokio::time::Instant::now()),
+                            last_update: Mutex::new(tokio::time::Instant::now()),
                             next_ack_update: Mutex::new(next_ack_update),
-                        next_idle_check: Mutex::new(
+                            next_idle_check: Mutex::new(
                                 tokio::time::Instant::now()
                                     + std::time::Duration::from_nanos(
                                         (idle_ttl_nanos / 2).max(1) as u64
                                     ),
-                        ),
-                        liveness,
-                        scaler: Default::default(),
-                    });
-                    state = registry.state.lock().expect("Matching registry lock");
-                    if state.stopped {
-                        drop(state);
-                        if let Err(error) = owner.finish(now, readers) {
-                            eprintln!("Matching startup shutdown cleanup failed: {error}");
+                            ),
+                            liveness,
+                            scaler: Default::default(),
+                        });
+                        state = registry.state.lock().expect("Matching registry lock");
+                        if state.stopped {
+                            drop(state);
+                            if let Err(error) = owner.finish(now, readers) {
+                                eprintln!("Matching startup shutdown cleanup failed: {error}");
+                            }
+                            return Err(Status::unavailable("Matching registry stopped."));
                         }
-                        return Err(Status::unavailable("Matching registry stopped."));
-                    }
-                    if let Err(error) = registry.check_task_list_ownership(&key.name, false) {
-                        drop(state);
-                        let _ = owner.finish(now, readers);
-                        return Err(error);
-                    }
-                    // Reconcile publication with concurrent root updates. A
-                    // nonroot startup may have read SQL before the root wrote
-                    // and published its notification.
-                    if kind == 0 {
+                        if let Err(error) = registry.check_task_list_ownership(&key.name, false) {
+                            drop(state);
+                            let _ = owner.finish(now, readers);
+                            return Err(error);
+                        }
+                        // Reconcile publication with concurrent root updates. A
+                        // nonroot startup may have read SQL before the root wrote
+                        // and published its notification.
+                        if kind == 0 {
                             let name = cadence_common::task_list::TaskListName::parse(&lookup.1)
                                 .map_err(Status::invalid_argument)?;
-                        if name.is_root() {
-                            if let Some(config) = owner.partitions.get() {
-                                for ((domain, task_list, task_type), other) in &state.owners {
+                            if name.is_root() {
+                                if let Some(config) = owner.partitions.get() {
+                                    for ((domain, task_list, task_type), other) in &state.owners {
                                         if *domain == lookup.0
                                             && *task_type == lookup.2
                                             && cadence_common::task_list::TaskListName::parse(
@@ -1585,103 +1637,104 @@ impl QueueRegistry {
                                             )
                                             .is_ok_and(|other| other.root() == name.root())
                                         {
-                                        other.partitions.push(&config);
+                                            other.partitions.push(&config);
+                                        }
                                     }
                                 }
-                            }
                             } else if let Some(root) =
                                 state.owners.get(&(lookup.0, name.root().into(), lookup.2))
                             {
                                 if let Some(config) = root.partitions.get() {
                                     owner.partitions.push(&config);
                                 }
-                        }
-                    }
-                    // Go `taskListManagerImpl.Start` pushes the loaded root config
-                    // to every non-root read partition in the background, bounded
-                    // by `notifyPartitionConfigTimeout` (5s).
-                    if kind == 0 {
-                        if let (Some(config), Ok(parsed)) = (
-                            owner.partitions.get(),
-                            cadence_common::task_list::TaskListName::parse(&key.name),
-                        ) {
-                            if parsed.is_root() {
-                                let notifier = registry.clone();
-                                let root_name = parsed.root().to_owned();
-                                let read_partitions = config.read_partitions.keys().copied().collect();
-                                let deadline = tokio::time::Instant::now()
-                                    + std::time::Duration::from_secs(5);
-                                tokio::spawn(async move {
-                                    notifier
-                                        .notify_read_partitions(
-                                            key.domain_id,
-                                            &root_name,
-                                            kind,
-                                            key.task_type,
-                                            read_partitions,
-                                            config,
-                                            Some(deadline),
-                                        )
-                                        .await;
-                                });
                             }
                         }
-                    }
-                    // Go starts the adaptive scaler on root normal managers;
-                    // the loop self-terminates when the owner stops.
-                    if kind == 0 && registry.scaler_config.is_some() {
-                        if let Ok(parsed) =
-                            cadence_common::task_list::TaskListName::parse(&key.name)
-                        {
-                            if parsed.is_root() {
-                                // Like the forward resolver, retain only a
-                                // weak handle on the owner state: the scaler
-                                // must not keep the registry (and its task
-                                // store) alive after every other handle is
-                                // dropped. The loop exits once the upgrade
-                                // fails.
-                                let scaler_state = Arc::downgrade(&registry.state);
-                                let mut scaler_registry = registry.clone();
-                                scaler_registry.state = Arc::new(Mutex::new(State::default()));
-                                let root = TaskListKey {
-                                    domain_id: key.domain_id,
-                                    name: key.name.clone(),
-                                    task_type: key.task_type,
-                                };
-                                owner.scaler.start(async move {
-                                    let mut scaler_registry = scaler_registry;
-                                    scaler_registry.scaler_loop(root, scaler_state).await;
-                                });
+                        // Go `taskListManagerImpl.Start` pushes the loaded root config
+                        // to every non-root read partition in the background, bounded
+                        // by `notifyPartitionConfigTimeout` (5s).
+                        if kind == 0 {
+                            if let (Some(config), Ok(parsed)) = (
+                                owner.partitions.get(),
+                                cadence_common::task_list::TaskListName::parse(&key.name),
+                            ) {
+                                if parsed.is_root() {
+                                    let notifier = registry.clone();
+                                    let root_name = parsed.root().to_owned();
+                                    let read_partitions =
+                                        config.read_partitions.keys().copied().collect();
+                                    let deadline = tokio::time::Instant::now()
+                                        + std::time::Duration::from_secs(5);
+                                    tokio::spawn(async move {
+                                        notifier
+                                            .notify_read_partitions(
+                                                key.domain_id,
+                                                &root_name,
+                                                kind,
+                                                key.task_type,
+                                                read_partitions,
+                                                config,
+                                                Some(deadline),
+                                            )
+                                            .await;
+                                    });
+                                }
                             }
                         }
+                        // Go starts the adaptive scaler on root normal managers;
+                        // the loop self-terminates when the owner stops.
+                        if kind == 0 && registry.scaler_config.is_some() {
+                            if let Ok(parsed) =
+                                cadence_common::task_list::TaskListName::parse(&key.name)
+                            {
+                                if parsed.is_root() {
+                                    // Like the forward resolver, retain only a
+                                    // weak handle on the owner state: the scaler
+                                    // must not keep the registry (and its task
+                                    // store) alive after every other handle is
+                                    // dropped. The loop exits once the upgrade
+                                    // fails.
+                                    let scaler_state = Arc::downgrade(&registry.state);
+                                    let mut scaler_registry = registry.clone();
+                                    scaler_registry.state = Arc::new(Mutex::new(State::default()));
+                                    let root = TaskListKey {
+                                        domain_id: key.domain_id,
+                                        name: key.name.clone(),
+                                        task_type: key.task_type,
+                                    };
+                                    owner.scaler.start(async move {
+                                        let mut scaler_registry = scaler_registry;
+                                        scaler_registry.scaler_loop(root, scaler_state).await;
+                                    });
+                                }
+                            }
+                        }
+                        state.owners.insert(lookup, owner.clone());
+                        registry
+                            .metrics
+                            .task_list_managers_gauge(state.owners.len());
+                        registry.changed.notify_waiters();
+                        owner
                     }
-                    state.owners.insert(lookup, owner.clone());
-                    registry
-                        .metrics
-                        .task_list_managers_gauge(state.owners.len());
-                    registry.changed.notify_waiters();
-                    owner
-                }
-            };
-            Ok(QueueHandle {
-                queue: owner.queue.clone(),
-                dispatcher: owner.dispatcher.clone(),
-                pollers: owner.pollers.clone(),
-                limiter: owner.limiter.clone(),
-                queries: owner.queries.clone(),
-                qps: owner.qps.clone(),
-                partitions: owner.partitions.clone(),
-                sync_matcher: owner.sync_matcher.clone(),
-                isolation_select: owner.isolation_select.clone(),
-                sync_wait: owner.sync_wait.clone(),
-                created: owner.created,
-                liveness: owner.liveness.clone(),
-                writer: owner.writer.clone(),
-                forward_tasks: owner.forward_tasks.clone(),
-                forward_rate: owner.forward_rate.clone(),
+                };
+                Ok(QueueHandle {
+                    queue: owner.queue.clone(),
+                    dispatcher: owner.dispatcher.clone(),
+                    pollers: owner.pollers.clone(),
+                    limiter: owner.limiter.clone(),
+                    queries: owner.queries.clone(),
+                    qps: owner.qps.clone(),
+                    partitions: owner.partitions.clone(),
+                    sync_matcher: owner.sync_matcher.clone(),
+                    isolation_select: owner.isolation_select.clone(),
+                    sync_wait: owner.sync_wait.clone(),
+                    created: owner.created,
+                    liveness: owner.liveness.clone(),
+                    writer: owner.writer.clone(),
+                    forward_tasks: owner.forward_tasks.clone(),
+                    forward_rate: owner.forward_rate.clone(),
+                })
             })
-        })
-        .await
+            .await
         })
     }
     /// Go `adaptiveScalerImpl` periodic loop, running only on root normal
@@ -2064,19 +2117,19 @@ impl QueueRegistry {
             let on_failure = || {
                 let domain = metric_domain.clone().unwrap_or_else(|| {
                     registry
-                    .domain_metadata
-                    .as_ref()
-                    .and_then(|(domains, _)| {
-                        domains
-                            .describe(&cadence_api::service_types::DescribeDomainRequest {
-                                name: None,
-                                uuid: Some(key.domain_id.to_string()),
-                            })
-                            .ok()
-                            .and_then(|response| response.domain_info.map(|info| info.name))
-                    })
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| "_unknown_".to_owned())
+                        .domain_metadata
+                        .as_ref()
+                        .and_then(|(domains, _)| {
+                            domains
+                                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                                    name: None,
+                                    uuid: Some(key.domain_id.to_string()),
+                                })
+                                .ok()
+                                .and_then(|response| response.domain_info.map(|info| info.name))
+                        })
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| "_unknown_".to_owned())
                 });
                 registry.metrics.task_list_counter_event(
                     crate::matching_metrics::PARTITION_UPDATE_FAILED,

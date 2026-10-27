@@ -137,94 +137,104 @@ pub fn checker(
             };
             let domain = key.domain_id.to_string();
             let started = std::time::Instant::now();
-            let result = retry_completion(completer_retry_policy(), || {
-                let domains = domains.clone();
-                let cluster = cluster.clone();
-                let history = history.clone();
-                let key = key.clone();
-                let enabled = enabled.clone();
-                let metrics = metrics.clone();
-                let metric_context = metric_context.clone();
-                let domain = domain.clone();
-                let task = task.clone();
-                async move {
-                let result: Result<Option<bool>, Status> = async {
-                    if domains
-                        .is_active_in(&domain, &cluster)
-                        .map_err(|error| Status::not_found(error.message))?
-                    {
-                        return Ok(Some(false));
-                    }
-                    let description = domains
-                        .describe(&cadence_api::service_types::DescribeDomainRequest {
-                            uuid: Some(domain.clone()),
-                            ..Default::default()
-                        })
-                        .map_err(|error| Status::not_found(error.message))?;
-                    let active_active = description
-                        .replication_configuration
-                        .as_ref()
-                        .and_then(|replication| replication.active_clusters.as_ref())
-                        .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
-                        .is_some_and(|scopes| {
-                            scopes.values().any(|scope| {
-                                scope
-                                    .cluster_attributes
-                                    .as_ref()
-                                    .is_some_and(|attributes| !attributes.is_empty())
-                            })
-                        });
-                    if active_active
-                        || enabled
-                            .as_ref()
-                            .is_some_and(|enabled| !enabled(&domain, &key.name, key.task_type))
-                    {
-                        return Ok(Some(false));
-                    }
-                    let completed = match history
-                        .describe_execution(
-                            &domain,
-                            description
-                                .domain_info
-                                .as_ref()
-                                .map(|info| info.name.as_str())
-                                .unwrap_or_default(),
-                            &task,
-                        )
-                        .await
-                    {
-                        Ok(state) => {
-                            let started =
-                                task_started(key.task_type, task.data.schedule_id, &state)?;
-                            let metric = if started {
-                                crate::matching_metrics::STANDBY_TASKS_COMPLETED
-                            } else {
-                                crate::matching_metrics::STANDBY_TASKS_NOT_STARTED
-                            };
-                            metrics.task_list_counter_event(metric, &metric_context);
-                            Ok(started.then_some(true))
-                        }
-                        Err(error) if crate::matching_history::missing_execution(&error) => {
-                            let result = missing_execution_result(
-                                super::grpc_matching::matching_now()
-                                    .saturating_sub(task.data.created_nanos),
-                            );
-                            if matches!(result, Ok(Some(true))) {
-                                metrics.task_list_counter_event(
-                                    crate::matching_metrics::STANDBY_TASKS_COMPLETED,
-                                    &metric_context,
-                                );
+            let result = retry_completion(
+                completer_retry_policy(),
+                || {
+                    let domains = domains.clone();
+                    let cluster = cluster.clone();
+                    let history = history.clone();
+                    let key = key.clone();
+                    let enabled = enabled.clone();
+                    let metrics = metrics.clone();
+                    let metric_context = metric_context.clone();
+                    let domain = domain.clone();
+                    let task = task.clone();
+                    async move {
+                        let result: Result<Option<bool>, Status> = async {
+                            if domains
+                                .is_active_in(&domain, &cluster)
+                                .map_err(|error| Status::not_found(error.message))?
+                            {
+                                return Ok(Some(false));
                             }
-                            result
+                            let description = domains
+                                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                                    uuid: Some(domain.clone()),
+                                    ..Default::default()
+                                })
+                                .map_err(|error| Status::not_found(error.message))?;
+                            let active_active = description
+                                .replication_configuration
+                                .as_ref()
+                                .and_then(|replication| replication.active_clusters.as_ref())
+                                .and_then(|active| {
+                                    active.active_clusters_by_cluster_attribute.as_ref()
+                                })
+                                .is_some_and(|scopes| {
+                                    scopes.values().any(|scope| {
+                                        scope
+                                            .cluster_attributes
+                                            .as_ref()
+                                            .is_some_and(|attributes| !attributes.is_empty())
+                                    })
+                                });
+                            if active_active
+                                || enabled.as_ref().is_some_and(|enabled| {
+                                    !enabled(&domain, &key.name, key.task_type)
+                                })
+                            {
+                                return Ok(Some(false));
+                            }
+                            let completed = match history
+                                .describe_execution(
+                                    &domain,
+                                    description
+                                        .domain_info
+                                        .as_ref()
+                                        .map(|info| info.name.as_str())
+                                        .unwrap_or_default(),
+                                    &task,
+                                )
+                                .await
+                            {
+                                Ok(state) => {
+                                    let started =
+                                        task_started(key.task_type, task.data.schedule_id, &state)?;
+                                    let metric = if started {
+                                        crate::matching_metrics::STANDBY_TASKS_COMPLETED
+                                    } else {
+                                        crate::matching_metrics::STANDBY_TASKS_NOT_STARTED
+                                    };
+                                    metrics.task_list_counter_event(metric, &metric_context);
+                                    Ok(started.then_some(true))
+                                }
+                                Err(error)
+                                    if crate::matching_history::missing_execution(&error) =>
+                                {
+                                    let result = missing_execution_result(
+                                        super::grpc_matching::matching_now()
+                                            .saturating_sub(task.data.created_nanos),
+                                    );
+                                    if matches!(result, Ok(Some(true))) {
+                                        metrics.task_list_counter_event(
+                                            crate::matching_metrics::STANDBY_TASKS_COMPLETED,
+                                            &metric_context,
+                                        );
+                                    }
+                                    result
+                                }
+                                Err(error) => Err(error),
+                            }?;
+                            Ok(completed)
                         }
-                        Err(error) => Err(error),
-                    }?;
-                    Ok(completed)
-                }
-                .await;
-                result
-                }
-            }, tokio::time::sleep, || started.elapsed()).await;
+                        .await;
+                        result
+                    }
+                },
+                tokio::time::sleep,
+                || started.elapsed(),
+            )
+            .await;
             cancellation.armed = false;
             match result {
                 Ok(Some(completed)) => Ok(completed),
@@ -284,7 +294,10 @@ mod tests {
     #[tokio::test]
     async fn domain_and_history_errors_retry_then_return_original_error_once() {
         use crate::matching_metrics::*;
-        for message in ["error-getting-domain-by-id", "error-describing-workflow-execution"] {
+        for message in [
+            "error-getting-domain-by-id",
+            "error-describing-workflow-execution",
+        ] {
             let sink = Arc::new(RecordingMetricSink::default());
             let metrics = MatchingMetrics::new(sink.clone());
             let context = poll_context();
@@ -293,8 +306,7 @@ mod tests {
             let sleep_elapsed = elapsed.clone();
             let clock_elapsed = elapsed.clone();
             let result = retry_completion(
-                ExponentialRetryPolicy::new(Duration::from_millis(1))
-                    .with_maximum_attempts(3),
+                ExponentialRetryPolicy::new(Duration::from_millis(1)).with_maximum_attempts(3),
                 || {
                     calls += 1;
                     let error = Status::unavailable(message);
@@ -401,7 +413,11 @@ mod tests {
                 "attempt {attempt}: {secs}s vs nominal {nominal}s"
             );
         }
-        assert!(delays.len() > 25, "retries for minutes, got {}", delays.len());
+        assert!(
+            delays.len() > 25,
+            "retries for minutes, got {}",
+            delays.len()
+        );
         assert!(elapsed <= Duration::from_secs(300));
         assert!(policy
             .compute_next_delay(&mut rng, Duration::from_secs(301), 3)
@@ -510,7 +526,10 @@ mod tests {
         }
     }
 
-    fn pending_decision(schedule_id: i64, pending_state: i32) -> h::DescribeWorkflowExecutionResponse {
+    fn pending_decision(
+        schedule_id: i64,
+        pending_state: i32,
+    ) -> h::DescribeWorkflowExecutionResponse {
         let mut response = state();
         response.pending_decision = Some(p::PendingDecisionInfo {
             schedule_id,
@@ -520,7 +539,10 @@ mod tests {
         response
     }
 
-    fn pending_activity(schedule_id: i64, pending_state: i32) -> h::DescribeWorkflowExecutionResponse {
+    fn pending_activity(
+        schedule_id: i64,
+        pending_state: i32,
+    ) -> h::DescribeWorkflowExecutionResponse {
         let mut response = state();
         response.pending_activities.push(p::PendingActivityInfo {
             schedule_id,
@@ -582,7 +604,8 @@ mod tests {
     // Go "error - no WorkflowExecutionInfo in workflow execution response".
     #[test]
     fn go_error_no_workflow_execution_info() {
-        let error = task_started(0, 3, &h::DescribeWorkflowExecutionResponse::default()).unwrap_err();
+        let error =
+            task_started(0, 3, &h::DescribeWorkflowExecutionResponse::default()).unwrap_err();
         assert_eq!(error.message(), "workflow execution info is nil");
     }
 
@@ -598,13 +621,19 @@ mod tests {
     fn go_missing_execution_younger_than_24h_waits() {
         let error = missing_execution_result(0).unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unavailable);
-        assert_eq!(error.message(), "wait time not reached for workflow EntityNotExistsError");
+        assert_eq!(
+            error.message(),
+            "wait time not reached for workflow EntityNotExistsError"
+        );
     }
 
     // Go "complete task - workflow not found and task created more than 24 hours before completion attempt".
     #[test]
     fn go_missing_execution_result_older_than_24h_completes() {
-        assert_eq!(missing_execution_result(86_401_000_000_000).unwrap(), Some(true));
+        assert_eq!(
+            missing_execution_result(86_401_000_000_000).unwrap(),
+            Some(true)
+        );
     }
 
     // Go taskCompleter counts a young missing execution as a completion failure once retries are exhausted.
@@ -625,7 +654,10 @@ mod tests {
         let sink = Arc::new(RecordingMetricSink::default());
         let metrics = MatchingMetrics::new(sink);
         let error = exhausted(missing_execution_result(0), &metrics, &poll_context()).unwrap_err();
-        assert_eq!(error.message(), "wait time not reached for workflow EntityNotExistsError");
+        assert_eq!(
+            error.message(),
+            "wait time not reached for workflow EntityNotExistsError"
+        );
     }
 
     struct DescribeHistory {
@@ -648,7 +680,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             tonic::transport::Server::builder()
-                .add_service(h::history_api_server::HistoryApiServer::new(DescribeHistory { reply }))
+                .add_service(h::history_api_server::HistoryApiServer::new(
+                    DescribeHistory { reply },
+                ))
                 .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
                 .await
                 .unwrap();
@@ -658,7 +692,11 @@ mod tests {
             .connect()
             .await
             .unwrap();
-        crate::matching_history::MatchingHistoryClient::new(channel, Duration::from_secs(5), 32 * 1024 * 1024)
+        crate::matching_history::MatchingHistoryClient::new(
+            channel,
+            Duration::from_secs(5),
+            32 * 1024 * 1024,
+        )
     }
 
     fn standby_domains(active_cluster: &str) -> cadence_persistence::InMemoryDomainStore {
@@ -681,7 +719,10 @@ mod tests {
         domains
     }
 
-    fn allocated(schedule_id: i64, created_nanos: i64) -> cadence_persistence::matching_sqlite::AllocatedTask {
+    fn allocated(
+        schedule_id: i64,
+        created_nanos: i64,
+    ) -> cadence_persistence::matching_sqlite::AllocatedTask {
         cadence_persistence::matching_sqlite::AllocatedTask {
             task_id: 1,
             data: cadence_persistence::matching_blob::TaskData {
@@ -700,7 +741,10 @@ mod tests {
         reply: Result<h::DescribeWorkflowExecutionResponse, Status>,
         task_type: i32,
         task: cadence_persistence::matching_sqlite::AllocatedTask,
-    ) -> (Option<Result<bool, Status>>, Arc<crate::matching_metrics::RecordingMetricSink>) {
+    ) -> (
+        Option<Result<bool, Status>>,
+        Arc<crate::matching_metrics::RecordingMetricSink>,
+    ) {
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         let check = checker(
             standby_domains(active_cluster),
@@ -715,7 +759,9 @@ mod tests {
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             poll_context(),
         );
-        let outcome = tokio::time::timeout(Duration::from_millis(500), check(task)).await.ok();
+        let outcome = tokio::time::timeout(Duration::from_millis(500), check(task))
+            .await
+            .ok();
         (outcome, sink)
     }
 
@@ -727,11 +773,22 @@ mod tests {
     ) {
         use crate::matching_metrics::*;
         let created = crate::grpc_matching::matching_now();
-        let (outcome, sink) = check_once("remote", reply, task_type, allocated(schedule_id, created)).await;
+        let (outcome, sink) =
+            check_once("remote", reply, task_type, allocated(schedule_id, created)).await;
         assert!(matches!(outcome, Some(Ok(true))), "{case}: {outcome:?}");
         let events = sink.events();
-        assert_eq!(events.iter().filter(|e| e.name == STANDBY_TASKS_COMPLETED).count(), 1, "{case}");
-        assert!(!events.iter().any(|e| e.name == STANDBY_TASKS_NOT_STARTED), "{case}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == STANDBY_TASKS_COMPLETED)
+                .count(),
+            1,
+            "{case}"
+        );
+        assert!(
+            !events.iter().any(|e| e.name == STANDBY_TASKS_NOT_STARTED),
+            "{case}"
+        );
     }
 
     // Go "error - domain is active": the active cluster owns the domain, so the task is not completed.
@@ -746,15 +803,27 @@ mod tests {
         )
         .await;
         assert!(!outcome.unwrap().unwrap());
-        assert!(sink.events().iter().all(|e| e.name != STANDBY_TASKS_COMPLETED));
+        assert!(sink
+            .events()
+            .iter()
+            .all(|e| e.name != STANDBY_TASKS_COMPLETED));
     }
 
     // Go "error - decision task not started": the first attempt records not-started and keeps retrying.
     #[tokio::test]
     async fn go_decision_not_started_is_not_completed() {
         use crate::matching_metrics::*;
-        let reply = Ok(pending_decision(3, p::PendingDecisionState::Scheduled as i32));
-        let (outcome, sink) = check_once("remote", reply, 0, allocated(3, crate::grpc_matching::matching_now())).await;
+        let reply = Ok(pending_decision(
+            3,
+            p::PendingDecisionState::Scheduled as i32,
+        ));
+        let (outcome, sink) = check_once(
+            "remote",
+            reply,
+            0,
+            allocated(3, crate::grpc_matching::matching_now()),
+        )
+        .await;
         assert!(outcome.is_none(), "{outcome:?}");
         let events = sink.events();
         assert!(events.iter().any(|e| e.name == STANDBY_TASKS_NOT_STARTED));
@@ -765,8 +834,17 @@ mod tests {
     #[tokio::test]
     async fn go_activity_not_started_is_not_completed() {
         use crate::matching_metrics::*;
-        let reply = Ok(pending_activity(3, p::PendingActivityState::Scheduled as i32));
-        let (outcome, sink) = check_once("remote", reply, 1, allocated(3, crate::grpc_matching::matching_now())).await;
+        let reply = Ok(pending_activity(
+            3,
+            p::PendingActivityState::Scheduled as i32,
+        ));
+        let (outcome, sink) = check_once(
+            "remote",
+            reply,
+            1,
+            allocated(3, crate::grpc_matching::matching_now()),
+        )
+        .await;
         assert!(outcome.is_none(), "{outcome:?}");
         let events = sink.events();
         assert!(events.iter().any(|e| e.name == STANDBY_TASKS_NOT_STARTED));
@@ -785,7 +863,10 @@ mod tests {
         )
         .await;
         assert!(outcome.is_none(), "{outcome:?}");
-        assert!(sink.events().iter().all(|e| e.name != STANDBY_TASKS_COMPLETED));
+        assert!(sink
+            .events()
+            .iter()
+            .all(|e| e.name != STANDBY_TASKS_COMPLETED));
     }
 
     // Go "complete task - workflow not found and task created more than 24 hours before completion attempt".
@@ -793,17 +874,27 @@ mod tests {
     async fn go_missing_execution_older_than_24h_completes() {
         use crate::matching_metrics::*;
         let created = crate::grpc_matching::matching_now() - 90_000_000_000_000;
-        let (outcome, sink) = check_once("remote", Err(entity_not_exists()), 0, allocated(3, created)).await;
+        let (outcome, sink) =
+            check_once("remote", Err(entity_not_exists()), 0, allocated(3, created)).await;
         assert!(matches!(outcome, Some(Ok(true))), "{outcome:?}");
-        assert_eq!(sink.events().iter().filter(|e| e.name == STANDBY_TASKS_COMPLETED).count(), 1);
+        assert_eq!(
+            sink.events()
+                .iter()
+                .filter(|e| e.name == STANDBY_TASKS_COMPLETED)
+                .count(),
+            1
+        );
     }
 
     // Go "complete task - workflow closed".
     #[tokio::test]
     async fn go_complete_task_workflow_closed() {
         let mut response = state();
-        response.workflow_execution_info.as_mut().unwrap().close_status =
-            p::WorkflowExecutionCloseStatus::Completed as i32;
+        response
+            .workflow_execution_info
+            .as_mut()
+            .unwrap()
+            .close_status = p::WorkflowExecutionCloseStatus::Completed as i32;
         assert_completed("workflow closed", Ok(response), 0, 3).await;
     }
 
@@ -816,7 +907,10 @@ mod tests {
     // Go "complete decision task - scheduleID is less than PendingDecision scheduleID".
     #[tokio::test]
     async fn go_complete_decision_schedule_less_than_pending() {
-        let reply = Ok(pending_decision(3, p::PendingDecisionState::Scheduled as i32));
+        let reply = Ok(pending_decision(
+            3,
+            p::PendingDecisionState::Scheduled as i32,
+        ));
         assert_completed("schedule less than pending", reply, 0, 2).await;
     }
 

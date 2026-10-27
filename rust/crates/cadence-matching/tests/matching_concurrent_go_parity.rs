@@ -6,8 +6,7 @@
 //! the SQLite lease and write boundary that fences stale engine owners.
 use cadence_api::types::DomainInfo;
 use cadence_matching::{
-    grpc_matching::Matching,
-    matching_history::MatchingHistoryClient,
+    grpc_matching::Matching, matching_history::MatchingHistoryClient,
     matching_registry::QueueRegistry,
 };
 use cadence_persistence::{
@@ -27,8 +26,7 @@ const DOMAIN_ID: Uuid = Uuid::from_u128(1);
 fn fixture() -> (tempfile::TempDir, Arc<SqliteTaskStore>, Arc<Matching>) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(
-        SqliteTaskStore::create(dir.path().join("matching.db"), BlobEncoding::ThriftRW)
-            .unwrap(),
+        SqliteTaskStore::create(dir.path().join("matching.db"), BlobEncoding::ThriftRW).unwrap(),
     );
     let history = MatchingHistoryClient::new(
         tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
@@ -119,11 +117,22 @@ async fn concurrent_adds(task_type: i32) {
         task_type,
     };
     let tasks = store.get_tasks(&key, 0, i64::MAX, 2_000).unwrap();
-    assert_eq!(tasks.len(), 2_000, "concurrent adds were lost or duplicated");
-    let mut workflow_ids: Vec<_> = tasks.iter().map(|task| task.data.workflow_id.as_str()).collect();
+    assert_eq!(
+        tasks.len(),
+        2_000,
+        "concurrent adds were lost or duplicated"
+    );
+    let mut workflow_ids: Vec<_> = tasks
+        .iter()
+        .map(|task| task.data.workflow_id.as_str())
+        .collect();
     workflow_ids.sort_unstable();
     workflow_ids.dedup();
-    assert_eq!(workflow_ids.len(), 2_000, "concurrent add identity repeated");
+    assert_eq!(
+        workflow_ids.len(),
+        2_000,
+        "concurrent add identity repeated"
+    );
 }
 
 #[tokio::test]
@@ -141,8 +150,8 @@ async fn go_concurrent_add_and_poll_decision_producer_half_persists_all_tasks() 
 #[test]
 fn go_two_engine_range_steal_fences_old_owner_and_replacement_keeps_working() {
     let dir = tempfile::tempdir().unwrap();
-    let store = SqliteTaskStore::create(dir.path().join("matching.db"), BlobEncoding::ThriftRW)
-        .unwrap();
+    let store =
+        SqliteTaskStore::create(dir.path().join("matching.db"), BlobEncoding::ThriftRW).unwrap();
     let key = TaskListKey {
         domain_id: DOMAIN_ID,
         name: "range-steal".into(),
@@ -157,7 +166,9 @@ fn go_two_engine_range_steal_fences_old_owner_and_replacement_keeps_working() {
             ..Default::default()
         },
     };
-    store.create_tasks(&key, old_owner.range_id, &[old_task]).unwrap();
+    store
+        .create_tasks(&key, old_owner.range_id, &[old_task])
+        .unwrap();
 
     let new_owner = store.lease(&key, 0, 0, 2).unwrap();
     assert!(new_owner.range_id > old_owner.range_id);
