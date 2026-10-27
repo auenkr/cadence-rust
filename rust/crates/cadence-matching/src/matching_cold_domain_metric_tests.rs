@@ -146,3 +146,49 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
     assert_eq!(&*source.calls.lock().unwrap(), &[DOMAIN_ID]);
 
 }
+
+#[tokio::test]
+async fn add_decision_task_captures_domain_resolver_panic_from_blocking_task() {
+    const PANIC_TEXT: &str = "resolver exploded";
+
+    let mut matching = Matching::new(crate::handlers::AppState::default());
+    matching.domain_name_resolver = Some(Arc::new(|_| panic!("{PANIC_TEXT}")));
+    let request = m::AddDecisionTaskRequest {
+        domain_id: DOMAIN_ID.into(),
+        ..Default::default()
+    };
+
+    let error = m::matching_api_server::MatchingApi::add_decision_task(
+        &matching,
+        Request::new(request),
+    )
+    .await
+    .expect_err("resolver panic must be returned as a captured handler error");
+
+    assert_eq!(error.code(), tonic::Code::Unknown);
+    assert_eq!(
+        error.message(),
+        r#"panic object is not error: "resolver exploded""#
+    );
+    assert!(crate::matching_panic::is_captured_panic(&error));
+}
+
+#[tokio::test]
+async fn add_decision_task_swallows_ordinary_domain_resolver_failure() {
+    let mut matching = Matching::new(crate::handlers::AppState::default());
+    matching.domain_name_resolver = Some(Arc::new(|_| None));
+    let request = m::AddDecisionTaskRequest {
+        domain_id: DOMAIN_ID.into(),
+        ..Default::default()
+    };
+
+    let error = m::matching_api_server::MatchingApi::add_decision_task(
+        &matching,
+        Request::new(request),
+    )
+    .await
+    .expect_err("an empty task list should reach ordinary request validation");
+
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    assert!(!crate::matching_panic::is_captured_panic(&error));
+}
