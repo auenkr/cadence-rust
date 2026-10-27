@@ -110,3 +110,26 @@ function mapping; 386136a8 partition deadlines and failure metrics trace.
 The earlier audit's 'intentional, accepted divergence' for reader invariant
 crashes was NOT authorized by the user and is not accepted. Go logger.Fatal
 behavior must be preserved; wiring is in progress. No source pin cut yet.
+
+## Combined source checkpoint (15:05 UTC)
+
+- d9e190d3d wires reader invariant fatal notification to the host, preserves SQL
+  malformed-RunID exit 2/text and uses reader fatal exit 1. Adds duplicate/out-of-order,
+  normal-reader, completion-order and runtime-channel regressions. Go loggerImpl.Fatal
+  delegates to zapLogger.Fatal (go/common/log/logger.go:138), confirming fatal behavior.
+- Merged b07c80398 via merge 967d4a6e7: context-aware partition retry and manager-level
+  failure counter, including scaler path; validation is excluded from failure counter.
+  Source branch t3/10596222 merged, pushed, verified clean/inactive, worktree removed,
+  local/remote branches deleted per cleanup rule. Evidence remains on master.
+- Prior automatic run 40525851340 failed runtime formatting, before compilation.
+  Formatting patch from 40525224830 applied to unaffected Thrift/partition/cold-cache/
+  active-offer files; remaining touched files are formatted by the next CI dispatch.
+- Immutable diagnostic tag matching-source-check-20261027-1 pins 967d4a6e7134764c94b75e087784259c0fed1706.
+  Full workspace formatting+Clippy+test run https://github.com/auenkr/cadence-rust/actions/runs/40527340382
+  is live. It is diagnostic: formatting mutates the checkout and must be applied to
+  source before the final v7 immutable validation. Master pushes cannot cancel this
+  tag's run. Retrieve matching-format-patch and inspect all source/errors/exits.
+- Sonnet rate limit stopped the concurrent scenario worker before changes. Returned
+  to user-authorized Luna medium/default workers: 10efc027 concurrency scenario ports,
+  45cf7837 standby error retry-exhaustion regressions, 31857385 merged fatal/retry review.
+  No local Cargo/Go validation ran. No final mixed lanes have been credited.
