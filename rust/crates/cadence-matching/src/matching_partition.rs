@@ -8,6 +8,31 @@ use cadence_persistence::{
 use std::sync::Mutex;
 use tonic::Status;
 
+/// Go `taskListManagerImpl.updatePartitionConfig` returns the raw persistence error.
+/// Only a throttled SQL backend becomes `types.ServiceBusyError`, which `handleErr`
+/// passes through (ResourceExhausted plus typed detail). Every other error, including
+/// ConditionFailed, timeouts and DBUnavailable, reaches `handleErr`'s default arm and
+/// becomes `InternalServiceError` (`Status::internal`, no detail).
+fn update_failure_status(error: &StorageError) -> Status {
+    if matches!(
+        error,
+        StorageError::Backend {
+            kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
+            ..
+        }
+    ) {
+        return crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            error.to_string(),
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError {
+                reason: String::new(),
+            },
+        );
+    }
+    Status::internal(error.to_string())
+}
+
 #[derive(Default)]
 pub struct PartitionCache(Mutex<Option<StoredPartitionConfig>>);
 
@@ -174,7 +199,7 @@ impl PartitionCache {
         });
         if let Err(error) = result {
             queue.stop();
-            return Err(Status::unavailable(error.to_string()));
+            return Err(update_failure_status(&error));
         }
         let old = cached.replace(config.clone());
         Ok(Some((old, config)))
@@ -314,9 +339,39 @@ mod tests {
             3,
         )
         .unwrap();
-        assert!(cache.update(&queue, request(3, 1), 4).is_err());
+        let error = cache.update(&queue, request(3, 1), 4).unwrap_err();
+        // Go handleErr default arm: ConditionFailed becomes InternalServiceError.
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.details().is_empty());
         assert_eq!(cache.get().unwrap().version, 1);
         assert_eq!(cache.get().unwrap().write_partitions.len(), 3);
         assert!(queue.is_stopped());
+    }
+
+    #[test]
+    fn update_failure_status_matches_go_handle_err_categories() {
+        use cadence_persistence::matching_task_store::BackendErrorKind as K;
+        let backend = |kind| StorageError::Backend {
+            kind,
+            message: "boom".into(),
+        };
+        // InternalServiceError, TimeoutError, DBUnavailableError, ConditionFailedError and
+        // untyped errors all hit the default arm.
+        for error in [
+            backend(K::Timeout),
+            backend(K::Internal),
+            backend(K::Permanent),
+            backend(K::DbUnavailable),
+            StorageError::ConditionFailed("lease lost".into()),
+        ] {
+            let status = update_failure_status(&error);
+            assert_eq!(status.code(), tonic::Code::Internal, "{error:?}");
+            assert_eq!(status.message(), error.to_string());
+            assert!(status.details().is_empty());
+        }
+        // Throttling is Go ServiceBusyError, passed through typed.
+        let status = update_failure_status(&backend(K::Throttled));
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert!(!status.details().is_empty());
     }
 }

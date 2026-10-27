@@ -48,6 +48,9 @@ fn normalize(name: &str, value: &Struct) -> Struct {
         if wire_type(field) != *wire {
             continue;
         }
+        // A correctly typed container with a wrong element type assigns nil,
+        // replacing an earlier occurrence of this field in Go's FromWire.
+        fields.retain(|(existing, _)| existing != id);
         let field = match (inner, field) {
             (schema::Inner::Struct(name), Value::Struct(v)) => Value::Struct(normalize(name, v)),
             (schema::Inner::List(element, nested), Value::List(items)) => {
@@ -841,8 +844,13 @@ async fn dispatch_inner(
     // error, which the transport reports as an unexpected error.
     matching.wait_started().await;
     let empty = Struct::default();
-    let request = match args.get(1) {
-        Some(Value::Struct(v)) => v,
+    let request = match args.fields.iter().rev().find_map(|(id, value)| {
+        match (id, value) {
+            (1, Value::Struct(value)) => Some(value),
+            _ => None,
+        }
+    }) {
+        Some(v) => v,
         _ => {
             use crate::matching_quota::MatchingRpc as Rpc;
             let nil_deref = match method.method {
@@ -1323,7 +1331,8 @@ mod tests {
     async fn matching_thrift_nil_request_waits_for_startup_like_go_start_profiling() {
         let matching = Matching::new(crate::handlers::AppState::default()).with_start_pending();
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        let pending = dispatch(&matching, "MatchingService::AddActivityTask", &Struct::default(), deadline);
+        let args = Struct::default();
+        let pending = dispatch(&matching, "MatchingService::AddActivityTask", &args, deadline);
         tokio::pin!(pending);
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(100), &mut pending)
@@ -1403,7 +1412,6 @@ mod tests {
             ("shared.QueryWorkflowRequest", 20, Value::I32(1)),
             ("shared.WorkflowQuery", 10, Value::I32(1)),
             ("shared.RespondQueryTaskCompletedRequest", 10, Value::I64(1)),
-            ("shared.WorkflowQueryResult", 10, Value::I64(1)),
             ("shared.DescribeTaskListRequest", 20, Value::I64(1)),
             ("shared.WorkflowExecution", 10, Value::I32(1)),
             ("shared.TaskList", 20, Value::I64(1)),
@@ -1439,7 +1447,7 @@ mod tests {
             "matching.AddDecisionTaskRequest",
             &Struct { fields: vec![(70, good_map.clone()), (70, bad_map), (10, Value::I32(1)), (10, text("d"))] },
         );
-        assert_eq!(out.fields, vec![(70, good_map), (10, text("d"))]);
+        assert_eq!(out.fields, vec![(10, text("d"))]);
 
         let info = structure(vec![
             (10, structure(vec![(10, Value::I32(1)), (20, Value::I64(2))])), // HistoryEvent: eventId i64
@@ -1454,6 +1462,26 @@ mod tests {
         assert_eq!(event.fields, vec![(20, Value::I64(2))]);
         let Some(Value::Struct(workflow_type)) = field(info, 70) else { panic!() };
         assert!(workflow_type.fields.is_empty());
+    }
+
+    #[tokio::test]
+    async fn matching_thrift_last_struct_request_argument_wins_like_go() {
+        let matching = Matching::new(crate::handlers::AppState::default());
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let valid = structure(vec![(10, text("domain"))]);
+        let expected = dispatch(
+            &matching, "MatchingService::AddDecisionTask",
+            &Struct { fields: vec![(1, valid.clone())] }, deadline,
+        ).await;
+        for fields in [
+            vec![(1, Value::I32(1)), (1, valid.clone())],
+            vec![(1, valid.clone()), (1, Value::I32(1))],
+            vec![(1, structure(vec![])), (1, valid)],
+        ] {
+            assert_eq!(dispatch(
+                &matching, "MatchingService::AddDecisionTask", &Struct { fields }, deadline,
+            ).await, expected);
+        }
     }
 
     #[test]

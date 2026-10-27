@@ -796,7 +796,9 @@ mod tests {
                     message: "injected".into(),
                 });
             }
-            self.inner.create_tasks_with_domains(key, range, now_nanos, tasks)
+            cadence_persistence::matching_task_store::MatchingTaskStore::create_tasks_with_domains(
+                self.inner.as_ref(), key, range, now_nanos, tasks,
+            )
         }
         fn get_tasks(&self, key: &TaskListKey, read_level: i64, max_read_level: i64, batch_size: i64) -> cadence_persistence::matching_task_store::Result<Vec<AllocatedTask>> {
             self.inner.get_tasks(key, read_level, max_read_level, batch_size)
