@@ -7,9 +7,13 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
     let set = FileDescriptorSet::decode(std::fs::read(descriptor)?.as_slice())?;
     let mut out = String::from("// Generated native Matching tonic bridge.\n");
     for file in &set.file {
-        if file.package() != "uber.cadence.matching.v1" { continue; }
+        if file.package() != "uber.cadence.matching.v1" {
+            continue;
+        }
         for service in &file.service {
-            if service.name() != "MatchingAPI" { continue; }
+            if service.name() != "MatchingAPI" {
+                continue;
+            }
             writeln!(out, "#[::tonic::async_trait]\nimpl<T: crate::native::NativeMatchingApi> crate::native_service::matching_api_server::MatchingApi for T {{")?;
             for method in &service.method {
                 let name = heck::ToSnakeCase::to_snake_case(method.name());

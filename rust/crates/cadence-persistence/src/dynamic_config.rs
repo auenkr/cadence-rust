@@ -236,17 +236,33 @@ fn filters_match_context(
     domain: Option<&str>,
     task_list: Option<(&str, i32)>,
 ) -> bool {
+    filters_match_context_bytes(value, domain, task_list.map(|(name, kind)| (name.as_bytes(), kind)))
+}
+
+fn filters_match_context_bytes(
+    value: &DynamicConfigValue,
+    domain: Option<&str>,
+    task_list: Option<(&[u8], i32)>,
+) -> bool {
     if value.filters.len() > usize::from(domain.is_some()) + 2 * usize::from(task_list.is_some()) {
         return false;
     }
     value.filters.iter().all(|filter| {
         let expected = match filter.name.as_str() {
             "domainName" => domain.map(|name| Value::String(name.into())),
-            "taskListName" => task_list.map(|(name, _)| Value::String(name.into())),
+            "taskListName" => None,
             "taskType" => task_list.map(|(_, kind)| Value::from(kind)),
             _ => None,
         };
-        expected.is_some() && decode(filter.value.as_ref()) == expected
+        if filter.name == "taskListName" {
+            task_list.is_some_and(|(actual, _)| {
+                decode(filter.value.as_ref())
+                    .and_then(|value| value.as_str().map(|filter| filter.as_bytes() == actual))
+                    .unwrap_or(false)
+            })
+        } else {
+            expected.is_some() && decode(filter.value.as_ref()) == expected
+        }
     })
 }
 
@@ -261,17 +277,38 @@ fn selected_context(
     domain: Option<&str>,
     task_list: Option<(&str, i32)>,
 ) -> Option<Value> {
+    selected_context_bytes(values, domain, task_list.map(|(name, kind)| (name.as_bytes(), kind)))
+}
+
+fn selected_context_bytes(
+    values: &[DynamicConfigValue],
+    domain: Option<&str>,
+    task_list: Option<(&[u8], i32)>,
+) -> Option<Value> {
     let mut fallback = None;
     for value in values {
         if value.filters.is_empty() {
             if let Some(value) = decode(value.value.as_ref()) {
                 fallback = Some(value);
             }
-        } else if filters_match_context(value, domain, task_list) {
+        } else if filters_match_context_bytes(value, domain, task_list) {
             return decode(value.value.as_ref());
         }
     }
     fallback
+}
+
+fn task_list_filters(
+    domain: Option<&str>,
+    task_list: &[u8],
+    task_type: i32,
+) -> BTreeMap<String, Value> {
+    let mut filters = property_filters(domain, None);
+    if let Ok(task_list) = std::str::from_utf8(task_list) {
+        filters.insert("taskListName".into(), Value::String(task_list.into()));
+    }
+    filters.insert("taskType".into(), Value::from(task_type));
+    filters
 }
 
 fn report_read_error(property_type: &str, reason: &str) {
@@ -299,15 +336,27 @@ pub fn task_list_integer(
     task_type: i32,
     default: i64,
 ) -> i64 {
-    let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) =
-        values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &filters)
-    {
-        return runtime_typed(result, default, "integer")
-            .and_then(integer_value)
-            .unwrap_or(default);
+    task_list_integer_bytes(values, domain, task_list.as_bytes(), task_type, default)
+}
+
+pub fn task_list_integer_bytes(
+    values: impl PropertyValueSource,
+    domain: Option<&str>,
+    task_list: &[u8],
+    task_type: i32,
+    default: i64,
+) -> i64 {
+    let filters = task_list_filters(domain, task_list, task_type);
+    if std::str::from_utf8(task_list).is_ok() {
+        if let Some(result) =
+            values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &filters)
+        {
+            return runtime_typed(result, default, "integer")
+                .and_then(integer_value)
+                .unwrap_or(default);
+        }
     }
-    match selected_context(
+    match selected_context_bytes(
         values.snapshot_values(),
         domain,
         Some((task_list, task_type)),
@@ -330,15 +379,27 @@ pub fn task_list_boolean(
     task_type: i32,
     default: bool,
 ) -> bool {
-    let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) =
-        values.runtime_value(RuntimePropertyType::Boolean, Value::Bool(default), &filters)
-    {
-        return runtime_typed(result, default, "boolean")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(default);
+    task_list_boolean_bytes(values, domain, task_list.as_bytes(), task_type, default)
+}
+
+pub fn task_list_boolean_bytes(
+    values: impl PropertyValueSource,
+    domain: Option<&str>,
+    task_list: &[u8],
+    task_type: i32,
+    default: bool,
+) -> bool {
+    let filters = task_list_filters(domain, task_list, task_type);
+    if std::str::from_utf8(task_list).is_ok() {
+        if let Some(result) =
+            values.runtime_value(RuntimePropertyType::Boolean, Value::Bool(default), &filters)
+        {
+            return runtime_typed(result, default, "boolean")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(default);
+        }
     }
-    match selected_context(
+    match selected_context_bytes(
         values.snapshot_values(),
         domain,
         Some((task_list, task_type)),
@@ -362,18 +423,30 @@ pub fn task_list_float(
     task_type: i32,
     default: f64,
 ) -> f64 {
-    let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(
-        RuntimePropertyType::Float,
-        serde_json::json!(default),
-        &filters,
-    ) {
-        return runtime_typed(result, default, "float")
-            .and_then(|value| value.as_f64())
-            .filter(|v| v.is_finite())
-            .unwrap_or(default);
+    task_list_float_bytes(values, domain, task_list.as_bytes(), task_type, default)
+}
+
+pub fn task_list_float_bytes(
+    values: impl PropertyValueSource,
+    domain: Option<&str>,
+    task_list: &[u8],
+    task_type: i32,
+    default: f64,
+) -> f64 {
+    let filters = task_list_filters(domain, task_list, task_type);
+    if std::str::from_utf8(task_list).is_ok() {
+        if let Some(result) = values.runtime_value(
+            RuntimePropertyType::Float,
+            serde_json::json!(default),
+            &filters,
+        ) {
+            return runtime_typed(result, default, "float")
+                .and_then(|value| value.as_f64())
+                .filter(|v| v.is_finite())
+                .unwrap_or(default);
+        }
     }
-    match selected_context(
+    match selected_context_bytes(
         values.snapshot_values(),
         domain,
         Some((task_list, task_type)),
@@ -396,17 +469,29 @@ pub fn task_list_duration(
     task_type: i32,
     default: i64,
 ) -> i64 {
-    let filters = property_filters(domain, Some((task_list, task_type)));
-    if let Some(result) = values.runtime_value(
-        RuntimePropertyType::Duration,
-        Value::from(default),
-        &filters,
-    ) {
-        return runtime_typed(result, default, "duration")
-            .and_then(|value| value.as_i64())
-            .unwrap_or(default);
+    task_list_duration_bytes(values, domain, task_list.as_bytes(), task_type, default)
+}
+
+pub fn task_list_duration_bytes(
+    values: impl PropertyValueSource,
+    domain: Option<&str>,
+    task_list: &[u8],
+    task_type: i32,
+    default: i64,
+) -> i64 {
+    let filters = task_list_filters(domain, task_list, task_type);
+    if std::str::from_utf8(task_list).is_ok() {
+        if let Some(result) = values.runtime_value(
+            RuntimePropertyType::Duration,
+            Value::from(default),
+            &filters,
+        ) {
+            return runtime_typed(result, default, "duration")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(default);
+        }
     }
-    match selected_context(
+    match selected_context_bytes(
         values.snapshot_values(),
         domain,
         Some((task_list, task_type)),
@@ -735,6 +820,64 @@ mod tests {
             9,
             "missing keys retain their default"
         );
+    }
+
+    #[test]
+    fn task_list_byte_filters_never_alias_invalid_bytes_to_replacement_rune() {
+        let values = vec![
+            entry(json!(4), &[]),
+            entry(
+                json!(43),
+                &[
+                    ("domainName", json!("d")),
+                    ("taskListName", json!("�")),
+                    ("taskType", json!(0)),
+                ],
+            ),
+            entry(
+                json!(42),
+                &[("taskListName", json!("�")), ("taskType", json!(0))],
+            ),
+            entry(json!(41), &[("taskListName", json!("�"))]),
+        ];
+        for invalid_name in [&[0xff][..], &[0xfe][..]] {
+            assert_eq!(task_list_integer_bytes(&values, None, invalid_name, 0, 9), 4);
+            assert!(task_list_boolean_bytes(&[], None, invalid_name, 0, true));
+            assert_eq!(task_list_float_bytes(&[], None, invalid_name, 0, 1.25), 1.25);
+            assert_eq!(task_list_duration_bytes(&values, None, invalid_name, 0, 17), 17);
+        }
+        assert_eq!(task_list_integer_bytes(&values, None, "�".as_bytes(), 0, 9), 42);
+        assert_eq!(task_list_integer_bytes(&values, Some("d"), "�".as_bytes(), 0, 9), 43);
+        let duration_values = vec![entry(
+            json!("3s"),
+            &[("taskListName", json!("�")), ("taskType", json!(0))],
+        )];
+        assert_eq!(
+            task_list_duration_bytes(&duration_values, None, "�".as_bytes(), 0, 17),
+            3_000_000_000
+        );
+    }
+
+    #[test]
+    fn task_list_byte_filters_preserve_global_fallback_and_all_filter_constraints() {
+        let values = vec![
+            entry(json!(6), &[]),
+            entry(
+                json!(7),
+                &[
+                    ("domainName", json!("d")),
+                    ("taskListName", json!("q")),
+                    ("taskType", json!(0)),
+                ],
+            ),
+            entry(
+                json!(8),
+                &[("domainName", json!("d")), ("taskListName", json!("q"))],
+            ),
+        ];
+        assert_eq!(task_list_integer_bytes(&values, Some("d"), b"q", 0, 1), 7);
+        assert_eq!(task_list_integer_bytes(&values, Some("elsewhere"), b"q", 0, 1), 6);
+        assert_eq!(task_list_integer_bytes(&[], Some("d"), b"\xff", 1, 12), 12);
     }
 
     #[test]

@@ -34,7 +34,11 @@ pub use generated::*;
 #[doc(hidden)]
 pub mod wire {
     use cadence_common::go_string::GoString;
-    use prost::{bytes::{Buf, BufMut}, encoding::{self, DecodeContext, WireType}, DecodeError};
+    use prost::{
+        bytes::{Buf, BufMut},
+        encoding::{self, DecodeContext, WireType},
+        DecodeError,
+    };
 
     pub fn encode_string(tag: u32, value: &GoString, buf: &mut impl BufMut) {
         encoding::encode_key(tag, WireType::LengthDelimited, buf);
@@ -61,7 +65,9 @@ pub mod wire {
     }
 
     pub mod string {
-        pub use super::{encode_string as encode, encoded_len_string as encoded_len, merge_string as merge};
+        pub use super::{
+            encode_string as encode, encoded_len_string as encoded_len, merge_string as merge,
+        };
     }
 
     // google.protobuf.StringValue is an embedded wrapper message. Using the
@@ -75,16 +81,33 @@ pub mod wire {
 
         impl Message for Wrapper {
             fn encode_raw(&self, buf: &mut impl BufMut) {
-                if !self.0.is_empty() { encode_string(1, &self.0, buf); }
+                if !self.0.is_empty() {
+                    encode_string(1, &self.0, buf);
+                }
             }
             fn encoded_len(&self) -> usize {
-                if self.0.is_empty() { 0 } else { encoded_len_string(1, &self.0) }
+                if self.0.is_empty() {
+                    0
+                } else {
+                    encoded_len_string(1, &self.0)
+                }
             }
-            fn merge_field(&mut self, tag: u32, wire_type: WireType, buf: &mut impl Buf, ctx: DecodeContext) -> Result<(), DecodeError> {
-                if tag == 1 { merge_string(wire_type, &mut self.0, buf, ctx) }
-                else { encoding::skip_field(wire_type, tag, buf, ctx) }
+            fn merge_field(
+                &mut self,
+                tag: u32,
+                wire_type: WireType,
+                buf: &mut impl Buf,
+                ctx: DecodeContext,
+            ) -> Result<(), DecodeError> {
+                if tag == 1 {
+                    merge_string(wire_type, &mut self.0, buf, ctx)
+                } else {
+                    encoding::skip_field(wire_type, tag, buf, ctx)
+                }
             }
-            fn clear(&mut self) { self.0 = GoString::default(); }
+            fn clear(&mut self) {
+                self.0 = GoString::default();
+            }
         }
 
         pub fn encode(tag: u32, value: &GoString, buf: &mut impl BufMut) {
@@ -93,7 +116,12 @@ pub mod wire {
         pub fn encoded_len(tag: u32, value: &GoString) -> usize {
             encoding::message::encoded_len(tag, &Wrapper(value.clone()))
         }
-        pub fn merge(wire_type: WireType, value: &mut GoString, buf: &mut impl Buf, ctx: DecodeContext) -> Result<(), DecodeError> {
+        pub fn merge(
+            wire_type: WireType,
+            value: &mut GoString,
+            buf: &mut impl Buf,
+            ctx: DecodeContext,
+        ) -> Result<(), DecodeError> {
             let mut wrapper = Wrapper(value.clone());
             encoding::message::merge(wire_type, &mut wrapper, buf, ctx)?;
             *value = wrapper.0;
@@ -109,40 +137,93 @@ mod tests {
     use prost::Message;
 
     fn unhex(value: &str) -> Vec<u8> {
-        (0..value.len()).step_by(2).map(|i| u8::from_str_radix(&value[i..i + 2], 16).unwrap()).collect()
+        (0..value.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&value[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]
     fn native_messages_decode_original_go_raw_scalar_nested_and_map_fields() {
-        let fixture = std::env::var("MATCHING_GO_RAW_STRING_ORACLE").ok()
+        let fixture = std::env::var("MATCHING_GO_RAW_STRING_ORACLE")
+            .ok()
             .map(|path| std::fs::read_to_string(path).unwrap())
-            .unwrap_or_else(|| include_str!("../../../../memory/evidence/matching-raw-protobuf-40578298264/go-oracle.json").to_owned());
+            .unwrap_or_else(|| {
+                include_str!(
+                    "../../../../memory/evidence/matching-raw-protobuf-40578298264/go-oracle.json"
+                )
+                .to_owned()
+            });
         let rows: serde_json::Value = serde_json::from_str(&fixture).unwrap();
         for row in rows.as_array().unwrap() {
             let raw = unhex(row["hex"].as_str().unwrap());
             for key in ["inputHex", "marshalHex"] {
                 let case = &row["protobuf"]["domainId"];
-                let message = matching::AddDecisionTaskRequest::decode(unhex(case[key].as_str().unwrap()).as_slice()).unwrap();
+                let message = matching::AddDecisionTaskRequest::decode(
+                    unhex(case[key].as_str().unwrap()).as_slice(),
+                )
+                .unwrap();
                 assert_eq!(message.domain_id.as_bytes(), raw);
                 let encoded = message.encode_to_vec();
                 assert_eq!(encoded.len(), message.encoded_len());
-                assert_eq!(matching::AddDecisionTaskRequest::decode(encoded.as_slice()).unwrap(), message);
+                assert_eq!(
+                    matching::AddDecisionTaskRequest::decode(encoded.as_slice()).unwrap(),
+                    message
+                );
 
                 let case = &row["protobuf"]["workflowId"];
-                let message = matching::AddDecisionTaskRequest::decode(unhex(case[key].as_str().unwrap()).as_slice()).unwrap();
-                assert_eq!(message.workflow_execution.as_ref().unwrap().workflow_id.as_bytes(), raw);
-                assert_eq!(matching::AddDecisionTaskRequest::decode(message.encode_to_vec().as_slice()).unwrap(), message);
+                let message = matching::AddDecisionTaskRequest::decode(
+                    unhex(case[key].as_str().unwrap()).as_slice(),
+                )
+                .unwrap();
+                assert_eq!(
+                    message
+                        .workflow_execution
+                        .as_ref()
+                        .unwrap()
+                        .workflow_id
+                        .as_bytes(),
+                    raw
+                );
+                assert_eq!(
+                    matching::AddDecisionTaskRequest::decode(message.encode_to_vec().as_slice())
+                        .unwrap(),
+                    message
+                );
 
                 let case = &row["protobuf"]["partitionMap"];
-                let message = matching::AddDecisionTaskRequest::decode(unhex(case[key].as_str().unwrap()).as_slice()).unwrap();
+                let message = matching::AddDecisionTaskRequest::decode(
+                    unhex(case[key].as_str().unwrap()).as_slice(),
+                )
+                .unwrap();
                 assert_eq!(message.partition_config.len(), 1);
-                assert_eq!(message.partition_config.get(raw.as_slice()).unwrap().as_bytes(), raw);
-                assert_eq!(matching::AddDecisionTaskRequest::decode(message.encode_to_vec().as_slice()).unwrap(), message);
+                assert_eq!(
+                    message
+                        .partition_config
+                        .get(raw.as_slice())
+                        .unwrap()
+                        .as_bytes(),
+                    raw
+                );
+                assert_eq!(
+                    matching::AddDecisionTaskRequest::decode(message.encode_to_vec().as_slice())
+                        .unwrap(),
+                    message
+                );
 
                 let case = &row["protobuf"]["pollIdentity"];
-                let message = matching::PollForDecisionTaskRequest::decode(unhex(case[key].as_str().unwrap()).as_slice()).unwrap();
+                let message = matching::PollForDecisionTaskRequest::decode(
+                    unhex(case[key].as_str().unwrap()).as_slice(),
+                )
+                .unwrap();
                 assert_eq!(message.request.as_ref().unwrap().identity.as_bytes(), raw);
-                assert_eq!(matching::PollForDecisionTaskRequest::decode(message.encode_to_vec().as_slice()).unwrap(), message);
+                assert_eq!(
+                    matching::PollForDecisionTaskRequest::decode(
+                        message.encode_to_vec().as_slice()
+                    )
+                    .unwrap(),
+                    message
+                );
             }
         }
     }
@@ -152,17 +233,35 @@ mod tests {
         let original = crate::matching::PollForDecisionTaskResponse {
             previous_started_event_id: Some(0),
             attempt: 7,
-            workflow_type: Some(crate::api::WorkflowType { name: "type".into() }),
+            workflow_type: Some(crate::api::WorkflowType {
+                name: "type".into(),
+            }),
             ..Default::default()
         };
-        let native = matching::PollForDecisionTaskResponse::decode(original.encode_to_vec().as_slice()).unwrap();
+        let native =
+            matching::PollForDecisionTaskResponse::decode(original.encode_to_vec().as_slice())
+                .unwrap();
         assert_eq!(native.previous_started_event_id, Some(0));
-        assert_eq!(crate::matching::PollForDecisionTaskResponse::decode(native.encode_to_vec().as_slice()).unwrap(), original);
+        assert_eq!(
+            crate::matching::PollForDecisionTaskResponse::decode(native.encode_to_vec().as_slice())
+                .unwrap(),
+            original
+        );
         let mut wire = unhex("0a01ff0a01fe");
         // Unknown length-delimited field and repeated scalar: last value wins.
         wire.extend_from_slice(&[0xa2, 0x06, 0x01, 0xff]);
-        assert_eq!(matching::AddDecisionTaskRequest::decode(wire.as_slice()).unwrap().domain_id.as_bytes(), &[0xfe]);
-        for malformed in [vec![0x0a, 0x02, 0xff], vec![0x0d, 0, 0, 0, 0], vec![0x42, 0x02, 0x0a]] {
+        assert_eq!(
+            matching::AddDecisionTaskRequest::decode(wire.as_slice())
+                .unwrap()
+                .domain_id
+                .as_bytes(),
+            &[0xfe]
+        );
+        for malformed in [
+            vec![0x0a, 0x02, 0xff],
+            vec![0x0d, 0, 0, 0, 0],
+            vec![0x42, 0x02, 0x0a],
+        ] {
             assert!(matching::AddDecisionTaskRequest::decode(malformed.as_slice()).is_err());
         }
     }
@@ -172,16 +271,35 @@ mod tests {
         let wire = unhex("42060a01ff12016142060a01ff12016242070a03efbfbd1200");
         let request = matching::AddDecisionTaskRequest::decode(wire.as_slice()).unwrap();
         assert_eq!(request.partition_config.len(), 2);
-        assert_eq!(request.partition_config.get([0xff].as_slice()).unwrap().as_bytes(), b"b");
-        assert_eq!(request.partition_config.get("�".as_bytes()).unwrap().as_bytes(), b"");
+        assert_eq!(
+            request
+                .partition_config
+                .get([0xff].as_slice())
+                .unwrap()
+                .as_bytes(),
+            b"b"
+        );
+        assert_eq!(
+            request
+                .partition_config
+                .get("�".as_bytes())
+                .unwrap()
+                .as_bytes(),
+            b""
+        );
         let event = crate::api::HistoryEvent {
-            attributes: Some(crate::api::history_event::Attributes::DecisionTaskScheduledEventAttributes(
-                Default::default()
-            )),
+            attributes: Some(
+                crate::api::history_event::Attributes::DecisionTaskScheduledEventAttributes(
+                    Default::default(),
+                ),
+            ),
             ..Default::default()
         };
         let native = api::HistoryEvent::decode(event.encode_to_vec().as_slice()).unwrap();
-        assert_eq!(crate::api::HistoryEvent::decode(native.encode_to_vec().as_slice()).unwrap(), event);
+        assert_eq!(
+            crate::api::HistoryEvent::decode(native.encode_to_vec().as_slice()).unwrap(),
+            event
+        );
     }
 
     #[test]
@@ -257,14 +375,22 @@ mod tests {
     fn raw_string_wire_primitive_preserves_oracle_bytes() {
         use prost::encoding;
         for input_hex in ["0a01ff", "0a02c0af", "0a00"] {
-            let input: Vec<u8> = input_hex.as_bytes().chunks_exact(2)
+            let input: Vec<u8> = input_hex
+                .as_bytes()
+                .chunks_exact(2)
                 .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
                 .collect();
             let mut buf = &input[..];
             let (tag, wire_type) = encoding::decode_key(&mut buf).unwrap();
             assert_eq!(tag, 1);
             let mut value = GoString::default();
-            wire::merge_string(wire_type, &mut value, &mut buf, encoding::DecodeContext::default()).unwrap();
+            wire::merge_string(
+                wire_type,
+                &mut value,
+                &mut buf,
+                encoding::DecodeContext::default(),
+            )
+            .unwrap();
             assert_eq!(value.as_bytes(), &input[2..]);
             let mut encoded = Vec::new();
             wire::encode_string(1, &value, &mut encoded);

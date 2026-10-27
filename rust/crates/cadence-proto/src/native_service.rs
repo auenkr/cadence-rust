@@ -3,7 +3,10 @@
 //! The ordinary `crate::matching` generated service remains the public UTF-8 API.
 #[allow(clippy::all, deprecated, unused_imports)]
 mod generated {
-    include!(concat!(env!("OUT_DIR"), "/native-service/uber.cadence.matching.v1.rs"));
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/native-service/uber.cadence.matching.v1.rs"
+    ));
 }
 pub use generated::*;
 

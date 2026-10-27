@@ -52,14 +52,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .out_dir(&native_out)
         .extern_path(".uber.cadence.matching.v1", "crate::native::matching")
         .extern_path(".uber.cadence.api.v1", "crate::native::api")
-        .extern_path(".uber.cadence.shared.v1", "crate::native::uber::cadence::shared::v1")
+        .extern_path(
+            ".uber.cadence.shared.v1",
+            "crate::native::uber::cadence::shared::v1",
+        )
         .extern_path(".uber.cadence.history.v1", "crate::native::history")
         .generate_default_stubs(true)
         .compile_protos(
             &[internal.join("uber/cadence/matching/v1/service.proto")],
-            &[root.clone(), internal.clone(), shard_manager.clone(), protoc_bin_vendored::include_path()?],
+            &[
+                root.clone(),
+                internal.clone(),
+                shard_manager.clone(),
+                protoc_bin_vendored::include_path()?,
+            ],
         )?;
-    native_service::generate(&out.join("cadence.bin"), &native_out.join("native_bridge.rs"))?;
+    native_service::generate(
+        &out.join("cadence.bin"),
+        &native_out.join("native_bridge.rs"),
+    )?;
     println!("cargo:rerun-if-changed=build/native_model.rs");
     println!("cargo:rerun-if-changed=build/native_wire.rs");
     println!("cargo:rerun-if-changed=build/native_service.rs");

@@ -11,6 +11,9 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use std::{path::Path, sync::Mutex, time::Duration};
 use uuid::Uuid;
 
+#[path = "matching_sqlite_native.rs"]
+mod native;
+
 pub struct SqliteTaskStore {
     connection: Mutex<Connection>,
     encoding: BlobEncoding,

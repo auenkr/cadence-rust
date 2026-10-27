@@ -1,4 +1,7 @@
-use cadence_proto::{native::{api, matching as m, NativeMatchingApi}, native_service};
+use cadence_proto::{
+    native::{api, matching as m, NativeMatchingApi},
+    native_service,
+};
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
 
@@ -48,33 +51,74 @@ async fn native_tonic_preserves_raw_requests_replies_and_public_client_compatibi
         let echo = Echo::default();
         let observed = echo.0.clone();
         let (stop, stopped) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(tonic::transport::Server::builder()
-            .add_service(native_service::matching_api_server::MatchingApiServer::new(echo))
-            .serve_with_incoming_shutdown(tokio_stream::wrappers::TcpListenerStream::new(listener), async { let _ = stopped.await; }));
+        let server = tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(native_service::matching_api_server::MatchingApiServer::new(
+                    echo,
+                ))
+                .serve_with_incoming_shutdown(
+                    tokio_stream::wrappers::TcpListenerStream::new(listener),
+                    async {
+                        let _ = stopped.await;
+                    },
+                ),
+        );
         let url = format!("http://{address}");
-        let mut client = native_service::matching_api_client::MatchingApiClient::connect(url.clone()).await.unwrap();
+        let mut client =
+            native_service::matching_api_client::MatchingApiClient::connect(url.clone())
+                .await
+                .unwrap();
         let request = m::AddDecisionTaskRequest {
             domain_id: vec![0xff].into(),
-            workflow_execution: Some(api::WorkflowExecution { workflow_id: vec![0xfe, 0].into(), run_id: "run".into() }),
-            partition_config: [(vec![0xff].into(), vec![0xfe].into()), ("�".into(), "distinct".into())].into(),
+            workflow_execution: Some(api::WorkflowExecution {
+                workflow_id: vec![0xfe, 0].into(),
+                run_id: "run".into(),
+            }),
+            partition_config: [
+                (vec![0xff].into(), vec![0xfe].into()),
+                ("�".into(), "distinct".into()),
+            ]
+            .into(),
             ..Default::default()
         };
         client.add_decision_task(request.clone()).await.unwrap();
         assert_eq!(observed.lock().unwrap().as_ref(), Some(&request));
-        let response = client.poll_for_decision_task(m::PollForDecisionTaskRequest {
-            request: Some(api::PollForDecisionTaskRequest { identity: vec![0xe1, 0x80, 0xff].into(), ..Default::default() }),
-            ..Default::default()
-        }).await.unwrap().into_inner();
-        assert_eq!(response.workflow_type.unwrap().name.as_bytes(), &[0xe1, 0x80, 0xff]);
-        let mut public = cadence_proto::matching::matching_api_client::MatchingApiClient::connect(url).await.unwrap();
-        let response = public.poll_for_decision_task(cadence_proto::matching::PollForDecisionTaskRequest {
-            request: Some(cadence_proto::api::PollForDecisionTaskRequest { identity: "sdk-identity".into(), ..Default::default() }),
-            ..Default::default()
-        }).await.unwrap().into_inner();
+        let response = client
+            .poll_for_decision_task(m::PollForDecisionTaskRequest {
+                request: Some(api::PollForDecisionTaskRequest {
+                    identity: vec![0xe1, 0x80, 0xff].into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            response.workflow_type.unwrap().name.as_bytes(),
+            &[0xe1, 0x80, 0xff]
+        );
+        let mut public =
+            cadence_proto::matching::matching_api_client::MatchingApiClient::connect(url)
+                .await
+                .unwrap();
+        let response = public
+            .poll_for_decision_task(cadence_proto::matching::PollForDecisionTaskRequest {
+                request: Some(cadence_proto::api::PollForDecisionTaskRequest {
+                    identity: "sdk-identity".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(response.workflow_type.unwrap().name, "sdk-identity");
         drop(public);
         drop(client);
         stop.send(()).unwrap();
         server.await.unwrap().unwrap();
-    }).await.expect("native tonic test timed out");
+    })
+    .await
+    .expect("native tonic test timed out");
 }

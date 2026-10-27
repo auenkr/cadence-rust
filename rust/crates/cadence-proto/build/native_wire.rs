@@ -31,13 +31,25 @@ fn codec(field: &FieldDescriptorProto) -> String {
 fn packed(field: &FieldDescriptorProto) -> bool {
     use prost_types::field_descriptor_proto::Type;
     field.label() as i32 == 3
-        && !matches!(field.r#type(), Type::String | Type::Bytes | Type::Message | Type::Group)
-        && field.options.as_ref().and_then(|options| options.packed).unwrap_or(true)
+        && !matches!(
+            field.r#type(),
+            Type::String | Type::Bytes | Type::Message | Type::Group
+        )
+        && field
+            .options
+            .as_ref()
+            .and_then(|options| options.packed)
+            .unwrap_or(true)
 }
 
 fn oneof_path(definition: &Definition, field: &FieldDescriptorProto) -> String {
     let oneof = &definition.descriptor.oneof_decl[field.oneof_index.unwrap() as usize];
-    format!("crate::native::{}::{}::{}", definition.modules.join("::"), definition.name.to_snake_case(), oneof.name().to_upper_camel_case())
+    format!(
+        "crate::native::{}::{}::{}",
+        definition.modules.join("::"),
+        definition.name.to_snake_case(),
+        oneof.name().to_upper_camel_case()
+    )
 }
 
 fn present(field: &FieldDescriptorProto, value: &str) -> String {
@@ -61,8 +73,16 @@ pub(super) fn implementation(messages: &Messages, definition: &Definition) -> St
         if let Some(index) = field.oneof_index.filter(|_| !field.proto3_optional()) {
             let oneof = &definition.descriptor.oneof_decl[index as usize];
             let union = format!("self.r#{}", oneof.name().to_snake_case());
-            let variant = format!("{}::{}", oneof_path(definition, field), field.name().to_upper_camel_case());
-            writeln!(encode, "if let Some({variant}(value)) = &{union} {{ {wire}::encode({tag}, value, buf); }}").unwrap();
+            let variant = format!(
+                "{}::{}",
+                oneof_path(definition, field),
+                field.name().to_upper_camel_case()
+            );
+            writeln!(
+                encode,
+                "if let Some({variant}(value)) = &{union} {{ {wire}::encode({tag}, value, buf); }}"
+            )
+            .unwrap();
             writeln!(length, "if let Some({variant}(value)) = &{union} {{ len += {wire}::encoded_len({tag}, value); }}").unwrap();
             writeln!(merge, "{tag} => {{ if let Some({variant}(value)) = &mut {union} {{ {wire}::merge(wire_type, value, buf, ctx) }} else {{ let mut value = Default::default(); {wire}::merge(wire_type, &mut value, buf, ctx)?; {union} = Some({variant}(value)); Ok(()) }} }},").unwrap();
         } else if let Some((key, value)) = map(messages, field) {
@@ -75,27 +95,63 @@ pub(super) fn implementation(messages: &Messages, definition: &Definition) -> St
             if packed(field) {
                 writeln!(encode, "{wire}::encode_packed({tag}, &{name}, buf);").unwrap();
                 writeln!(length, "len += {wire}::encoded_len_packed({tag}, &{name});").unwrap();
-                writeln!(merge, "{tag} => {wire}::merge_repeated(wire_type, &mut {name}, buf, ctx),").unwrap();
+                writeln!(
+                    merge,
+                    "{tag} => {wire}::merge_repeated(wire_type, &mut {name}, buf, ctx),"
+                )
+                .unwrap();
             } else {
-                writeln!(encode, "for value in &{name} {{ {wire}::encode({tag}, value, buf); }}").unwrap();
-                writeln!(length, "for value in &{name} {{ len += {wire}::encoded_len({tag}, value); }}").unwrap();
+                writeln!(
+                    encode,
+                    "for value in &{name} {{ {wire}::encode({tag}, value, buf); }}"
+                )
+                .unwrap();
+                writeln!(
+                    length,
+                    "for value in &{name} {{ len += {wire}::encoded_len({tag}, value); }}"
+                )
+                .unwrap();
                 // Numeric repeated fields accept both packed and unpacked
                 // encodings, even when the descriptor chooses unpacked output.
                 if matches!(field.r#type() as i32, 1..=8 | 13..=18) && field.r#type() as i32 != 11 {
-                    writeln!(merge, "{tag} => {wire}::merge_repeated(wire_type, &mut {name}, buf, ctx),").unwrap();
+                    writeln!(
+                        merge,
+                        "{tag} => {wire}::merge_repeated(wire_type, &mut {name}, buf, ctx),"
+                    )
+                    .unwrap();
                 } else {
                     writeln!(merge, "{tag} => {{ let mut value = Default::default(); {wire}::merge(wire_type, &mut value, buf, ctx)?; {name}.push(value); Ok(()) }},").unwrap();
                 }
             }
         } else if optional(field) {
-            writeln!(encode, "if let Some(value) = &{name} {{ {wire}::encode({tag}, value, buf); }}").unwrap();
-            writeln!(length, "if let Some(value) = &{name} {{ len += {wire}::encoded_len({tag}, value); }}").unwrap();
+            writeln!(
+                encode,
+                "if let Some(value) = &{name} {{ {wire}::encode({tag}, value, buf); }}"
+            )
+            .unwrap();
+            writeln!(
+                length,
+                "if let Some(value) = &{name} {{ len += {wire}::encoded_len({tag}, value); }}"
+            )
+            .unwrap();
             writeln!(merge, "{tag} => {wire}::merge(wire_type, {name}.get_or_insert_with(Default::default), buf, ctx),").unwrap();
         } else {
             let condition = present(field, &name);
-            writeln!(encode, "if {condition} {{ {wire}::encode({tag}, &{name}, buf); }}").unwrap();
-            writeln!(length, "if {condition} {{ len += {wire}::encoded_len({tag}, &{name}); }}").unwrap();
-            writeln!(merge, "{tag} => {wire}::merge(wire_type, &mut {name}, buf, ctx),").unwrap();
+            writeln!(
+                encode,
+                "if {condition} {{ {wire}::encode({tag}, &{name}, buf); }}"
+            )
+            .unwrap();
+            writeln!(
+                length,
+                "if {condition} {{ len += {wire}::encoded_len({tag}, &{name}); }}"
+            )
+            .unwrap();
+            writeln!(
+                merge,
+                "{tag} => {wire}::merge(wire_type, &mut {name}, buf, ctx),"
+            )
+            .unwrap();
         }
     }
     let name = path(definition, true);

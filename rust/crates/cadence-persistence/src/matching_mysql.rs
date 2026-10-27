@@ -27,6 +27,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "matching_mysql_native.rs"]
+mod native;
+
 const DEFAULT_MAX_IDLE_CONNS: usize = 2;
 
 #[derive(Debug, Clone)]

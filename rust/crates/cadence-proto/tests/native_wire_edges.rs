@@ -4,10 +4,10 @@ use prost::Message;
 fn unhex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap()
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
 }
 
@@ -15,8 +15,7 @@ fn unhex(value: &str) -> Vec<u8> {
 fn native_matching_wire_edges_match_pinned_go_yarpc_decoder() {
     let path = std::env::var("MATCHING_GO_RAW_STRING_ORACLE")
         .expect("CI must provide MATCHING_GO_RAW_STRING_ORACLE from the pinned Go oracle");
-    let fixture: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let fixture: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let cases = fixture[0]["nativeWireEdgeCases"]
         .as_array()
         .expect("Go oracle output must include nativeWireEdgeCases");
@@ -29,7 +28,10 @@ fn native_matching_wire_edges_match_pinned_go_yarpc_decoder() {
             let decoded = matching::PollForDecisionTaskResponse::decode(input.as_slice());
             assert_eq!(decoded.is_ok(), go_ok, "{}", case["name"]);
             if let Ok(decoded) = decoded {
-                assert_eq!(decoded.previous_started_event_id.is_some(), case["previousStartedPresent"].as_bool().unwrap());
+                assert_eq!(
+                    decoded.previous_started_event_id.is_some(),
+                    case["previousStartedPresent"].as_bool().unwrap()
+                );
                 if let Some(value) = decoded.previous_started_event_id {
                     assert_eq!(value, case["previousStartedValue"].as_i64().unwrap());
                 }
