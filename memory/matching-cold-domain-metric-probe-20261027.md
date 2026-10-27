@@ -44,7 +44,7 @@ runtime/build/test was run under this research task.
 Extend an existing production lane (no topology change) as follows:
 
 1. Before starting Rust Matching, choose a per-run domain name and inject an
-   exact `matching.domainrps` dynamic-config filter for that name with value
+   exact `matching.domainworkerrps` dynamic-config filter for that name with value
    `0` into the generated `rust-dynamic-config.yaml`. Use the same value in the
    probe, and configure the existing Prometheus exporter for that lane.
 2. After Matching is ready, have the probe register that domain through the
@@ -75,7 +75,7 @@ and run on Actions.
 
 Implemented as opt-in `--matching-cold-domain-metric-probe` in
 `tests/run-go-service-baseline.py`, requiring production Matching and the
-Prometheus exporter. It adds an exact `matching.domainrps=0` filter for a
+Prometheus exporter. It adds an exact `matching.domainworkerrps=0` filter for a
 per-run domain before Rust Matching starts. The compat probe registers and
 describes that domain afterward, directly calls Matching `AddDecisionTask`
 with a unique task list and caller label, asserts gRPC `RESOURCE_EXHAUSTED`,
@@ -88,3 +88,23 @@ Syntax checks passed: Python AST parse, `node --check`, and `git diff --check`.
 No service runtime, Cargo/Go command, Actions workflow, or mixed gate was run;
 parent owns serial validation. This is not runtime evidence until that gate
 passes.
+
+
+## Integrated review corrections and bounded validation
+
+Parent integration a5276f336 moves registration and the rejected RPC after
+primary Rust readiness, targets that primary gRPC endpoint directly, selects
+worker-domain quota (AddDecisionTask is a worker RPC), restores exporter branch
+nesting, and reads the rejection record from the rust-matching subdirectory.
+If the requested domain evidence is absent or names another domain, exporter
+validation fails. Registration follows a1.1s wait beyond the cache's1s minimum
+refresh interval; registration still occurs after Matching startup.
+
+Local lightweight validation extracted only validate_matching_exporter via
+Python AST into a temporary fixture (no harness, server, Go or Cargo commands).
+It confirmed four cases: the default Prometheus branch succeeds with required
+samples; requested but missing cold-domain evidence fails; matching canonical
+sample plus recorded status8 succeeds; a sample naming an unrelated domain
+fails. These checks validate the assertion wiring only, not live persistence,
+quota rejection, exporter delivery or mixed service behavior. Runtime evidence
+remains required.
