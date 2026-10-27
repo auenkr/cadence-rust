@@ -1001,16 +1001,36 @@ try:
         server = subprocess.Popen(command, cwd=work, stdout=log, stderr=subprocess.STDOUT, env=environment)
         try:
             deadline = time.monotonic() + 90
+            wait_for_worker = 'worker' in go_services
+            worker_ready_marker = '"msg":"worker started"'
+            worker_ready = not wait_for_worker
+            frontend_ready = False
             while True:
                 if server.poll() is not None:
                     raise RuntimeError(f'Go baseline exited; see {work / "server.log"}')
-                try:
-                    with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
-                        break
-                except OSError:
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError('Go baseline startup timed out')
-                    time.sleep(0.1)
+                if not frontend_ready:
+                    try:
+                        with socket.create_connection(('127.0.0.1', int(ports['FRONTEND_PORT_GRPC'])), timeout=0.5):
+                            frontend_ready = True
+                    except OSError:
+                        pass
+                if wait_for_worker and not worker_ready:
+                    worker_ready = worker_ready_marker in (work / 'server.log').read_text(errors='replace')
+                if frontend_ready and worker_ready:
+                    break
+                if time.monotonic() >= deadline:
+                    waiting_for = []
+                    if not frontend_ready:
+                        waiting_for.append('Frontend TCP listener')
+                    if not worker_ready:
+                        waiting_for.append('Go Worker readiness log (worker started)')
+                    raise RuntimeError(f'Go baseline startup timed out waiting for {" and ".join(waiting_for)}')
+                time.sleep(0.1)
+            results['workerReadiness'] = {
+                'required': wait_for_worker,
+                'marker': worker_ready_marker if wait_for_worker else None,
+                'observed': worker_ready,
+            }
             with (work / 'probe.log').open('w') as output:
                 if production_matching:
                     probe = ['node', str(root / 'tests/matching-service-compat.cjs'),
