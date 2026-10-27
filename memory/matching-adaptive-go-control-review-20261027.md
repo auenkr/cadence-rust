@@ -13,3 +13,13 @@ No concrete wiring or execution blocker found in the requested path.
 - Control output marks `acceptanceEligible: false` and records its diagnostic topology. It is a one-Go-Matching control, while the Rust adaptive trace exercises two Rust Matching nodes. It cannot establish two-node Rust parity or service acceptance; it provides a baseline for the shared behavioral scenario.
 
 No code fix recommended from this bounded source review. Runtime execution and its outcome remain for the parent gate; this note is not runtime evidence or a service acceptance claim.
+
+## Subsequent runtime correction
+
+Run40472035315 on the reviewed source failed before adaptive execution: Go
+Matching had not yet refreshed the newly provisioned canonical domain. Parent
+fixed that specific provisioning race in9a3673d0d with the existing compatibility
+probe's bounded15s retry of the exact DefaultDomainCache error. No adaptive
+assertion or SDK budget was changed. Runtime comparison run40472428123 is now
+active at that corrected source. The no-blocker source review above did not
+establish runtime readiness.
