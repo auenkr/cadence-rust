@@ -54,7 +54,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(".uber.cadence.api.v1", "crate::native::api")
         .extern_path(".uber.cadence.shared.v1", "crate::native::uber::cadence::shared::v1")
         .extern_path(".uber.cadence.history.v1", "crate::native::history")
-        .extern_path(".google.protobuf", "::prost_types")
         .generate_default_stubs(true)
         .compile_protos(
             &[internal.join("uber/cadence/matching/v1/service.proto")],

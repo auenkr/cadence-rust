@@ -93,3 +93,5 @@ pub mod matching_writer;
 pub mod thrift_matching;
 #[allow(dead_code)] // Native adapters await native Matching handler integration.
 pub mod thrift_matching_native;
+#[allow(dead_code)] // Native request adapters await shared handler integration.
+pub mod thrift_matching_native_extra;

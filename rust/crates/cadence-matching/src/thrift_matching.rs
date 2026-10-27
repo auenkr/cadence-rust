@@ -1174,7 +1174,7 @@ mod tests {
     }
     #[test]
     fn matching_thrift_preserves_nanos_and_internal_decision_field_ids() {
-        let value = decision(m::PollForDecisionTaskResponse {
+        let response = m::PollForDecisionTaskResponse {
             started_event_id: 8,
             attempt: 2,
             next_event_id: 9,
@@ -1187,6 +1187,9 @@ mod tests {
                 nanos: 456,
             }),
             previous_started_event_id: Some(3),
+            query: Some(p::WorkflowQuery { query_type: "query".into(), query_args: Some(p::Payload { data: vec![0xff] }) }),
+            queries: [("query-id".into(), p::WorkflowQuery { query_type: "type".into(), query_args: None })].into(),
+            auto_config_hint: Some(p::AutoConfigHint { enable_auto_config: true, poller_wait_time_in_ms: 17 }),
             workflow_execution_task_list: Some(p::TaskList {
                 name: "normal".into(),
                 kind: 1,
@@ -1212,8 +1215,26 @@ mod tests {
                 started_event: None,
             }),
             ..Default::default()
-        })
-        .unwrap();
+        };
+        let native = crate::thrift_matching_native::poll_for_decision_task_response(response.clone().into()).unwrap();
+        let value = decision(response).unwrap();
+        fn canonical(value: Value) -> Value {
+            match value {
+                Value::Struct(value) => {
+                    let mut fields: Vec<_> = value.fields.into_iter().map(|(id, value)| (id, canonical(value))).collect();
+                    fields.sort_by_key(|(id, _)| *id);
+                    Value::Struct(Struct { fields })
+                }
+                Value::Map(entries) => {
+                    let mut entries: Vec<_> = entries.into_iter().map(|(key, value)| (canonical(key), canonical(value))).collect();
+                    entries.sort_by_key(|(key, _)| format!("{key:?}"));
+                    Value::Map(entries)
+                }
+                Value::List(entries) => Value::List(entries.into_iter().map(canonical).collect()),
+                other => other,
+            }
+        }
+        assert_eq!(canonical(Value::Struct(native)), canonical(Value::Struct(value.clone())));
         assert_eq!(value.opt_i64(130).unwrap(), Some(1_000_000_123));
         assert_eq!(value.opt_i64(140).unwrap(), Some(2_000_000_456));
         assert_eq!(value.opt_i64(40).unwrap(), Some(3));

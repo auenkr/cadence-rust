@@ -500,7 +500,7 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
             generated.push_str("];\n");
         }
     }
-    generated.push_str("pub use uber::cadence::{api::v1 as api, matching::v1 as matching, history::v1 as history};\n");
+    generated.push_str("pub use uber::cadence::{api::v1 as api, matching::v1 as matching, history::v1 as history, shared::v1 as shared};\n");
     std::fs::write(output, generated)?;
     Ok(())
 }
