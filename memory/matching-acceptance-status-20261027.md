@@ -94,6 +94,17 @@ worker tasks were no longer using either worktree.
 
 ## Only remaining acceptance checklist
 
+### Newly verified cold name-lookup gap
+
+Parent inspection found GetTaskListsByDomain and ListTaskListPartitions resolve
+domain names directly from the consumer InMemoryDomainStore, bypassing the
+UUID metric resolver. Go engine.GetTaskListsByDomain and getAllPartitions call
+domainCache.GetDomainID. Thus a fresh name-based call can still miss a late
+domain even after the UUID read-through publication fix. The delegated
+entry-point audit's no-gap conclusion was incomplete: it explicitly did not
+inspect grpc_matching.rs. A focused name-read-through fix/regression is needed;
+do not mark all cold-domain entry points closed from the earlier audit.
+
 Matching remains **not accepted** until all ten required exact-final-pin mixed
 lanes below pass and their artifacts are reviewed. Each lane must show Go
 Frontend/History/Worker, Rust Matching, no Go Matching, completed SDK and
