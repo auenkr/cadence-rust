@@ -548,6 +548,10 @@ async function run() {
 
     await call('DomainAPI', 'RegisterDomain', { name: partitionLookupDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
     const partitionTaskList = `cold-name-partitions-${id}`;
+    // Go and Rust suppress cache refreshes within one second of a prior
+    // scan. Let a domain registered after the first name probe become eligible
+    // for read-through; no UUID RPC warms this domain in the meantime.
+    await new Promise(resolve => setTimeout(resolve, 1100));
     const partitionClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
     const partitionLookup = await new Promise((resolve, reject) => partitionClient.ListTaskListPartitions(
       { domain: partitionLookupDomain, taskList: { name: partitionTaskList } }, new grpc.Metadata(),

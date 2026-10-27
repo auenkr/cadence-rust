@@ -1,0 +1,50 @@
+PROBE BODY FAILED: Error: 13 INTERNAL: DefaultDomainCache encounter case where domain exists but cannot be loaded
+    at callErrorFromStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:84:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at partitionLookup (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:84)
+    at new Promise (<anonymous>)
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:35)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  code: 13,
+  details: 'DefaultDomainCache encounter case where domain exists but cannot be loaded',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'content-type' => [Array],
+      'content-length' => [Array],
+      'date' => [Array]
+    },
+    options: {}
+  }
+}
+Error: 13 INTERNAL: DefaultDomainCache encounter case where domain exists but cannot be loaded
+    at callErrorFromStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:84:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at partitionLookup (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:84)
+    at new Promise (<anonymous>)
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:35)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  code: 13,
+  details: 'DefaultDomainCache encounter case where domain exists but cannot be loaded',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'content-type' => [Array],
+      'content-length' => [Array],
+      'date' => [Array]
+    },
+    options: {}
+  }
+}
