@@ -1900,7 +1900,22 @@ impl QueueRegistry {
                 ..AggregateMetrics::default()
             }
         };
+        let observed_qps = metrics.total_qps;
         let prepared = scaler.tick_prepare(config, now, &current.write_partitions, &metrics);
+        if std::env::var("CADENCE_MATCHING_ADAPTIVE_TRACE").as_deref()
+            == Ok("production-adaptive-scaler-probe")
+        {
+            eprintln!(
+                "matching_adaptive_trace ts={} task_list={} boundary=scaler_tick qps={:.3} read_count={} write_count={} next_write_count={} isolation_assignment={}",
+                now,
+                root.name,
+                observed_qps,
+                current.read_partitions.values().map(Vec::len).sum::<usize>(),
+                current.write_partitions.values().map(Vec::len).sum::<usize>(),
+                prepared.write.values().map(Vec::len).sum::<usize>(),
+                config.isolation_assignment,
+            );
+        }
         let name = cadence_common::task_list::TaskListName::parse(&root.name)
             .map_err(Status::invalid_argument)?;
         let write_for_describe = prepared.write.clone();

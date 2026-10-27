@@ -1548,6 +1548,12 @@ impl Matching {
             poller_isolation_group: String::new(),
         };
         let match_started = tokio::time::Instant::now();
+        let trace_identity = format!(
+            "workflow={} run={} schedule_id={}",
+            data.workflow_id,
+            data.run_id_string(),
+            data.schedule_id
+        );
         let name = task_list_name(&list.name)?;
         let degree = {
             let config = self
@@ -1594,6 +1600,14 @@ impl Matching {
                 self.metrics.sync_throttled(&context);
             }
             if outcome == crate::matching_registry::SyncMatchOutcome::Matched {
+                adaptive_scaler_trace(
+                    &list.name,
+                    "sync_match",
+                    &format!(
+                        "{trace_identity} outcome=matched elapsed_ms={}",
+                        match_started.elapsed().as_millis()
+                    ),
+                );
                 for (started, context) in in_process_forward_metrics.drain(..) {
                     self.metrics
                         .forward_task_latency(&context, started.elapsed());
@@ -1620,6 +1634,14 @@ impl Matching {
                 );
             }
             if name.is_root() || list.kind == 2 || tokio::time::Instant::now() >= deadline {
+                adaptive_scaler_trace(
+                    &list.name,
+                    "sync_match",
+                    &format!(
+                        "{trace_identity} outcome=unmatched elapsed_ms={}",
+                        match_started.elapsed().as_millis()
+                    ),
+                );
                 for (started, context) in in_process_forward_metrics.drain(..) {
                     self.metrics
                         .forward_task_latency(&context, started.elapsed());
@@ -1710,6 +1732,16 @@ impl Matching {
                 };
                 self.metrics
                     .forward_task_latency(&forward_context, forward_started.elapsed());
+                adaptive_scaler_trace(
+                    &list.name,
+                    "forward_attempt",
+                    &format!(
+                        "{trace_identity} elapsed_ms={} status={:?} ack={}",
+                        forward_started.elapsed().as_millis(),
+                        result.as_ref().err().map(|status| status.code()),
+                        result.is_ok()
+                    ),
+                );
                 // Go matcher.Offer counts a parent ServiceBusy (ErrForwarderSlowDown) on the child.
                 if let Err(status) = &result {
                     if matches!(
@@ -1861,6 +1893,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 &queue,
             )?;
             let poll_started = std::time::Instant::now();
+            adaptive_scaler_trace(&guard.key.task_list, "poll_wait_start", "");
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
             if queue.stop_if_isolation_changed() {
@@ -1971,6 +2004,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                     }
                 }=>
                     result.map(|mut response| {
+                        adaptive_scaler_trace(
+                            &guard.key.task_list,
+                            "poll_result",
+                            &format!(
+                                "elapsed_ms={} token_present={} workflow={} run={} started_event_id={}",
+                                poll_started.elapsed().as_millis(),
+                                !response.task_token.is_empty(),
+                                response.workflow_execution.as_ref().map_or("", |execution| execution.workflow_id.as_str()),
+                                response.workflow_execution.as_ref().map_or("", |execution| execution.run_id.as_str()),
+                                response.started_event_id
+                            ),
+                        );
                         response.load_balancer_hints=queue.load_balancer_hints(matching_now());
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
@@ -2357,6 +2402,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .with_request_run_id(&execution.run_id)
                         .at_creation(matching_now(), 0);
                         let forwarded = !r.forwarded_from.is_empty();
+                        let trace_ids = format!("workflow={} run={} schedule_id={}", execution.workflow_id, execution.run_id, r.schedule_id);
                         // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
                         // liveness and reports arrival QPS, grouped by the task's isolation
                         // group when it has one.
@@ -2394,6 +2440,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             )
                             .map_err(|error| crate::grpc::domain_not_found(error.message))?;
                         if active {
+                            adaptive_scaler_trace(&list.name, "decision_add_sync_start", &trace_ids);
                             let matched = self
                                 .sync_match_chain(ForwardedAdd {
                                     domain_id: &r.domain_id,
@@ -2409,6 +2456,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     schedule_to_start_timeout: r.schedule_to_start_timeout,
                                 })
                                 .await?;
+                            adaptive_scaler_trace(&list.name, "decision_add_sync_result", &format!("{trace_ids} matched={} elapsed_ms={}", matched.is_some(), add_started.elapsed().as_millis()));
                             if let Some(partition_config) = matched {
                                 // Go records the handler-level latency only when AddTask sync matched.
                                 self.metrics.handler_sync_match_latency(
@@ -2431,7 +2479,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                         if forwarded {
                             return Err(Self::remote_sync_failed());
                         }
-                        queue
+                        let enqueue_started = std::time::Instant::now();
+                        let enqueue_result = queue
                             .enqueue(
                                 data,
                                 source,
@@ -2439,7 +2488,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     .map(|timeout| timeout.seconds as i32)
                                     .unwrap_or_default(),
                             )
-                            .await?;
+                            .await;
+                        adaptive_scaler_trace(&list.name, "decision_add_enqueue", &format!("{trace_ids} elapsed_ms={} status={}", enqueue_started.elapsed().as_millis(), if enqueue_result.is_ok() { "ok" } else { "error" }));
+                        enqueue_result?;
                         return Ok(Response::new(m::AddDecisionTaskResponse {
                             partition_config: queue
                                 .partitions
@@ -4148,6 +4199,23 @@ fn log_received_add_task(
             ),
         ],
     );
+}
+
+/// Bounded tracing for the production adaptive-scaler SDK probe. Enable by
+/// setting CADENCE_MATCHING_ADAPTIVE_TRACE to the root task-list name.
+fn adaptive_scaler_trace(task_list: &str, boundary: &str, fields: &str) {
+    const PROBE: &str = "production-adaptive-scaler-probe";
+    if std::env::var("CADENCE_MATCHING_ADAPTIVE_TRACE").as_deref() != Ok(PROBE) {
+        return;
+    }
+    if cadence_common::task_list::TaskListName::parse(task_list)
+        .is_ok_and(|parsed| parsed.root() == PROBE)
+    {
+        eprintln!(
+            "matching_adaptive_trace ts={} task_list={} boundary={} {}",
+            matching_now(), task_list, boundary, fields
+        );
+    }
 }
 
 /// Go `engine.go` "Emitting tasklist counter on ..." event.
