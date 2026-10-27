@@ -531,24 +531,29 @@ async function run() {
     assert(productionMode, 'cold-domain quota probe requires production Matching');
     await call('DomainAPI', 'RegisterDomain', { name: coldDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
     const canonicalDomain = await call('DomainAPI', 'DescribeDomain', { name: coldDomain });
-    const coldTaskList = `cold-domain-${id}`;
     const metadata = new grpc.Metadata();
     metadata.set('rpc-service', 'cadence-matching');
     metadata.set('rpc-encoding', 'proto');
     metadata.set('rpc-caller', 'cadence-cold-domain-metric-probe');
     const coldClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
-    const rejected = await new Promise(resolve => coldClient.AddDecisionTask({
-      domainId: canonicalDomain.domain.id,
-      workflowExecution: { workflowId: `cold-${id}`, runId: randomUUID() },
-      taskList: { name: coldTaskList }, scheduleId: '1',
-      scheduleToStartTimeout: { seconds: '10' }, source: 'TASK_SOURCE_HISTORY',
-    }, metadata, { deadline: Date.now() + 20000 }, error => resolve(error)));
+    // Nonpositive domain rates fall back to host quota. Rate one supplies a
+    // one-token initial burst, so concurrent requests can exercise rejection.
+    const outcomes = await Promise.all([0, 1].map(index => {
+      const taskListName = `cold-domain-${id}-${index}`;
+      return new Promise(resolve => coldClient.AddDecisionTask({
+        domainId: canonicalDomain.domain.id,
+        workflowExecution: { workflowId: `cold-${id}-${index}`, runId: randomUUID() },
+        taskList: { name: taskListName }, scheduleId: '1',
+        scheduleToStartTimeout: { seconds: '10' }, source: 'TASK_SOURCE_HISTORY',
+      }, metadata, { deadline: Date.now() + 20000 }, error => resolve({ taskListName, error })));
+    }));
     coldClient.close();
-    assert(rejected, 'exact zero domain RPS must reject direct AddDecisionTask');
-    assert.equal(rejected.code, grpc.status.RESOURCE_EXHAUSTED, `expected RESOURCE_EXHAUSTED, got ${rejected.message}`);
+    const rejected = outcomes.find(outcome => outcome.error?.code === grpc.status.RESOURCE_EXHAUSTED);
+    assert(rejected, `one-token domain burst must reject a concurrent call: ${JSON.stringify(outcomes.map(outcome => ({ taskList: outcome.taskListName, code: outcome.error?.code })))}`);
     fs.writeFileSync(path.join(work, 'matching-cold-domain-metric-probe.json'), `${JSON.stringify({
       domain: canonicalDomain.domain.name, domainId: canonicalDomain.domain.id,
-      taskList: coldTaskList, grpcCode: rejected.code, grpcMessage: rejected.message,
+      taskList: rejected.taskListName, grpcCode: rejected.error.code, grpcMessage: rejected.error.message,
+      requests: outcomes.map(outcome => ({ taskList: outcome.taskListName, grpcCode: outcome.error?.code ?? 0 })),
     }, null, 2)}\n`);
   }
 

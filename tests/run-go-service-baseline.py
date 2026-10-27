@@ -527,7 +527,7 @@ dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
 cold_domain_name = f'matching-cold-{secrets.token_hex(8)}' if args.matching_cold_domain_metric_probe else None
 if cold_domain_name:
     dynamic_text += ('\nmatching.domainworkerrps:\n'
-        '  - value: 0\n'
+        '  - value: 1\n'
         f'    constraints: {{domainName: {cold_domain_name}}}\n')
 if production_matching or args.rust_matching or args.matching_restart or args.adaptive_go_control:
     dynamic_text += (
