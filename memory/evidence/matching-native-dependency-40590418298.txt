@@ -1,0 +1,30 @@
+Run: https://github.com/auenkr/cadence-rust/actions/runs/40590418298
+Head: 22ede2f1b366892fcc2b8f59b264133e9e64f108
+Conclusion: success. Real Go History raw TChannel + PostgreSQL TLS.
+go-peer-binary.sha256:
+0ea80e201c0be52a58b1300af930787e805d3b5a4ca40ec33c445da790d522b4  cadence-rust-history-peer
+history-tchannel-binary.sha256:
+336b11019ef60e9f0a939a0cfb4aa76aaaafd4fa3ddd7ddbf2be9365843d6fb2  cadence-matching-lib-tests
+postgres-tls-binary.sha256:
+2792e638a4006689b08bb89dfcb8ee67307cc96612d5bba6da347b2d58d70b7a  cadence-persistence-lib-tests
+history-tchannel-test.log:
+
+running 1 test
+test matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 805 filtered out; finished in 0.02s
+
+overall.exit:
+0
+cleanup.exit:
+0
+pgcase-disable.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.06s
+pgcase-inline-verify-ca.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.09s
+pgcase-inline-verify-full.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.09s
+pgcase-inline-wrongca.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.03s
+pgcase-require-no-ca.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.09s
+pgcase-require-wrongca.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.03s
+pgcase-verify-ca-valid.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.09s
+pgcase-verify-ca-wrongca.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.03s
+pgcase-verify-full-ip.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.03s
+pgcase-verify-full-local.log: test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 351 filtered out; finished in 0.09s
