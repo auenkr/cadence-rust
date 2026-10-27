@@ -73,6 +73,8 @@ jobs:
           path: ${{ runner.temp }}/matching-describe-tasklist-go-oracle
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
+      - name: Verify reviewed Go History TChannel wire fixture
+        run: scripts/verify-history-tchannel-wire-oracle.sh
       - name: Execute production Go Matching owner ordering oracle
         run: python3 tests/run-matching-owner-order-oracle.py
       - name: Audit Matching definitions and rollup map
