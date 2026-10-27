@@ -30,7 +30,7 @@ func (s *domainCacheSuite) TestDomainCacheUUIDSpellingOracle() {
 		s.metadataMgr.On("GetDomain", mock.Anything, &persistence.GetDomainRequest{Name: "", ID: canonical}).
 			Return(&persistence.GetDomainResponse{Info: &persistence.DomainInfo{ID: canonical, Name: name}}, nil).Once()
 		s.metadataMgr.On("GetMetadata", mock.Anything).
-			Return(&persistence.GetMetadataResponse{NotificationVersion: 2}, nil).Once()
+			Return(&persistence.GetMetadataResponse{NotificationVersion: 3}, nil).Once()
 		s.metadataMgr.On("ListDomains", mock.Anything, mock.Anything).
 			Return(&persistence.ListDomainsResponse{Domains: []*persistence.GetDomainResponse{{
 				Info: &persistence.DomainInfo{ID: canonical, Name: name, Data: map[string]string{}},
