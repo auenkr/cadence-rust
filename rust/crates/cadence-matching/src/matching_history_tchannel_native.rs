@@ -55,10 +55,7 @@ fn poll_decision_n(value: &n::api::PollForDecisionTaskRequest) -> TypedValue {
 }
 
 fn poll_activity_n(value: &n::api::PollForActivityTaskRequest) -> TypedValue {
-    let mut fields = vec![
-        field(10, gs(&value.domain)),
-        field(30, gs(&value.identity)),
-    ];
+    let mut fields = vec![field(10, gs(&value.domain)), field(30, gs(&value.identity))];
     if let Some(task) = &value.task_list {
         fields.push(field(20, task_list_n(task)));
     }
@@ -140,21 +137,15 @@ fn retry_policy_n(policy: &TypedStruct) -> cadence_thrift::Result<n::api::RetryP
         }
     };
     Ok(n::api::RetryPolicy {
-        initial_interval: duration_from_seconds(
-            Some(field_i32(policy, 10)?),
-        ),
+        initial_interval: duration_from_seconds(Some(field_i32(policy, 10)?)),
         backoff_coefficient: typed_field(policy, 20)
             .map(|v| as_f64(v, 20))
             .transpose()?
             .unwrap_or_default(),
-        maximum_interval: duration_from_seconds(
-            Some(field_i32(policy, 30)?),
-        ),
+        maximum_interval: duration_from_seconds(Some(field_i32(policy, 30)?)),
         maximum_attempts: field_i32(policy, 40)?,
         non_retryable_error_reasons,
-        expiration_interval: duration_from_seconds(
-            Some(field_i32(policy, 60)?),
-        ),
+        expiration_interval: duration_from_seconds(Some(field_i32(policy, 60)?)),
         jitter_coefficient: typed_field(policy, 70)
             .map(|v| as_f64(v, 70))
             .transpose()?
@@ -312,10 +303,14 @@ pub(crate) fn record_decision_task_started_response_native(
         event_store_version: field_i32(value, 100)?,
         branch_token: field_bytes(value, 110)?,
         scheduled_time: timestamp_from_nanos(
-            typed_field(value, 120).map(|v| as_i64(v, 120)).transpose()?,
+            typed_field(value, 120)
+                .map(|v| as_i64(v, 120))
+                .transpose()?,
         ),
         started_time: timestamp_from_nanos(
-            typed_field(value, 130).map(|v| as_i64(v, 130)).transpose()?,
+            typed_field(value, 130)
+                .map(|v| as_i64(v, 130))
+                .transpose()?,
         ),
         queries,
         history_size: field_i64(value, 150)?,
@@ -409,23 +404,41 @@ mod tests {
             }),
         };
         let wire = record_decision_task_started_request_native(&request);
-        assert_eq!(typed_field(&wire, 10), Some(&TypedValue::Bytes(b"d\xff".to_vec())));
-        assert_eq!(typed_field(&wire, 45), Some(&TypedValue::Bytes(b"q\xfc".to_vec())));
+        assert_eq!(
+            typed_field(&wire, 10),
+            Some(&TypedValue::Bytes(b"d\xff".to_vec()))
+        );
+        assert_eq!(
+            typed_field(&wire, 45),
+            Some(&TypedValue::Bytes(b"q\xfc".to_vec()))
+        );
         let Some(TypedValue::Struct(execution)) = typed_field(&wire, 20) else {
             panic!("execution")
         };
-        assert_eq!(typed_field(execution, 10), Some(&TypedValue::Bytes(b"w\xfe".to_vec())));
+        assert_eq!(
+            typed_field(execution, 10),
+            Some(&TypedValue::Bytes(b"w\xfe".to_vec()))
+        );
         let Some(TypedValue::Struct(poll)) = typed_field(&wire, 50) else {
             panic!("poll")
         };
-        assert_eq!(typed_field(poll, 40), Some(&TypedValue::Bytes(b"c\xf7".to_vec())));
+        assert_eq!(
+            typed_field(poll, 40),
+            Some(&TypedValue::Bytes(b"c\xf7".to_vec()))
+        );
         let Some(TypedValue::Struct(list)) = typed_field(poll, 20) else {
             panic!("list")
         };
         assert_eq!(typed_field(list, 20), Some(&TypedValue::I32(1)));
-        assert_eq!(typed_field(list, 30), Some(&TypedValue::Bytes(b"b\xf9".to_vec())));
+        assert_eq!(
+            typed_field(list, 30),
+            Some(&TypedValue::Bytes(b"b\xf9".to_vec()))
+        );
         // Encoded bytes survive the Thrift codec unchanged.
-        assert_eq!(decode_typed_struct(&encode_typed_struct(&wire)).unwrap(), wire);
+        assert_eq!(
+            decode_typed_struct(&encode_typed_struct(&wire)).unwrap(),
+            wire
+        );
     }
 
     #[test]
@@ -519,7 +532,10 @@ mod tests {
             ],
         };
         let wire = TypedStruct {
-            fields: vec![field(20, TypedValue::Struct(scheduled.clone())), field(80, binary(b"wd\xf8"))],
+            fields: vec![
+                field(20, TypedValue::Struct(scheduled.clone())),
+                field(80, binary(b"wd\xf8")),
+            ],
         };
         let response = record_activity_task_started_response_native(&wire).unwrap();
         assert_eq!(response.workflow_domain.as_bytes(), b"wd\xf8");
@@ -531,7 +547,10 @@ mod tests {
         assert_eq!(a.activity_id.as_bytes(), b"a\xff");
         assert_eq!(a.domain.as_bytes(), b"dm\xfd");
         assert_eq!(a.input.unwrap().data, b"in\xfc");
-        assert_eq!(a.retry_policy.unwrap().non_retryable_error_reasons[0].as_bytes(), b"e\xfb");
+        assert_eq!(
+            a.retry_policy.unwrap().non_retryable_error_reasons[0].as_bytes(),
+            b"e\xfb"
+        );
         assert_eq!(a.header.unwrap().fields[&b"h\xfa"[..]].data, b"v\xf9");
 
         let mut unknown = scheduled;

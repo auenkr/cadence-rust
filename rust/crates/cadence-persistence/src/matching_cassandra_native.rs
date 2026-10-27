@@ -903,7 +903,10 @@ mod tests {
         let s = store(fake.clone());
         let mut task = AllocatedTaskBytes {
             task_id: 7,
-            data: TaskDataBytes { expiry_nanos: 1_999_999_999, ..Default::default() },
+            data: TaskDataBytes {
+                expiry_nanos: 1_999_999_999,
+                ..Default::default()
+            },
         };
         s.create_tasks_with_domains(&key(b"q\xff"), 3, 1_000_000_000, &[(Uuid::nil(), &task)])
             .unwrap();

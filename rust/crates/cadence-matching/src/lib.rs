@@ -71,6 +71,7 @@ pub mod matching_persistence_limiter;
 #[allow(clippy::result_large_err)]
 pub mod matching_query;
 pub mod matching_reader;
+pub mod matching_reader_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry;
 pub mod matching_ringpop_provider;
@@ -84,11 +85,13 @@ pub mod matching_shard_processor;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_routing;
 pub mod matching_sync;
+pub mod matching_sync_native;
 pub mod matching_task_info_log;
 pub mod matching_task_store;
 pub mod matching_throttled_logger;
 #[allow(clippy::result_large_err)]
 pub mod matching_writer;
+#[allow(clippy::result_large_err)]
 pub mod matching_writer_native;
 #[allow(clippy::result_large_err)]
 pub mod thrift_matching;

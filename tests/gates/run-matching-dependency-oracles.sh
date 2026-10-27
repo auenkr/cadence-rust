@@ -15,7 +15,7 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PG_IMAGE="${PG_IMAGE:-postgres:16}"
 CONTAINER="cadence-dep-oracle-pg-$$"
-GO_TEST=matching_history_tchannel::tests::generated_go_history_server_accepts_native_tchannel_calls
+GO_TEST=matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls
 PG_TEST=matching_postgres::tests::postgres_tls_live_oracle
 OVERALL=0
 

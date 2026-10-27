@@ -93,7 +93,9 @@ impl ExecFailure {
                 RequestAttemptError::DbError(DbError::Overloaded, _) => BackendErrorKind::Throttled,
                 RequestAttemptError::DbError(DbError::Unavailable { .. }, message)
                     if message.contains("Cannot perform LWT operation")
-                        || message.to_lowercase().contains("cannot achieve consistency level") =>
+                        || message
+                            .to_lowercase()
+                            .contains("cannot achieve consistency level") =>
                 {
                     BackendErrorKind::DbUnavailable
                 }
@@ -151,8 +153,11 @@ pub trait CqlExecutor: Send + Sync {
         statement: &CqlStatement,
         values: BoundValues,
     ) -> ExecResult<Vec<(i64, CassandraTaskUdt, Option<i32>)>>;
-    fn select_count(&self, statement: &CqlStatement, values: BoundValues)
-        -> ExecResult<Option<i64>>;
+    fn select_count(
+        &self,
+        statement: &CqlStatement,
+        values: BoundValues,
+    ) -> ExecResult<Option<i64>>;
     fn select_config(
         &self,
         statement: &CqlStatement,

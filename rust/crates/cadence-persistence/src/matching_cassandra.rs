@@ -283,7 +283,6 @@ impl CassandraMatchingTaskStore {
             adaptive_partition_config,
         })
     }
-
 }
 
 fn timestamp(nanos: i64) -> Result<DateTime<Utc>> {
@@ -415,7 +414,6 @@ fn expiry_not_passed(expiry_nanos: i64, now_nanos: i64) -> bool {
 #[path = "matching_cassandra_native.rs"]
 mod native;
 
-
 impl MatchingTaskStore for CassandraMatchingTaskStore {
     fn fetch_latest_config(
         &self,
@@ -427,11 +425,13 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             .executor
             .select_config(&CqlStatement::new(SELECT_CONFIG), vec![bound(row_type)])
             .map_err(|e| e.to_string())?;
-        Ok(row.map(|(version, data, encoding)| crate::config_store::ConfigStoreRow {
-            version,
-            data: data.unwrap_or_default(),
-            encoding: encoding.unwrap_or_default(),
-        }))
+        Ok(row.map(
+            |(version, data, encoding)| crate::config_store::ConfigStoreRow {
+                version,
+                data: data.unwrap_or_default(),
+                encoding: encoding.unwrap_or_default(),
+            },
+        ))
     }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
@@ -691,10 +691,8 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             ]
         };
         let outcome = {
-            let all_consistency = CqlStatement::with_consistency(
-                DELETE_LIST,
-                scylla::frame::types::Consistency::All,
-            );
+            let all_consistency =
+                CqlStatement::with_consistency(DELETE_LIST, scylla::frame::types::Consistency::All);
             match self.executor.exec_lwt(&all_consistency, values()) {
                 Ok(outcome) => outcome,
                 Err(error) if error.is_unavailable() => {
@@ -745,12 +743,7 @@ mod tests {
         let go = include_str!(
             "../../../../go/common/persistence/nosql/nosqlplugin/cassandra/tasks_cql.go"
         );
-        for statement in [
-            SELECT_LIST,
-            DELETE_LIST,
-            RANGE_DELETE_TASKS,
-            COUNT_TASKS,
-        ] {
+        for statement in [SELECT_LIST, DELETE_LIST, RANGE_DELETE_TASKS, COUNT_TASKS] {
             assert_in_go_ci(go, statement);
         }
         // templateGetTasksQuery adds only an alias; the Rust reader appends the
@@ -777,11 +770,11 @@ mod tests {
         }
         // Part 2 of the TTL update: Go binds the TTL, Rust inlines 86400.
         assert!(go_stripped.contains(
-            &strip(&UPDATE_LIST_TTL.replace("USING TTL 86400", "USING TTL ?").replacen(
-                "task_list=?",
-                &format!("task_list={}", GO_UDT),
-                1
-            ))
+            &strip(
+                &UPDATE_LIST_TTL
+                    .replace("USING TTL 86400", "USING TTL ?")
+                    .replacen("task_list=?", &format!("task_list={}", GO_UDT), 1)
+            )
             .to_ascii_lowercase()
         ));
     }
@@ -865,7 +858,9 @@ mod tests {
         assert!(second.contains(", 4, {domain_id:"));
         // Fence: range_id bound twice (SET and IF), type 1, sentinel -12345.
         let fence = range_fence_statement(&key, 25, base_nanos);
-        assert!(fence.starts_with("UPDATE tasks SET range_id = 25, last_updated_time = 1711922921000 WHERE"));
+        assert!(fence.starts_with(
+            "UPDATE tasks SET range_id = 25, last_updated_time = 1711922921000 WHERE"
+        ));
         assert!(fence.contains("type = 1 AND task_id = -12345 IF range_id = 25"));
     }
 
@@ -1158,11 +1153,21 @@ mod recording_tests {
         };
         for (message, expected) in [
             ("unavailable", BackendErrorKind::Internal),
-            ("Cannot perform LWT operation", BackendErrorKind::DbUnavailable),
-            ("Cannot Achieve Consistency Level ALL", BackendErrorKind::DbUnavailable),
+            (
+                "Cannot perform LWT operation",
+                BackendErrorKind::DbUnavailable,
+            ),
+            (
+                "Cannot Achieve Consistency Level ALL",
+                BackendErrorKind::DbUnavailable,
+            ),
         ] {
             let error = db_error(
-                DbError::Unavailable { consistency: Consistency::All, required: 3, alive: 1 },
+                DbError::Unavailable {
+                    consistency: Consistency::All,
+                    required: 3,
+                    alive: 1,
+                },
                 message,
             );
             assert!(error.is_unavailable());
@@ -1187,12 +1192,16 @@ mod recording_tests {
             },
             "write timed out",
         );
-        assert_eq!(write_timeout.backend_error_kind(), BackendErrorKind::Timeout);
+        assert_eq!(
+            write_timeout.backend_error_kind(),
+            BackendErrorKind::Timeout
+        );
         let closed = ExecFailure::Execution(Box::new(ExecutionError::LastAttemptError(
             RequestAttemptError::BrokenConnectionError(
-                scylla::errors::BrokenConnectionErrorKind::WriteError(
-                    std::io::Error::from(std::io::ErrorKind::BrokenPipe),
-                ).into(),
+                scylla::errors::BrokenConnectionErrorKind::WriteError(std::io::Error::from(
+                    std::io::ErrorKind::BrokenPipe,
+                ))
+                .into(),
             ),
         )));
         assert_eq!(closed.backend_error_kind(), BackendErrorKind::Timeout);
@@ -1222,7 +1231,11 @@ mod recording_tests {
             values: BoundValues,
         ) -> ExecResult<LwtOutcome> {
             self.record(statement, &values, false);
-            self.lwt.lock().unwrap().pop_front().unwrap_or(Ok(applied()))
+            self.lwt
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(applied()))
         }
         fn batch_lwt(
             &self,
@@ -1232,7 +1245,11 @@ mod recording_tests {
             for (statement, values) in statements.iter().zip(&values) {
                 self.record(statement, values, true);
             }
-            self.lwt.lock().unwrap().pop_front().unwrap_or(Ok(applied()))
+            self.lwt
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or(Ok(applied()))
         }
         fn select_task_list(
             &self,
@@ -1290,7 +1307,9 @@ mod recording_tests {
     /// Whitespace/case-insensitive statement comparison (Go's queries differ
     /// from Rust's only in spacing around `=` and `,`).
     fn squash(text: &str) -> String {
-        text.split_whitespace().collect::<String>().to_ascii_lowercase()
+        text.split_whitespace()
+            .collect::<String>()
+            .to_ascii_lowercase()
     }
 
     fn assert_call(call: &Call, go_text: &str, values: Vec<String>) {
@@ -1439,7 +1458,11 @@ mod recording_tests {
         let calls = recorder.calls();
         assert_eq!(calls.len(), 1);
         assert!(!calls[0].batch);
-        assert_call(&calls[0], GO_UPDATE, update_values(25, &list_udt(1000, 0), 25));
+        assert_call(
+            &calls[0],
+            GO_UPDATE,
+            update_values(25, &list_udt(1000, 0), 25),
+        );
     }
 
     /// TestUpdateTaskListWithTTL "successfully applied" (:505-506): sticky and
@@ -1529,11 +1552,18 @@ mod recording_tests {
         };
         let domain = key().domain_id;
         store(&recorder, false)
-            .create_tasks_with_domains(&key(), 25, BASE_NANOS, &[(domain, &plain), (domain, &capped)])
+            .create_tasks_with_domains(
+                &key(),
+                25,
+                BASE_NANOS,
+                &[(domain, &plain), (domain, &capped)],
+            )
             .unwrap();
         let calls = recorder.calls();
         assert_eq!(calls.len(), 3);
-        assert!(calls.iter().all(|call| call.batch && call.values.is_empty()));
+        assert!(calls
+            .iter()
+            .all(|call| call.batch && call.values.is_empty()));
         assert!(calls[0].text.starts_with(
             "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, task, created_time) VALUES ("
         ));
@@ -1598,7 +1628,9 @@ mod recording_tests {
     #[test]
     fn go_select_tasks_statement_and_values() {
         let recorder = Arc::new(Recorder::default());
-        let tasks = store(&recorder, false).get_tasks(&key(), 0, 100, 100).unwrap();
+        let tasks = store(&recorder, false)
+            .get_tasks(&key(), 0, 100, 100)
+            .unwrap();
         assert!(tasks.is_empty());
         let calls = recorder.calls();
         assert_call(
@@ -1621,7 +1653,10 @@ mod recording_tests {
     fn go_get_tasks_count_statement_and_values() {
         let recorder = Arc::new(Recorder::default());
         *recorder.count.lock().unwrap() = Some(5);
-        assert_eq!(store(&recorder, false).task_list_size(&key(), 1).unwrap(), 5);
+        assert_eq!(
+            store(&recorder, false).task_list_size(&key(), 1).unwrap(),
+            5
+        );
         let calls = recorder.calls();
         assert_call(
             &calls[0],
@@ -1715,7 +1750,9 @@ mod recording_tests {
 
         // Go always uses ALL for DeleteTaskList, including with the flag off.
         let recorder = Arc::new(Recorder::default());
-        store(&recorder, false).delete_task_list(&key(), 35).unwrap();
+        store(&recorder, false)
+            .delete_task_list(&key(), 35)
+            .unwrap();
         assert_eq!(recorder.calls()[0].consistency, Some(Consistency::All));
     }
 
@@ -1736,7 +1773,9 @@ mod recording_tests {
     fn go_delete_task_list_retries_at_default_consistency_when_all_unavailable() {
         let recorder = Arc::new(Recorder::default());
         recorder.push_lwt(Err(unavailable()));
-        store(&recorder, false).delete_task_list(&key(), 35).unwrap();
+        store(&recorder, false)
+            .delete_task_list(&key(), 35)
+            .unwrap();
         let calls = recorder.calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].consistency, Some(Consistency::All));
