@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,17 +18,21 @@ import (
 	"go.uber.org/cadence/workflow"
 )
 
-// retryHistoryDiagnostic deliberately uses a fresh bounded context: the suite's
-// context is commonly expired by the time run.Get reports its deadline.
-func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflowID, runID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+type childHistoryRef struct {
+	workflowID string
+	runID      string
+}
+
+// fetchHistoryDiagnostic pages one execution and returns references to children
+// that actually started. Child histories are fetched separately and never
+// recursively expanded.
+func fetchHistoryDiagnostic(ctx context.Context, rpc workflowserviceclient.Interface, domain, workflowID, runID string, findChildren bool) (string, []childHistoryRef) {
 	if runID == "" {
 		description, err := rpc.DescribeWorkflowExecution(ctx, &shared.DescribeWorkflowExecutionRequest{
 			Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &workflowID},
 		})
 		if err != nil {
-			return fmt.Sprintf("history diagnostic could not resolve run ID for workflow %s: %v", workflowID, err)
+			return fmt.Sprintf("history diagnostic could not resolve run ID for workflow %s: %v", workflowID, err), nil
 		}
 		runID = description.WorkflowExecutionInfo.GetExecution().GetRunId()
 	}
@@ -36,10 +41,11 @@ func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflo
 	counts := make(map[string]int)
 	total, pages := 0, 0
 	seenTokens := make(map[string]bool)
+	var children []childHistoryRef
 	for {
 		response, err := rpc.GetWorkflowExecutionHistory(ctx, request)
 		if err != nil {
-			return fmt.Sprintf("history diagnostic failed for workflow %s/%s after %d events/%d pages: %v", workflowID, runID, total, pages, err)
+			return fmt.Sprintf("history diagnostic failed for workflow %s/%s after %d events/%d pages: %v", workflowID, runID, total, pages, err), children
 		}
 		pages++
 		if response.History != nil {
@@ -52,18 +58,52 @@ func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflo
 				} else {
 					fmt.Printf("history event workflow=%s/%s event=%s\n", workflowID, runID, encoded)
 				}
+				if findChildren && event.GetChildWorkflowExecutionStartedEventAttributes() != nil {
+					attrs := event.GetChildWorkflowExecutionStartedEventAttributes()
+					children = append(children, childHistoryRef{workflowID: attrs.GetWorkflowExecution().GetWorkflowId(), runID: attrs.GetWorkflowExecution().GetRunId()})
+				}
 			}
 		}
 		if len(response.NextPageToken) == 0 {
-			return fmt.Sprintf("history workflow=%s/%s events=%d pages=%d eventTypes=%v", workflowID, runID, total, pages, counts)
+			return fmt.Sprintf("history workflow=%s/%s events=%d pages=%d eventTypes=%v", workflowID, runID, total, pages, counts), children
 		}
 		token := string(response.NextPageToken)
 		if seenTokens[token] {
-			return fmt.Sprintf("history diagnostic repeated page token for workflow %s/%s after %d events/%d pages eventTypes=%v", workflowID, runID, total, pages, counts)
+			return fmt.Sprintf("history diagnostic repeated page token for workflow %s/%s after %d events/%d pages eventTypes=%v", workflowID, runID, total, pages, counts), children
 		}
 		seenTokens[token] = true
 		request.NextPageToken = response.NextPageToken
 	}
+}
+
+// retryHistoryDiagnostic deliberately uses one fresh, five-second budget for
+// the parent and a small number of already-started child histories. The suite's
+// context is commonly expired by the time run.Get reports its deadline.
+func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflowID, runID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	parent, children := fetchHistoryDiagnostic(ctx, rpc, domain, workflowID, runID, true)
+	const maxChildHistories = 2
+	limit := len(children)
+	if limit > maxChildHistories {
+		limit = maxChildHistories
+	}
+	diagnostics := []string{parent}
+	for _, child := range children[:limit] {
+		if child.workflowID == "" || child.runID == "" {
+			diagnostics = append(diagnostics, fmt.Sprintf("child history skipped: incomplete execution reference workflow=%q run=%q", child.workflowID, child.runID))
+			continue
+		}
+		detail, _ := fetchHistoryDiagnostic(ctx, rpc, domain, child.workflowID, child.runID, false)
+		diagnostics = append(diagnostics, detail)
+	}
+	if ctx.Err() != nil {
+		diagnostics = append(diagnostics, fmt.Sprintf("child history diagnostic budget exhausted after %s: %v", 5*time.Second, ctx.Err()))
+	}
+	if len(children) > limit {
+		diagnostics = append(diagnostics, fmt.Sprintf("child history diagnostics truncated: fetched=%d started=%d limit=%d", limit, len(children), maxChildHistories))
+	}
+	return strings.Join(diagnostics, "; ")
 }
 
 func mixedRunGetError(rpc workflowserviceclient.Interface, domain, scenario string, run interface {
