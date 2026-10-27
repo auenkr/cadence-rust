@@ -70,5 +70,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: matching-cassandra-mixed-gate
-          path: out/
+          # Preserve runtime evidence and binary hashes without storing generated executables.
+          path: |
+            out/
+            !out/**/cadence-server
+            !out/**/shard-distributor-real
+            !out/**/configstore-seed
           retention-days: 3
