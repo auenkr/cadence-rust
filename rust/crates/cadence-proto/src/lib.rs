@@ -1,6 +1,7 @@
 //! Cadence public and internal protobuf APIs, generated from upstream IDLs.
 pub mod task_list_status;
 pub mod task_list_partition;
+pub mod native;
 // Preserve generated tonic signatures, protobuf oneofs, and upstream IDL docs.
 #[allow(
     clippy::result_large_err,

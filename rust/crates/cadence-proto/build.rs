@@ -1,3 +1,6 @@
+#[path = "build/native_model.rs"]
+mod native_model;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../go/idls/proto");
     let internal =
@@ -13,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     collect_protos(&internal, &mut files)?;
     collect_protos(&shard_manager, &mut files)?;
     files.sort();
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR")?);
     tonic_build::configure()
         .extern_path(".uber.cadence.api.v1.TaskListStatus", "crate::task_list_status::TaskListStatus")
         .extern_path(".uber.cadence.api.v1.TaskListPartitionConfig", "crate::task_list_partition::api::TaskListPartitionConfig")
@@ -30,6 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 protoc_bin_vendored::include_path()?,
             ],
         )?;
+    native_model::generate(&out.join("cadence.bin"), &out.join("matching_native.rs"))?;
+    println!("cargo:rerun-if-changed=build/native_model.rs");
     Ok(())
 }
 

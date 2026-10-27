@@ -499,6 +499,8 @@ dependencies = [
 name = "cadence-proto"
 version = "0.1.0"
 dependencies = [
+ "cadence-common",
+ "heck",
  "prost",
  "prost-types",
  "protoc-bin-vendored",
