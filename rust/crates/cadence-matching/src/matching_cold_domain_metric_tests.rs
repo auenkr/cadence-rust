@@ -50,20 +50,73 @@ impl DomainMetadataSource for LateDomainSource {
 
     fn get_domain(
         &self,
-        _name: Option<&str>,
+        name: Option<&str>,
         id: Option<&str>,
         _timeout: Duration,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(id.unwrap_or_default().to_owned());
+        self.calls.lock().unwrap().push(
+            name.map(|name| format!("name:{name}"))
+                .or_else(|| id.map(|id| format!("id:{id}")))
+                .unwrap_or_default(),
+        );
         self.domain
             .lock()
             .unwrap()
             .clone()
-            .filter(|domain| Some(domain.info.uuid.as_str()) == id)
+            .filter(|domain| {
+                name.map(|name| domain.info.name == name).unwrap_or(true)
+                    && id.map(|id| domain.info.uuid == id).unwrap_or(true)
+            })
             .ok_or_else(|| DomainMetadataSourceError::permanent("domain not found"))
+    }
+}
+
+#[tokio::test]
+async fn name_based_listing_handlers_read_through_cold_domain_cache() {
+    for handler in ["GetTaskListsByDomain", "ListTaskListPartitions"] {
+        let source = Arc::new(LateDomainSource::default());
+        let cache = Arc::new(MatchingDomainCache::with_clock(
+            source.clone(),
+            Arc::new(ManualClock::default()),
+        ));
+        cache.refresh_domains().expect("initial empty cache scan");
+        *source.domain.lock().unwrap() = Some(domain_metadata());
+        let matching = Matching::new(crate::handlers::AppState::default())
+            .with_domain_cache(cache.clone());
+
+        let call = if handler == "GetTaskListsByDomain" {
+            let response = m::matching_api_server::MatchingApi::get_task_lists_by_domain(
+                &matching,
+                Request::new(m::GetTaskListsByDomainRequest {
+                    domain: DOMAIN_NAME.into(),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("cold name lookup succeeds")
+            .into_inner();
+            assert_eq!(response, m::GetTaskListsByDomainResponse::default());
+            "name:created-after-cache-scan"
+        } else {
+            let _response = m::matching_api_server::MatchingApi::list_task_list_partitions(
+                &matching,
+                Request::new(m::ListTaskListPartitionsRequest {
+                    domain: DOMAIN_NAME.into(),
+                    task_list: Some(p::TaskList {
+                        name: "queue".into(),
+                        kind: 0,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("cold name lookup succeeds")
+            .into_inner();
+            "name:created-after-cache-scan"
+        };
+        assert_eq!(&*source.calls.lock().unwrap(), &[call]);
+        assert_eq!(matching.domain_name(DOMAIN_ID).as_deref(), Some(DOMAIN_NAME));
     }
 }
 
@@ -143,7 +196,7 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
         Some(DOMAIN_NAME),
         "the metric must use the canonical name learned by cache read-through"
     );
-    assert_eq!(&*source.calls.lock().unwrap(), &[DOMAIN_ID]);
+    assert_eq!(&*source.calls.lock().unwrap(), &[format!("id:{DOMAIN_ID}")]);
     assert_eq!(
         matching.domain_name(DOMAIN_ID).expect("cold domain published"),
         DOMAIN_NAME,
