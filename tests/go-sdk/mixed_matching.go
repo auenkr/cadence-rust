@@ -46,6 +46,12 @@ func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflo
 			for _, event := range response.History.Events {
 				counts[event.GetEventType().String()]++
 				total++
+				encoded, encodeErr := json.Marshal(event)
+				if encodeErr != nil {
+					fmt.Printf("history event workflow=%s/%s eventID=%d encodeError=%v\n", workflowID, runID, event.GetEventId(), encodeErr)
+				} else {
+					fmt.Printf("history event workflow=%s/%s event=%s\n", workflowID, runID, encoded)
+				}
 			}
 		}
 		if len(response.NextPageToken) == 0 {
@@ -137,6 +143,7 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 			panic(mixedRunGetError(rpc, domain, "workflow-task-retry-only", run, err))
 		}
 		require(result == "workflow-task-recovered", "mixed Matching retry-only result changed")
+		fmt.Println(retryHistoryDiagnostic(rpc, domain, run.GetID(), run.GetRunID()))
 		fmt.Printf("scenario end name=workflow-task-retry-only workflowID=%s runID=%s duration=%s suiteBudgetRemaining=%s\n", run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
 		return
 	}
