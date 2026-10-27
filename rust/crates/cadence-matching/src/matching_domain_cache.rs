@@ -733,8 +733,8 @@ impl MatchingDomainCache {
     }
 
     /// Resolve a domain name from the current snapshot without querying or
-    /// refreshing persistence. Telemetry must never make a cache miss block an
-    /// RPC handler on the synchronous domain metadata store.
+    /// refreshing persistence. Callers that need Go's read-through behavior
+    /// should use `get_domain_name` from a blocking worker.
     pub fn cached_domain_name(&self, id: &str) -> Option<String> {
         self.by_id(id).map(|domain| domain.info.name)
     }

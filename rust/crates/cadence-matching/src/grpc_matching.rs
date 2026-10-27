@@ -463,7 +463,7 @@ impl Matching {
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> Self {
         self.domain_id_parse = cache.domain_id_parse();
-        self.domain_name_resolver = Some(Arc::new(move |id| cache.cached_domain_name(id)));
+        self.domain_name_resolver = Some(Arc::new(move |id| cache.get_domain_name(id).ok()));
         self
     }
     #[cfg(test)]
@@ -480,11 +480,15 @@ impl Matching {
     fn domain_lookup_guard(&self, domain_id: &str, operation: &'static str) -> Result<(), Status> {
         crate::matching_domain_uuid::domain_lookup_guard(self.domain_id_parse, domain_id, operation)
     }
-    fn metric_domain_name(&self, id: &str) -> Option<String> {
-        self.domain_name_resolver
-            .as_ref()
-            .map(|resolve| resolve(id))
-            .unwrap_or_else(|| domain_name_for(&self.frontend.state.domains, id))
+    async fn metric_domain_name(&self, id: &str) -> Option<String> {
+        if let Some(resolve) = self.domain_name_resolver.as_ref().cloned() {
+            let id = id.to_owned();
+            return tokio::task::spawn_blocking(move || resolve(&id))
+                .await
+                .ok()
+                .flatten();
+        }
+        domain_name_for(&self.frontend.state.domains, id)
     }
     /// Incremental durable delivery backend. Domain metadata and the remaining
     /// administrative/query methods still use the supplied application state.
@@ -1802,7 +1806,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_decision_task")?;
         self.metrics.matching_request(
             "PollForDecisionTask",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).await.as_deref(),
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
@@ -2044,7 +2048,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_activity_task")?;
         self.metrics.matching_request(
             "PollForActivityTask",
-            self.metric_domain_name(request.get_ref().domain_id.as_str()).as_deref(),
+            self.metric_domain_name(request.get_ref().domain_id.as_str()).await.as_deref(),
             request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (t.name.as_str(), Some(t.kind))),
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc")),
             async {
@@ -2259,7 +2263,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.metrics
             .matching_request(
                 "AddDecisionTask",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                     .as_deref(),
                 request
                     .get_ref()
@@ -2481,7 +2485,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.metrics
             .matching_request(
                 "AddActivityTask",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                     .as_deref(),
                 request
                     .get_ref()
@@ -2699,7 +2703,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "QueryWorkflow",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3137,7 +3141,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.metrics
             .matching_request(
                 "AcquireSemaphore",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                     .as_deref(),
                 Some((request.get_ref().semaphore_name.as_str(), Some(0))),
                 Some(
@@ -3219,7 +3223,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         Err(error) => match caller_ended(deadline, cancelled.as_ref()) {
                             Some(ended) => {
                                 self.metrics.semaphore_context_timeout(
-                                    self.metric_domain_name(request.get_ref().domain_id.as_str())
+                                    self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                                         .as_deref(),
                                     request.get_ref().semaphore_name.as_str(),
                                     Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
@@ -3250,7 +3254,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.metrics
             .matching_request(
                 "UpdateTaskListPartitionConfig",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                     .as_deref(),
                 request
                     .get_ref()
@@ -3394,7 +3398,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         self.metrics
             .matching_request(
                 "RefreshTaskListPartitionConfig",
-                self.metric_domain_name(request.get_ref().domain_id.as_str())
+                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                     .as_deref(),
                 request
                     .get_ref()
@@ -3483,7 +3487,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "CancelOutstandingPoll",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3581,7 +3585,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3700,7 +3704,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "DescribeTaskList",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
                             .as_deref(),
                         request
                             .get_ref()
@@ -4164,3 +4168,42 @@ mod query_forward_family_tests;
 #[cfg(test)]
 #[path = "matching_handler_go_tests.rs"]
 mod handler_go_tests;
+
+#[cfg(test)]
+mod cold_domain_metric_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cold_domain_name_is_resolved_before_request_metric_emission() {
+        let mut matching = Matching::new(crate::handlers::AppState::default());
+        matching.domain_name_resolver = Some(Arc::new(|id| {
+            (id == "00000000-0000-0000-0000-000000000042")
+                .then(|| "created-after-cache-scan".to_owned())
+        }));
+        let domain_id = "00000000-0000-0000-0000-000000000042";
+        let domain_name = matching.metric_domain_name(domain_id).await;
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
+
+        metrics
+            .matching_request(
+                "AddDecisionTask",
+                domain_name.as_deref(),
+                Some(("queue", Some(0))),
+                None,
+                async { Ok::<(), Status>(()) },
+            )
+            .await
+            .unwrap();
+
+        let request = sink
+            .events()
+            .into_iter()
+            .find(|event| event.name == crate::matching_metrics::CADENCE_REQUESTS_PER_TASK_LIST)
+            .expect("request metric emitted");
+        assert_eq!(
+            request.tags.get(crate::matching_metrics::DOMAIN_TAG),
+            Some(&"created-after-cache-scan".to_owned())
+        );
+    }
+}
