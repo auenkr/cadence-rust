@@ -1,0 +1,11 @@
+    Updating crates.io index
+    Checking cadence-common v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-common)
+   Compiling cadence-proto v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-proto)
+    Checking mysql_async v0.37.1 (/home/runner/work/cadence-rust/cadence-rust/rust/vendor/mysql_async-0.37.1)
+    Checking scylla v1.9.0 (/home/runner/work/cadence-rust/cadence-rust/rust/vendor/scylla-1.9.0)
+    Checking cadence-api v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-api)
+    Checking cadence-thrift v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-thrift)
+    Checking cadence-persistence v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-persistence)
+    Checking cadence-service-core v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-service-core)
+    Checking cadence-matching v0.1.0 (/home/runner/work/cadence-rust/cadence-rust/rust/crates/cadence-matching)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 23.49s

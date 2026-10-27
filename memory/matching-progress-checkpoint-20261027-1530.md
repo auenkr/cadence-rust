@@ -76,3 +76,14 @@ Focused run 40531087779 reached Test after passing Clippy; no result credited ye
   and runtime shutdown notification tests passed on this run.
 Focused Matching CI has been redispatched at 4c6b2c6a9. The concurrent test
 worker has uncommitted edits in its owned file; do not stage those prematurely.
+
+Replacement focused CI: https://github.com/auenkr/cadence-rust/actions/runs/40532092440
+head 4c6b2c6a9 (in progress). Prior failed logs retained under
+memory/evidence/matching-focused-40531087779/.
+
+Config and ignored-test reconciliation workers completed; see
+matching-current-config-reconciliation-20261027.md and
+matching-current-ignore-reconciliation-20261027.md. Neither confirmed a current
+production mismatch; both are static evidence with explicit coverage limits.
+Concurrent scenario worker remains active. At 15:34 UTC load rose to 10.44;
+replacement worker starts are again held under the resource guard.
