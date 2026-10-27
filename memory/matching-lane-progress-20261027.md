@@ -7,6 +7,16 @@ Binary SHA256s: only recorded from failed lanes in /mnt/storage/service/ci-evide
 Other open: Cassandra DescribeTaskList rate cause unconfirmed (no Go control run); adaptive scaler has no gate lane; isolation balancer/persistence path not audited.
 Matching NOT complete.
 
+## Bounded isolation assignment/persistence audit (2026-10-27)
+
+At source `9e719ab6e6c96d8c64d4880868a18ea602bad2ef`, completed the bounded
+Go/Rust production-path audit for isolation balancing, task attributes,
+forwarding, and scoped configuration. No concrete observable mismatch found.
+Production source map, persisted active/standby/forwarded/retry/reload trace,
+existing test pointers, and remaining runtime-evidence checklist are in
+`memory/matching-isolation-parity-audit-20261027.md`. This closes the audit
+item only; parent still owns final-pin mixed evidence and Matching acceptance.
+
 ## Pause checkpoint
 - User paused work. Shard-distributor investigation worker (branch t3/mw-sd-expiry) was stopped before any commit/push; no WIP exists. Re-launch from the brief in this note: bisect dce2ab05e..6af476941 for the after-sigkill executor-expiry failure (runs 40198127804, 40205093375; logs in /mnt/storage/service/ci-evidence/l4, not in repo).
 - Clean-target workspace CI 40428681163 on master head 1b9df63e4: in_progress  (at pause time).
