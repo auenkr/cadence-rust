@@ -41,7 +41,7 @@ async function run() {
     function deliver(kind, scheduleId) {
       const fixture = path.join(directory, 'fixture.json'), output = path.join(directory, 'response.bin');
       fs.writeFileSync(fixture, JSON.stringify({ domain, domain_id: domainId, workflow_id: id, run_id: started.runId, task_list: taskList.name, history_peer: process.argv[3], kind, schedule_id: Number(scheduleId), database: path.join(directory, 'matching.db'), output }));
-      const command = ['test', '--manifest-path', path.join(root, 'rust/Cargo.toml'), '-p', 'cadence-server', '--test', 'matching_delivery', 'matching_delivery_go_history', '--', '--ignored', '--exact'];
+      const command = ['test', '--manifest-path', path.join(root, 'rust/Cargo.toml'), '-p', 'cadence-matching', '--test', 'matching_delivery', 'matching_delivery_go_history', '--', '--ignored', '--exact'];
       const result = spawnSync('cargo', command, { cwd: root, env: { ...process.env, CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS || '1', CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }, encoding: 'utf8', timeout: 180000 });
       if (result.status !== 0) throw new Error(`Rust matching delivery failed: ${result.error || ''}\n${result.stdout}\n${result.stderr}`);
       const method = Object.values(schema.matching.v1.MatchingAPI.service).find(value => value.path.endsWith(kind === 'activity' ? '/PollForActivityTask' : '/PollForDecisionTask'));
