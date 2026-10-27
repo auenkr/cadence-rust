@@ -87,3 +87,32 @@ matching-current-ignore-reconciliation-20261027.md. Neither confirmed a current
 production mismatch; both are static evidence with explicit coverage limits.
 Concurrent scenario worker remains active. At 15:34 UTC load rose to 10.44;
 replacement worker starts are again held under the resource guard.
+
+## Combined regression progress (15:57 UTC)
+
+- Focused CI [40534430151](https://github.com/auenkr/cadence-rust/actions/runs/40534430151)
+  PASSED at `8ed5ff127ae36a47c33f3b31577444f94caf7a64`: Clippy and
+  package tests, 756 unit tests plus integration suites. All eight concurrent
+  producer/delivery/isolation/live-owner tests passed, as did active offer.
+  Compact identity/exits and test summary retained in
+  `memory/evidence/matching-focused-40534430151/`. This is cached package CI,
+  not final workspace or mixed acceptance.
+- The failed predecessor 40532092440 passed units but exposed a routing fixture
+  using a nil argument; fixed to send a present empty request. 40533448281
+  then failed only Clippy's manual_is_multiple_of suggestion; runner formatting
+  and that fix are included in the passing pin.
+- Source `94276d20fe09cc8dc79b678e3791533349caacad` adds a confirmed refresh
+  error/cancellation fix, public RPC persistence-failure regression, zero-rate
+  durable recovery test, and actual registered domain-failover callback test.
+  See matching-refresh-retry-error-fix-20261027.md. These supersede older audit
+  claims that the refresh/failover rows lack any regression.
+- Diagnostic package CI [40535623193](https://github.com/auenkr/cadence-rust/actions/runs/40535623193)
+  is running on 94276d20f with formatting enabled. Retrieve/apply the
+  matching-format-patch, then check Clippy/tests before freezing v7.
+- Three Luna medium/default-tier read-only final reviewers started once load
+  fell to 4.86 with 4.4 GiB available: 223752d3 refresh/callback corrections;
+  b546b8a0 reachable query/typed-wire mappings; 63b4bbcb fixed config/GC wiring.
+  They write disjoint memory reports. No source ownership, local validation or
+  CI dispatch granted. Completions wake the parent; do not poll their tasks.
+
+No final candidate has been frozen and no final mixed lane is credited.

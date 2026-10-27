@@ -1,0 +1,30 @@
+test matching_reader::tests::matching_reader_reports_fatal_for_duplicate_and_out_of_order_rows ... ok
+test matching_registry::partition_cancellation_tests::dropped_partition_update_without_deadline_cancels_retry_and_counts_failure_once ... ok
+test thrift_matching::tests::matching_thrift_nil_request_runs_metrics_and_host_quota_before_engine_panic ... ok
+test result: ok. 756 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 35.16s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test go_concurrent_add_and_poll_activity_isolation ... ok
+test go_concurrent_add_and_poll_decision_isolation ... ok
+test go_concurrent_add_and_poll_delivers_every_activity_once ... ok
+test go_concurrent_add_and_poll_delivers_every_decision_once ... ok
+test go_two_live_matching_owners_steal_lease_and_deliver_all_work ... ok
+test go_concurrent_add_and_poll_activity_producer_half_persists_all_tasks ... ok
+test go_concurrent_add_and_poll_decision_producer_half_persists_all_tasks ... ok
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.91s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 18 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 16 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 30.00s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test go_dispatch_task_active_offer_without_error_reaches_poller ... ok
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.14s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
