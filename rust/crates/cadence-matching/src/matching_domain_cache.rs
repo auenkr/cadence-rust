@@ -749,9 +749,12 @@ impl MatchingDomainCache {
         if id.is_empty() {
             return Err(DomainCacheError::EmptyId);
         }
-        let lookup_id = self.source.normalize_domain_id(id).ok_or_else(|| {
-            DomainCacheError::Source(format!("invalid Cassandra UUID {id:?}"))
-        })?;
+        // Keep malformed IDs on the source's normal validation path so its
+        // backend-specific error class and precedence remain unchanged.
+        let lookup_id = self
+            .source
+            .normalize_domain_id(id)
+            .unwrap_or_else(|| id.to_owned());
         if let Some(entry) = self.by_id(&lookup_id) {
             return Ok(entry);
         }
