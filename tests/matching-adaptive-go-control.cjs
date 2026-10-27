@@ -33,6 +33,22 @@ async function main() {
   const domain = `adaptive-go-control-${id}`;
   await call('DomainAPI', 'RegisterDomain', { name: domain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
+  // Independent Go roles refresh domain metadata separately. Wait only for
+  // this provisioning race before invoking the unchanged adaptive assertions.
+  const provisionDeadline = Date.now() + 15000;
+  for (;;) {
+    try {
+      await call('Matching', 'DescribeTaskList', { domainId,
+        request: { taskList: { name: 'production-adaptive-scaler-probe' },
+          taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } });
+      break;
+    } catch (error) {
+      if (error.code !== grpc.status.INTERNAL
+        || !error.details?.includes('DefaultDomainCache encounter case')
+        || Date.now() >= provisionDeadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
   const startRequest = { domain, workflowType: { name: 'main.EchoWorkflow' }, taskList: { name: 'unused' },
     executionStartToCloseTimeout: { seconds: '300' }, taskStartToCloseTimeout: { seconds: '10' },
     input: { data: Buffer.from(JSON.stringify('adaptive-load')) } };

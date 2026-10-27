@@ -1,0 +1,29 @@
+Error: 13 INTERNAL: DefaultDomainCache encounter case where domain exists but cannot be loaded
+    at callErrorFromStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/call.js:32:19)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:193:76)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:367:141)
+    at Object.onReceiveStatus (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client-interceptors.js:327:181)
+    at /home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/resolving-call.js:155:78
+    at process.processTicksAndRejections (node:internal/process/task_queues:84:11)
+for call at
+    at ServiceClientImpl.makeUnaryRequest (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/client.js:161:32)
+    at ServiceClientImpl.<anonymous> (/home/runner/work/_temp/node-grpc/node_modules/@grpc/grpc-js/build/src/make-client.js:105:19)
+    at /home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:23:19
+    at new Promise (<anonymous>)
+    at attempt (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:18:35)
+    at /home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:28:26
+    at ownerRpc (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:34:5)
+    at adaptiveScaler (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:216:25)
+    at runScenario (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:516:25)
+    at runProbeScenarios (/home/runner/work/cadence-rust/cadence-rust/tests/matching-probe-scenarios.cjs:525:9) {
+  code: 13,
+  details: 'DefaultDomainCache encounter case where domain exists but cannot be loaded',
+  metadata: Metadata {
+    internalRepr: Map(3) {
+      'rpc-application-error-details' => [Array],
+      'rpc-service' => [Array],
+      'rpc-application-error' => [Array]
+    },
+    options: {}
+  }
+}
