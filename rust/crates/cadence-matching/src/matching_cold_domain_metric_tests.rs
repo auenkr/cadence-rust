@@ -161,12 +161,16 @@ async fn empty_name_lookup_is_bad_request() {
 async fn name_based_listing_handlers_read_through_cold_domain_cache() {
     for handler in ["GetTaskListsByDomain", "ListTaskListPartitions"] {
         let source = Arc::new(LateDomainSource::default());
+        let clock = Arc::new(ManualClock::default());
         let cache = Arc::new(MatchingDomainCache::with_clock(
             source.clone(),
-            Arc::new(ManualClock::default()),
+            clock.clone(),
         ));
         cache.refresh_domains().expect("initial empty cache scan");
         *source.domain.lock().unwrap() = Some(domain_metadata());
+        // Go and Rust suppress another scan within one second of a successful
+        // refresh. Model registration after that interval without sleeping.
+        clock.0.store(1, Ordering::SeqCst);
         let matching = Matching::new(crate::handlers::AppState::default())
             .with_domain_cache(cache.clone());
 

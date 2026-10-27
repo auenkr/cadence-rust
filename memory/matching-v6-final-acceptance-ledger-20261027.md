@@ -10,7 +10,7 @@ and reruns. Subsequent master commits may contain documentation only.
 
 | Requirement | Run / task | Reviewed result |
 | --- | --- | --- |
-| Fresh uncached workspace Clippy then tests | [40520934239](https://github.com/auenkr/cadence-rust/actions/runs/40520934239), head matches v6 | In progress: Clippy passed, workspace Test active at 14:30 UTC; artifacts not yet reviewed |
+| Fresh uncached workspace Clippy then tests | [40520934239](https://github.com/auenkr/cadence-rust/actions/runs/40520934239), head matches v6 | FAILED: Clippy exit 0, tests exit 101; cold-domain listing fixture does not advance its manual clock |
 | PostgreSQL | Not dispatched | Pending |
 | MySQL probes | Not dispatched | Pending |
 | Thrift | Not dispatched | Pending |
@@ -59,3 +59,29 @@ These replace the three completed initial audits, whose scope was bounded;
 none constitutes full service acceptance. The ignored-test report's claims of
 missing harnesses or untested behavior require source reconciliation, not
 blind promotion into new completion requirements.
+
+## V6 final workspace result and additional fixes (14:38 UTC)
+
+Run 40520934239 concluded failure at exact v6 SHA; downloaded rust-ci-logs under
+`memory/evidence/matching-v6-workspace-40520934239/`. Artifact source SHA matches,
+fresh target `/home/runner/work/_temp/cargo-target-final`, Clippy exit 0, Test
+exit 101. Matching lib: 733 passed, one failed, two ignored. The failed test is
+`name_based_listing_handlers_read_through_cold_domain_cache`: its manual clock
+stayed at zero after the initial empty scan. Production cache correctly suppresses
+another scan inside one second, matching Go domainCacheMinRefreshInterval.
+Advance the fixture clock to one second, just like the adjacent metric test;
+no runtime cache behavior change is needed.
+
+Re-enabled the formerly ignored active-offer test with a reachable scripted
+History peer in cdbc8cb07. CI on that intermediate SHA is diagnostic only.
+The dependency oracle workflow adds direct ignored-test execution for generated
+Go History TChannel calls and live PostgreSQL TLS; it is supplemental to the ten
+mixed lanes. Parent review corrected IDL initialization, Docker password env,
+certificate permission ordering, error-handling scope and cleanup result propagation.
+It remains unexecuted until CI.
+
+Deep source audit found B1: failed-delivery rewrite retries recognize only SQLite
+and sticky-kind lease errors, missing typed backend transient failures. A worker
+is repairing it with a backend-timeout regression. Separate workers resolve
+Thrift nil/wrong-type wire decoding and the audit's crash-vs-unload deviations.
+V7 is deferred until all confirmed fixes and tests are reviewed.

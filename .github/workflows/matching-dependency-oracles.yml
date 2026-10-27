@@ -1,0 +1,48 @@
+name: Matching dependency oracles
+
+# Supplemental focused gate for two ignored dependency tests. It does NOT
+# replace the full mixed-cluster Matching lanes.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: matching-dependency-oracles-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-oracles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run dependency oracles
+        shell: bash
+        run: |
+          set -u
+          # Fresh dedicated target dir; no Cargo cache is restored or saved.
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cargo-target-dependency-oracles"
+          rm -rf "$CARGO_TARGET_DIR"
+          export EVIDENCE_DIR="$RUNNER_TEMP/dependency-oracles-evidence"
+          # Holds ephemeral CA/server keys; never uploaded, removed by the trap.
+          export SECRET_DIR="$RUNNER_TEMP/dependency-oracles-secrets"
+          tests/gates/run-matching-dependency-oracles.sh
+      - name: Upload small evidence logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-dependency-oracles-evidence
+          path: ${{ runner.temp }}/dependency-oracles-evidence/
+          retention-days: 3
+          if-no-files-found: warn
