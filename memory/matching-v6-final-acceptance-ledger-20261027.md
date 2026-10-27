@@ -133,3 +133,28 @@ behavior must be preserved; wiring is in progress. No source pin cut yet.
   to user-authorized Luna medium/default workers: 10efc027 concurrency scenario ports,
   45cf7837 standby error retry-exhaustion regressions, 31857385 merged fatal/retry review.
   No local Cargo/Go validation ran. No final mixed lanes have been credited.
+
+## Caller cancellation and regression checkpoint (15:15 UTC)
+
+Diagnostic run40527340382 failed required runtime-formatting check before Clippy:
+the formatting list omitted matching_registry.rs after the partition changes.
+Applied the uploaded runner formatting patch to unaffected files and expanded
+the explicit formatting list to registry/new cancellation tests/backoff. No
+format command has been run locally.
+
+Merged review found caller cancellation without a deadline still failed to stop
+partition retries. Parent added a drop guard shared with the blocking retry;
+first DB attempt remains uninterruptible and retry wait observes cancellation.
+New real-registry regression blocks a transient database update, drops the
+no-deadline caller, releases the DB call, then requires exactly one persistence
+attempt, one failure metric and a stopped queue. Unverified until CI.
+
+Luna added deterministic standby cache/History retry-exhaustion coverage using an
+explicit elapsed-time seam, plus concurrent public add RPC producer scenarios
+and lease fencing. The latter are explicitly PARTIAL: concurrent polls, zero
+rate, isolation variants and two-live-engine range stealing remain unported in
+that test; do not claim the old Go scenario was fully ported. Source reports in
+matching-concurrent-go-parity and matching-standby-error-exhaustion-tests.
+Workers completed; replacement starts held by host load above6 (peaked13.9)
+with sufficient memory. No local heavy validation or new workers started while
+over the guard. Final candidate and all ten mixed lanes still pending.

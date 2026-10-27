@@ -225,10 +225,21 @@ impl<T> Rendezvous<T> {
         mut stop: watch::Receiver<bool>,
         deadline: tokio::time::Instant,
     ) -> Option<bool> {
-        if *stop.borrow() { return None; }
-        let pending = Arc::new(Pending { item: Mutex::new(Some(item)), accepted: Notify::new() });
-        let _guard = OfferGuard { channel: self, pending: pending.clone() };
-        self.offers.lock().expect("Matching handoff lock").push_back(pending.clone());
+        if *stop.borrow() {
+            return None;
+        }
+        let pending = Arc::new(Pending {
+            item: Mutex::new(Some(item)),
+            accepted: Notify::new(),
+        });
+        let _guard = OfferGuard {
+            channel: self,
+            pending: pending.clone(),
+        };
+        self.offers
+            .lock()
+            .expect("Matching handoff lock")
+            .push_back(pending.clone());
         self.available.notify_one();
         tokio::select! {
             _ = pending.accepted.notified() => return Some(true),
@@ -236,7 +247,12 @@ impl<T> Rendezvous<T> {
             _ = stop.changed() => return None,
         }
         let mut offers = self.offers.lock().expect("Matching handoff lock");
-        if pending.item.lock().expect("Matching offered task lock").is_none() {
+        if pending
+            .item
+            .lock()
+            .expect("Matching offered task lock")
+            .is_none()
+        {
             return Some(true);
         }
         offers.retain(|offer| !Arc::ptr_eq(offer, &pending));
@@ -251,10 +267,21 @@ impl<T> Rendezvous<T> {
         mut stop: watch::Receiver<bool>,
         tokens: &crate::matching_forward::RequestTokens,
     ) -> Option<Result<tokio::sync::OwnedSemaphorePermit, ()>> {
-        if *stop.borrow() { return None; }
-        let pending = Arc::new(Pending { item: Mutex::new(Some(item)), accepted: Notify::new() });
-        let _guard = OfferGuard { channel: self, pending: pending.clone() };
-        self.offers.lock().expect("Matching handoff lock").push_back(pending.clone());
+        if *stop.borrow() {
+            return None;
+        }
+        let pending = Arc::new(Pending {
+            item: Mutex::new(Some(item)),
+            accepted: Notify::new(),
+        });
+        let _guard = OfferGuard {
+            channel: self,
+            pending: pending.clone(),
+        };
+        self.offers
+            .lock()
+            .expect("Matching handoff lock")
+            .push_back(pending.clone());
         self.available.notify_one();
         let acquired = tokio::select! {
             _ = pending.accepted.notified() => return Some(Err(())),
@@ -262,7 +289,12 @@ impl<T> Rendezvous<T> {
             _ = stop.changed() => return None,
         };
         let mut offers = self.offers.lock().expect("Matching handoff lock");
-        if pending.item.lock().expect("Matching offered task lock").is_none() {
+        if pending
+            .item
+            .lock()
+            .expect("Matching offered task lock")
+            .is_none()
+        {
             return Some(Err(()));
         }
         offers.retain(|offer| !Arc::ptr_eq(offer, &pending));
@@ -329,7 +361,9 @@ struct Inner {
 /// fails (duplicate or non-increasing task id). The sink must terminate the host
 /// gracefully; the reader only reports the cause and stops its queue.
 pub type ReaderFatalSink = Arc<dyn Fn(String) + Send + Sync>;
-pub type BacklogForwardResult = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>>;
+pub type BacklogForwardResult = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>,
+>;
 pub type BacklogForwardCall = Arc<dyn Fn(AllocatedTask) -> BacklogForwardResult + Send + Sync>;
 #[derive(Clone)]
 pub struct BacklogForward {
@@ -406,7 +440,11 @@ pub type DispatchCheck = Arc<
 >;
 impl TaskReader {
     pub fn set_backlog_forwarder(&self, forward: BacklogForward) {
-        *self.inner.backlog_forward.lock().expect("matching reader forwarder lock") = Some(forward);
+        *self
+            .inner
+            .backlog_forward
+            .lock()
+            .expect("matching reader forwarder lock") = Some(forward);
     }
     pub fn with_metric_context(
         &self,
@@ -502,7 +540,17 @@ impl TaskReader {
             crate::matching_metrics::PollMetricContext,
         )>,
     ) -> Self {
-        Self::with_dispatch_check_metrics_forwarding(queue, wake, config, active, limiter, isolation, dispatch_check, metric_context, None)
+        Self::with_dispatch_check_metrics_forwarding(
+            queue,
+            wake,
+            config,
+            active,
+            limiter,
+            isolation,
+            dispatch_check,
+            metric_context,
+            None,
+        )
     }
     // Install forwarding before spawning either the reader pump or dispatchers.
     // A restored child backlog must never get stuck in a local-only offer.
@@ -522,8 +570,16 @@ impl TaskReader {
         backlog_forward: Option<BacklogForward>,
     ) -> Self {
         Self::with_fatal_invariant_sink(
-            queue, wake, config, active, limiter, isolation, dispatch_check, metric_context,
-            backlog_forward, None,
+            queue,
+            wake,
+            config,
+            active,
+            limiter,
+            isolation,
+            dispatch_check,
+            metric_context,
+            backlog_forward,
+            None,
         )
     }
     // The fatal sink is a constructor argument, not a setter: the pump task is
@@ -657,7 +713,14 @@ impl TaskReader {
                                 Ok(true) => {
                                     let queue = dispatch_queue.clone();
                                     let id = task.task_id;
-                                    if !matches!(crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await, Ok(Ok(_))) {
+                                    if !matches!(
+                                        crate::matching_blocking::run(move || {
+                                            queue.complete(id)?;
+                                            queue.run_garbage_collection(false).map(|_| ())
+                                        })
+                                        .await,
+                                        Ok(Ok(_))
+                                    ) {
                                         dispatch_queue.stop();
                                         break 'dispatch;
                                     }
@@ -687,26 +750,28 @@ impl TaskReader {
                         }
                         // Go `newDispatchContext`: the deadline only applies to an
                         // active (or unknown) domain above the 1e-7 noise floor.
-                    let original_group = task
-                        .data
-                        .partition_config
-                        .as_ref()
-                        .and_then(|config| config.get("isolation-group"))
-                        .map(String::as_str)
-                        .unwrap_or_default();
-                    let (group, mut isolation_duration, leak_cause) =
-                        (isolation.select)(&task.data);
-                    if let (Some(cause), Some(reader_metrics)) = (
-                        leak_cause,
-                        dispatch_metrics
-                            .lock()
-                            .expect("matching reader metrics lock")
-                            .as_ref(),
-                    ) {
-                        reader_metrics
-                            .metrics
-                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
-                    }
+                        let original_group = task
+                            .data
+                            .partition_config
+                            .as_ref()
+                            .and_then(|config| config.get("isolation-group"))
+                            .map(String::as_str)
+                            .unwrap_or_default();
+                        let (group, mut isolation_duration, leak_cause) =
+                            (isolation.select)(&task.data);
+                        if let (Some(cause), Some(reader_metrics)) = (
+                            leak_cause,
+                            dispatch_metrics
+                                .lock()
+                                .expect("matching reader metrics lock")
+                                .as_ref(),
+                        ) {
+                            reader_metrics.metrics.task_isolation_leak(
+                                &reader_metrics.context,
+                                original_group,
+                                cause,
+                            );
+                        }
                         let target = isolated.get(&group).unwrap_or_else(|| {
                             isolation_duration = 0;
                             &matcher
@@ -760,24 +825,44 @@ impl TaskReader {
                                     Attempt::Stopped
                                 };
                             };
-                            let first_deadline = tokio::time::Instant::now() + (forwarder.local_wait)();
-                            match target.offer_until(dispatched.clone(), dispatch_stop.clone(), first_deadline).await {
+                            let first_deadline =
+                                tokio::time::Instant::now() + (forwarder.local_wait)();
+                            match target
+                                .offer_until(
+                                    dispatched.clone(),
+                                    dispatch_stop.clone(),
+                                    first_deadline,
+                                )
+                                .await
+                            {
                                 Some(true) => return Attempt::Offered,
                                 None => return Attempt::Stopped,
                                 Some(false) => (),
                             }
                             let mut attempt = 0u64;
                             loop {
-                                if *dispatch_stop.borrow() { return Attempt::Stopped; }
+                                if *dispatch_stop.borrow() {
+                                    return Attempt::Stopped;
+                                }
                                 // Go selects between a local poller and an
                                 // outstanding-forward token; once the token is
                                 // taken the forward call itself is not raced.
-                                let token = match target.offer_or_token(dispatched.clone(), dispatch_stop.clone(), &forwarder.tokens).await {
+                                let token = match target
+                                    .offer_or_token(
+                                        dispatched.clone(),
+                                        dispatch_stop.clone(),
+                                        &forwarder.tokens,
+                                    )
+                                    .await
+                                {
                                     Some(Ok(token)) => token,
-                                    Some(Err(())) => return Attempt::OfferedAfterForwardRetry(attempt),
+                                    Some(Err(())) => {
+                                        return Attempt::OfferedAfterForwardRetry(attempt)
+                                    }
                                     None => return Attempt::Stopped,
                                 };
-                                let forward_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+                                let forward_deadline =
+                                    tokio::time::Instant::now() + Duration::from_secs(2);
                                 let forward_started = std::time::Instant::now();
                                 let result = tokio::select! {
                                     result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())) => result,
@@ -803,16 +888,34 @@ impl TaskReader {
                                 match result {
                                     Ok(Ok(())) => return Attempt::Forwarded(attempt),
                                     Ok(Err(error)) => {
-                                        if matches!(error, crate::matching_forward::ForwardError::SlowDown) {
-                                            if let Some(metrics) = dispatch_metrics.lock().expect("matching reader metrics lock").as_ref() {
-                                                metrics.metrics.async_forward_throttled(&metrics.context);
+                                        if matches!(
+                                            error,
+                                            crate::matching_forward::ForwardError::SlowDown
+                                        ) {
+                                            if let Some(metrics) = dispatch_metrics
+                                                .lock()
+                                                .expect("matching reader metrics lock")
+                                                .as_ref()
+                                            {
+                                                metrics
+                                                    .metrics
+                                                    .async_forward_throttled(&metrics.context);
                                             }
                                         }
                                     }
                                     Err(_) => (),
                                 }
-                                match target.offer_until(dispatched.clone(), dispatch_stop.clone(), forward_deadline).await {
-                                    Some(true) => return Attempt::OfferedAfterForwardFailure(attempt),
+                                match target
+                                    .offer_until(
+                                        dispatched.clone(),
+                                        dispatch_stop.clone(),
+                                        forward_deadline,
+                                    )
+                                    .await
+                                {
+                                    Some(true) => {
+                                        return Attempt::OfferedAfterForwardFailure(attempt)
+                                    }
                                     None => return Attempt::Stopped,
                                     Some(false) => (),
                                 }
@@ -882,8 +985,16 @@ impl TaskReader {
                                 break;
                             }
                             Attempt::OfferedAfterForwardRetry(attempt) => {
-                                if let Some(metrics) = dispatch_metrics.lock().expect("matching reader metrics lock").as_ref() {
-                                    metrics.metrics.async_match_local(&metrics.context, Some(*attempt), dispatch_started.elapsed());
+                                if let Some(metrics) = dispatch_metrics
+                                    .lock()
+                                    .expect("matching reader metrics lock")
+                                    .as_ref()
+                                {
+                                    metrics.metrics.async_match_local(
+                                        &metrics.context,
+                                        Some(*attempt),
+                                        dispatch_started.elapsed(),
+                                    );
                                 }
                                 break;
                             }
@@ -901,7 +1012,11 @@ impl TaskReader {
                                 }
                                 let queue = dispatch_queue.clone();
                                 let id = task.task_id;
-                                let completion = crate::matching_blocking::run(move || { queue.complete(id)?; queue.run_garbage_collection(false).map(|_| ()) }).await;
+                                let completion = crate::matching_blocking::run(move || {
+                                    queue.complete(id)?;
+                                    queue.run_garbage_collection(false).map(|_| ())
+                                })
+                                .await;
                                 let completion_ok = matches!(&completion, Ok(Ok(_)));
                                 adaptive_reader_trace(&trace_list, "reader_durable_completion", format_args!(
                                     "root_partition={} partition={} workflow_id={} run_id={} schedule_id={} task_id={} outcome={}",
@@ -921,11 +1036,13 @@ impl TaskReader {
                                     .expect("matching reader metrics lock")
                                     .as_ref()
                                 {
-                                    reader_metrics.metrics.async_match_local_after_forward_failure(
-                                        &reader_metrics.context,
-                                        *attempt,
-                                        dispatch_started.elapsed(),
-                                    );
+                                    reader_metrics
+                                        .metrics
+                                        .async_match_local_after_forward_failure(
+                                            &reader_metrics.context,
+                                            *attempt,
+                                            dispatch_started.elapsed(),
+                                        );
                                 }
                                 break;
                             }
@@ -970,9 +1087,9 @@ impl TaskReader {
                 let queue_copy = queue.clone();
                 // Go reads the scan range and batch size on every bounded read.
                 let (range, batch) = (config.read_range_size(), config.read_batch_size());
-                let result = crate::matching_blocking::run(move || {
-                    queue_copy.reader_turn(range, batch)
-                }).await;
+                let result =
+                    crate::matching_blocking::run(move || queue_copy.reader_turn(range, batch))
+                        .await;
                 if *pump_stop.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -1026,7 +1143,10 @@ impl TaskReader {
                         Ok(Some(task)) => task,
                         Ok(None) => break,
                         Err(error) => {
-                            if let cadence_persistence::matching_queue::QueueError::ReaderState(detail) = &error {
+                            if let cadence_persistence::matching_queue::QueueError::ReaderState(
+                                detail,
+                            ) = &error
+                            {
                                 if let Some(sink) = &fatal_invariant {
                                     sink(detail.clone());
                                 }
@@ -1053,9 +1173,11 @@ impl TaskReader {
                             .expect("matching reader metrics lock")
                             .as_ref(),
                     ) {
-                        reader_metrics
-                            .metrics
-                            .task_isolation_leak(&reader_metrics.context, original_group, cause);
+                        reader_metrics.metrics.task_isolation_leak(
+                            &reader_metrics.context,
+                            original_group,
+                            cause,
+                        );
                     }
                     let buffer_send = buffer_senders
                         .get(&group)
@@ -1236,7 +1358,10 @@ mod tests {
             };
             assert_eq!(config.raw_batch_size(), value);
             // The read path still validates the same raw value to the default.
-            assert_eq!(config.read_batch_size().get(), DEFAULT_TASKS_BATCH_SIZE as u32);
+            assert_eq!(
+                config.read_batch_size().get(),
+                DEFAULT_TASKS_BATCH_SIZE as u32
+            );
         }
     }
 
@@ -1453,9 +1578,7 @@ mod tests {
         stop(queue, reader).await;
     }
     // --- Go task_reader.go logger.Fatal on ackManager.ReadItem failure ---
-    fn scripted_queue(
-        ids: Vec<i64>,
-    ) -> (tempfile::TempDir, Arc<DurableTaskQueue>) {
+    fn scripted_queue(ids: Vec<i64>) -> (tempfile::TempDir, Arc<DurableTaskQueue>) {
         let directory = tempfile::tempdir().unwrap();
         let sqlite = Arc::new(
             SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
@@ -1483,10 +1606,7 @@ mod tests {
         queue.append(&[TaskData::default()], now()).unwrap();
         (directory, queue)
     }
-    fn scripted_reader(
-        queue: &Arc<DurableTaskQueue>,
-        sink: ReaderFatalSink,
-    ) -> TaskReader {
+    fn scripted_reader(queue: &Arc<DurableTaskQueue>, sink: ReaderFatalSink) -> TaskReader {
         TaskReader::with_fatal_invariant_sink(
             queue.clone(),
             Arc::new(Notify::new()),
@@ -1615,14 +1735,10 @@ mod tests {
         wake.notify_waiters();
         wait_read(&queue, 1).await;
         tokio::time::timeout(Duration::from_secs(2), async {
-            while !sink
-                .events()
-                .iter()
-                .any(|event| {
-                    event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST
-                        && event.value == crate::matching_metrics::MetricValue::Number(1.0)
-                })
-            {
+            while !sink.events().iter().any(|event| {
+                event.name == crate::matching_metrics::TASK_BACKLOG_PER_TASK_LIST
+                    && event.value == crate::matching_metrics::MetricValue::Number(1.0)
+            }) {
                 tokio::task::yield_now().await;
             }
         })
@@ -1718,7 +1834,6 @@ mod tests {
         stop(queue, grouped).await;
     }
 
-
     /// Go TestRateLimitErrorsFromTasklistDispatch: a throttled dispatch is
     /// retried (counted as a buffer throttle) and the task is neither
     /// dropped nor acked. Go injects `dispatchTask`; Rust has no hook, so a
@@ -1753,17 +1868,34 @@ mod tests {
         reader.with_metric_context(
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             crate::matching_metrics::PollMetricContext {
-                domain: "reader-domain".into(), task_list: "reader".into(),
-                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+                domain: "reader-domain".into(),
+                task_list: "reader".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
             },
         );
-        queue.append(&[TaskData { schedule_id: 3, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 3,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
         tokio::time::timeout(Duration::from_secs(3), async {
-            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::BUFFER_THROTTLE_COUNT) {
+            while !sink
+                .events()
+                .iter()
+                .any(|event| event.name == crate::matching_metrics::BUFFER_THROTTLE_COUNT)
+            {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(queue.levels().1, 0, "throttled task must not be acked");
         stop(queue, reader).await;
     }
@@ -1775,8 +1907,11 @@ mod tests {
         reader.with_metric_context(
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             crate::matching_metrics::PollMetricContext {
-                domain: "reader-domain".into(), task_list: "child-list".into(),
-                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+                domain: "reader-domain".into(),
+                task_list: "child-list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
             },
         );
         let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1789,15 +1924,31 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 7, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 7,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
         tokio::time::timeout(Duration::from_secs(3), async {
-            while queue.levels().1 < 1 { tokio::task::yield_now().await; }
-        }).await.unwrap();
+            while queue.levels().1 < 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         assert_eq!(forwarded.load(Ordering::SeqCst), 1);
         let events = sink.events();
-        assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL));
-        assert!(events.iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL_LATENCY));
+        assert!(events
+            .iter()
+            .any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL));
+        assert!(events
+            .iter()
+            .any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_FORWARD_POLL_LATENCY));
         stop(queue, reader).await;
     }
 
@@ -1808,8 +1959,11 @@ mod tests {
         reader.with_metric_context(
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             crate::matching_metrics::PollMetricContext {
-                domain: "reader-domain".into(), task_list: "child-list".into(),
-                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+                domain: "reader-domain".into(),
+                task_list: "child-list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
             },
         );
         let attempted = Arc::new(Notify::new());
@@ -1822,24 +1976,48 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 11, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 11,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
-        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified())
+            .await
+            .unwrap();
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(delivered.data.schedule_id, 11);
-        assert!(sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_FORWARD_TASK_THROTTLE_ERRORS));
+        assert!(
+            sink.events()
+                .iter()
+                .any(|event| event.name
+                    == crate::matching_metrics::ASYNC_FORWARD_TASK_THROTTLE_ERRORS)
+        );
         // Go records the metric after the send to the poller completes
         // (matcher.go:396-403), so it lands after poll() returns.
         tokio::time::timeout(Duration::from_secs(2), async {
-            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED) {
+            while !sink.events().iter().any(|event| {
+                event.name == crate::matching_metrics::ASYNC_MATCH_LOCAL_AFTER_FORWARD_FAILED
+            }) {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         stop(queue, reader).await;
     }
 
     fn test_tokens(count: i64) -> Arc<crate::matching_forward::RequestTokens> {
-        Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(move || count)))
+        Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(
+            move || count,
+        )))
     }
 
     #[tokio::test]
@@ -1855,9 +2033,20 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 21, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 21,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
-        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(delivered.data.schedule_id, 21);
         assert_eq!(forwarded.load(Ordering::SeqCst), 0);
         stop(queue, reader).await;
@@ -1872,15 +2061,36 @@ mod tests {
             tokens: test_tokens(1),
             forward: Arc::new(move |_task| {
                 attempted_forward.notify_one();
-                Box::pin(async { Err(crate::matching_forward::ForwardError::Remote(tonic::Status::unavailable("parent down"))) })
+                Box::pin(async {
+                    Err(crate::matching_forward::ForwardError::Remote(
+                        tonic::Status::unavailable("parent down"),
+                    ))
+                })
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 22, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 22,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
-        assert_eq!(queue.levels().1, 0, "failed forward must not ack the durable row");
-        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified())
+            .await
+            .unwrap();
+        assert_eq!(
+            queue.levels().1,
+            0,
+            "failed forward must not ack the durable row"
+        );
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(delivered.data.schedule_id, 22);
         stop(queue, reader).await;
     }
@@ -1901,14 +2111,18 @@ mod tests {
         });
         queue.append(&[TaskData::default()], now()).unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         stop(queue, reader).await;
     }
 
     #[tokio::test]
     async fn matching_reader_forward_errors_retry_only_after_two_second_child_context() {
-        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_secs(10), true);
+        let (_directory, queue, reader, wake) =
+            configured_fixture(0, 1, Duration::from_secs(10), true);
         let attempts = Arc::new(Mutex::new(Vec::new()));
         let observed = attempts.clone();
         reader.set_backlog_forwarder(BacklogForward {
@@ -1922,8 +2136,12 @@ mod tests {
         queue.append(&[TaskData::default()], now()).unwrap();
         wake.notify_waiters();
         tokio::time::timeout(Duration::from_secs(5), async {
-            while attempts.lock().unwrap().len() < 2 { tokio::time::sleep(Duration::from_millis(5)).await; }
-        }).await.unwrap();
+            while attempts.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
         {
             let attempts = attempts.lock().unwrap();
             assert!(attempts[1].duration_since(attempts[0]) >= Duration::from_secs(2));
@@ -1950,8 +2168,12 @@ mod tests {
         });
         queue.append(&[TaskData::default()], now()).unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(1), stop(queue.clone(), reader)).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), stop(queue.clone(), reader))
+            .await
+            .unwrap();
         assert_eq!(queue.levels().1, 0);
         assert!(tokens.try_acquire().is_some());
     }
@@ -1960,24 +2182,49 @@ mod tests {
     // and a later poller receives the same row.
     #[tokio::test]
     async fn matching_reader_dispatch_timeout_without_poller_keeps_row_unacked() {
-        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_millis(50), true);
+        let (_directory, queue, reader, wake) =
+            configured_fixture(0, 1, Duration::from_millis(50), true);
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         reader.with_metric_context(
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             crate::matching_metrics::PollMetricContext {
-                domain: "reader-domain".into(), task_list: "child-list".into(),
-                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+                domain: "reader-domain".into(),
+                task_list: "child-list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
             },
         );
-        queue.append(&[TaskData { schedule_id: 31, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 31,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
         tokio::time::timeout(Duration::from_secs(2), async {
-            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS) {
+            while !sink
+                .events()
+                .iter()
+                .any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS)
+            {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
-        assert_eq!(queue.levels().1, 0, "dispatch timeout must not ack the durable row");
-        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            queue.levels().1,
+            0,
+            "dispatch timeout must not ack the durable row"
+        );
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(delivered.data.schedule_id, 31);
         stop(queue, reader).await;
     }
@@ -1987,13 +2234,17 @@ mod tests {
     // dispatch leaves the durable row unacknowledged.
     #[tokio::test]
     async fn matching_reader_dispatch_timeout_without_token_never_forwards_or_acks() {
-        let (_directory, queue, reader, wake) = configured_fixture(0, 1, Duration::from_millis(50), true);
+        let (_directory, queue, reader, wake) =
+            configured_fixture(0, 1, Duration::from_millis(50), true);
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         reader.with_metric_context(
             crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             crate::matching_metrics::PollMetricContext {
-                domain: "reader-domain".into(), task_list: "child-list".into(),
-                task_list_kind: 0, task_type: "decision_task", poller_isolation_group: String::new(),
+                domain: "reader-domain".into(),
+                task_list: "child-list".into(),
+                task_list_kind: 0,
+                task_type: "decision_task",
+                poller_isolation_group: String::new(),
             },
         );
         let forwarded = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2006,16 +2257,41 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 32, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 32,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
         tokio::time::timeout(Duration::from_secs(2), async {
-            while !sink.events().iter().any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS) {
+            while !sink
+                .events()
+                .iter()
+                .any(|event| event.name == crate::matching_metrics::ASYNC_MATCH_DISPATCH_TIMEOUTS)
+            {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
-        assert_eq!(forwarded.load(Ordering::SeqCst), 0, "no token means no forward");
-        assert_eq!(queue.levels().1, 0, "expired dispatch must not ack the durable row");
-        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll()).await.unwrap().unwrap();
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            forwarded.load(Ordering::SeqCst),
+            0,
+            "no token means no forward"
+        );
+        assert_eq!(
+            queue.levels().1,
+            0,
+            "expired dispatch must not ack the durable row"
+        );
+        let delivered = tokio::time::timeout(Duration::from_secs(2), reader.poll())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(delivered.data.schedule_id, 32);
         stop(queue, reader).await;
     }
@@ -2039,18 +2315,42 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 33, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 33,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified())
+            .await
+            .unwrap();
         // Shorter than the 2-second forward deadline and the 3-second dispatch timeout.
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(forwarded.load(Ordering::SeqCst), 1, "one token admits one in-flight forward");
-        assert!(tokens.try_acquire().is_none(), "the in-flight forward holds the only token");
+        assert_eq!(
+            forwarded.load(Ordering::SeqCst),
+            1,
+            "one token admits one in-flight forward"
+        );
+        assert!(
+            tokens.try_acquire().is_none(),
+            "the in-flight forward holds the only token"
+        );
         assert_eq!(queue.levels().1, 0);
         let queue_for_levels = queue.clone();
         stop(queue, reader).await;
-        assert_eq!(queue_for_levels.levels().1, 0, "stopping an in-flight forward must not ack");
-        assert!(tokens.try_acquire().is_some(), "stopping releases the token held by the forward");
+        assert_eq!(
+            queue_for_levels.levels().1,
+            0,
+            "stopping an in-flight forward must not ack"
+        );
+        assert!(
+            tokens.try_acquire().is_some(),
+            "stopping releases the token held by the forward"
+        );
     }
 
     // Go TestMustOffer_ContextExpiredAfterForwardError: a forward error keeps
@@ -2073,20 +2373,45 @@ mod tests {
             }),
             local_wait: Arc::new(|| Duration::ZERO),
         });
-        queue.append(&[TaskData { schedule_id: 34, ..TaskData::default() }], now()).unwrap();
+        queue
+            .append(
+                &[TaskData {
+                    schedule_id: 34,
+                    ..TaskData::default()
+                }],
+                now(),
+            )
+            .unwrap();
         wake.notify_waiters();
-        tokio::time::timeout(Duration::from_secs(2), attempted.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), attempted.notified())
+            .await
+            .unwrap();
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                if tokens.try_acquire().is_some() { break; }
+                if tokens.try_acquire().is_some() {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
-        assert_eq!(forwarded.load(Ordering::SeqCst), 1, "one token admits one forward");
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            forwarded.load(Ordering::SeqCst),
+            1,
+            "one token admits one forward"
+        );
         let queue_for_levels = queue.clone();
         stop(queue, reader).await;
-        assert_eq!(queue_for_levels.levels().1, 0, "cancelled retry must not ack the durable row");
-        assert!(tokens.try_acquire().is_some(), "the failed forward's token is free after cancellation");
+        assert_eq!(
+            queue_for_levels.levels().1,
+            0,
+            "cancelled retry must not ack the durable row"
+        );
+        assert!(
+            tokens.try_acquire().is_some(),
+            "the failed forward's token is free after cancellation"
+        );
     }
 
     #[tokio::test]
@@ -2102,10 +2427,15 @@ mod tests {
             local_wait: Arc::new(|| Duration::ZERO),
         };
         // The row exists before the reader starts, as after manager reload.
-        let (_directory, queue, reader, _wake) = configured_fixture_with_forwarding(1, 1, Duration::from_secs(3), true, Some(forward));
+        let (_directory, queue, reader, _wake) =
+            configured_fixture_with_forwarding(1, 1, Duration::from_secs(3), true, Some(forward));
         tokio::time::timeout(Duration::from_secs(3), async {
-            while queue.levels().1 < 1 { tokio::task::yield_now().await; }
-        }).await.unwrap();
+            while queue.levels().1 < 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         stop(queue, reader).await;
     }
@@ -2396,9 +2726,8 @@ mod tests {
     async fn matching_reader_dispatches_new_task_to_waiting_poller_then_acks() {
         let (_directory, queue, reader, wake) = fixture(0, 1);
         let waiting = reader.inner.clone();
-        let poller = tokio::spawn(async move {
-            waiting.matcher.poll(waiting.stop.subscribe()).await
-        });
+        let poller =
+            tokio::spawn(async move { waiting.matcher.poll(waiting.stop.subscribe()).await });
         tokio::time::sleep(Duration::from_millis(50)).await;
         queue.append(&[TaskData::default()], now()).unwrap();
         wake.notify_waiters();

@@ -24,6 +24,15 @@ type Key = (Uuid, String, i32);
 type StartupGates = HashMap<Key, Weak<Mutex<()>>>;
 type LocalPollFactory = Arc<dyn Fn(QueueRegistry) -> crate::grpc_matching::Matching + Send + Sync>;
 
+/// Dropping an RPC future cancels its Go context even when no deadline was set.
+/// Blocking persistence cannot be interrupted mid-call; its next retry wait observes this flag.
+struct PartitionUpdateCancellation(Arc<std::sync::atomic::AtomicBool>);
+impl Drop for PartitionUpdateCancellation {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// One partition's DescribeTaskList state as the adaptive scaler consumes it
 /// (Go `toPartitionMetrics` inputs). `groups` holds each isolation group's
 /// arrival QPS and whether it has pollers.
@@ -2001,6 +2010,7 @@ impl QueueRegistry {
     }
 
     /// Like `_with_deadline`, with the metrics domain name already resolved by the RPC layer.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_partition_config_for_domain(
         &self,
         key: TaskListKey,
@@ -2023,7 +2033,8 @@ impl QueueRegistry {
     }
 
     /// `scaler_ctx`: the caller context is the manager's own (Go `a.ctx`), cancelled
-    /// when the queue stops; manual updates only observe the RPC deadline.
+    /// when the queue stops; manual updates observe deadline and caller cancellation.
+    #[allow(clippy::too_many_arguments)]
     async fn update_partition_config_inner(
         &self,
         key: TaskListKey,
@@ -2038,13 +2049,16 @@ impl QueueRegistry {
         let domain_id = key.domain_id;
         let task_type = key.task_type;
         let task_list_kind = handle.queue.task_list_kind();
+        let caller_cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _cancel_on_drop = PartitionUpdateCancellation(caller_cancelled.clone());
         let notification = tokio::task::spawn_blocking(move || {
             // The closure outlives a dropped caller future (tonic drops the handler at
             // the gRPC deadline), so retry cut-off and the failure counter happen here,
             // like Go's `throttleRetry.Do(ctx, ...)` and `IncCounter` at the failure point.
             let deadline = caller_deadline.map(tokio::time::Instant::into_std);
             let cancelled = || {
-                deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+                caller_cancelled.load(std::sync::atomic::Ordering::Acquire)
+                    || deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
                     || (scaler_ctx && handle.queue.is_stopped())
             };
             let on_failure = || {
@@ -3968,3 +3982,7 @@ mod tests {
         pump.await.unwrap().unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "matching_partition_cancellation_tests.rs"]
+mod partition_cancellation_tests;

@@ -1444,6 +1444,9 @@ mod tests {
                 if detail.contains("less than or equal to current read level")
         ));
         runtime.shutdown().await.unwrap();
-        assert!(fatal_rx.try_recv().is_err(), "a single violation reports once");
+        assert!(
+            fatal_rx.try_recv().is_err(),
+            "a single violation reports once"
+        );
     }
 }

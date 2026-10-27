@@ -4,8 +4,8 @@
 use super::*;
 use crate::matching_semaphore::{Identifier, ManagerError};
 use cadence_common::membership::Host;
-use uuid::Uuid;
 use std::sync::Arc;
+use uuid::Uuid;
 
 fn host(n: u32) -> Host {
     Host {
@@ -16,7 +16,8 @@ fn host(n: u32) -> Host {
 }
 
 fn engine_with(membership: &crate::matching_membership::Membership) -> Matching {
-    let (_dir, _store, matching, _key) = super::durable_tests::fixture_with_history("http://127.0.0.1:1");
+    let (_dir, _store, matching, _key) =
+        super::durable_tests::fixture_with_history("http://127.0.0.1:1");
     // Keep the tempdir alive for the whole test process; the store is only used for metadata.
     std::mem::forget(_dir);
     let domain = Uuid::from_u128(1).to_string();
@@ -50,10 +51,8 @@ async fn load(matching: &Matching, id: Identifier) -> Arc<crate::matching_semaph
 // usable, only the bucket that moved to the other host is stopped and unregistered.
 #[tokio::test]
 async fn membership_change_keeps_owned_semaphore_bucket_and_stops_moved_one() {
-    let membership = crate::matching_membership::Membership::new(
-        "rust-matching-0",
-        vec![host(0), host(1)],
-    );
+    let membership =
+        crate::matching_membership::Membership::new("rust-matching-0", vec![host(0), host(1)]);
     let owned = (0..512)
         .map(bucket)
         .find(|id| membership.owns(&id.ring_key()).unwrap())
@@ -119,9 +118,10 @@ async fn semaphore_ownership_check_distinguishes_lookup_error_from_not_owned() {
     let error = matching.check_semaphore_ownership(&id).unwrap_err();
     assert_eq!(error.code(), tonic::Code::Internal);
     assert!(
-        error
-            .message()
-            .contains(&format!("failed to look up the owner of semaphore bucket {}", id.to_log_string())),
+        error.message().contains(&format!(
+            "failed to look up the owner of semaphore bucket {}",
+            id.to_log_string()
+        )),
         "{}",
         error.message()
     );
@@ -131,7 +131,9 @@ async fn semaphore_ownership_check_distinguishes_lookup_error_from_not_owned() {
     let error = matching.check_semaphore_ownership(&id).unwrap_err();
     assert_eq!(error.code(), tonic::Code::Aborted);
     assert!(
-        error.message().contains("OwnedBy: rust-matching-1, Me: rust-matching-0"),
+        error
+            .message()
+            .contains("OwnedBy: rust-matching-1, Me: rust-matching-0"),
         "{}",
         error.message()
     );

@@ -462,14 +462,26 @@ mod tests {
         let failures = std::cell::Cell::new(0);
         // Validation failure: no counter.
         cache
-            .update_until(&queue, request(1, 3), 2, || false, || failures.set(failures.get() + 1))
+            .update_until(
+                &queue,
+                request(1, 3),
+                2,
+                || false,
+                || failures.set(failures.get() + 1),
+            )
             .unwrap_err();
         assert_eq!(failures.get(), 0);
         // Fencing failure, even with an already cancelled caller: first attempt runs and
         // the counter fires exactly once; ConditionFailed is not retried.
         let _owner = open(3);
         let error = cache
-            .update_until(&queue, request(3, 3), 4, || true, || failures.set(failures.get() + 1))
+            .update_until(
+                &queue,
+                request(3, 3),
+                4,
+                || true,
+                || failures.set(failures.get() + 1),
+            )
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert_eq!(failures.get(), 1);

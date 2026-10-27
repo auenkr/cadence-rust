@@ -11,13 +11,22 @@ async fn main() -> anyhow::Result<()> {
         .with_ansi(false)
         .compact()
         .init();
-    match cadence_matching::launcher::run("cadence-matching", Some(&[ServiceName::Matching])).await {
-        Err(error) if error.downcast_ref::<cadence_matching::launcher::SqlMatchingWriterFatal>().is_some() => {
+    match cadence_matching::launcher::run("cadence-matching", Some(&[ServiceName::Matching])).await
+    {
+        Err(error)
+            if error
+                .downcast_ref::<cadence_matching::launcher::SqlMatchingWriterFatal>()
+                .is_some() =>
+        {
             eprintln!("{error:#}");
             std::process::exit(2);
         }
         // Go zap Logger.Fatal (task reader invariant) exits with status 1.
-        Err(error) if error.downcast_ref::<cadence_matching::launcher::MatchingReaderFatal>().is_some() => {
+        Err(error)
+            if error
+                .downcast_ref::<cadence_matching::launcher::MatchingReaderFatal>()
+                .is_some() =>
+        {
             eprintln!("{error:#}");
             std::process::exit(1);
         }

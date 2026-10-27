@@ -2877,7 +2877,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "QueryWorkflow",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3647,7 +3648,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "CancelOutstandingPoll",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3745,7 +3747,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "RespondQueryTaskCompleted",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .await
                             .as_deref(),
                         request
                             .get_ref()
@@ -3864,7 +3867,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                 self.metrics
                     .matching_request(
                         "DescribeTaskList",
-                        self.metric_domain_name(request.get_ref().domain_id.as_str()).await
+                        self.metric_domain_name(request.get_ref().domain_id.as_str())
+                            .await
                             .as_deref(),
                         request
                             .get_ref()
@@ -4316,7 +4320,10 @@ fn adaptive_scaler_trace(task_list: &str, boundary: &str, fields: &str) {
     {
         eprintln!(
             "matching_adaptive_trace ts={} task_list={} boundary={} {}",
-            matching_now(), task_list, boundary, fields
+            matching_now(),
+            task_list,
+            boundary,
+            fields
         );
     }
 }

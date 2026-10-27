@@ -3,7 +3,7 @@
 //! has passed the 24 hour safety window.
 use cadence_common::{ExponentialRetryPolicy, Retrier};
 use cadence_proto::{api as p, history as h};
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 use tonic::Status;
 
 pub type Enabled = Arc<dyn Fn(&str, &str, i32) -> bool + Send + Sync>;
@@ -86,6 +86,32 @@ fn completer_retry_policy() -> ExponentialRetryPolicy {
         .with_expiration_interval(Duration::from_secs(300))
 }
 
+async fn retry_completion<F, Fut, S, SFut, E>(
+    policy: ExponentialRetryPolicy,
+    mut attempt: F,
+    mut sleep: S,
+    mut elapsed: E,
+) -> Result<Option<bool>, Status>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<Option<bool>, Status>>,
+    S: FnMut(Duration) -> SFut,
+    SFut: Future<Output = ()>,
+    E: FnMut() -> Duration,
+{
+    let mut retrier = Retrier::new(policy);
+    loop {
+        let result = attempt().await;
+        if matches!(result, Ok(Some(_))) {
+            return result;
+        }
+        let Some(delay) = retrier.next_backoff_at(&mut rand::thread_rng(), elapsed()) else {
+            return result;
+        };
+        sleep(delay).await;
+    }
+}
+
 pub fn checker(
     domains: cadence_persistence::InMemoryDomainStore,
     cluster: String,
@@ -110,8 +136,18 @@ pub fn checker(
                 armed: true,
             };
             let domain = key.domain_id.to_string();
-            let mut retrier = Retrier::new(completer_retry_policy());
-            loop {
+            let started = std::time::Instant::now();
+            let result = retry_completion(completer_retry_policy(), || {
+                let domains = domains.clone();
+                let cluster = cluster.clone();
+                let history = history.clone();
+                let key = key.clone();
+                let enabled = enabled.clone();
+                let metrics = metrics.clone();
+                let metric_context = metric_context.clone();
+                let domain = domain.clone();
+                let task = task.clone();
+                async move {
                 let result: Result<Option<bool>, Status> = async {
                     if domains
                         .is_active_in(&domain, &cluster)
@@ -186,15 +222,13 @@ pub fn checker(
                     Ok(completed)
                 }
                 .await;
-                if let Ok(Some(completed)) = result {
-                    cancellation.armed = false;
-                    return Ok(completed);
+                result
                 }
-                let Some(delay) = retrier.next_backoff(&mut rand::thread_rng()) else {
-                    cancellation.armed = false;
-                    return exhausted(result, &metrics, &metric_context);
-                };
-                tokio::time::sleep(delay).await;
+            }, tokio::time::sleep, || started.elapsed()).await;
+            cancellation.armed = false;
+            match result {
+                Ok(Some(completed)) => Ok(completed),
+                result => exhausted(result, &metrics, &metric_context),
             }
         })
     })
@@ -245,6 +279,44 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, STANDBY_TASKS_COMPLETION_FAILURE);
         assert_eq!(events[0].tags[DOMAIN_TAG], "domain");
+    }
+
+    #[tokio::test]
+    async fn domain_and_history_errors_retry_then_return_original_error_once() {
+        use crate::matching_metrics::*;
+        for message in ["error-getting-domain-by-id", "error-describing-workflow-execution"] {
+            let sink = Arc::new(RecordingMetricSink::default());
+            let metrics = MatchingMetrics::new(sink.clone());
+            let context = poll_context();
+            let mut calls = 0;
+            let elapsed = Arc::new(std::sync::Mutex::new(Duration::ZERO));
+            let sleep_elapsed = elapsed.clone();
+            let clock_elapsed = elapsed.clone();
+            let result = retry_completion(
+                ExponentialRetryPolicy::new(Duration::from_millis(1))
+                    .with_maximum_attempts(3),
+                || {
+                    calls += 1;
+                    let error = Status::unavailable(message);
+                    std::future::ready(Err(error))
+                },
+                move |delay| {
+                    *sleep_elapsed.lock().unwrap() += delay;
+                    std::future::ready(())
+                },
+                move || *clock_elapsed.lock().unwrap(),
+            )
+            .await;
+            let returned = exhausted(result, &metrics, &context).unwrap_err();
+            assert_eq!(calls, 4, "{message}");
+            assert_eq!(returned.message(), message);
+            let failures = sink
+                .events()
+                .iter()
+                .filter(|event| event.name == STANDBY_TASKS_COMPLETION_FAILURE)
+                .count();
+            assert_eq!(failures, 1, "{message}");
+        }
     }
 
     #[test]

@@ -244,9 +244,7 @@ impl TaskWriter {
         notify: Arc<Notify>,
         config: WriterConfig,
         live_config: Option<crate::matching_registry::WriterLiveConfig>,
-        fatal: Option<
-            crate::matching_fatal::MatchingFatalSender,
-        >,
+        fatal: Option<crate::matching_fatal::MatchingFatalSender>,
         tracker: Option<Arc<WriterTracker>>,
     ) -> Self {
         let capacity = live_config
@@ -354,7 +352,9 @@ impl TaskWriter {
                             &error
                         {
                             if let Some(fatal) = &fatal {
-                                let _ = fatal.send(crate::matching_fatal::MatchingFatal::SqlRunId(cause.clone()));
+                                let _ = fatal.send(crate::matching_fatal::MatchingFatal::SqlRunId(
+                                    cause.clone(),
+                                ));
                             }
                         }
                         let status = match (&error, kind) {
@@ -777,42 +777,97 @@ mod tests {
         calls: std::sync::atomic::AtomicUsize,
     }
     impl cadence_persistence::matching_task_store::MatchingTaskStore for FlakyCreateStore {
-        fn get_task_list(&self, key: &TaskListKey) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+        fn get_task_list(
+            &self,
+            key: &TaskListKey,
+        ) -> cadence_persistence::matching_task_store::Result<
+            cadence_persistence::matching_task_store::TaskListRecord,
+        > {
             self.inner.get_task_list(key)
         }
-        fn lease(&self, key: &TaskListKey, kind: i16, previous_range: i64, now_nanos: i64) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+        fn lease(
+            &self,
+            key: &TaskListKey,
+            kind: i16,
+            previous_range: i64,
+            now_nanos: i64,
+        ) -> cadence_persistence::matching_task_store::Result<
+            cadence_persistence::matching_task_store::TaskListRecord,
+        > {
             self.inner.lease(key, kind, previous_range, now_nanos)
         }
-        fn update_task_list(&self, key: &TaskListKey, range: i64, data: cadence_persistence::matching_blob::TaskListData, now_nanos: i64) -> cadence_persistence::matching_task_store::Result<()> {
+        fn update_task_list(
+            &self,
+            key: &TaskListKey,
+            range: i64,
+            data: cadence_persistence::matching_blob::TaskListData,
+            now_nanos: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
             self.inner.update_task_list(key, range, data, now_nanos)
         }
-        fn create_tasks_with_domains(&self, key: &TaskListKey, range: i64, now_nanos: i64, tasks: &[(Uuid, &AllocatedTask)]) -> cadence_persistence::matching_task_store::Result<()> {
+        fn create_tasks_with_domains(
+            &self,
+            key: &TaskListKey,
+            range: i64,
+            now_nanos: i64,
+            tasks: &[(Uuid, &AllocatedTask)],
+        ) -> cadence_persistence::matching_task_store::Result<()> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let remaining = self.failures.load(Ordering::SeqCst);
             if remaining > 0 {
                 self.failures.store(remaining - 1, Ordering::SeqCst);
-                return Err(cadence_persistence::matching_task_store::MatchingTaskStoreError::Backend {
-                    kind: self.kind,
-                    message: "injected".into(),
-                });
+                return Err(
+                    cadence_persistence::matching_task_store::MatchingTaskStoreError::Backend {
+                        kind: self.kind,
+                        message: "injected".into(),
+                    },
+                );
             }
             cadence_persistence::matching_task_store::MatchingTaskStore::create_tasks_with_domains(
-                self.inner.as_ref(), key, range, now_nanos, tasks,
+                self.inner.as_ref(),
+                key,
+                range,
+                now_nanos,
+                tasks,
             )
         }
-        fn get_tasks(&self, key: &TaskListKey, read_level: i64, max_read_level: i64, batch_size: i64) -> cadence_persistence::matching_task_store::Result<Vec<AllocatedTask>> {
-            self.inner.get_tasks(key, read_level, max_read_level, batch_size)
+        fn get_tasks(
+            &self,
+            key: &TaskListKey,
+            read_level: i64,
+            max_read_level: i64,
+            batch_size: i64,
+        ) -> cadence_persistence::matching_task_store::Result<Vec<AllocatedTask>> {
+            self.inner
+                .get_tasks(key, read_level, max_read_level, batch_size)
         }
-        fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> cadence_persistence::matching_task_store::Result<i64> {
+        fn task_list_size(
+            &self,
+            key: &TaskListKey,
+            ack_level: i64,
+        ) -> cadence_persistence::matching_task_store::Result<i64> {
             self.inner.task_list_size(key, ack_level)
         }
-        fn complete_task(&self, key: &TaskListKey, task_id: i64) -> cadence_persistence::matching_task_store::Result<()> {
+        fn complete_task(
+            &self,
+            key: &TaskListKey,
+            task_id: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
             self.inner.complete_task(key, task_id)
         }
-        fn complete_tasks_less_than(&self, key: &TaskListKey, id: i64, limit: i64) -> cadence_persistence::matching_task_store::Result<usize> {
+        fn complete_tasks_less_than(
+            &self,
+            key: &TaskListKey,
+            id: i64,
+            limit: i64,
+        ) -> cadence_persistence::matching_task_store::Result<usize> {
             self.inner.complete_tasks_less_than(key, id, limit)
         }
-        fn delete_task_list(&self, key: &TaskListKey, range: i64) -> cadence_persistence::matching_task_store::Result<()> {
+        fn delete_task_list(
+            &self,
+            key: &TaskListKey,
+            range: i64,
+        ) -> cadence_persistence::matching_task_store::Result<()> {
             self.inner.delete_task_list(key, range)
         }
     }
@@ -837,7 +892,11 @@ mod tests {
         let queue = Arc::new(
             DurableTaskQueue::open(
                 store.clone(),
-                TaskListKey { domain_id: domain, name: "rewrite-transient".into(), task_type: 0 },
+                TaskListKey {
+                    domain_id: domain,
+                    name: "rewrite-transient".into(),
+                    task_type: 0,
+                },
                 0,
                 NonZeroU32::new(100).unwrap(),
                 1,

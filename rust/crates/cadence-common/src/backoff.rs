@@ -118,9 +118,19 @@ impl Retrier {
     }
 
     pub fn next_backoff<R: Rng + ?Sized>(&mut self, rng: &mut R) -> Option<Duration> {
+        self.next_backoff_at(rng, self.start.elapsed())
+    }
+
+    /// Computes the next retry delay with caller supplied elapsed time.
+    /// This keeps retry loops testable without sleeping through their expiration.
+    pub fn next_backoff_at<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+        elapsed: Duration,
+    ) -> Option<Duration> {
         let next = self
             .policy
-            .compute_next_delay(rng, self.start.elapsed(), self.current_attempt);
+            .compute_next_delay(rng, elapsed, self.current_attempt);
         self.current_attempt += 1;
         next
     }

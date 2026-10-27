@@ -193,6 +193,10 @@ jobs:
             crates/cadence-matching/src/matching_membership_go_tests.rs
             crates/cadence-matching/tests/matching_concurrent_go_parity.rs
             crates/cadence-persistence/src/matching_retry.rs
+            crates/cadence-matching/src/matching_registry.rs
+            crates/cadence-matching/src/lib.rs
+            crates/cadence-matching/src/matching_partition_cancellation_tests.rs
+            crates/cadence-common/src/backoff.rs
           )
           existing=()
           for file in "${files[@]}"; do
