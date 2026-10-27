@@ -463,7 +463,15 @@ impl Matching {
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> Self {
         self.domain_id_parse = cache.domain_id_parse();
-        self.domain_name_resolver = Some(Arc::new(move |id| cache.get_domain_name(id).ok()));
+        let domains = self.frontend.state.domains.clone();
+        self.domain_name_resolver = Some(Arc::new(move |id| {
+            let domain = cache.get_domain_by_id(id).ok()?;
+            // Go consumers read the cache directly. Rust's quota and workflow
+            // consumers use this metadata view; publish cold discoveries before
+            // they run. Go's change callback intentionally omits new entries.
+            domains.sync_matching_metadata(std::slice::from_ref(&domain));
+            Some(domain.info.name)
+        }));
         self
     }
     #[cfg(test)]

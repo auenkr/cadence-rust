@@ -144,7 +144,11 @@ async fn add_decision_task_metric_resolves_domain_created_after_cache_scan() {
         "the metric must use the canonical name learned by cache read-through"
     );
     assert_eq!(&*source.calls.lock().unwrap(), &[DOMAIN_ID]);
-
+    assert_eq!(
+        matching.domain_name(DOMAIN_ID).as_deref(),
+        Ok(DOMAIN_NAME),
+        "cold discoveries must reach the domain view used by quotas and workflow handlers"
+    );
 }
 
 #[tokio::test]
