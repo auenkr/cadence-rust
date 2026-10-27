@@ -264,6 +264,20 @@ async function adaptiveScaler(ctx) {
   // Use the existing Go SDK worker/client on the changed queue. Its normal
   // workflow and activity loop proves tasks scheduled after the update still
   // traverse Go Frontend/History and Rust Matching successfully.
+  // The opt-in retry-only process gets a fresh 60s SDK suite context while
+  // using this exact already-scaled task list. The full suite below is always
+  // retained and continues to enforce its original completion assertions.
+  if (process.env.CADENCE_ADAPTIVE_RETRY_ONLY === '1') {
+    const retryStarted = Date.now();
+    const retry = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'),
+      env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: ctx.domain,
+        CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList,
+        CADENCE_MIXED_MATCHING_RETRY_ONLY: '1' },
+      encoding: 'utf8', timeout: 90000 });
+    fs.writeFileSync(path.join(ctx.work, 'adaptive-scaler-retry-only-sdk.log'), `${retry.stdout || ''}\n${retry.stderr || ''}`);
+    assert.equal(retry.status, 0, `Go SDK retry-only scenario failed: ${retry.error || retry.status}; see adaptive-scaler-retry-only-sdk.log`);
+    console.log(`adaptive retry-only subprocess passed in ${Date.now() - retryStarted}ms on ${taskList}`);
+  }
   const sdk = spawnSync('go', ['run', '.'], { cwd: path.resolve(__dirname, 'go-sdk'),
     env: { ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: ctx.domain,
       CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_MATCHING_TASK_LIST: taskList,

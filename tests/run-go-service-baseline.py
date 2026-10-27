@@ -69,6 +69,7 @@ parser.add_argument('--probe-pg-gc-domain', action='store_true', help='probe sce
 parser.add_argument('--probe-query-standby', action='store_true', help='probe scenario: QueryWorkflow answered by a poller that only polls the parent partition (requires --rust-services matching)')
 parser.add_argument('--probe-list-partitions', action='store_true', help='probe scenario: ListTaskListPartitions/DescribeTaskList compared with Go semantics on every Rust node and through the Go Frontend; sets matching.numTasklistWritePartitions=3 (requires --rust-services matching)')
 parser.add_argument('--probe-adaptive-scaler', action='store_true', help='probe adaptive Matching scaling with Go SDK completion on a scaled queue (requires --rust-services matching)')
+parser.add_argument('--probe-adaptive-retry-only', action='store_true', help='run an additional fresh-process workflow-task-retry SDK probe on the adaptive scaler queue (requires --probe-adaptive-scaler)')
 parser.add_argument('--probe-durable-restart', action='store_true', help='probe scenario: stop Rust Matching with multi-partition backlog rows, restart, drain every partition (requires --rust-services matching)')
 parser.add_argument('--probe-auto-config-hint', action='store_true', help='probe scenario: decision and activity polls through Go Frontend carry autoConfigHint with enableAutoConfig=false; sets matching.enableClientAutoConfig=false in the dynamic config (requires --rust-services matching, not with --matching-configstore)')
 parser.add_argument('--probe-active-offer', action='store_true', help='probe active decision-task offer: wait for a real Rust Matching poller, then schedule via Go Frontend/History and require task-token delivery without persisted fallback')
@@ -345,6 +346,8 @@ if args.probe_pg_gc_domain and not args.postgres:
     parser.error('--probe-pg-gc-domain requires --postgres')
 if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler) and not production_matching:
     parser.error('Matching probes require --rust-services matching')
+if args.probe_adaptive_retry_only and not args.probe_adaptive_scaler:
+    parser.error('--probe-adaptive-retry-only requires --probe-adaptive-scaler')
 if args.probe_auto_config_hint and not production_matching:
     parser.error('--probe-auto-config-hint requires --rust-services matching')
 if args.probe_auto_config_hint and args.matching_configstore:
@@ -1110,6 +1113,8 @@ try:
                                        (args.probe_adaptive_scaler, 'CADENCE_PROBE_ADAPTIVE_SCALER')):
                         if flag:
                             probe_environment[name] = '1'
+                    if args.probe_adaptive_retry_only:
+                        probe_environment['CADENCE_ADAPTIVE_RETRY_ONLY'] = '1'
                     if args.matching_configstore:
                         seed_values = {
                             'matching.longPollExpirationInterval': '"2s"',
