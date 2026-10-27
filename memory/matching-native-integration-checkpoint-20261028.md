@@ -1,0 +1,25 @@
+# Native Matching integration checkpoint — 2026-10-28
+
+Resumed the existing Matching completion task. Exact Go raw-byte behavior remains required.
+
+Committed and pushed `c51012f9e`:
+- Registered `matching_native_task_store` in persistence lib.rs.
+- Fixed the contract import: AllocatedTask lives in matching_task_store, not matching_blob.
+- Moved test-only blob imports under cfg(test).
+- Fixed an unclosed tuple in native decision response query-map encoding, which prevented rustfmt and compilation in the previous CI run.
+- Included native persistence and dynamic config files in the CI formatting patch list.
+
+Previous CI: https://github.com/auenkr/cadence-rust/actions/runs/40583437678
+Head: baf2da6a9cd7ca55209b8924ce28d9d262bbaba3
+Conclusion: failure during rustfmt syntax parsing, before compilation.
+
+Replacement CI: https://github.com/auenkr/cadence-rust/actions/runs/40583973417
+Head: c51012f9e (resolve full SHA from git)
+Conclusion: in progress at checkpoint; not a pass.
+Selection: cadence-proto, cadence-common, cadence-api, cadence-persistence, cadence-matching.
+Inputs: clean_target=true, format_matching_parity_files=true.
+
+No Cargo, Go, or rustfmt commands ran locally. git diff --check passed.
+Pre-existing uncommitted dynamic_config.rs and matching-native-config-filters-20261028.md were left untouched and are excluded from this CI pin.
+
+Remaining: native backend implementations, handler/queue/History/token adoption, production tonic/Thrift registration, full native response graphs, invalid-byte mixed Go oracles, final workspace and mixed gates at one verified source pin. The scheduled continuation must remain enabled while Matching is incomplete.
