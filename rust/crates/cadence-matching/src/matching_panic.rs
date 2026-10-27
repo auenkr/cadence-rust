@@ -126,7 +126,7 @@ fn go_is_print(ch: char) -> bool {
 
 fn in_ranges<T: Copy + Ord + Into<u32>>(ranges: &[T], value: u32) -> bool {
     let i = ranges.partition_point(|range| (*range).into() < value);
-    i < ranges.len() && i % 2 == 1 && value <= ranges[i].into()
+    i < ranges.len() && (i % 2 == 1 || value == ranges[i].into())
 }
 
 /// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
@@ -245,6 +245,12 @@ mod tests {
             capture_sync::<()>("test", || std::panic::panic_any(42_u8)),
             Err("panic object is not error: <non-string panic payload>".to_string())
         );
+    }
+
+    #[test]
+    fn go_quote_preserves_printable_range_starts_and_singletons() {
+        assert_eq!(go_quote("\u{037a}\u{09d7}"), "\"\u{037a}\u{09d7}\"");
+        assert_eq!(go_quote("\0\u{0085}\u{0378}"), "\"\\x00\\u0085\\u0378\"");
     }
 
     #[test]
