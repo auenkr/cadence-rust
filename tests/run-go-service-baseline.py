@@ -50,7 +50,7 @@ parser.add_argument('--matching-transport', choices=('grpc', 'thrift'), default=
 parser.add_argument('--matching-rpc-tls', action='store_true', help='enable verified TLS on the production Rust Matching gRPC listener and Go Matching outbound using an ephemeral test CA')
 parser.add_argument('--matching-exporter', choices=('prometheus', 'statsd', 'm3'),
     help='configure and capture one Rust Matching exporter in the production Ringpop lane')
-parser.add_argument('--matching-cold-domain-metric-probe', action='store_true', help='opt-in production Prometheus probe for a late-registered exact-domain quota rejection and canonical request metric')
+parser.add_argument('--matching-cold-domain-metric-probe', action='store_true', help='opt-in production Prometheus probe for late-domain name lookups, exact-domain quota rejection, and canonical request metric')
 parser.add_argument('--mysql', action='store_true', help='run production Rust Matching and Go services on the same MySQL schema')
 parser.add_argument('--postgres', action='store_true', help='run production Rust Matching and original Go services against the same Go-configured PostgreSQL schema; requires CADENCE_POSTGRES_* settings')
 parser.add_argument('--cassandra', action='store_true', help='run production Rust Matching and original Go services on the same Go-schema Cassandra keyspaces (container managed by tests/gates/run-cassandra-lane.sh; implies the two-node failure-recovery probe)')
