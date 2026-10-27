@@ -529,8 +529,35 @@ async function run() {
   if (coldDomain) {
     await new Promise(resolve => setTimeout(resolve, 1100));
     assert(productionMode, 'cold-domain quota probe requires production Matching');
+    const nameLookupDomain = `${coldDomain}-name`;
+    const partitionLookupDomain = `${coldDomain}-partitions`;
     await call('DomainAPI', 'RegisterDomain', { name: coldDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
     const canonicalDomain = await call('DomainAPI', 'DescribeDomain', { name: coldDomain });
+    // These are distinct late-registered domain keys in the shared process
+    // cache. Readiness completed before registration, but background cache
+    // refreshes may observe either registration before its first RPC; this
+    // exercises name-based read-through without proving a cache miss.
+    await call('DomainAPI', 'RegisterDomain', { name: nameLookupDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    const nameClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const nameLookup = await new Promise((resolve, reject) => nameClient.GetTaskListsByDomain(
+      { domain: nameLookupDomain }, new grpc.Metadata(), { deadline: Date.now() + 20000 },
+      (error, response) => error ? reject(error) : resolve(response)));
+    assert(nameLookup && nameLookup.decisionTaskListMap && nameLookup.activityTaskListMap,
+      `GetTaskListsByDomain by late domain name returned an invalid response: ${JSON.stringify(nameLookup)}`);
+    nameClient.close();
+
+    await call('DomainAPI', 'RegisterDomain', { name: partitionLookupDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    const partitionTaskList = `cold-name-partitions-${id}`;
+    const partitionClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const partitionLookup = await new Promise((resolve, reject) => partitionClient.ListTaskListPartitions(
+      { domain: partitionLookupDomain, taskList: { name: partitionTaskList } }, new grpc.Metadata(),
+      { deadline: Date.now() + 20000 }, (error, response) => error ? reject(error) : resolve(response)));
+    assert(partitionLookup && partitionLookup.decisionTaskListPartitions?.length > 0,
+      `ListTaskListPartitions by late domain name returned no decision partitions: ${JSON.stringify(partitionLookup)}`);
+    assert.equal(partitionLookup.decisionTaskListPartitions[0].key, partitionTaskList,
+      `ListTaskListPartitions returned an unexpected root partition: ${JSON.stringify(partitionLookup.decisionTaskListPartitions)}`);
+    partitionClient.close();
+
     const metadata = new grpc.Metadata();
     metadata.set('rpc-service', 'cadence-matching');
     metadata.set('rpc-encoding', 'proto');
@@ -552,6 +579,18 @@ async function run() {
     assert(rejected, `one-token domain burst must reject a concurrent call: ${JSON.stringify(outcomes.map(outcome => ({ taskList: outcome.taskListName, code: outcome.error?.code })))}`);
     fs.writeFileSync(path.join(work, 'matching-cold-domain-metric-probe.json'), `${JSON.stringify({
       domain: canonicalDomain.domain.name, domainId: canonicalDomain.domain.id,
+      nameLookup: {
+        domain: nameLookupDomain, firstRpc: 'GetTaskListsByDomain',
+        decisionTaskListNames: Object.keys(nameLookup.decisionTaskListMap),
+        activityTaskListNames: Object.keys(nameLookup.activityTaskListMap),
+        responseShapeValid: true,
+      },
+      partitionLookup: {
+        domain: partitionLookupDomain, firstRpc: 'ListTaskListPartitions', taskList: partitionTaskList,
+        decisionPartitionKeys: partitionLookup.decisionTaskListPartitions.map(partition => partition.key),
+        activityPartitionKeys: partitionLookup.activityTaskListPartitions.map(partition => partition.key),
+      },
+      coldClaimLimit: 'Domains were registered after Matching readiness and queried by name without UUID RPC warming; domains use distinct keys in one shared process cache, and a background refresh may observe either registration before its first RPC.',
       taskList: rejected.taskListName, grpcCode: rejected.error.code, grpcMessage: rejected.error.message,
       requests: outcomes.map(outcome => ({ taskList: outcome.taskListName, grpcCode: outcome.error?.code ?? 0 })),
     }, null, 2)}\n`);
