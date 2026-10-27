@@ -1,5 +1,10 @@
 # Matching acceptance status — 2026-10-27
 
+**Superseded current status:** use
+`matching-v7-final-acceptance-ledger-20261027.md` and
+`matching-progress-checkpoint-20261027-1530.md`. The v5 and older claims below
+are historical and do not describe the current source or acceptance pin.
+
 **Authority:** this is the current concise status. It supersedes conflicting
 status and blocker claims in `matching-final-acceptance-ledger-20261026.md`,
 `matching-integration-control-20261027.md`, and
