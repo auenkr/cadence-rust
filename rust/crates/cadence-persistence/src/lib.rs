@@ -39,6 +39,7 @@ pub mod matching_queue;
 pub mod matching_sqlite;
 pub mod matching_task_store;
 pub mod matching_native_task_store;
+pub mod matching_native_queue;
 pub mod matching_writer_actor;
 
 pub mod matching_gc;

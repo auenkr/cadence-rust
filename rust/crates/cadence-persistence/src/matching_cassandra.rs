@@ -355,16 +355,26 @@ fn range_fence_statement(key: &TaskListKey, range: i64, now_nanos: i64) -> Strin
 }
 
 fn task_ttl(data: &TaskData) -> Option<i32> {
-    if data.expiry_nanos <= 0 || data.expiry_nanos <= data.created_nanos {
+    ttl_seconds(data.expiry_nanos, data.created_nanos)
+}
+fn ttl_seconds(expiry_nanos: i64, created_nanos: i64) -> Option<i32> {
+    if expiry_nanos <= 0 || expiry_nanos <= created_nanos {
         return None;
     }
-    let seconds = (data.expiry_nanos - data.created_nanos) / 1_000_000_000;
+    let seconds = (expiry_nanos - created_nanos) / 1_000_000_000;
     (seconds > 0).then(|| seconds.min(MAX_CASSANDRA_TTL_SECONDS) as i32)
 }
 
 fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
-    data.expiry_nanos <= 0 || data.expiry_nanos > now_nanos
+    expiry_not_passed(data.expiry_nanos, now_nanos)
 }
+fn expiry_not_passed(expiry_nanos: i64, now_nanos: i64) -> bool {
+    expiry_nanos <= 0 || expiry_nanos > now_nanos
+}
+
+// Raw-byte `MatchingTaskStoreBytes` implementation (private child module).
+#[path = "matching_cassandra_native.rs"]
+mod native;
 
 
 impl MatchingTaskStore for CassandraMatchingTaskStore {
