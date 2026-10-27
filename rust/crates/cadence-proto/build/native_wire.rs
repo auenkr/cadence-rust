@@ -58,8 +58,8 @@ pub(super) fn implementation(messages: &Messages, definition: &Definition) -> St
         let tag = field.number();
         let name = format!("self.r#{}", field.name().to_snake_case());
         let wire = codec(field);
-        if field.oneof_index.is_some() && !field.proto3_optional() {
-            let oneof = &definition.descriptor.oneof_decl[field.oneof_index.unwrap() as usize];
+        if let Some(index) = field.oneof_index.filter(|_| !field.proto3_optional()) {
+            let oneof = &definition.descriptor.oneof_decl[index as usize];
             let union = format!("self.r#{}", oneof.name().to_snake_case());
             let variant = format!("{}::{}", oneof_path(definition, field), field.name().to_upper_camel_case());
             writeln!(encode, "if let Some({variant}(value)) = &{union} {{ {wire}::encode({tag}, value, buf); }}").unwrap();

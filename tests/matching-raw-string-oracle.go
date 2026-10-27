@@ -101,6 +101,71 @@ func protobufCases(raw []byte) map[string]interface{} {
 	}
 }
 
+// These inputs are assembled from wire primitives rather than generated
+// messages: each captures the pinned gogo/YARPC decoder's actual behavior.
+func nativeWireEdgeCases() []map[string]interface{} {
+	varint := func(v uint64) []byte { return binary.AppendUvarint(nil, v) }
+	tag := func(field, wire uint64) []byte { return varint(field<<3 | wire) }
+	bytesField := func(field uint64, value []byte) []byte {
+		out := tag(field, 2)
+		out = varintAppend(out, uint64(len(value)))
+		return append(out, value...)
+	}
+	join := func(parts ...[]byte) []byte { var out []byte; for _, part := range parts { out = append(out, part...) }; return out }
+	inputs := []struct { name string; wire []byte }{
+		{"duplicate_scalar_last_wins", join(bytesField(1, []byte("first")), bytesField(1, []byte("last")))},
+		{"wrong_wire_scalar", join(bytesField(1, []byte("kept")), tag(1, 0), varint(7))},
+		{"duplicate_raw_map_keys", join(
+			bytesField(8, join(bytesField(1, []byte{0xff}), bytesField(2, []byte("raw")))),
+			bytesField(8, join(bytesField(1, []byte{0xff}), bytesField(2, []byte("last-raw")))),
+			bytesField(8, join(bytesField(1, []byte("\xef\xbf\xbd")), bytesField(2, []byte("replacement")))),
+			bytesField(8, bytesField(2, []byte("default-key"))),
+		)},
+		{"nested_message_merge", join(bytesField(2, bytesField(1, []byte("workflow"))), bytesField(2, bytesField(2, []byte("run"))))},
+		{"empty_and_zero_nested_presence", join(bytesField(5, nil), bytesField(5, []byte{0x08, 0x00}))},
+		{"unknown_field", bytesField(99, []byte("ignored"))},
+		{"truncated_varint", append(tag(1, 0), 0x80)},
+		{"truncated_length", []byte{0x0a, 0x05, 'x'}},
+		{"wrong_wire_type", tag(1, 5)},
+	}
+	out := make([]map[string]interface{}, 0, len(inputs))
+	for _, input := range inputs {
+		decoded := &matchingv1.AddDecisionTaskRequest{}
+		codec, ok := protobuf.GetCodecForEncoding(protobuf.Encoding)
+		if !ok { panic("missing pinned YARPC protobuf codec") }
+		err := codec.Unmarshal(input.wire, decoded)
+		row := map[string]interface{}{"name": input.name, "inputHex": hex.EncodeToString(input.wire), "error": errorText(err), "errorType": ""}
+		if err != nil { row["errorType"] = fmt.Sprintf("%T", err) }
+		row["domainIdHex"] = hex.EncodeToString([]byte(decoded.DomainId))
+		row["workflowExecutionPresent"] = decoded.WorkflowExecution != nil
+		if decoded.WorkflowExecution != nil {
+			row["workflowIdHex"] = hex.EncodeToString([]byte(decoded.WorkflowExecution.WorkflowId))
+			row["runIdHex"] = hex.EncodeToString([]byte(decoded.WorkflowExecution.RunId))
+		}
+		row["scheduleToStartTimeoutPresent"] = decoded.ScheduleToStartTimeout != nil
+		maps := make([][]string, 0, len(decoded.PartitionConfig))
+		for key, value := range decoded.PartitionConfig { maps = append(maps, []string{hex.EncodeToString([]byte(key)), hex.EncodeToString([]byte(value))}) }
+		row["partitionConfigHex"] = maps
+		out = append(out, row)
+	}
+	for _, input := range []struct { name string; wire []byte }{
+		{"empty_wrapper_presence", bytesField(4, nil)},
+		{"zero_wrapper_presence", bytesField(4, []byte{0x08, 0x00})},
+		{"duplicate_wrapper_message_merge", join(bytesField(4, []byte{0x08, 0x07}), bytesField(4, nil))},
+	} {
+		decoded := &matchingv1.PollForDecisionTaskResponse{}
+		codec, ok := protobuf.GetCodecForEncoding(protobuf.Encoding)
+		if !ok { panic("missing pinned YARPC protobuf codec") }
+		err := codec.Unmarshal(input.wire, decoded)
+		row := map[string]interface{}{"name": input.name, "message": "pollDecisionResponse", "inputHex": hex.EncodeToString(input.wire), "error": errorText(err), "previousStartedPresent": decoded.PreviousStartedEventId != nil}
+		if decoded.PreviousStartedEventId != nil { row["previousStartedValue"] = decoded.PreviousStartedEventId.Value }
+		out = append(out, row)
+	}
+	return out
+}
+
+func varintAppend(out []byte, value uint64) []byte { return binary.AppendUvarint(out, value) }
+
 func identifierCase(raw []byte) map[string]interface{} {
 	id, err := tasklist.NewIdentifier("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11", string(raw), 0)
 	row := map[string]interface{}{"inputHex": hex.EncodeToString(raw), "errorHex": ""}
@@ -160,6 +225,7 @@ func main() {
 			"cassandraUUID": map[string]interface{}{"error": errorText(cassandraErr), "uuidHex": hex.EncodeToString(cassandraID[:])},
 			"taskList": identifierCase(raw), "taskListPartition": identifierCase(partitionName),
 		})
+		if len(rows) == 1 { rows[0]["nativeWireEdgeCases"] = nativeWireEdgeCases() }
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {
 		fmt.Fprintln(os.Stderr, err)
