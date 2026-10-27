@@ -24,6 +24,22 @@ registry API, and applies runner formatting. Replacement diagnostic CI:
 head `97eb8560e` (pending). Formatting enabled; apply its patch before the final
 pin. Superseded unformatted diagnostic40536460336 is not acceptance evidence.
 
+Current diagnostic status (supersedes the pending status above):
+- 40536574918 failed compiling the test's equality assertion; aab625202
+  compares the stored partition configuration fields individually.
+- [40537474183](https://github.com/auenkr/cadence-rust/actions/runs/40537474183)
+  at aab625202 passed Clippy, then failed the reader zero-dispatch recovery
+  regression (757 passed, 1 failed, 2 ignored in the lib suite). Polling
+  delivers an allocated task but does not complete it; the assertion wrongly
+  expected the ack level to advance before completion.
+- ed63d5f47 explicitly completes the delivered task, first checking that
+  delivery alone preserves the unacknowledged state. Replacement focused CI
+  [40538520049](https://github.com/auenkr/cadence-rust/actions/runs/40538520049)
+  at `ed63d5f47287daf5126b5cd8e01deafc224f0076` is running with runner formatting
+  enabled. This is diagnostic package validation, not fresh workspace evidence.
+- c16d25e01 adds public certificate fingerprints and a verified live TLS
+  handshake record; final runtime validation must inspect that record.
+
 ## Required runtime evidence
 
 Dispatch commands and artifact requirements are in
