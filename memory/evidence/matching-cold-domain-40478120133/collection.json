@@ -1,0 +1,198 @@
+{
+  "runUrl": "https://github.com/auenkr/cadence-rust/actions/runs/40478120133",
+  "lane": "mysql-cold-domain",
+  "headSha": "c06aa9b1e70632e216a2bf868c89b06d0c44fc0e",
+  "binarySha256": "b47b3eea7a3610bcbc67a9006fdd03a09e21dc2be43dbe0de6c42b9fdc06edbf",
+  "buildExit": 0,
+  "gateExit": 1,
+  "runtimeResults": {
+    "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+    "goMatchingStarted": false,
+    "rustServices": [
+      "matching"
+    ],
+    "goServices": [
+      "frontend",
+      "history",
+      "worker"
+    ],
+    "rustProductionBinary": "/tmp/cadence-cargo-target-mysql-40478120133/debug/cadence-matching",
+    "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+    "historyTransport": "grpc",
+    "matchingTransport": "grpc",
+    "rustDynamicConfigFile": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-dynamic-config.yaml",
+    "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+    "acceptanceEligible": false,
+    "persistence": null,
+    "shardDistributor": null,
+    "serverCommand": [
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/cadence-server",
+      "--config",
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/config",
+      "--zone",
+      "mysql",
+      "start",
+      "--auto-setup",
+      "--services",
+      "frontend,history,worker"
+    ],
+    "artifactsDirectory": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+    "workerReadiness": {
+      "required": true,
+      "marker": "\"msg\":\"worker started\"",
+      "observed": true
+    },
+    "probeExitCode": 1,
+    "goServicesPid": 8668,
+    "goServicesAliveAfterProbe": true,
+    "matchingExporter": "prometheus",
+    "matchingExporterAddress": "127.0.0.1:34833",
+    "goSchemaOnly": {
+      "presentTables": [
+        "active_cluster_selection_policy",
+        "activity_info_maps",
+        "buffered_events",
+        "buffered_replication_task_maps",
+        "child_execution_info_maps",
+        "cluster_config",
+        "cross_cluster_tasks",
+        "current_executions",
+        "domain_audit_log",
+        "domain_metadata",
+        "domains",
+        "executions",
+        "history_node",
+        "history_tree",
+        "queue",
+        "queue_metadata",
+        "replication_tasks",
+        "replication_tasks_dlq",
+        "request_cancel_info_maps",
+        "schema_update_history",
+        "schema_version",
+        "shards",
+        "signal_info_maps",
+        "signals_requested_sets",
+        "task_lists",
+        "tasks",
+        "timer_info_maps",
+        "timer_tasks",
+        "transfer_tasks"
+      ],
+      "goSchemaTables": [
+        "active_cluster_selection_policy",
+        "activity_info_maps",
+        "buffered_events",
+        "buffered_replication_task_maps",
+        "child_execution_info_maps",
+        "cluster_config",
+        "cross_cluster_tasks",
+        "current_executions",
+        "domain_audit_log",
+        "domain_metadata",
+        "domains",
+        "executions",
+        "history_node",
+        "history_tree",
+        "queue",
+        "queue_metadata",
+        "replication_tasks",
+        "replication_tasks_dlq",
+        "request_cancel_info_maps",
+        "shards",
+        "signal_info_maps",
+        "signals_requested_sets",
+        "task_lists",
+        "tasks",
+        "timer_info_maps",
+        "timer_tasks",
+        "transfer_tasks"
+      ],
+      "goSetupTables": [
+        "schema_update_history",
+        "schema_version"
+      ],
+      "missingGoTables": []
+    },
+    "runExitCode": 1,
+    "failure": "RuntimeError: Go baseline probe failed; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/probe.log"
+  },
+  "observedProbeResults": [],
+  "sdkEvidenceFiles": {
+    "go-sdk.log": {
+      "status": "missing"
+    },
+    "restart-sdk.log": {
+      "status": "missing"
+    },
+    "graceful-drain-sdk.log": {
+      "status": "missing"
+    },
+    "adaptive-scaler-sdk.log": {
+      "status": "missing"
+    },
+    "adaptive-scaler-retry-only-sdk.log": {
+      "status": "missing"
+    },
+    "production-idle-recovery-sdk.log": {
+      "status": "missing"
+    },
+    "production-crash-recovery-sdk.log": {
+      "status": "missing"
+    },
+    "gc-backlog-sdk.log": {
+      "status": "missing"
+    }
+  },
+  "recoveryEvidence": {
+    "matching-shutdown.json": {
+      "status": "present",
+      "recorded": {
+        "signal": "SIGTERM",
+        "sigtermSentUnixNs": 1793092136998000000,
+        "exitCode": 0,
+        "childSignal": null,
+        "completedAtUnixNs": 1793092137070000000
+      }
+    },
+    "production-failure-recovery-checkpoints.json": {
+      "status": "missing"
+    },
+    "db-observations.json": {
+      "status": "missing"
+    }
+  },
+  "databaseCleanup": {
+    "mysql-container-cleanup.txt": {
+      "status": "present",
+      "recordedOutput": "cadence-rust-gate-mysql-lane-20261027T090825-8099",
+      "sha256": "f9d90c5779191c49bae3c953ebeae6cedf45b11e03ab0019b407c3a0dd3e13fb"
+    }
+  },
+  "retainedFiles": [
+    "commit.txt",
+    "binary.sha256",
+    "cargo-build.exit",
+    "gate.exit",
+    "gate/run/results.json",
+    "gate/run/probe.log",
+    "command.txt",
+    "gate/run/run.exit",
+    "gate/mysql-container-cleanup.txt",
+    "gate/run/rust-matching/matching-shutdown.json"
+  ],
+  "originalFileSha256": {
+    "commit.txt": "73d0da2461cd21f8b326928b6f17a3747123d5b1ed0882e81520e2ca29c43eb2",
+    "binary.sha256": "cf798fbad5771a01bb582e9f8cf9a135514ffe346ec9525ae5990de6ee748fb2",
+    "cargo-build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "gate.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "gate/run/results.json": "3a801d19d3cd08b97d21f4888fdd16758c1d8ff8ada8fdf8914a13bd653107f2",
+    "gate/run/probe.log": "263a67fe229fd3c951b035e722f2daab3cfcc11337ad231aaa3158015b8b0586",
+    "command.txt": "5f2f8c6780b26002d4c57bb716291b5dbcb831d42bd0e103f685967081bf31cb",
+    "gate/run/run.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "gate/mysql-container-cleanup.txt": "f9d90c5779191c49bae3c953ebeae6cedf45b11e03ab0019b407c3a0dd3e13fb",
+    "gate/run/rust-matching/matching-shutdown.json": "f92bf31dccb93e0acd49050cdbba9ce0a792b4e1ce47b09c8de00683d6dd1bff"
+  },
+  "serviceAcceptance": false,
+  "reviewRequired": "Inspect actual lane-specific result rows, SDK/recovery evidence, cleanup output, and source parity ledger. Missing files and requested flags are not execution evidence."
+}

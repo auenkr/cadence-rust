@@ -1,0 +1,1 @@
+tests/gates/run-mysql-lane.sh out/gate /tmp/cadence-cargo-target-mysql-40478120133/debug/cadence-matching --matching-restart --matching-failure-recovery --matching-idle-check-seconds 3 --matching-exporter prometheus --matching-cold-domain-metric-probe

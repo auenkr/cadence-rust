@@ -1,0 +1,20 @@
+PROBE BODY FAILED: AssertionError [ERR_ASSERTION]: one-token domain burst must reject a concurrent call: [{"taskList":"cold-domain-48f285f2-a19d-46d8-9166-1463c8e0b92a-0","code":5},{"taskList":"cold-domain-48f285f2-a19d-46d8-9166-1463c8e0b92a-1","code":5}]
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: undefined,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+AssertionError [ERR_ASSERTION]: one-token domain burst must reject a concurrent call: [{"taskList":"cold-domain-48f285f2-a19d-46d8-9166-1463c8e0b92a-0","code":5},{"taskList":"cold-domain-48f285f2-a19d-46d8-9166-1463c8e0b92a-1","code":5}]
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:5)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: undefined,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
