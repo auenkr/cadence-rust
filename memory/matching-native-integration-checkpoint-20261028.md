@@ -37,3 +37,9 @@ Run https://github.com/auenkr/cadence-rust/actions/runs/40585602320 validates 69
 ## Queue and Cassandra CI pin
 
 Commit 102f1c077 registers the full native durable queue and raw Cassandra backend. Fresh uncached five-crate CI dispatched at https://github.com/auenkr/cadence-rust/actions/runs/40585964293 (head 102f1c077; conclusion pending). Supersedes prior in-progress 40585602320 via workflow cancel-in-progress concurrency. No local Cargo, Go or formatting executed. Native History start-client worker remains active. Further worker starts deferred because the host load was 6.86 (>6 resource guard), despite available RAM 3.2 GiB. Next source review should compare native queue behavior and RawCql UDT/collection serialization to legacy and Go. No production-native handler adoption or service completion claimed.
+
+## Native History client and clippy correction checkpoint
+
+Run 40585964293 at 102f1c077 concluded failure in clippy. Reported only lints: duplicated allow(dead_code) on all three native adapter modules, test-module ordering in the decision adapter, and field_reassign_with_default in Cassandra/Postgres tests. Removed duplicate inner attributes, moved the test module to the end, and initialized test fields directly. Applied the CI-generated formatting patch locally without invoking rustfmt.
+
+Integrated the additive native gRPC History task-start client and raw workflow/domain peer hashing. Parent corrected the lossy timeout key, added a native byte-aware timeout provider seam, and preserved malformed persisted-UUID errors. TChannel raw History still unsupported; native runtime/provider adoption remains pending. Next CI pin required; no Matching completion claim.

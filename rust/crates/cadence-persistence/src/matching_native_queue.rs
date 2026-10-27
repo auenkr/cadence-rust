@@ -69,7 +69,10 @@ const STASHED: &str = "\0native-store-error-stashed";
 /// The shared retry policy is typed on the legacy error. Legacy and backend
 /// errors pass through (keeping transient classification); other native errors
 /// are non-transient, so they are stashed and restored unchanged.
-fn adapt<T>(stash: &RefCell<Option<StoreError>>, result: StoreResult<T>) -> std::result::Result<T, LegacyError> {
+fn adapt<T>(
+    stash: &RefCell<Option<StoreError>>,
+    result: StoreResult<T>,
+) -> std::result::Result<T, LegacyError> {
     result.map_err(|error| match error {
         StoreError::Legacy(e) => e,
         StoreError::Backend { kind, message } => LegacyError::Backend { kind, message },
@@ -79,11 +82,15 @@ fn adapt<T>(stash: &RefCell<Option<StoreError>>, result: StoreResult<T>) -> std:
         }
     })
 }
-fn restore<T>(stash: &RefCell<Option<StoreError>>, result: std::result::Result<T, LegacyError>) -> StoreResult<T> {
+fn restore<T>(
+    stash: &RefCell<Option<StoreError>>,
+    result: std::result::Result<T, LegacyError>,
+) -> StoreResult<T> {
     result.map_err(|error| match error {
-        LegacyError::ConditionFailed(m) if m == STASHED => {
-            stash.borrow_mut().take().unwrap_or(StoreError::Legacy(LegacyError::ConditionFailed(m)))
-        }
+        LegacyError::ConditionFailed(m) if m == STASHED => stash
+            .borrow_mut()
+            .take()
+            .unwrap_or(StoreError::Legacy(LegacyError::ConditionFailed(m))),
         other => StoreError::Legacy(other),
     })
 }
@@ -198,18 +205,29 @@ fn scan_batch(
         let upper = read.wrapping_add(i64::from(range)).min(max);
         let tasks = retry(|| store.get_tasks(key, read, upper, i64::from(batch.get())))?;
         if !tasks.is_empty() {
-            return Ok(ScannedBatch { tasks, read_level: upper, finished: true });
+            return Ok(ScannedBatch {
+                tasks,
+                read_level: upper,
+                finished: true,
+            });
         }
         read = upper;
     }
-    Ok(ScannedBatch { tasks: Vec::new(), read_level: read, finished: read == max })
+    Ok(ScannedBatch {
+        tasks: Vec::new(),
+        read_level: read,
+        finished: read == max,
+    })
 }
 fn expired(expiry: i64, now: i64) -> bool {
     expiry > 0 && now > expiry
 }
 fn block(range: i64, size: NonZeroU32) -> (i64, i64) {
     let size = i64::from(size.get());
-    (range.wrapping_sub(1).wrapping_mul(size).wrapping_add(1), range.wrapping_mul(size))
+    (
+        range.wrapping_sub(1).wrapping_mul(size).wrapping_add(1),
+        range.wrapping_mul(size),
+    )
 }
 
 impl DurableTaskQueueBytes {
@@ -259,16 +277,26 @@ impl DurableTaskQueueBytes {
         }
     }
     pub fn set_lease_observer(&self, observer: LeaseObserver) {
-        *self.lease_observer.lock().expect("matching lease observer lock") = Some(observer);
+        *self
+            .lease_observer
+            .lock()
+            .expect("matching lease observer lock") = Some(observer);
     }
     fn observe_lease(&self, success: bool) {
-        let observer = self.lease_observer.lock().expect("matching lease observer lock").clone();
+        let observer = self
+            .lease_observer
+            .lock()
+            .expect("matching lease observer lock")
+            .clone();
         if let Some(observer) = observer {
             observer(success);
         }
     }
     pub fn set_condition_failed_observer(&self, observer: ConditionFailedObserver) {
-        *self.condition_failed_observer.lock().expect("matching condition observer lock") = Some(observer);
+        *self
+            .condition_failed_observer
+            .lock()
+            .expect("matching condition observer lock") = Some(observer);
     }
     fn check<T>(&self, result: StoreResult<T>) -> Result<T> {
         self.check_with(result, true)
@@ -322,7 +350,10 @@ impl DurableTaskQueueBytes {
                 result?;
                 state = self.state.lock().expect("matching queue lock");
             }
-            tasks.push(AllocatedTaskBytes { task_id: state.next_id, data: data.clone() });
+            tasks.push(AllocatedTaskBytes {
+                task_id: state.next_id,
+                data: data.clone(),
+            });
             state.next_id = state.next_id.wrapping_add(1);
         }
         let _database = self.database.lock().expect("matching database gate");
@@ -341,11 +372,16 @@ impl DurableTaskQueueBytes {
             .zip(data)
             .map(|(task, (domain, _))| (*domain, task))
             .collect::<Vec<_>>();
-        let result = self.store.create_tasks_with_domains(&self.key, range_id, now, &tasks_with_domains);
+        let result =
+            self.store
+                .create_tasks_with_domains(&self.key, range_id, now, &tasks_with_domains);
         // Go advances the read boundary after the write returns, even on error.
         if let Some(last) = tasks.last() {
             if last.task_id > 0 {
-                self.state.lock().expect("matching queue lock").max_read_level = last.task_id;
+                self.state
+                    .lock()
+                    .expect("matching queue lock")
+                    .max_read_level = last.task_id;
             }
         }
         self.check(result)?;
@@ -362,7 +398,11 @@ impl DurableTaskQueueBytes {
     ) -> Result<Vec<AllocatedTaskBytes>> {
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(
-            &data.iter().cloned().map(|task| (source_domain, task)).collect::<Vec<_>>(),
+            &data
+                .iter()
+                .cloned()
+                .map(|task| (source_domain, task))
+                .collect::<Vec<_>>(),
             now,
             None,
         )
@@ -380,13 +420,23 @@ impl DurableTaskQueueBytes {
         pending: &[PendingTaskBytes],
         now_nanos: i64,
     ) -> Result<Vec<AllocatedTaskBytes>> {
-        let data = pending.iter().map(|t| (t.source_domain, t.data.clone())).collect::<Vec<_>>();
-        let timeouts = pending.iter().map(|t| t.schedule_to_start_seconds).collect::<Vec<_>>();
+        let data = pending
+            .iter()
+            .map(|t| (t.source_domain, t.data.clone()))
+            .collect::<Vec<_>>();
+        let timeouts = pending
+            .iter()
+            .map(|t| t.schedule_to_start_seconds)
+            .collect::<Vec<_>>();
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(&data, now_nanos, Some(&timeouts))
     }
     pub fn task_list_kind(&self) -> i16 {
-        self.state.lock().expect("matching queue lock").metadata.kind
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .metadata
+            .kind
     }
     pub fn retry_data(&self, task_id: i64) -> Result<TaskDataBytes> {
         self.state
@@ -397,7 +447,12 @@ impl DurableTaskQueueBytes {
             .map(|task| task.data.clone())
             .ok_or(NativeQueueError::NotInFlight(task_id))
     }
-    pub fn read_batch(&self, read_range_size: u32, batch_size: NonZeroU32, now: i64) -> Result<ReadBatchBytes> {
+    pub fn read_batch(
+        &self,
+        read_range_size: u32,
+        batch_size: NonZeroU32,
+        now: i64,
+    ) -> Result<ReadBatchBytes> {
         self.read_batch_with_clock(read_range_size, batch_size, || now)
     }
     pub fn read_batch_with_clock(
@@ -411,7 +466,10 @@ impl DurableTaskQueueBytes {
             tasks.push(task);
             true
         })?;
-        Ok(ReadBatchBytes { tasks, scan_pending })
+        Ok(ReadBatchBytes {
+            tasks,
+            scan_pending,
+        })
     }
     pub fn read_batch_into(
         &self,
@@ -445,12 +503,27 @@ impl DurableTaskQueueBytes {
             expired: 0,
         })
     }
-    fn load_reader_turn(&self, range: u32, batch: NonZeroU32) -> Result<(ReaderPermit, ScannedBatch)> {
+    fn load_reader_turn(
+        &self,
+        range: u32,
+        batch: NonZeroU32,
+    ) -> Result<(ReaderPermit, ScannedBatch)> {
         let permit = self.reader.lock();
         self.active()?;
-        let max = self.state.lock().expect("matching queue lock").max_read_level;
+        let max = self
+            .state
+            .lock()
+            .expect("matching queue lock")
+            .max_read_level;
         let (initial_read, _, _) = self.ack.levels();
-        let scanned = scan_batch(self.store.as_ref(), &self.key, initial_read, max, range, batch)?;
+        let scanned = scan_batch(
+            self.store.as_ref(),
+            &self.key,
+            initial_read,
+            max,
+            range,
+            batch,
+        )?;
         let _state = self.state.lock().expect("matching queue lock");
         self.active()?;
         if scanned.tasks.is_empty() {
@@ -472,7 +545,9 @@ impl DurableTaskQueueBytes {
             self.ack.set_read_level(task.task_id);
             return Ok(None);
         }
-        self.ack.read_item(task.task_id).map_err(NativeQueueError::ReaderState)?;
+        self.ack
+            .read_item(task.task_id)
+            .map_err(NativeQueueError::ReaderState)?;
         state.in_flight.insert(task.task_id, task.clone());
         Ok(Some(task))
     }
@@ -488,7 +563,11 @@ impl DurableTaskQueueBytes {
         let _writer = self.writer.lock().expect("matching writer gate");
         let data = at_creation(self.retry_data(task_id)?, now, 0);
         let mut written = self.append_serialized(&[(self.key.domain_id, data)], now, None)?;
-        self.state.lock().expect("matching queue lock").in_flight.remove(&task_id);
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .in_flight
+            .remove(&task_id);
         self.ack.ack_item(task_id);
         Ok(written.remove(0))
     }
@@ -496,9 +575,18 @@ impl DurableTaskQueueBytes {
         self.persist_ack_impl(now, false)
     }
     pub fn partition_config(&self) -> Option<PartitionConfigBytes> {
-        self.state.lock().expect("matching queue lock").metadata.adaptive_partition_config.clone()
+        self.state
+            .lock()
+            .expect("matching queue lock")
+            .metadata
+            .adaptive_partition_config
+            .clone()
     }
-    pub fn update_partition_config(&self, config: Option<PartitionConfigBytes>, now: i64) -> Result<()> {
+    pub fn update_partition_config(
+        &self,
+        config: Option<PartitionConfigBytes>,
+        now: i64,
+    ) -> Result<()> {
         let _database = self.database.lock().expect("matching database gate");
         self.active()?;
         let (range, mut metadata) = {
@@ -506,7 +594,11 @@ impl DurableTaskQueueBytes {
             (state.range_id, state.metadata.clone())
         };
         metadata.adaptive_partition_config = config;
-        self.check_with(self.store.update_task_list(&self.key, range, metadata.clone(), now), false)?;
+        self.check_with(
+            self.store
+                .update_task_list(&self.key, range, metadata.clone(), now),
+            false,
+        )?;
         self.state.lock().expect("matching queue lock").metadata = metadata;
         Ok(())
     }
@@ -525,7 +617,9 @@ impl DurableTaskQueueBytes {
                 (state.range_id, state.metadata.clone())
             };
             metadata.ack_level = ack;
-            let result = self.store.update_task_list(&self.key, range, metadata.clone(), now);
+            let result = self
+                .store
+                .update_task_list(&self.key, range, metadata.clone(), now);
             self.check_with(result, !final_update)?;
             self.state.lock().expect("matching queue lock").metadata = metadata;
         }
@@ -536,7 +630,11 @@ impl DurableTaskQueueBytes {
         Ok(self.store.complete_tasks_less_than(&self.key, ack, limit)?)
     }
     pub fn run_garbage_collection(&self, force: bool) -> Result<usize> {
-        let provider = self.gc_batch_size_provider.lock().expect("matching GC config lock").clone();
+        let provider = self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock")
+            .clone();
         match provider {
             Some(provider) => self.run_garbage_collection_with_batch_provider(
                 force,
@@ -551,7 +649,10 @@ impl DurableTaskQueueBytes {
         }
     }
     pub fn set_gc_batch_size_provider(&self, provider: Arc<dyn Fn() -> i64 + Send + Sync>) {
-        *self.gc_batch_size_provider.lock().expect("matching GC config lock") = Some(provider);
+        *self
+            .gc_batch_size_provider
+            .lock()
+            .expect("matching GC config lock") = Some(provider);
     }
     pub fn run_garbage_collection_with(
         &self,
@@ -559,7 +660,11 @@ impl DurableTaskQueueBytes {
         batch: NonZeroU32,
         max_interval: std::time::Duration,
     ) -> Result<usize> {
-        self.run_garbage_collection_with_batch_provider(force, || i64::from(batch.get()), max_interval)
+        self.run_garbage_collection_with_batch_provider(
+            force,
+            || i64::from(batch.get()),
+            max_interval,
+        )
     }
     pub fn run_garbage_collection_with_batch_provider(
         &self,
@@ -606,7 +711,11 @@ impl DurableTaskQueueBytes {
     }
     pub fn stop(&self) {
         if !self.stopped.swap(true, Ordering::AcqRel) {
-            let wake = self.stop_waker.lock().expect("Matching stop waker lock").clone();
+            let wake = self
+                .stop_waker
+                .lock()
+                .expect("Matching stop waker lock")
+                .clone();
             if let Some(wake) = wake {
                 wake();
             }
@@ -626,7 +735,11 @@ mod tests {
         NonZeroU32::new(v).unwrap()
     }
     fn key(name: &[u8]) -> TaskListKeyBytes {
-        TaskListKeyBytes { domain_id: Uuid::from_u128(1), name: GoString::from(name), task_type: 0 }
+        TaskListKeyBytes {
+            domain_id: Uuid::from_u128(1),
+            name: GoString::from(name),
+            task_type: 0,
+        }
     }
     fn data(workflow: &[u8]) -> TaskDataBytes {
         at_creation(
@@ -644,7 +757,9 @@ mod tests {
         Arc::new(SqliteTaskStore::create(dir.path().join("t.db"), BlobEncoding::ThriftRW).unwrap())
     }
     fn rows(s: &SqliteTaskStore, k: &TaskListKeyBytes) -> usize {
-        MatchingTaskStoreBytes::get_tasks(s, k, 0, i64::MAX, 1000).unwrap().len()
+        MatchingTaskStoreBytes::get_tasks(s, k, 0, i64::MAX, 1000)
+            .unwrap()
+            .len()
     }
 
     #[test]
@@ -663,8 +778,14 @@ mod tests {
         for (i, q) in queues.iter().enumerate() {
             let batch = q.read_batch(100, n(10), 3).unwrap();
             assert_eq!(batch.tasks.len(), 1);
-            assert_eq!(batch.tasks[0].data.workflow_id.as_bytes(), &[b'w', 0xff, i as u8]);
-            assert_eq!(batch.tasks[0].data.run_id, Some(Uuid::from_u128(2).as_bytes().to_vec()));
+            assert_eq!(
+                batch.tasks[0].data.workflow_id.as_bytes(),
+                &[b'w', 0xff, i as u8]
+            );
+            assert_eq!(
+                batch.tasks[0].data.run_id,
+                Some(Uuid::from_u128(2).as_bytes().to_vec())
+            );
             q.complete(batch.tasks[0].task_id).unwrap();
         }
     }
@@ -685,7 +806,10 @@ mod tests {
         assert!(matches!(err, NativeQueueError::Storage(ref e) if is_condition_failed(e)));
         assert!(first.is_stopped());
         assert_eq!(reports.load(Ordering::SeqCst), 1);
-        assert!(matches!(first.append(&[data(b"wf")], 4), Err(NativeQueueError::Stopped)));
+        assert!(matches!(
+            first.append(&[data(b"wf")], 4),
+            Err(NativeQueueError::Stopped)
+        ));
         // The new owner is unaffected and no row from the fenced writer exists.
         assert_eq!(rows(&s, &key(b"q\xff")), 0);
         second.append(&[data(b"wf")], 5).unwrap();
@@ -697,7 +821,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = store(&dir);
         let q = DurableTaskQueueBytes::open(s.clone(), key(b"\xfe"), 0, n(2), 1).unwrap();
-        let ids: Vec<_> = q.append(&[data(b"a"), data(b"b"), data(b"c")], 2).unwrap().iter().map(|t| t.task_id).collect();
+        let ids: Vec<_> = q
+            .append(&[data(b"a"), data(b"b"), data(b"c")], 2)
+            .unwrap()
+            .iter()
+            .map(|t| t.task_id)
+            .collect();
         assert_eq!(ids, vec![1, 2, 3]);
         let record = MatchingTaskStoreBytes::get_task_list(&*s, &key(b"\xfe")).unwrap();
         assert_eq!(record.range_id, 2);
@@ -714,9 +843,18 @@ mod tests {
         assert_eq!(batch.tasks.len(), 3);
         q.complete(batch.tasks[0].task_id).unwrap();
         q.complete(batch.tasks[1].task_id).unwrap();
-        assert!(matches!(q.complete(999), Err(NativeQueueError::NotInFlight(999))));
+        assert!(matches!(
+            q.complete(999),
+            Err(NativeQueueError::NotInFlight(999))
+        ));
         q.persist_ack(4).unwrap();
-        assert_eq!(MatchingTaskStoreBytes::get_task_list(&*s, &k).unwrap().data.ack_level, 2);
+        assert_eq!(
+            MatchingTaskStoreBytes::get_task_list(&*s, &k)
+                .unwrap()
+                .data
+                .ack_level,
+            2
+        );
         q.stop();
         assert!(matches!(q.persist_ack(5), Err(NativeQueueError::Stopped)));
         q.persist_final_ack(5).unwrap();
@@ -766,7 +904,8 @@ mod tests {
         let k = key(b"xd");
         let q = DurableTaskQueueBytes::open(s.clone(), k.clone(), 1, n(100), 1).unwrap();
         // Rows are stored under the source domain, so the target-domain reader sees none.
-        q.append_in_domain(&[data(b"x")], Uuid::from_u128(9), 2).unwrap();
+        q.append_in_domain(&[data(b"x")], Uuid::from_u128(9), 2)
+            .unwrap();
         assert_eq!(rows(&s, &k), 0);
         assert_eq!(q.task_list_kind(), 1);
     }

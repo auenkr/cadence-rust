@@ -3,7 +3,6 @@
 //! DescribeTaskList, GetTaskListsByDomain, ListTaskListPartitions). Field IDs
 //! and unit conversions mirror the legacy `thrift_matching.rs` handlers. Not
 //! wired into production dispatch.
-#![allow(dead_code)] // Temporary: consumed by the forthcoming native handler path.
 
 use cadence_common::go_string::GoString;
 use cadence_proto::native::{api as n_api, matching as n};
@@ -210,8 +209,14 @@ mod tests {
             activity_id: gs(&[0xef, 0xbf]),
             activity_type: Some(n_api::ActivityType { name: gs(&[0xc0]) }),
             input: Some(n_api::Payload { data: vec![] }),
-            scheduled_time: Some(prost_types::Timestamp { seconds: 2, nanos: 3 }),
-            schedule_to_close_timeout: Some(prost_types::Duration { seconds: 9, nanos: 0 }),
+            scheduled_time: Some(prost_types::Timestamp {
+                seconds: 2,
+                nanos: 3,
+            }),
+            schedule_to_close_timeout: Some(prost_types::Duration {
+                seconds: 9,
+                nanos: 0,
+            }),
             attempt: 4,
             header: Some(n_api::Header {
                 fields: [(gs(&[0xfd]), n_api::Payload { data: vec![7] })].into(),
@@ -232,7 +237,10 @@ mod tests {
         };
         assert_eq!(
             get(h, 10),
-            Some(&Value::Map(vec![(Value::Bytes(vec![0xfd]), Value::Bytes(vec![7]))]))
+            Some(&Value::Map(vec![(
+                Value::Bytes(vec![0xfd]),
+                Value::Bytes(vec![7])
+            )]))
         );
         let Some(Value::Struct(e)) = get(&s, 20) else {
             panic!()
@@ -268,22 +276,35 @@ mod tests {
     fn describe_and_by_domain_full_shape() {
         let d = || n::DescribeTaskListResponse {
             pollers: vec![n_api::PollerInfo {
-                last_access_time: Some(prost_types::Timestamp { seconds: 1, nanos: 5 }),
+                last_access_time: Some(prost_types::Timestamp {
+                    seconds: 1,
+                    nanos: 5,
+                }),
                 identity: gs(&[0xff]),
                 rate_per_second: 1.5,
             }],
             task_list_status: Some(n_api::TaskListStatus {
                 backlog_count_hint: 3,
-                task_id_block: Some(n_api::TaskIdBlock { start_id: 1, end_id: 2 }),
+                task_id_block: Some(n_api::TaskIdBlock {
+                    start_id: 1,
+                    end_id: 2,
+                }),
                 isolation_group_metrics: [(
                     gs(&[0xfe]),
-                    n_api::IsolationGroupMetrics { new_tasks_per_second: 2.0, poller_count: 6 },
+                    n_api::IsolationGroupMetrics {
+                        new_tasks_per_second: 2.0,
+                        poller_count: 6,
+                    },
                 )]
                 .into(),
                 empty: true,
                 ..Default::default()
             }),
-            task_list: Some(n_api::TaskList { name: gs(&[0xfd]), kind: 2, base_name: gs(b"") }),
+            task_list: Some(n_api::TaskList {
+                name: gs(&[0xfd]),
+                kind: 2,
+                base_name: gs(b""),
+            }),
             ..Default::default()
         };
         let s = describe_task_list_response(d());

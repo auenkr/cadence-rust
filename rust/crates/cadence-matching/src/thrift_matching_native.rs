@@ -1,7 +1,6 @@
 //! Byte-preserving request and response adapters for the Matching decision-task
 //! Thrift methods. This module is intentionally not wired into production
 //! dispatch until native handlers are available.
-#![allow(dead_code)] // Temporary: adapters are consumed by the forthcoming native handler path.
 
 use cadence_common::go_string::GoString;
 use cadence_proto::native::{api as n_api, matching as n};
@@ -38,210 +37,7 @@ fn nested(s: &Struct, id: i16) -> Result<Option<&Struct>, Error> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn st(fields: Vec<(i16, Value)>) -> Struct {
-        Struct { fields }
-    }
-    #[test]
-    fn raw_decode_preserves_invalid_bytes_nul_and_nested_identifiers() {
-        let req = st(vec![
-            (10, Value::Bytes(vec![0xff, 0xfe])),
-            (
-                20,
-                Value::Struct(st(vec![
-                    (10, Value::Bytes(b"a\0b".to_vec())),
-                    (20, Value::Bytes(vec![0xfe])),
-                ])),
-            ),
-        ]);
-        let decoded = add_decision_task(&req).unwrap();
-        assert_eq!(decoded.domain_id.as_bytes(), &[0xff, 0xfe]);
-        let execution = decoded.workflow_execution.unwrap();
-        assert_eq!(execution.workflow_id.as_bytes(), b"a\0b");
-        assert_eq!(execution.run_id.as_bytes(), &[0xfe]);
-    }
-    #[test]
-    fn raw_map_equal_keys_are_last_wins_and_wrong_scalar_is_skipped() {
-        let req = st(vec![
-            (10, Value::Bytes(b"first".to_vec())),
-            (10, Value::I32(9)),
-            (
-                70,
-                Value::Map(vec![
-                    (Value::Bytes(vec![0xff]), Value::Bytes(b"old".to_vec())),
-                    (Value::Bytes(vec![0xff]), Value::Bytes(b"new".to_vec())),
-                ]),
-            ),
-        ]);
-        let decoded = add_decision_task(&req).unwrap();
-        assert_eq!(decoded.domain_id.as_bytes(), b"first");
-        assert_eq!(
-            decoded
-                .partition_config
-                .get([0xff_u8].as_slice())
-                .unwrap()
-                .as_bytes(),
-            b"new"
-        );
-    }
-    #[test]
-    fn poll_nested_api_request_keeps_invalid_identity_and_default_presence() {
-        let req = st(vec![(
-            20,
-            Value::Struct(st(vec![
-                (10, Value::Bytes(vec![0xff])),
-                (30, Value::Bytes(vec![0xfe])),
-                (
-                    20,
-                    Value::Struct(st(vec![(10, Value::Bytes(b"queue".to_vec()))])),
-                ),
-            ])),
-        )]);
-        let decoded = poll_for_decision_task(&req).unwrap();
-        let inner = decoded.request.unwrap();
-        assert_eq!(inner.identity.as_bytes(), &[0xfe]);
-        assert_eq!(inner.task_list.unwrap().name.as_bytes(), b"queue");
-        assert_eq!(inner.domain.as_bytes(), &[0xff]);
-    }
 
-    #[test]
-    fn response_encodes_raw_query_bytes_map_keys_hints_and_counts() {
-        let response = n::PollForDecisionTaskResponse {
-            query: Some(n_api::WorkflowQuery {
-                query_type: GoString::from(vec![0xff]),
-                query_args: Some(n_api::Payload {
-                    data: vec![0xfe, 0],
-                }),
-            }),
-            queries: [(
-                GoString::from(vec![0xfd]),
-                n_api::WorkflowQuery {
-                    query_type: GoString::from(b"q".to_vec()),
-                    query_args: Some(n_api::Payload { data: vec![0xfc] }),
-                },
-            )]
-            .into(),
-            auto_config_hint: Some(n_api::AutoConfigHint {
-                enable_auto_config: true,
-                poller_wait_time_in_ms: 17,
-            }),
-            ..Default::default()
-        };
-        let encoded = poll_for_decision_task_response(response).unwrap();
-        let query = encoded.fields.iter().find(|(id, _)| *id == 80).unwrap();
-        let Value::Struct(query) = &query.1 else {
-            panic!("query is not a struct")
-        };
-        assert!(query
-            .fields
-            .iter()
-            .any(|(id, v)| *id == 10 && v == &Value::Bytes(vec![0xff])));
-        assert!(query
-            .fields
-            .iter()
-            .any(|(id, v)| *id == 20 && v == &Value::Bytes(vec![0xfe, 0])));
-        let queries = encoded.fields.iter().find(|(id, _)| *id == 150).unwrap();
-        let Value::Map(entries) = &queries.1 else {
-            panic!("queries is not a map")
-        };
-        assert_eq!(entries[0].0, Value::Bytes(vec![0xfd]));
-        let hint = encoded.fields.iter().find(|(id, _)| *id == 170).unwrap();
-        assert_eq!(
-            hint.1,
-            structure(vec![(10, Value::Bool(true)), (20, Value::I64(17))])
-        );
-        assert!(encoded
-            .fields
-            .iter()
-            .any(|(id, value)| *id == 65 && *value == Value::I64(0)));
-        assert!(encoded
-            .fields
-            .iter()
-            .any(|(id, value)| *id == 51 && *value == Value::I64(0)));
-    }
-
-    #[test]
-    fn response_encodes_transient_decision_events_and_rejects_other_variants() {
-        use n_api::history_event::Attributes;
-        let scheduled = n_api::HistoryEvent {
-            event_id: 8,
-            attributes: Some(Attributes::DecisionTaskScheduledEventAttributes(
-                n_api::DecisionTaskScheduledEventAttributes {
-                    attempt: 3,
-                    task_list: Some(n_api::TaskList {
-                        name: GoString::from(vec![0xff]),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )),
-            ..Default::default()
-        };
-        let started = n_api::HistoryEvent {
-            event_id: 9,
-            attributes: Some(Attributes::DecisionTaskStartedEventAttributes(
-                n_api::DecisionTaskStartedEventAttributes {
-                    scheduled_event_id: 8,
-                    identity: GoString::from(vec![0xfe]),
-                    request_id: GoString::from(vec![0xfd]),
-                },
-            )),
-            ..Default::default()
-        };
-        let response = n::PollForDecisionTaskResponse {
-            decision_info: Some(cadence_proto::native::shared::TransientDecisionInfo {
-                scheduled_event: Some(scheduled),
-                started_event: Some(started),
-            }),
-            ..Default::default()
-        };
-        let encoded = poll_for_decision_task_response(response).unwrap();
-        let info = encoded.fields.iter().find(|(id, _)| *id == 90).unwrap();
-        let Value::Struct(info) = &info.1 else {
-            panic!("decision info is not a struct")
-        };
-        assert_eq!(info.fields.len(), 2);
-        let Value::Struct(started) = &info.fields[1].1 else {
-            panic!("started event is not a struct")
-        };
-        let Value::Struct(attrs) = &started.fields.iter().find(|(id, _)| *id == 90).unwrap().1
-        else {
-            panic!("started attrs are not a struct")
-        };
-        assert!(attrs
-            .fields
-            .iter()
-            .any(|(id, value)| *id == 20 && *value == Value::Bytes(vec![0xfe])));
-
-        let unsupported = n_api::HistoryEvent {
-            attributes: Some(Attributes::ActivityTaskScheduledEventAttributes(
-                Default::default(),
-            )),
-            ..Default::default()
-        };
-        assert_eq!(
-            transient_event_out(unsupported),
-            Err("Unexpected event in transient decision info.")
-        );
-    }
-
-    #[test]
-    fn partition_metadata_preserves_raw_and_empty_values() {
-        let encoded = partition_metadata_out(n_api::TaskListPartitionMetadata {
-            key: GoString::from(vec![0xff]),
-            owner_host_name: GoString::default(),
-        });
-        assert_eq!(
-            encoded,
-            structure(vec![
-                (10, Value::Bytes(vec![0xff])),
-                (20, Value::Bytes(Vec::new())),
-            ])
-        );
-    }
-}
 fn int(s: &Struct, id: i16) -> Option<i32> {
     s.fields.iter().rev().find_map(|(field, v)| {
         if *field == id {
@@ -524,4 +320,209 @@ pub fn poll_for_decision_task_response(
     // The production Thrift decision adapter predates partition-config and
     // load-balancer fields; these have no fields in its Thrift response.
     Ok(Struct { fields: f })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn st(fields: Vec<(i16, Value)>) -> Struct {
+        Struct { fields }
+    }
+    #[test]
+    fn raw_decode_preserves_invalid_bytes_nul_and_nested_identifiers() {
+        let req = st(vec![
+            (10, Value::Bytes(vec![0xff, 0xfe])),
+            (
+                20,
+                Value::Struct(st(vec![
+                    (10, Value::Bytes(b"a\0b".to_vec())),
+                    (20, Value::Bytes(vec![0xfe])),
+                ])),
+            ),
+        ]);
+        let decoded = add_decision_task(&req).unwrap();
+        assert_eq!(decoded.domain_id.as_bytes(), &[0xff, 0xfe]);
+        let execution = decoded.workflow_execution.unwrap();
+        assert_eq!(execution.workflow_id.as_bytes(), b"a\0b");
+        assert_eq!(execution.run_id.as_bytes(), &[0xfe]);
+    }
+    #[test]
+    fn raw_map_equal_keys_are_last_wins_and_wrong_scalar_is_skipped() {
+        let req = st(vec![
+            (10, Value::Bytes(b"first".to_vec())),
+            (10, Value::I32(9)),
+            (
+                70,
+                Value::Map(vec![
+                    (Value::Bytes(vec![0xff]), Value::Bytes(b"old".to_vec())),
+                    (Value::Bytes(vec![0xff]), Value::Bytes(b"new".to_vec())),
+                ]),
+            ),
+        ]);
+        let decoded = add_decision_task(&req).unwrap();
+        assert_eq!(decoded.domain_id.as_bytes(), b"first");
+        assert_eq!(
+            decoded
+                .partition_config
+                .get([0xff_u8].as_slice())
+                .unwrap()
+                .as_bytes(),
+            b"new"
+        );
+    }
+    #[test]
+    fn poll_nested_api_request_keeps_invalid_identity_and_default_presence() {
+        let req = st(vec![(
+            20,
+            Value::Struct(st(vec![
+                (10, Value::Bytes(vec![0xff])),
+                (30, Value::Bytes(vec![0xfe])),
+                (
+                    20,
+                    Value::Struct(st(vec![(10, Value::Bytes(b"queue".to_vec()))])),
+                ),
+            ])),
+        )]);
+        let decoded = poll_for_decision_task(&req).unwrap();
+        let inner = decoded.request.unwrap();
+        assert_eq!(inner.identity.as_bytes(), &[0xfe]);
+        assert_eq!(inner.task_list.unwrap().name.as_bytes(), b"queue");
+        assert_eq!(inner.domain.as_bytes(), &[0xff]);
+    }
+
+    #[test]
+    fn response_encodes_raw_query_bytes_map_keys_hints_and_counts() {
+        let response = n::PollForDecisionTaskResponse {
+            query: Some(n_api::WorkflowQuery {
+                query_type: GoString::from(vec![0xff]),
+                query_args: Some(n_api::Payload {
+                    data: vec![0xfe, 0],
+                }),
+            }),
+            queries: [(
+                GoString::from(vec![0xfd]),
+                n_api::WorkflowQuery {
+                    query_type: GoString::from(b"q".to_vec()),
+                    query_args: Some(n_api::Payload { data: vec![0xfc] }),
+                },
+            )]
+            .into(),
+            auto_config_hint: Some(n_api::AutoConfigHint {
+                enable_auto_config: true,
+                poller_wait_time_in_ms: 17,
+            }),
+            ..Default::default()
+        };
+        let encoded = poll_for_decision_task_response(response).unwrap();
+        let query = encoded.fields.iter().find(|(id, _)| *id == 80).unwrap();
+        let Value::Struct(query) = &query.1 else {
+            panic!("query is not a struct")
+        };
+        assert!(query
+            .fields
+            .iter()
+            .any(|(id, v)| *id == 10 && v == &Value::Bytes(vec![0xff])));
+        assert!(query
+            .fields
+            .iter()
+            .any(|(id, v)| *id == 20 && v == &Value::Bytes(vec![0xfe, 0])));
+        let queries = encoded.fields.iter().find(|(id, _)| *id == 150).unwrap();
+        let Value::Map(entries) = &queries.1 else {
+            panic!("queries is not a map")
+        };
+        assert_eq!(entries[0].0, Value::Bytes(vec![0xfd]));
+        let hint = encoded.fields.iter().find(|(id, _)| *id == 170).unwrap();
+        assert_eq!(
+            hint.1,
+            structure(vec![(10, Value::Bool(true)), (20, Value::I64(17))])
+        );
+        assert!(encoded
+            .fields
+            .iter()
+            .any(|(id, value)| *id == 65 && *value == Value::I64(0)));
+        assert!(encoded
+            .fields
+            .iter()
+            .any(|(id, value)| *id == 51 && *value == Value::I64(0)));
+    }
+
+    #[test]
+    fn response_encodes_transient_decision_events_and_rejects_other_variants() {
+        use n_api::history_event::Attributes;
+        let scheduled = n_api::HistoryEvent {
+            event_id: 8,
+            attributes: Some(Attributes::DecisionTaskScheduledEventAttributes(
+                n_api::DecisionTaskScheduledEventAttributes {
+                    attempt: 3,
+                    task_list: Some(n_api::TaskList {
+                        name: GoString::from(vec![0xff]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        };
+        let started = n_api::HistoryEvent {
+            event_id: 9,
+            attributes: Some(Attributes::DecisionTaskStartedEventAttributes(
+                n_api::DecisionTaskStartedEventAttributes {
+                    scheduled_event_id: 8,
+                    identity: GoString::from(vec![0xfe]),
+                    request_id: GoString::from(vec![0xfd]),
+                },
+            )),
+            ..Default::default()
+        };
+        let response = n::PollForDecisionTaskResponse {
+            decision_info: Some(cadence_proto::native::shared::TransientDecisionInfo {
+                scheduled_event: Some(scheduled),
+                started_event: Some(started),
+            }),
+            ..Default::default()
+        };
+        let encoded = poll_for_decision_task_response(response).unwrap();
+        let info = encoded.fields.iter().find(|(id, _)| *id == 90).unwrap();
+        let Value::Struct(info) = &info.1 else {
+            panic!("decision info is not a struct")
+        };
+        assert_eq!(info.fields.len(), 2);
+        let Value::Struct(started) = &info.fields[1].1 else {
+            panic!("started event is not a struct")
+        };
+        let Value::Struct(attrs) = &started.fields.iter().find(|(id, _)| *id == 90).unwrap().1
+        else {
+            panic!("started attrs are not a struct")
+        };
+        assert!(attrs
+            .fields
+            .iter()
+            .any(|(id, value)| *id == 20 && *value == Value::Bytes(vec![0xfe])));
+
+        let unsupported = n_api::HistoryEvent {
+            attributes: Some(Attributes::ActivityTaskScheduledEventAttributes(
+                Default::default(),
+            )),
+            ..Default::default()
+        };
+        assert_eq!(
+            transient_event_out(unsupported),
+            Err("Unexpected event in transient decision info.")
+        );
+    }
+
+    #[test]
+    fn partition_metadata_preserves_raw_and_empty_values() {
+        let encoded = partition_metadata_out(n_api::TaskListPartitionMetadata {
+            key: GoString::from(vec![0xff]),
+            owner_host_name: GoString::default(),
+        });
+        assert_eq!(
+            encoded,
+            structure(vec![
+                (10, Value::Bytes(vec![0xff])),
+                (20, Value::Bytes(Vec::new())),
+            ])
+        );
+    }
 }

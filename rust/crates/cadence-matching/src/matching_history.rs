@@ -9,6 +9,9 @@ use std::{future::Future, sync::Arc, time::Duration};
 use tonic::{transport::Channel, Code, Request, Status};
 use uuid::Uuid;
 
+#[path = "matching_history_native.rs"]
+mod native;
+
 #[derive(Clone, PartialEq, Message)]
 struct RpcStatus {
     #[prost(int32, tag = "1")]
@@ -119,6 +122,7 @@ pub(crate) fn service_busy(error: &Status) -> bool {
 #[derive(Clone)]
 pub struct MatchingHistoryClient {
     history: h::history_api_client::HistoryApiClient<Channel>,
+    channel: Channel,
     /// Matching's default per-attempt budget for the two Record*Started RPCs.
     operation_timeout: Duration,
     /// Go factory History timeout, applied afresh for each resource retry.
@@ -129,6 +133,7 @@ pub struct MatchingHistoryClient {
     /// RecordDecisionTaskStarted/RecordActivityTaskStarted attempt. It is read
     /// per call because a running owner keeps its client.
     record_started_timeout: Option<RecordStartedTimeout>,
+    record_started_timeout_bytes: Option<RecordStartedTimeoutBytes>,
     peer_resolver: Option<Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>>,
     /// Go's History outbound TLS, taken from History's `rpc.tls`; applies to
     /// peers resolved at runtime (the bootstrap channel is built by the caller).
@@ -140,7 +145,8 @@ pub struct MatchingHistoryClient {
 }
 #[derive(Clone)]
 enum HistoryConnection {
-    Grpc(h::history_api_client::HistoryApiClient<Channel>),
+    /// Typed client plus its configured channel, for native raw-byte calls.
+    Grpc(h::history_api_client::HistoryApiClient<Channel>, Channel),
     Tchannel(
         crate::matching_history_tchannel::TChannelHistoryClient,
         Duration,
@@ -148,6 +154,7 @@ enum HistoryConnection {
 }
 /// Live per-domain `matching.recordTaskStartedTimeout` read, in nanoseconds.
 pub type RecordStartedTimeout = Arc<dyn Fn(&str) -> Duration + Send + Sync>;
+pub type RecordStartedTimeoutBytes = Arc<dyn Fn(&[u8]) -> Duration + Send + Sync>;
 /// Go `matching.recordTaskStartedTimeout` property default (1s), shared with the
 /// Matching Record*Started attempt timeout, which is distinct from the
 /// History client's configured per-RPC timeout.
@@ -158,6 +165,7 @@ pub const DEFAULT_HISTORY_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 impl MatchingHistoryClient {
     pub fn new(channel: Channel, operation_timeout: Duration, max_message_size: usize) -> Self {
         Self {
+            channel: channel.clone(),
             history: h::history_api_client::HistoryApiClient::new(channel)
                 .max_decoding_message_size(max_message_size)
                 .max_encoding_message_size(max_message_size),
@@ -165,6 +173,7 @@ impl MatchingHistoryClient {
             history_rpc_timeout: DEFAULT_HISTORY_RPC_TIMEOUT,
             max_message_size,
             record_started_timeout: None,
+            record_started_timeout_bytes: None,
             peer_resolver: None,
             tls: None,
             tchannel_peer_resolver: None,
@@ -210,6 +219,10 @@ impl MatchingHistoryClient {
         self.record_started_timeout = Some(provider);
         self
     }
+    pub fn with_record_started_timeout_bytes(mut self, provider: RecordStartedTimeoutBytes) -> Self {
+        self.record_started_timeout_bytes = Some(provider);
+        self
+    }
     pub fn with_peer_resolver(
         mut self,
         resolver: Arc<crate::matching_history_peer_resolver::MatchingHistoryPeerResolver>,
@@ -253,18 +266,21 @@ impl MatchingHistoryClient {
     fn client_for_peer(
         &self,
         peer: &str,
-    ) -> Result<h::history_api_client::HistoryApiClient<Channel>, Status> {
+    ) -> Result<(h::history_api_client::HistoryApiClient<Channel>, Channel), Status> {
         let channel = crate::grpc_tls::endpoint_channel(peer, self.tls.as_ref()).map_err(|error| {
             Status::unavailable(format!("Invalid resolved History endpoint: {error}"))
         })?;
-        Ok(h::history_api_client::HistoryApiClient::new(channel)
-            .max_decoding_message_size(self.max_message_size)
-            .max_encoding_message_size(self.max_message_size))
+        Ok((
+            h::history_api_client::HistoryApiClient::new(channel.clone())
+                .max_decoding_message_size(self.max_message_size)
+                .max_encoding_message_size(self.max_message_size),
+            channel,
+        ))
     }
-    fn initial_peer(&self, workflow_id: &str) -> Result<Option<String>, Status> {
+    fn initial_peer(&self, workflow_id: &[u8]) -> Result<Option<String>, Status> {
         self.peer_resolver
             .as_ref()
-            .map(|resolver| resolver.workflow(workflow_id))
+            .map(|resolver| resolver.workflow_bytes(workflow_id))
             .transpose()
     }
     /// Go `recordDecisionTaskStarted`/`recordActivityTaskStarted`: the live
@@ -309,12 +325,12 @@ impl MatchingHistoryClient {
         }
         request
     }
-    async fn retry<T: Clone + Send, R, F, Fut>(
+    async fn retry<T: Clone + Send, R, F, Fut, W: AsRef<[u8]> + ?Sized>(
         &self,
         payload: T,
         timeout: Option<Duration>,
         caller_deadline: Option<tokio::time::Instant>,
-        workflow_id: &str,
+        workflow_id: &W,
         mut call: F,
     ) -> Result<R, Status>
     where
@@ -397,12 +413,12 @@ impl MatchingHistoryClient {
     /// Go matching's outer Record*TaskStarted retry loop. Each attempt gets a
     /// fresh domain timeout; inside it the resource History retry wrapper may
     /// retry transient errors until this attempt context expires.
-    async fn retry_record_started<T: Clone + Send, R, F, Fut>(
+    async fn retry_record_started<T: Clone + Send, R, F, Fut, W: AsRef<[u8]> + ?Sized>(
         &self,
         payload: T,
         timeout: Option<Duration>,
         caller_deadline: Option<tokio::time::Instant>,
-        workflow_id: &str,
+        workflow_id: &W,
         mut call: F,
     ) -> Result<R, Status>
     where
@@ -469,12 +485,12 @@ impl MatchingHistoryClient {
     /// Match Go `executeWithRedirect`: validate the operation deadline before
     /// every RPC, and follow only typed ownership-loss statuses. Redirects
     /// share the original per-operation deadline.
-    async fn execute_with_redirect<T: Clone + Send, R, F, Fut>(
+    async fn execute_with_redirect<T: Clone + Send, R, F, Fut, W: AsRef<[u8]> + ?Sized>(
         &self,
         payload: T,
         timeout: Option<Duration>,
         caller_deadline: Option<tokio::time::Instant>,
-        workflow_id: &str,
+        workflow_id: &W,
         call: &mut F,
     ) -> Result<R, Status>
     where
@@ -483,9 +499,9 @@ impl MatchingHistoryClient {
     {
         let using_tchannel = self.tchannel_peer_resolver.is_some();
         let initial_peer = if let Some(resolver) = &self.tchannel_peer_resolver {
-            Some(resolver.workflow(workflow_id)?)
+            Some(resolver.workflow_bytes(workflow_id.as_ref())?)
         } else {
-            self.initial_peer(workflow_id)?
+            self.initial_peer(workflow_id.as_ref())?
         };
         // The factory timeout wrapper adds a fresh per-RPC timeout. A caller
         // deadline and the Record*Started attempt budget can shorten it.
@@ -506,8 +522,11 @@ impl MatchingHistoryClient {
                     "TChannel History outbound requires a peer resolver.",
                 ))
             }
-            (false, Some(peer)) => HistoryConnection::Grpc(self.client_for_peer(peer)?),
-            (false, None) => HistoryConnection::Grpc(self.history.clone()),
+            (false, Some(peer)) => {
+                let (client, channel) = self.client_for_peer(peer)?;
+                HistoryConnection::Grpc(client, channel)
+            }
+            (false, None) => HistoryConnection::Grpc(self.history.clone(), self.channel.clone()),
         };
         loop {
             let remaining =
@@ -518,7 +537,9 @@ impl MatchingHistoryClient {
                 ));
             }
             let call_connection = match &connection {
-                HistoryConnection::Grpc(client) => HistoryConnection::Grpc(client.clone()),
+                HistoryConnection::Grpc(client, channel) => {
+                    HistoryConnection::Grpc(client.clone(), channel.clone())
+                }
                 HistoryConnection::Tchannel(client, _) => HistoryConnection::Tchannel(
                     client.clone(),
                     remaining.unwrap_or(self.history_rpc_timeout),
@@ -556,7 +577,8 @@ impl MatchingHistoryClient {
                             self.history_rpc_timeout,
                         )
                     } else {
-                        HistoryConnection::Grpc(self.client_for_peer(&peer)?)
+                        let (client, channel) = self.client_for_peer(&peer)?;
+                        HistoryConnection::Grpc(client, channel)
                     };
                 }
             }
@@ -607,7 +629,7 @@ impl MatchingHistoryClient {
                     &task.data.workflow_id,
                     &mut |client, request: Request<h::RefreshWorkflowTasksRequest>| async move {
                         match client {
-                            HistoryConnection::Grpc(mut client) => {
+                            HistoryConnection::Grpc(mut client, _) => {
                                 client.refresh_workflow_tasks(request).await.map(|_| ())
                             }
                             HistoryConnection::Tchannel(client, timeout) => {
@@ -678,7 +700,7 @@ impl MatchingHistoryClient {
                 &task.data.workflow_id,
                 &mut |client, request: Request<h::DescribeWorkflowExecutionRequest>| async move {
                     match client {
-                        HistoryConnection::Grpc(mut client) => client
+                        HistoryConnection::Grpc(mut client, _) => client
                             .describe_workflow_execution(request)
                             .await
                             .map(tonic::Response::into_inner),
@@ -727,7 +749,7 @@ impl MatchingHistoryClient {
                 &execution.workflow_id,
                 move |client, request| async move {
                     match client {
-                        HistoryConnection::Grpc(mut client) => client
+                        HistoryConnection::Grpc(mut client, _) => client
                             .get_mutable_state(request)
                             .await
                             .map(tonic::Response::into_inner),
@@ -777,7 +799,7 @@ impl MatchingHistoryClient {
                     &execution.workflow_id,
                     move |client, request| async move {
                         match client {
-                            HistoryConnection::Grpc(mut client) => client
+                            HistoryConnection::Grpc(mut client, _) => client
                                 .record_decision_task_started(request)
                                 .await
                                 .map(tonic::Response::into_inner),
@@ -857,7 +879,7 @@ impl MatchingHistoryClient {
                     &execution.workflow_id,
                     move |client, request| async move {
                         match client {
-                            HistoryConnection::Grpc(mut client) => client
+                            HistoryConnection::Grpc(mut client, _) => client
                                 .record_activity_task_started(request)
                                 .await
                                 .map(tonic::Response::into_inner),
@@ -1414,7 +1436,7 @@ mod tests {
                 &mut move |connection, _| {
                     let debug = match &connection {
                         HistoryConnection::Tchannel(client, _) => format!("{client:?}"),
-                        HistoryConnection::Grpc(_) => panic!("TChannel resolver selected gRPC"),
+                        HistoryConnection::Grpc(..) => panic!("TChannel resolver selected gRPC"),
                     };
                     observed_peers.lock().unwrap().push(debug);
                     let attempt = attempts.fetch_add(1, Ordering::SeqCst);

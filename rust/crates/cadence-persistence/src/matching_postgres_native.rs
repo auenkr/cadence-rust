@@ -507,8 +507,7 @@ mod tests {
 
     #[test]
     fn malformed_run_id_bytes_are_retained_and_fatal() {
-        let mut data = TaskDataBytes::default();
-        data.raw_run_id = Some(GoString::from(&b"\xffnot-a-uuid"[..]));
+        let data = TaskDataBytes { raw_run_id: Some(GoString::from(&b"\xffnot-a-uuid"[..])), ..Default::default() };
         let error = BytesError::from(data.for_sql().unwrap_err());
         assert!(!error.is_transient());
         match error {

@@ -1,7 +1,6 @@
 //! Byte-valued Thrift request decoders for Matching methods beyond decision
 //! polling. Field IDs follow `thrift_matching.rs::dispatch_inner`; nested API
 //! field IDs follow the pinned Thrift descriptors consumed by `cadence-thrift`.
-#![allow(dead_code)] // Parent registers this isolated adapter with native handlers.
 
 use cadence_common::go_string::GoString;
 use cadence_proto::native::{api as a, matching as m};

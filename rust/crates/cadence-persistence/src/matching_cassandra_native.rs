@@ -13,16 +13,14 @@
 //! server-validated UTF-8 and convert to `GoString` without loss.
 
 use super::{
-    expiry_not_passed, timestamp, ttl_seconds, CassandraMatchingTaskStore as Store,
-    DELETE_LIST, INITIAL_RANGE_ID, INSERT_TASK_LIST, INSERT_TASK_LIST_TTL, LIST_ROW,
-    LIST_SENTINEL, RANGE_DELETE_TASKS, SELECT_LIST, SELECT_TASKS, TASK_ROW, UPDATE_LIST,
-    UPDATE_LIST_TTL, COUNT_TASKS, FALLBACK_CONSISTENCY,
+    expiry_not_passed, timestamp, ttl_seconds, CassandraMatchingTaskStore as Store, COUNT_TASKS,
+    DELETE_LIST, FALLBACK_CONSISTENCY, INITIAL_RANGE_ID, INSERT_TASK_LIST, INSERT_TASK_LIST_TTL,
+    LIST_ROW, LIST_SENTINEL, RANGE_DELETE_TASKS, SELECT_LIST, SELECT_TASKS, TASK_ROW, UPDATE_LIST,
+    UPDATE_LIST_TTL,
 };
 use crate::{
     cassandra::{CassandraTaskListUdt, CassandraTaskUdt},
-    matching_blob::{
-        PartitionBytes, PartitionConfigBytes, TaskDataBytes, TaskListDataBytes,
-    },
+    matching_blob::{PartitionBytes, PartitionConfigBytes, TaskDataBytes, TaskListDataBytes},
     matching_cassandra_exec::{bound, BoundValue, BoundValues, CqlStatement},
     matching_native_task_store::{
         AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError as BytesError,
@@ -102,9 +100,15 @@ impl SerializeValue for RawCql {
                     return Err(ser_err(format!("UDT bound to non-UDT type {typ:?}")));
                 };
                 if let Some((name, _)) = fields.iter().find(|(name, _)| {
-                    !definition.field_types.iter().any(|(f, _)| f.as_ref() == *name)
+                    !definition
+                        .field_types
+                        .iter()
+                        .any(|(f, _)| f.as_ref() == *name)
                 }) {
-                    return Err(ser_err(format!("no field {name} in UDT {}", definition.name)));
+                    return Err(ser_err(format!(
+                        "no field {name} in UDT {}",
+                        definition.name
+                    )));
                 }
                 let mut builder = writer.into_value_builder();
                 for (field, field_type) in &definition.field_types {
@@ -158,7 +162,9 @@ impl SerializeValue for RawCql {
 }
 
 fn partitions(parts: &Option<BTreeMap<i32, PartitionBytes>>) -> RawCql {
-    let Some(parts) = parts else { return RawCql::Null };
+    let Some(parts) = parts else {
+        return RawCql::Null;
+    };
     RawCql::Map(
         parts
             .iter()
@@ -177,11 +183,19 @@ fn partitions(parts: &Option<BTreeMap<i32, PartitionBytes>>) -> RawCql {
 }
 
 fn partition_config(config: &Option<PartitionConfigBytes>) -> RawCql {
-    let Some(config) = config else { return RawCql::Null };
+    let Some(config) = config else {
+        return RawCql::Null;
+    };
     RawCql::Udt(vec![
         ("version", RawCql::scalar(config.version)),
-        ("num_read_partitions", RawCql::scalar(config.num_read_partitions)),
-        ("num_write_partitions", RawCql::scalar(config.num_write_partitions)),
+        (
+            "num_read_partitions",
+            RawCql::scalar(config.num_read_partitions),
+        ),
+        (
+            "num_write_partitions",
+            RawCql::scalar(config.num_write_partitions),
+        ),
         ("read_partitions", partitions(&config.read_partitions)),
         ("write_partitions", partitions(&config.write_partitions)),
     ])
@@ -194,7 +208,10 @@ fn task_list_udt(key: &TaskListKeyBytes, data: &TaskListDataBytes) -> Result<Raw
         ("type", RawCql::scalar(key.task_type)),
         ("ack_level", RawCql::scalar(data.ack_level)),
         ("kind", RawCql::scalar(i32::from(data.kind))),
-        ("last_updated", RawCql::scalar(timestamp(data.last_updated_nanos)?)),
+        (
+            "last_updated",
+            RawCql::scalar(timestamp(data.last_updated_nanos)?),
+        ),
         (
             "adaptive_partition_config",
             partition_config(&data.adaptive_partition_config),
@@ -227,7 +244,10 @@ fn task_udt(domain: Uuid, data: &TaskDataBytes) -> Result<RawCql> {
         ("workflow_id", RawCql::text(&data.workflow_id)),
         ("run_id", run),
         ("schedule_id", RawCql::scalar(data.schedule_id)),
-        ("created_time", RawCql::scalar(timestamp(data.created_nanos)?)),
+        (
+            "created_time",
+            RawCql::scalar(timestamp(data.created_nanos)?),
+        ),
         ("partition_config", partition),
     ]))
 }
@@ -597,10 +617,8 @@ impl MatchingTaskStoreBytes for Store {
             v
         };
         let outcome = if (self.all_consistency_delete)() {
-            let all = CqlStatement::with_consistency(
-                DELETE_LIST,
-                scylla::frame::types::Consistency::All,
-            );
+            let all =
+                CqlStatement::with_consistency(DELETE_LIST, scylla::frame::types::Consistency::All);
             match self.executor.exec_lwt(&all, values()) {
                 Ok(outcome) => outcome,
                 Err(error) if error.is_unavailable() => self
@@ -636,11 +654,12 @@ impl MatchingTaskStoreBytes for Store {
 mod tests {
     use super::*;
     use crate::matching_blob::TaskListData;
-    use crate::matching_cassandra_exec::{
-        ConfigRow, CqlExecutor, ExecResult, LwtOutcome,
-    };
+    use crate::matching_cassandra_exec::{ConfigRow, CqlExecutor, ExecResult, LwtOutcome};
     use scylla::cluster::metadata::UserDefinedType;
-    use std::{borrow::Cow, sync::{Arc, Mutex}};
+    use std::{
+        borrow::Cow,
+        sync::{Arc, Mutex},
+    };
 
     fn text() -> ColumnType<'static> {
         ColumnType::Native(NativeType::Text)
@@ -654,12 +673,23 @@ mod tests {
     #[test]
     fn raw_text_bytes_are_written_verbatim_without_normalization() {
         // 0xff is not UTF-8; U+FFFD and a decomposed/precomposed pair must not collapse.
-        for raw in [&b"\xff"[..], "\u{fffd}".as_bytes(), "e\u{301}".as_bytes(), "\u{e9}".as_bytes(), b""] {
+        for raw in [
+            &b"\xff"[..],
+            "\u{fffd}".as_bytes(),
+            "e\u{301}".as_bytes(),
+            "\u{e9}".as_bytes(),
+            b"",
+        ] {
             let out = encode(&RawCql::Text(raw.to_vec()), &text());
             assert_eq!(&out[..4], &(raw.len() as i32).to_be_bytes());
             assert_eq!(&out[4..], raw);
         }
-        assert!(RawCql::Text(vec![1]).serialize(&ColumnType::Native(NativeType::BigInt), CellWriter::new(&mut Vec::new())).is_err());
+        assert!(RawCql::Text(vec![1])
+            .serialize(
+                &ColumnType::Native(NativeType::BigInt),
+                CellWriter::new(&mut Vec::new())
+            )
+            .is_err());
     }
 
     #[test]
@@ -686,7 +716,10 @@ mod tests {
             ("workflow_id", RawCql::Text(b"\xfe".to_vec())),
             (
                 "partition_config",
-                RawCql::Map(vec![(RawCql::Text(b"k\xff".to_vec()), RawCql::Text(b"v".to_vec()))]),
+                RawCql::Map(vec![(
+                    RawCql::Text(b"k\xff".to_vec()),
+                    RawCql::Text(b"v".to_vec()),
+                )]),
             ),
         ]);
         let out = encode(&value, &udt);
@@ -705,7 +738,9 @@ mod tests {
         assert_eq!(&out[4..], &expected[..]);
         // Unknown UDT field is rejected rather than dropped.
         let bad = RawCql::Udt(vec![("nope", RawCql::Null)]);
-        assert!(bad.serialize(&udt, CellWriter::new(&mut Vec::new())).is_err());
+        assert!(bad
+            .serialize(&udt, CellWriter::new(&mut Vec::new()))
+            .is_err());
     }
 
     #[derive(Default)]
@@ -722,7 +757,10 @@ mod tests {
             ));
         }
         fn out(&self) -> LwtOutcome {
-            self.outcome.lock().unwrap().unwrap_or(LwtOutcome { applied: true, range_id: 0 })
+            self.outcome.lock().unwrap().unwrap_or(LwtOutcome {
+                applied: true,
+                range_id: 0,
+            })
         }
     }
     impl CqlExecutor for Fake {
@@ -740,11 +778,19 @@ mod tests {
             }
             Ok(self.out())
         }
-        fn select_task_list(&self, s: &CqlStatement, v: BoundValues) -> ExecResult<Option<(i64, CassandraTaskListUdt)>> {
+        fn select_task_list(
+            &self,
+            s: &CqlStatement,
+            v: BoundValues,
+        ) -> ExecResult<Option<(i64, CassandraTaskListUdt)>> {
             self.rec(&s.text, &v);
             Ok(self.list.lock().unwrap().clone())
         }
-        fn select_tasks(&self, _: &CqlStatement, _: BoundValues) -> ExecResult<Vec<(i64, CassandraTaskUdt, Option<i32>)>> {
+        fn select_tasks(
+            &self,
+            _: &CqlStatement,
+            _: BoundValues,
+        ) -> ExecResult<Vec<(i64, CassandraTaskUdt, Option<i32>)>> {
             Ok(Vec::new())
         }
         fn select_count(&self, _: &CqlStatement, _: BoundValues) -> ExecResult<Option<i64>> {
@@ -759,23 +805,32 @@ mod tests {
         Store::with_executor(fake, Arc::new(|| false))
     }
     fn key(name: &[u8]) -> TaskListKeyBytes {
-        TaskListKeyBytes { domain_id: Uuid::nil(), name: GoString::from(name), task_type: 1 }
+        TaskListKeyBytes {
+            domain_id: Uuid::nil(),
+            name: GoString::from(name),
+            task_type: 1,
+        }
     }
 
     #[test]
     fn lease_renewal_failure_keeps_raw_name_bytes_and_go_text() {
         let fake = Arc::new(Fake::default());
-        *fake.list.lock().unwrap() = Some((5, CassandraTaskListUdt {
-            domain_id: Uuid::nil(),
-            name: "x".into(),
-            type_: 1,
-            ack_level: 0,
-            kind: 0,
-            last_updated: chrono::DateTime::from_timestamp(1, 0).unwrap(),
-            adaptive_partition_config: None,
-        }));
+        *fake.list.lock().unwrap() = Some((
+            5,
+            CassandraTaskListUdt {
+                domain_id: Uuid::nil(),
+                name: "x".into(),
+                type_: 1,
+                ack_level: 0,
+                kind: 0,
+                last_updated: chrono::DateTime::from_timestamp(1, 0).unwrap(),
+                adaptive_partition_config: None,
+            },
+        ));
         let err = store(fake).lease(&key(b"a\xff"), 0, 1, 10).unwrap_err();
-        let BytesError::ConditionFailed { message } = err else { panic!("{err:?}") };
+        let BytesError::ConditionFailed { message } = err else {
+            panic!("{err:?}")
+        };
         assert_eq!(
             message.as_bytes(),
             &b"leaseTaskList:renew failed: taskList:a\xff, taskListType:1, haveRangeID:1, gotRangeID:5"[..]
@@ -786,34 +841,65 @@ mod tests {
     fn create_tasks_binds_raw_names_fences_range_and_rejects_malformed_run_id() {
         let fake = Arc::new(Fake::default());
         let s = store(fake.clone());
-        let mut data = TaskDataBytes::default();
-        data.workflow_id = GoString::from(&b"w\xff"[..]);
-        let task = AllocatedTaskBytes { task_id: 7, data: data.clone() };
-        s.create_tasks_with_domains(&key(b"q\xfe"), 3, 1_000_000_000, &[(Uuid::nil(), &task)]).unwrap();
+        let mut data = TaskDataBytes { workflow_id: GoString::from(&b"w\xff"[..]), ..Default::default() };
+        let task = AllocatedTaskBytes {
+            task_id: 7,
+            data: data.clone(),
+        };
+        s.create_tasks_with_domains(&key(b"q\xfe"), 3, 1_000_000_000, &[(Uuid::nil(), &task)])
+            .unwrap();
         let calls = fake.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 2);
         assert!(calls[0].0.starts_with("INSERT INTO tasks"));
-        assert!(calls[0].1.iter().any(|v| v.contains("254")), "raw 0xfe name bound: {:?}", calls[0].1);
+        assert!(
+            calls[0].1.iter().any(|v| v.contains("254")),
+            "raw 0xfe name bound: {:?}",
+            calls[0].1
+        );
         assert!(calls[1].0.ends_with("IF range_id = ?"));
         // Lost fence: LWT reports the conflicting range, error is a condition failure with raw bytes.
-        *fake.outcome.lock().unwrap() = Some(LwtOutcome { applied: false, range_id: 9 });
-        let err = s.create_tasks_with_domains(&key(b"q\xfe"), 3, 1, &[]).unwrap_err();
-        let BytesError::ConditionFailed { message } = err else { panic!("{err:?}") };
-        assert!(message.as_bytes().starts_with(b"Failed to insert tasks. name: q\xfe"));
+        *fake.outcome.lock().unwrap() = Some(LwtOutcome {
+            applied: false,
+            range_id: 9,
+        });
+        let err = s
+            .create_tasks_with_domains(&key(b"q\xfe"), 3, 1, &[])
+            .unwrap_err();
+        let BytesError::ConditionFailed { message } = err else {
+            panic!("{err:?}")
+        };
+        assert!(message
+            .as_bytes()
+            .starts_with(b"Failed to insert tasks. name: q\xfe"));
         assert!(!BytesError::ConditionFailed { message }.is_transient());
         // Malformed RunID: nothing is sent.
         fake.calls.lock().unwrap().clear();
         let mut bad = data;
         bad.raw_run_id = Some(GoString::from(&b"not-a-uuid\xff"[..]));
-        let bad = AllocatedTaskBytes { task_id: 8, data: bad };
-        let err = s.create_tasks_with_domains(&key(b"q"), 3, 1, &[(Uuid::nil(), &bad)]).unwrap_err();
-        assert!(matches!(err, BytesError::Legacy(MatchingTaskStoreError::BackendConfiguration(_))), "{err:?}");
+        let bad = AllocatedTaskBytes {
+            task_id: 8,
+            data: bad,
+        };
+        let err = s
+            .create_tasks_with_domains(&key(b"q"), 3, 1, &[(Uuid::nil(), &bad)])
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                BytesError::Legacy(MatchingTaskStoreError::BackendConfiguration(_))
+            ),
+            "{err:?}"
+        );
         assert!(fake.calls.lock().unwrap().is_empty());
     }
 
     #[test]
     fn legacy_and_native_blob_models_cross_convert_losslessly_for_valid_utf8() {
-        let data = TaskListData { kind: 1, ack_level: 4, ..Default::default() };
+        let data = TaskListData {
+            kind: 1,
+            ack_level: 4,
+            ..Default::default()
+        };
         let bytes = TaskListDataBytes::from(data.clone());
         assert_eq!(TaskListData::try_from(bytes).unwrap(), data);
     }

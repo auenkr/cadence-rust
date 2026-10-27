@@ -92,6 +92,20 @@ impl MatchingHistoryPeerResolver {
         self.shard_key(domain_id)
     }
 
+    /// Raw-byte twin of `workflow`: hashes the exact Go string bytes.
+    pub fn workflow_bytes(&self, workflow_id: &[u8]) -> Result<String, Status> {
+        self.shard_key_bytes(workflow_id)
+    }
+
+    /// Raw-byte twin of `domain`: hashes the exact Go string bytes.
+    pub fn domain_bytes(&self, domain_id: &[u8]) -> Result<String, Status> {
+        self.shard_key_bytes(domain_id)
+    }
+
+    fn shard_key_bytes(&self, value: &[u8]) -> Result<String, Status> {
+        self.shard_id(cadence_common::membership::fingerprint32(value) % self.shard_count)
+    }
+
     fn shard_key(&self, value: &str) -> Result<String, Status> {
         // Go common.WorkflowIDToHistoryShard and DomainIDToHistoryShard use
         // farm.Fingerprint32 % shard count; History lookup then hashes
