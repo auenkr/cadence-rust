@@ -100,6 +100,27 @@ jobs:
           name: go-sdk-fixture-validation
           retention-days: 3
           path: ${{ runner.temp }}/go-sdk-fixture
+      - name: Run Go raw-byte string oracle
+        working-directory: go
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/matching-raw-string-oracle"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          set +e
+          go run ../tests/matching-raw-string-oracle.go > "$evidence/go-oracle.json" 2> "$evidence/go-oracle.log"
+          result=$?
+          echo "$result" > "$evidence/go-oracle.exit"
+          cat "$evidence/go-oracle.log"
+          if [ "$result" != 0 ]; then exit "$result"; fi
+          echo "MATCHING_GO_RAW_STRING_ORACLE=$evidence/go-oracle.json" >> "$GITHUB_ENV"
+      - name: Upload Go raw-byte string oracle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-raw-string-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-raw-string-oracle
       - name: Run original Go malformed DescribeTaskList oracle
         working-directory: go
         run: |
@@ -182,6 +203,7 @@ jobs:
             crates/cadence-common/src/lib.rs
             crates/cadence-api/src/lib.rs
             crates/cadence-thrift/src/value.rs
+            crates/cadence-persistence/src/matching_task_store.rs
             crates/cadence-matching/src/grpc_matching.rs
             crates/cadence-matching/src/thrift_matching.rs
             crates/cadence-matching/src/matching_writer.rs

@@ -81,8 +81,15 @@ pub type Result<T> = std::result::Result<T, MatchingTaskStoreError>;
 /// FarmHash32 of `<domainID>_<taskListName>` modulo the configured `nShards`.
 /// Go hashes the canonical lowercase hyphenated UUID string.
 pub fn go_db_shard_id(domain_id: &Uuid, task_list_name: &str, n_shards: usize) -> i32 {
-    let input = format!("{domain_id}_{task_list_name}");
-    (farmhash::hash32(input.as_bytes()) % n_shards as u32) as i32
+    go_db_shard_id_bytes(domain_id, task_list_name.as_bytes(), n_shards)
+}
+
+/// Native Thrift task-list names are Go strings and may contain arbitrary bytes.
+pub fn go_db_shard_id_bytes(domain_id: &Uuid, task_list_name: &[u8], n_shards: usize) -> i32 {
+    let mut input = domain_id.to_string().into_bytes();
+    input.push(b'_');
+    input.extend_from_slice(task_list_name);
+    (farmhash::hash32(&input) % n_shards as u32) as i32
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +241,27 @@ pub(crate) mod go_sql_pin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_task_list_db_shards_match_executable_go_farm_oracle() {
+        let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else {
+            return;
+        };
+        let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let domain = Uuid::parse_str("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11").unwrap();
+        let rows = rows.as_array().unwrap();
+        assert!(rows.len() >= 8);
+        for row in rows {
+            let hex = row["hex"].as_str().unwrap();
+            let name: Vec<u8> = (0..hex.len()).step_by(2)
+                .map(|offset| u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap())
+                .collect();
+            let hash = row["hash32"].as_u64().unwrap() as u32;
+            for shards in [1_usize, 2, 4, 16, 1000] {
+                assert_eq!(go_db_shard_id_bytes(&domain, &name, shards), (hash % shards as u32) as i32, "raw name {hex}");
+            }
+        }
+    }
 
     /// Values produced by dgryski/go-farm `Hash32` (go.mod v0.0.0-20240924180020)
     /// over `<domainID>_<taskListName>`, then `% nShards`, as in

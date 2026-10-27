@@ -111,6 +111,15 @@ mod tests {
         assert_eq!(map.get("\u{fffd}".as_bytes()), Some(&2));
         let ordered: BTreeSet<_> = map.into_keys().collect();
         let bytes: Vec<_> = ordered.into_iter().map(GoString::into_bytes).collect();
-        assert_eq!(bytes, vec![vec![], vec![0], vec![0xef, 0xbf, 0xbd], vec![0xfe], vec![0xff]]);
+        assert_eq!(
+            bytes,
+            vec![
+                vec![],
+                vec![0],
+                vec![0xef, 0xbf, 0xbd],
+                vec![0xfe],
+                vec![0xff]
+            ]
+        );
     }
 }

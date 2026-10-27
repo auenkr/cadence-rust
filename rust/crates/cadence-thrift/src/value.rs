@@ -45,11 +45,16 @@ impl Struct {
     }
 
     pub fn req_go_string(&self, id: i16, default: &[u8]) -> Result<GoString> {
-        Ok(self.opt_go_string(id)?.unwrap_or_else(|| GoString::from(default)))
+        Ok(self
+            .opt_go_string(id)?
+            .unwrap_or_else(|| GoString::from(default)))
     }
 
     /// Map keys retain raw bytes and duplicate keys are last-wins, like Go.
-    pub fn opt_map_go_string<T>(&self, id: i16) -> Result<Option<std::collections::HashMap<GoString, T>>>
+    pub fn opt_map_go_string<T>(
+        &self,
+        id: i16,
+    ) -> Result<Option<std::collections::HashMap<GoString, T>>>
     where
         T: FromValue,
     {
@@ -62,7 +67,9 @@ impl Struct {
                 }
                 Ok(Some(map))
             }
-            Some(value) => Err(Error::Invalid(format!("field {id}: expected map, got {value:?}"))),
+            Some(value) => Err(Error::Invalid(format!(
+                "field {id}: expected map, got {value:?}"
+            ))),
         }
     }
 
@@ -612,7 +619,9 @@ mod tests {
     #[test]
     fn go_string_wire_roundtrip_preserves_invalid_utf8_and_nul() {
         let raw = GoString::from(vec![0xff, 0, 0xc0, 0xaf, 0xfe]);
-        let original = Struct { fields: vec![(10, raw.to_value())] };
+        let original = Struct {
+            fields: vec![(10, raw.to_value())],
+        };
         let mut writer = Writer::new();
         write_struct(&mut writer, &original);
         let bytes = writer.into_bytes();
@@ -621,7 +630,10 @@ mod tests {
         assert_eq!(decoded.req_go_string(10, b"").unwrap(), raw);
         assert!(decoded.req_string(10, "").is_err());
         assert_eq!(decoded.opt_go_string(20).unwrap(), None);
-        assert_eq!(decoded.req_go_string(20, &[0xfe]).unwrap().as_bytes(), &[0xfe]);
+        assert_eq!(
+            decoded.req_go_string(20, &[0xfe]).unwrap().as_bytes(),
+            &[0xfe]
+        );
         assert_eq!(reader.remaining(), 0);
         let mut writer = Writer::new();
         write_struct(&mut writer, &decoded);
@@ -630,12 +642,20 @@ mod tests {
 
     #[test]
     fn go_string_map_keys_are_lossless_and_duplicate_keys_are_last_wins() {
-        let value = Struct { fields: vec![(10, Value::Map(vec![
-            (Value::Bytes(vec![0xff]), Value::Bytes(vec![1])),
-            (Value::Bytes(vec![0xfe]), Value::Bytes(vec![2])),
-            (Value::Bytes(vec![0xff]), Value::Bytes(vec![3])),
-            (Value::Bytes("\u{fffd}".as_bytes().to_vec()), Value::Bytes(vec![4])),
-        ]))] };
+        let value = Struct {
+            fields: vec![(
+                10,
+                Value::Map(vec![
+                    (Value::Bytes(vec![0xff]), Value::Bytes(vec![1])),
+                    (Value::Bytes(vec![0xfe]), Value::Bytes(vec![2])),
+                    (Value::Bytes(vec![0xff]), Value::Bytes(vec![3])),
+                    (
+                        Value::Bytes("\u{fffd}".as_bytes().to_vec()),
+                        Value::Bytes(vec![4]),
+                    ),
+                ]),
+            )],
+        };
         let map = value.opt_map_go_string::<GoString>(10).unwrap().unwrap();
         assert_eq!(map.len(), 3);
         assert_eq!(map.get([0xff_u8].as_slice()).unwrap().as_bytes(), &[3]);

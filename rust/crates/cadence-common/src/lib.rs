@@ -9,18 +9,18 @@
 
 pub mod backoff;
 pub mod cluster;
-pub mod duration;
 pub mod cron;
-pub mod jitter;
+pub mod duration;
 pub mod go_string;
+pub mod jitter;
 pub mod retry;
 pub mod semaphore;
 
 pub use backoff::{ExponentialRetryPolicy, Retrier};
 
-pub mod task_list;
-pub mod task_isolation;
 pub mod ack_manager;
+pub mod task_isolation;
+pub mod task_list;
 
 pub mod poller;
 
@@ -31,9 +31,9 @@ pub mod qps;
 pub mod rate_limiter;
 
 pub mod membership;
-pub mod ringpop_wire;
-pub mod ringpop_member;
-pub mod ringpop_disseminator;
-pub mod ringpop_memberlist;
 pub mod ringpop_bootstrap_selection;
+pub mod ringpop_disseminator;
+pub mod ringpop_member;
+pub mod ringpop_memberlist;
 pub mod ringpop_state_transitions;
+pub mod ringpop_wire;
