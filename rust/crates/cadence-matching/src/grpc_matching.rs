@@ -3480,7 +3480,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             .durable_queue(&r.domain_id, &task_list, crate::matching_config::persistence_task_list_type(r.task_list_type))
                             .await?;
                         let update = registry
-                            .update_partition_config_with_deadline(
+                            .update_partition_config_for_domain(
                                 cadence_persistence::matching_sqlite::TaskListKey {
                                     domain_id: uuid::Uuid::parse_str(&r.domain_id)
                                         .expect("validated domain"),
@@ -3491,24 +3491,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 partition_config_from_proto(config),
                                 matching_now(),
                                 caller_deadline,
+                                domain.clone(),
                             )
                             .await;
-                        if update.is_err() {
-                            self.metrics.task_list_counter_event(
-                                crate::matching_metrics::PARTITION_UPDATE_FAILED,
-                                &crate::matching_metrics::PollMetricContext {
-                                    domain: domain.clone(),
-                                    task_list: task_list.name.clone(),
-                                    task_list_kind: task_list.kind,
-                                    task_type: if r.task_list_type == 2 {
-                                        "activity_task"
-                                    } else {
-                                        "decision_task"
-                                    },
-                                    poller_isolation_group: String::new(),
-                                },
-                            );
-                        }
+                        // The failure counter is emitted by the manager at the
+                        // persistence failure point (not for validation errors).
                         update?;
                         return Ok(Response::new(m::UpdateTaskListPartitionConfigResponse {}));
                     }
@@ -3521,7 +3508,13 @@ impl m::matching_api_server::MatchingApi for Matching {
                         kind_is_normal,
                         stored,
                     );
-                    if update.is_err() {
+                    // Go counts only persistence failures; the in-memory store's validation
+                    // errors (InvalidToken) correspond to Go's pre-counter BadRequest.
+                    if matches!(
+                        &update,
+                        Err(cadence_persistence::TaskError::NotFound(_)
+                            | cadence_persistence::TaskError::AlreadyCompleted(_))
+                    ) {
                         self.metrics.task_list_counter_event(
                             crate::matching_metrics::PARTITION_UPDATE_FAILED,
                             &crate::matching_metrics::PollMetricContext {
