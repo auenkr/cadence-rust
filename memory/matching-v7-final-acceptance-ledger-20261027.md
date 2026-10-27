@@ -3,7 +3,8 @@
 Matching remains incomplete. This ledger supersedes the current-status claims
 in the v5/v6 ledgers; their results remain historical evidence.
 
-Final ref: **not cut**. Final SHA: **pending combined source validation**.
+Final ref: `matching-acceptance-20261027-v7`.
+Final SHA: `f5963951befb12dc64b72bb366c44a464939b87a`.
 Never credit an old-pin result to this candidate. Any source correction after
 the pin requires a new immutable candidate and same-pin gate reruns.
 
@@ -40,6 +41,19 @@ Current diagnostic status (supersedes the pending status above):
 - c16d25e01 adds public certificate fingerprints and a verified live TLS
   handshake record; final runtime validation must inspect that record.
 
+Focused CI40538520049 **passed** at ed63d5f47 (Clippy exit0, test exit0).
+Compact proof: `memory/evidence/matching-focused-40538520049/`. Its runner
+formatting patch is applied in f5963951b. Candidate v7 also includes b380cf224
+(TLS sanitized evidence bundle and collector retention); that Python-only
+collector change passed a synthetic retention/exclusion fixture. The package
+pass is a prerequisite, not same-pin workspace acceptance.
+
+Fresh uncached workspace CI is now dispatched at the v7 tag:
+[40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017).
+Run head and artifact exits are not yet reviewed. All mixed lanes remain
+undispatched. Use the explicit two-node Prometheus/cold-domain arguments in
+`matching-v7-two-node-dispatch-review-20261027.md` to preserve the v5 checks.
+
 ## Required runtime evidence
 
 Dispatch commands and artifact requirements are in
@@ -51,7 +65,7 @@ matching exit files and cleanup proof. Job conclusion alone is insufficient.
 
 | Requirement | Run | Reviewed result |
 | --- | --- | --- |
-| Fresh uncached workspace Clippy followed by tests | Not dispatched | Pending |
+| Fresh uncached workspace Clippy followed by tests | [40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017), v7 tag | Running; evidence pending |
 | PostgreSQL | Not dispatched | Pending |
 | MySQL probes | Not dispatched | Pending |
 | Thrift | Not dispatched | Pending |

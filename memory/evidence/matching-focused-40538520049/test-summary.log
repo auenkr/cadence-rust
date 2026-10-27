@@ -1,0 +1,38 @@
+test grpc_matching::durable_tests::go_handler_refresh_partition_config_engine_error_is_internal_service_error ... ok
+test grpc_matching::durable_tests::go_handler_refresh_partition_config_rejects_missing_tasklist_and_non_normal_kinds ... ok
+test grpc_matching::durable_tests::matching_failover_callback_disconnects_sticky_decision_and_keeps_manager ... ok
+test grpc_matching::durable_tests::matching_failover_callback_excludes_sticky_activity_and_other_domains ... ok
+test grpc_matching::durable_tests::matching_rpc_domain_failover_releases_blocked_polls ... ok
+test matching_dispatch::tests::matching_failover_keeps_local_history_delivery_after_end_poll ... ok
+test matching_dispatch::tests::matching_failover_releases_active_forward_resolver_and_poller_registration ... ok
+test matching_dispatch::tests::matching_standby_query_failover_releases_wait_and_refreshes_for_next_poll ... ok
+test matching_domain_cache::tests::cache_retains_independent_config_failover_versions_and_raw_nested_blobs ... ok
+test matching_dispatch::tests::matching_standby_query_failover_cancels_each_forward_wait ... ok
+test matching_reader::tests::matching_reader_zero_dispatch_recovers_same_durable_task_after_ttl ... ok
+test matching_registry::partition_cancellation_tests::dropped_partition_update_without_deadline_cancels_retry_and_counts_failure_once ... ok
+test matching_registry::partition_cancellation_tests::refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller ... ok
+test matching_registry::tests::refresh_partition_config_from_request_ignores_older_versions ... ok
+test matching_runtime::failover_callback_tests::registered_failover_callbacks_preserve_catchup_and_release_only_eligible_updates ... ok
+test matching_runtime::tests::failover_callback_selection_matches_go_and_advances_baseline ... ok
+test result: ok. 758 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 35.22s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.99s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 11 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.02s
+test result: ok. 18 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 16 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 30.01s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test go_refresh_partition_config_from_database_replaces_cache ... ok
+test go_refresh_partition_config_concurrency_keeps_highest_version ... ok
+test go_refresh_partition_config_from_request_ignores_older_version ... ok
+test result: ok. 9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.15s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
