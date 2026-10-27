@@ -13,7 +13,13 @@ That live helper was not executed; mixed Thrift acceptance remains required.
 
 Validation: local shell syntax and git diff checks passed; no local Go/Cargo
 commands ran. Actions https://github.com/auenkr/cadence-rust/actions/runs/40463643059
-is running on the exact source above; no passing result is claimed yet.
+failed in the new Go comparison before Rust validation. The fixture generator
+inherited wall-clock testdata timestamps and Go map iteration order. Repair
+fb0cd3d08 fixes the testdata timestamps to the reviewed fixture's values and
+compares all decoded Thrift values, ignoring map/set order only. Scalar bytes,
+field IDs, container types, list order and absent-versus-empty values remain
+significant. The fixture itself is unchanged. Focused Matching CI was dispatched
+on master after the repair; no passing result is claimed yet.
 
 Parent review of worker panic patch caccc07d4 is still open: the initial
 implementation uses an approximate printable-Unicode exclusion list and
