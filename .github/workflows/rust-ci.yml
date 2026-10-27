@@ -161,6 +161,10 @@ jobs:
         run: scripts/verify-history-tchannel-wire-oracle.sh
       - name: Execute production Go Matching owner ordering oracle
         run: python3 tests/run-matching-owner-order-oracle.py
+      - name: Verify Matching Thrift decoder schema matches Go
+        run: |
+          python3 tests/gates/gen-matching-thrift-schema.py "$GITHUB_WORKSPACE"
+          git diff --exit-code -- rust/crates/cadence-matching/src/thrift_matching_schema.rs
       - name: Audit Matching definitions and rollup map
         run: python3 rust/tools/audit-matching-metrics.py
       - name: Check Go emission oracle formatting
