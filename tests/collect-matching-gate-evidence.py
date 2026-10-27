@@ -65,7 +65,7 @@ def collect(args):
             'sha256': sha256_file(path),
         }
     recovery_names = ('matching-shutdown.json', 'production-failure-recovery-checkpoints.json',
-                      'db-observations.json')
+                      'db-observations.json', 'matching-cold-domain-metric-probe.json')
     recovery_evidence = {}
     for name in recovery_names:
         path = work / name
@@ -95,6 +95,7 @@ def collect(args):
                  'go-sdk.log', 'restart-sdk.log', 'graceful-drain-sdk.log',
                  'production-idle-recovery-sdk.log', 'production-crash-recovery-sdk.log',
                  'production-failure-recovery-checkpoints.json',
+                 'matching-cold-domain-metric-probe.json',
                  'gc-backlog-sdk.log', 'db-observations.json', 'matching-shutdown.json'):
         path = source / 'gate/run/rust-matching' / name
         if path.is_file():

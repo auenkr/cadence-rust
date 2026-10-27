@@ -26,7 +26,10 @@ fn adaptive_reader_trace(task_list: &str, event: &str, fields: std::fmt::Argumen
 }
 
 fn reader_partition_parts(name: &str) -> (&str, &str) {
-    match name.strip_prefix("/__cadence_sys/").and_then(|name| name.rsplit_once('/')) {
+    match name
+        .strip_prefix("/__cadence_sys/")
+        .and_then(|name| name.rsplit_once('/'))
+    {
         Some((root, leaf)) if leaf.parse::<u32>().is_ok() => (root, "child"),
         _ => (name, "root"),
     }
