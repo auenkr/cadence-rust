@@ -30,6 +30,16 @@ fn update_failure_status(error: &StorageError) -> Status {
             },
         );
     }
+    // Go `handleErr` passes a raw BadRequestError through as InvalidArgument.
+    if matches!(
+        error,
+        StorageError::Backend {
+            kind: cadence_persistence::matching_task_store::BackendErrorKind::BadRequest,
+            ..
+        }
+    ) {
+        return Status::invalid_argument(error.to_string());
+    }
     Status::internal(error.to_string())
 }
 
@@ -170,8 +180,21 @@ impl PartitionCache {
     pub fn update(
         &self,
         queue: &DurableTaskQueue,
+        config: StoredPartitionConfig,
+        now: i64,
+    ) -> Result<Option<(Option<StoredPartitionConfig>, StoredPartitionConfig)>, Status> {
+        self.update_until(queue, config, now, || false, || {})
+    }
+    /// Go `updatePartitionConfig`: `cancelled` is the caller context's `Done()` for the
+    /// persistence retry; `on_persist_failure` runs once at the failure point
+    /// (Go's TaskListPartitionUpdateFailed counter), never for validation errors.
+    pub fn update_until(
+        &self,
+        queue: &DurableTaskQueue,
         mut config: StoredPartitionConfig,
         now: i64,
+        cancelled: impl Fn() -> bool,
+        on_persist_failure: impl FnOnce(),
     ) -> Result<Option<(Option<StoredPartitionConfig>, StoredPartitionConfig)>, Status> {
         validate(&config)?;
         let mut cached = self.0.lock().expect("Matching partition cache lock");
@@ -189,15 +212,19 @@ impl PartitionCache {
             .map(|old| old.version)
             .unwrap_or_default()
             .wrapping_add(1);
-        let result = cadence_persistence::matching_retry::persistence(|| {
-            queue
-                .update_partition_config(Some(to_storage(&config)), now)
-                .map_err(|error| match error {
-                    QueueError::Storage(error) => error,
-                    error => StorageError::ConditionFailed(error.to_string()),
-                })
-        });
+        let result = cadence_persistence::matching_retry::persistence_until(
+            || {
+                queue
+                    .update_partition_config(Some(to_storage(&config)), now)
+                    .map_err(|error| match error {
+                        QueueError::Storage(error) => error,
+                        error => StorageError::ConditionFailed(error.to_string()),
+                    })
+            },
+            cancelled,
+        );
         if let Err(error) = result {
+            on_persist_failure();
             queue.stop();
             return Err(update_failure_status(&error));
         }
@@ -389,5 +416,63 @@ mod tests {
         let status = update_failure_status(&backend(K::Throttled));
         assert_eq!(status.code(), tonic::Code::ResourceExhausted);
         assert!(!status.details().is_empty());
+    }
+
+    #[test]
+    fn bad_request_backend_error_is_invalid_argument() {
+        let status = update_failure_status(&StorageError::Backend {
+            kind: cadence_persistence::matching_task_store::BackendErrorKind::BadRequest,
+            message: "bad".into(),
+        });
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn failure_callback_fires_once_for_persistence_failure_not_for_validation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            SqliteTaskStore::create(directory.path().join("queue.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let key = TaskListKey {
+            domain_id: uuid::Uuid::from_u128(1),
+            name: "tl".into(),
+            task_type: 0,
+        };
+        let open = |lease| {
+            DurableTaskQueue::open(
+                store.clone(),
+                key.clone(),
+                0,
+                std::num::NonZeroU32::new(100).unwrap(),
+                lease,
+            )
+            .unwrap()
+        };
+        let queue = open(1);
+        let cache = PartitionCache::load(store.as_ref(), &queue, &key, 0).unwrap();
+        let parts = |count: i32| -> std::collections::HashMap<i32, Vec<String>> {
+            (0..count).map(|id| (id, Vec::new())).collect()
+        };
+        let request = |read, write| StoredPartitionConfig {
+            version: 0,
+            read_partitions: parts(read),
+            write_partitions: parts(write),
+        };
+        let failures = std::cell::Cell::new(0);
+        // Validation failure: no counter.
+        cache
+            .update_until(&queue, request(1, 3), 2, || false, || failures.set(failures.get() + 1))
+            .unwrap_err();
+        assert_eq!(failures.get(), 0);
+        // Fencing failure, even with an already cancelled caller: first attempt runs and
+        // the counter fires exactly once; ConditionFailed is not retried.
+        let _owner = open(3);
+        let error = cache
+            .update_until(&queue, request(3, 3), 4, || true, || failures.set(failures.get() + 1))
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(failures.get(), 1);
+        assert!(queue.is_stopped());
     }
 }

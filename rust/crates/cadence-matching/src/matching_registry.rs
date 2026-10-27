@@ -1953,8 +1953,9 @@ impl QueueRegistry {
         ) {
             Some((read_partitions, write_partitions)) => {
                 scaler.record_update_counter(false);
+                // Go's scaler passes its own `a.ctx`, which ends when the manager stops.
                 let result = self
-                    .update_partition_config(
+                    .update_partition_config_inner(
                         root.clone(),
                         handle,
                         cadence_persistence::StoredPartitionConfig {
@@ -1963,6 +1964,9 @@ impl QueueRegistry {
                             write_partitions,
                         },
                         now,
+                        None,
+                        true,
+                        None,
                     )
                     .await;
                 if result.is_err() {
@@ -1992,12 +1996,97 @@ impl QueueRegistry {
         now: i64,
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<(), Status> {
+        self.update_partition_config_inner(key, handle, config, now, caller_deadline, false, None)
+            .await
+    }
+
+    /// Like `_with_deadline`, with the metrics domain name already resolved by the RPC layer.
+    pub async fn update_partition_config_for_domain(
+        &self,
+        key: TaskListKey,
+        handle: QueueHandle,
+        config: cadence_persistence::StoredPartitionConfig,
+        now: i64,
+        caller_deadline: Option<tokio::time::Instant>,
+        metric_domain: String,
+    ) -> Result<(), Status> {
+        self.update_partition_config_inner(
+            key,
+            handle,
+            config,
+            now,
+            caller_deadline,
+            false,
+            Some(metric_domain),
+        )
+        .await
+    }
+
+    /// `scaler_ctx`: the caller context is the manager's own (Go `a.ctx`), cancelled
+    /// when the queue stops; manual updates only observe the RPC deadline.
+    async fn update_partition_config_inner(
+        &self,
+        key: TaskListKey,
+        handle: QueueHandle,
+        config: cadence_persistence::StoredPartitionConfig,
+        now: i64,
+        caller_deadline: Option<tokio::time::Instant>,
+        scaler_ctx: bool,
+        metric_domain: Option<String>,
+    ) -> Result<(), Status> {
         let registry = self.clone();
         let domain_id = key.domain_id;
         let task_type = key.task_type;
         let task_list_kind = handle.queue.task_list_kind();
         let notification = tokio::task::spawn_blocking(move || {
-            let Some((old, new)) = handle.partitions.update(&handle.queue, config, now)? else {
+            // The closure outlives a dropped caller future (tonic drops the handler at
+            // the gRPC deadline), so retry cut-off and the failure counter happen here,
+            // like Go's `throttleRetry.Do(ctx, ...)` and `IncCounter` at the failure point.
+            let deadline = caller_deadline.map(tokio::time::Instant::into_std);
+            let cancelled = || {
+                deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline)
+                    || (scaler_ctx && handle.queue.is_stopped())
+            };
+            let on_failure = || {
+                let domain = metric_domain.clone().unwrap_or_else(|| {
+                    registry
+                    .domain_metadata
+                    .as_ref()
+                    .and_then(|(domains, _)| {
+                        domains
+                            .describe(&cadence_api::service_types::DescribeDomainRequest {
+                                name: None,
+                                uuid: Some(key.domain_id.to_string()),
+                            })
+                            .ok()
+                            .and_then(|response| response.domain_info.map(|info| info.name))
+                    })
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| "_unknown_".to_owned())
+                });
+                registry.metrics.task_list_counter_event(
+                    crate::matching_metrics::PARTITION_UPDATE_FAILED,
+                    &crate::matching_metrics::PollMetricContext {
+                        domain,
+                        task_list: key.name.clone(),
+                        task_list_kind: i32::from(task_list_kind),
+                        task_type: if key.task_type == 0 {
+                            "decision_task"
+                        } else {
+                            "activity_task"
+                        },
+                        poller_isolation_group: String::new(),
+                    },
+                );
+            };
+            let Some((old, new)) = handle.partitions.update_until(
+                &handle.queue,
+                config,
+                now,
+                cancelled,
+                on_failure,
+            )?
+            else {
                 return Ok::<_, Status>(None);
             };
             // Pinned Go taskListManager.notifyPartitionConfig notifies the
