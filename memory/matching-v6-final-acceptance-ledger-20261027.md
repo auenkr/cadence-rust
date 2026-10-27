@@ -1,5 +1,8 @@
 # Matching candidate v6 final acceptance ledger
 
+Current status: see `matching-progress-checkpoint-20261027-1530.md`. V6 is
+superseded; the combined source is under diagnostic CI, not final acceptance.
+
 Final ref: `matching-acceptance-20261027-v6`
 Final SHA: `3055d0c6c0c8932c14e12714b498b82569cfe0b5`
 
