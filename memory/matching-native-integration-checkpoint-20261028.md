@@ -33,3 +33,7 @@ Previous replacement 40583973417 concluded failure: clippy chunks_exact_to_as_ch
 Run 40584900096 concluded failure in clippy: four PostgreSQL ignored-test lease calls omitted the kind argument; native.rs had a second chunks_exact_to_as_chunks lint. Corrected both and applied the runner formatting patch. Added and registered the five non-decision native Thrift response encoders; production dispatch is unchanged. Next CI required.
 
 Run https://github.com/auenkr/cadence-rust/actions/runs/40585602320 validates 69981a19d (response encoders and prior CI fixes). Pending at the Cassandra/queue integration checkpoint. It does not include the newly registered native queue or Cassandra backend.
+
+## Queue and Cassandra CI pin
+
+Commit 102f1c077 registers the full native durable queue and raw Cassandra backend. Fresh uncached five-crate CI dispatched at https://github.com/auenkr/cadence-rust/actions/runs/40585964293 (head 102f1c077; conclusion pending). Supersedes prior in-progress 40585602320 via workflow cancel-in-progress concurrency. No local Cargo, Go or formatting executed. Native History start-client worker remains active. Further worker starts deferred because the host load was 6.86 (>6 resource guard), despite available RAM 3.2 GiB. Next source review should compare native queue behavior and RawCql UDT/collection serialization to legacy and Go. No production-native handler adoption or service completion claimed.
