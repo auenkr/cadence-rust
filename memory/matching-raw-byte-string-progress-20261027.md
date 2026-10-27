@@ -44,3 +44,8 @@ Required integration work:
 
 Host load remains above6, so no new workers may start under AGENTS.md. Parent
 is progressing with narrow source reads and all validation remains CI-only.
+
+Foundation source: 00ce7a04f. Focused common+Thrift Clippy/test and runner
+formatting CI: https://github.com/auenkr/cadence-rust/actions/runs/40546474520.
+Conclusion pending. This is not handler, persistence or raw-byte service
+acceptance evidence. Apply the runner formatting patch before the next pin.
