@@ -102,6 +102,48 @@ pub fn persistence_until<T>(
     )
 }
 
+/// Native-store retry: same algorithm as [`persistence_until`]. Legacy and backend
+/// errors keep their transient classification; every other native error is
+/// non-transient, stashed through the legacy-typed policy and restored unchanged
+/// (raw message bytes and subtype intact).
+pub fn persistence_bytes_until<T>(
+    mut operation: impl FnMut() -> crate::matching_native_task_store::Result<T>,
+    cancelled: impl Fn() -> bool,
+) -> crate::matching_native_task_store::Result<T> {
+    use crate::matching_native_task_store::MatchingTaskStoreBytesError as Native;
+    const STASHED: &str = "\0native-retry-error-stashed";
+    let stash = std::cell::RefCell::new(None);
+    let result = persistence_until(
+        || {
+            operation().map_err(|error| match error {
+                Native::Legacy(error) => error,
+                Native::Backend { kind, message } => {
+                    crate::matching_sqlite::StorageError::Backend { kind, message }
+                }
+                other => {
+                    *stash.borrow_mut() = Some(other);
+                    crate::matching_sqlite::StorageError::ConditionFailed(STASHED.into())
+                }
+            })
+        },
+        cancelled,
+    );
+    result.map_err(|error| match error {
+        crate::matching_sqlite::StorageError::ConditionFailed(message) if message == STASHED => {
+            stash.borrow_mut().take().unwrap_or(Native::Legacy(
+                crate::matching_sqlite::StorageError::ConditionFailed(message),
+            ))
+        }
+        other => Native::Legacy(other),
+    })
+}
+
+pub fn persistence_bytes<T>(
+    operation: impl FnMut() -> crate::matching_native_task_store::Result<T>,
+) -> crate::matching_native_task_store::Result<T> {
+    persistence_bytes_until(operation, || false)
+}
+
 pub(crate) fn lease<T>(now: i64, mut operation: impl FnMut(i64) -> Result<T>) -> Result<T> {
     let started = Instant::now();
     let mut first = true;
