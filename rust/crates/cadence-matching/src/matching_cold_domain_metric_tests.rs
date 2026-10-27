@@ -28,6 +28,7 @@ impl crate::matching_domain_cache::DomainCacheClock for ManualClock {
 struct LateDomainSource {
     domain: Mutex<Option<MatchingDomainMetadata>>,
     calls: Mutex<Vec<String>>,
+    failure: Mutex<Option<DomainMetadataSourceError>>,
 }
 
 impl DomainMetadataSource for LateDomainSource {
@@ -59,6 +60,9 @@ impl DomainMetadataSource for LateDomainSource {
                 .or_else(|| id.map(|id| format!("id:{id}")))
                 .unwrap_or_default(),
         );
+        if let Some(error) = self.failure.lock().unwrap().clone() {
+            return Err(error);
+        }
         self.domain
             .lock()
             .unwrap()
@@ -67,8 +71,84 @@ impl DomainMetadataSource for LateDomainSource {
                 name.map(|name| domain.info.name == name).unwrap_or(true)
                     && id.map(|id| domain.info.uuid == id).unwrap_or(true)
             })
-            .ok_or_else(|| DomainMetadataSourceError::permanent("domain not found"))
+            .ok_or_else(|| {
+                DomainMetadataSourceError::permanent("domain not found")
+                    .with_class(crate::matching_domain_cache::DomainErrorClass::NotFound)
+            })
     }
+}
+
+#[tokio::test]
+async fn name_lookup_preserves_domain_cache_error_classification() {
+    use crate::matching_domain_cache::DomainErrorClass;
+
+    for (error, code, message, detail_type) in [
+        (
+            DomainMetadataSourceError::permanent("Domain missing")
+                .with_class(DomainErrorClass::NotFound),
+            tonic::Code::NotFound,
+            "Domain missing",
+            Some("type.googleapis.com/uber.cadence.api.v1.EntityNotExistsError"),
+        ),
+        (
+            DomainMetadataSourceError::permanent("storage unavailable"),
+            tonic::Code::Internal,
+            "storage unavailable",
+            None,
+        ),
+    ] {
+        let source = Arc::new(LateDomainSource::default());
+        *source.failure.lock().unwrap() = Some(error);
+        let cache = Arc::new(MatchingDomainCache::with_clock(
+            source,
+            Arc::new(ManualClock::default()),
+        ));
+        let matching = Matching::new(crate::handlers::AppState::default())
+            .with_domain_cache(cache);
+        let status = m::matching_api_server::MatchingApi::list_task_list_partitions(
+            &matching,
+            Request::new(m::ListTaskListPartitionsRequest {
+                domain: DOMAIN_NAME.into(),
+                task_list: Some(p::TaskList {
+                    name: "queue".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect_err("cold domain source error must reach the caller");
+        assert_eq!(status.code(), code);
+        assert_eq!(status.message(), message);
+        assert_eq!(
+            status.details().first().map(|detail| detail.type_url.as_str()),
+            detail_type,
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_name_lookup_is_bad_request() {
+    let matching = Matching::new(crate::handlers::AppState::default())
+        .with_domain_cache(Arc::new(MatchingDomainCache::with_clock(
+            Arc::new(LateDomainSource::default()),
+            Arc::new(ManualClock::default()),
+        )));
+    let status = m::matching_api_server::MatchingApi::list_task_list_partitions(
+        &matching,
+        Request::new(m::ListTaskListPartitionsRequest {
+            domain: String::new(),
+            task_list: Some(p::TaskList {
+                name: "queue".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+    )
+    .await
+    .expect_err("empty domain name is rejected");
+    assert_eq!(status.code(), tonic::Code::InvalidArgument);
+    assert_eq!(status.message(), "Domain name is empty");
 }
 
 #[tokio::test]
