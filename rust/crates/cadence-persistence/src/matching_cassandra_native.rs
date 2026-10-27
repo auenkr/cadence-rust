@@ -616,7 +616,7 @@ impl MatchingTaskStoreBytes for Store {
             v.push(bound(range));
             v
         };
-        let outcome = if (self.all_consistency_delete)() {
+        let outcome = {
             let all =
                 CqlStatement::with_consistency(DELETE_LIST, scylla::frame::types::Consistency::All);
             match self.executor.exec_lwt(&all, values()) {
@@ -630,10 +630,6 @@ impl MatchingTaskStoreBytes for Store {
                     .map_err(internal)?,
                 Err(error) => return Err(internal(error)),
             }
-        } else {
-            self.executor
-                .exec_lwt(&CqlStatement::new(DELETE_LIST), values())
-                .map_err(internal)?
         };
         if outcome.applied {
             Ok(())
@@ -894,6 +890,29 @@ mod tests {
             "{err:?}"
         );
         assert!(fake.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn subsecond_expiry_skips_native_insert_but_keeps_fence() {
+        let fake = Arc::new(Fake::default());
+        let s = store(fake.clone());
+        let mut task = AllocatedTaskBytes {
+            task_id: 7,
+            data: TaskDataBytes { expiry_nanos: 1_999_999_999, ..Default::default() },
+        };
+        s.create_tasks_with_domains(&key(b"q\xff"), 3, 1_000_000_000, &[(Uuid::nil(), &task)])
+            .unwrap();
+        let calls = fake.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].0.ends_with("IF range_id = ?"));
+        fake.calls.lock().unwrap().clear();
+        task.data.expiry_nanos = 2_000_000_000;
+        s.create_tasks_with_domains(&key(b"q\xff"), 3, 1_000_000_000, &[(Uuid::nil(), &task)])
+            .unwrap();
+        let calls = fake.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].0.ends_with(" USING TTL 1"));
+        assert!(calls[1].0.ends_with("IF range_id = ?"));
     }
 
     #[test]

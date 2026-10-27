@@ -53,7 +53,8 @@ fn execution(task: &AllocatedTaskBytes) -> Result<n::api::WorkflowExecution, Sta
         None | Some([]) => GoString::default(),
         Some(bytes) => Uuid::from_slice(bytes)
             .map_err(|_| Status::internal("Invalid run ID in persisted matching task."))?
-            .to_string().into(),
+            .to_string()
+            .into(),
     };
     Ok(n::api::WorkflowExecution {
         workflow_id: task.data.workflow_id.clone(),
@@ -163,7 +164,10 @@ pub(super) fn activity_response(
 impl MatchingHistoryClient {
     /// Byte-aware providers can resolve raw domains without aliasing invalid
     /// bytes to a valid domain containing a replacement rune.
-    fn record_started_operation_timeout_bytes(&self, domain_id: &GoString) -> Option<std::time::Duration> {
+    fn record_started_operation_timeout_bytes(
+        &self,
+        domain_id: &GoString,
+    ) -> Option<std::time::Duration> {
         let timeout = if let Some(provider) = &self.record_started_timeout_bytes {
             provider(domain_id.as_bytes())
         } else if let Ok(domain) = domain_id.as_utf8() {
@@ -327,7 +331,10 @@ mod tests {
         task.data.run_id = Some(vec![1, 2]);
         let error = execution(&task).unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
-        assert_eq!(error.message(), "Invalid run ID in persisted matching task.");
+        assert_eq!(
+            error.message(),
+            "Invalid run ID in persisted matching task."
+        );
         task.data.raw_run_id = Some(raw(b"\xff\xfe"));
         assert_eq!(execution(&task).unwrap().run_id.as_bytes(), &[0xff, 0xfe]);
     }
@@ -336,18 +343,29 @@ mod tests {
     async fn raw_timeout_provider_never_aliases_invalid_domain_bytes() {
         let client = MatchingHistoryClient::new(
             Channel::from_static("http://127.0.0.1:1").connect_lazy(),
-            Duration::from_secs(1), 1024,
-        ).with_record_started_timeout(Arc::new(|domain| {
+            Duration::from_secs(1),
+            1024,
+        )
+        .with_record_started_timeout(Arc::new(|domain| {
             assert_eq!(domain, "�");
             Duration::from_secs(7)
         }));
-        assert_eq!(client.record_started_operation_timeout_bytes(&raw("�".as_bytes())), Some(Duration::from_secs(7)));
-        assert_eq!(client.record_started_operation_timeout_bytes(&raw(b"\xff")), Some(Duration::from_secs(1)));
+        assert_eq!(
+            client.record_started_operation_timeout_bytes(&raw("�".as_bytes())),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            client.record_started_operation_timeout_bytes(&raw(b"\xff")),
+            Some(Duration::from_secs(1))
+        );
         let client = client.with_record_started_timeout_bytes(Arc::new(|domain| {
             assert_eq!(domain, b"\xff");
             Duration::from_secs(3)
         }));
-        assert_eq!(client.record_started_operation_timeout_bytes(&raw(b"\xff")), Some(Duration::from_secs(3)));
+        assert_eq!(
+            client.record_started_operation_timeout_bytes(&raw(b"\xff")),
+            Some(Duration::from_secs(3))
+        );
     }
 
     #[test]
@@ -368,7 +386,9 @@ mod tests {
                 scheduled_event_id: 9,
                 attempt: 2,
                 previous_started_event_id: Some(-23),
-                workflow_type: Some(n::api::WorkflowType { name: raw(b"t\xfe") }),
+                workflow_type: Some(n::api::WorkflowType {
+                    name: raw(b"t\xfe"),
+                }),
                 started_event_id: 11,
                 ..Default::default()
             },
@@ -402,14 +422,14 @@ mod tests {
         assert_eq!(missing.code(), tonic::Code::Internal);
         let attributes = n::api::ActivityTaskScheduledEventAttributes {
             activity_id: raw(b"a\xff"),
-            activity_type: Some(n::api::ActivityType { name: raw(b"at\xfe") }),
+            activity_type: Some(n::api::ActivityType {
+                name: raw(b"at\xfe"),
+            }),
             ..Default::default()
         };
         let event = n::api::HistoryEvent {
             attributes: Some(
-                n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    attributes,
-                ),
+                n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes),
             ),
             ..Default::default()
         };
@@ -420,7 +440,9 @@ mod tests {
             n::history::RecordActivityTaskStartedResponse {
                 scheduled_event: Some(event),
                 attempt: 3,
-                workflow_type: Some(n::api::WorkflowType { name: raw(b"wt\xfe") }),
+                workflow_type: Some(n::api::WorkflowType {
+                    name: raw(b"wt\xfe"),
+                }),
                 ..Default::default()
             },
         )
@@ -500,7 +522,11 @@ mod tests {
             impl tonic::server::UnaryService<n::history::RecordDecisionTaskStartedRequest> for Decision {
                 type Response = n::history::RecordDecisionTaskStartedResponse;
                 type Future = std::pin::Pin<
-                    Box<dyn std::future::Future<Output = Result<tonic::Response<Self::Response>, Status>> + Send>,
+                    Box<
+                        dyn std::future::Future<
+                                Output = Result<tonic::Response<Self::Response>, Status>,
+                            > + Send,
+                    >,
                 >;
                 fn call(
                     &mut self,

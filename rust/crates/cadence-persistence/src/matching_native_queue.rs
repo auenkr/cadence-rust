@@ -907,7 +907,10 @@ mod tests {
         q.append_in_domain(&[data(b"x")], Uuid::from_u128(9), 2)
             .unwrap();
         assert_eq!(rows(&s, &k), 0);
-        let source = TaskListKeyBytes { domain_id: Uuid::from_u128(9), ..k };
+        let source = TaskListKeyBytes {
+            domain_id: Uuid::from_u128(9),
+            ..k
+        };
         let stored = MatchingTaskStoreBytes::get_tasks(&*s, &source, 0, i64::MAX, 10).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].data.workflow_id.as_bytes(), b"x");

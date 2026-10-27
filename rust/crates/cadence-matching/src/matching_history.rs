@@ -146,7 +146,10 @@ pub struct MatchingHistoryClient {
 #[derive(Clone)]
 enum HistoryConnection {
     /// Typed client plus its configured channel, for native raw-byte calls.
-    Grpc(Box<h::history_api_client::HistoryApiClient<Channel>>, Channel),
+    Grpc(
+        Box<h::history_api_client::HistoryApiClient<Channel>>,
+        Channel,
+    ),
     Tchannel(
         crate::matching_history_tchannel::TChannelHistoryClient,
         Duration,
@@ -530,7 +533,9 @@ impl MatchingHistoryClient {
                 let (client, channel) = self.client_for_peer(peer)?;
                 HistoryConnection::Grpc(Box::new(client), channel)
             }
-            (false, None) => HistoryConnection::Grpc(Box::new(self.history.clone()), self.channel.clone()),
+            (false, None) => {
+                HistoryConnection::Grpc(Box::new(self.history.clone()), self.channel.clone())
+            }
         };
         loop {
             let remaining =

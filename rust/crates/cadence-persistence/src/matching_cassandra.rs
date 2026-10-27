@@ -78,11 +78,11 @@ impl CassandraMatchingTaskStore {
 
     fn internal(error: impl std::fmt::Display + 'static) -> MatchingTaskStoreError {
         let kind = match (&error as &dyn std::any::Any).downcast_ref::<ExecFailure>() {
-            Some(error) if error.is_unavailable() => BackendErrorKind::DbUnavailable,
+            Some(error) => error.backend_error_kind(),
             _ => BackendErrorKind::Internal,
         };
-        // Go nosql `convertCommonErrors`: gocql unavailability becomes
-        // `DBUnavailableError`, everything else unclassified is internal.
+        // Go nosql `convertCommonErrors` distinguishes timeout, overload,
+        // actionable database unavailability, and unclassified errors.
         MatchingTaskStoreError::Backend {
             kind,
             message: error.to_string(),
@@ -369,7 +369,7 @@ fn task_not_expired(data: &TaskData, now_nanos: i64) -> bool {
     expiry_not_passed(data.expiry_nanos, now_nanos)
 }
 fn expiry_not_passed(expiry_nanos: i64, now_nanos: i64) -> bool {
-    expiry_nanos <= 0 || expiry_nanos > now_nanos
+    expiry_nanos <= 0 || expiry_nanos.saturating_sub(now_nanos) >= 1_000_000_000
 }
 
 // Raw-byte `MatchingTaskStoreBytes` implementation (private child module).
@@ -670,7 +670,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 bound(range),
             ]
         };
-        let outcome = if (self.all_consistency_delete)() {
+        let outcome = {
             let all_consistency = CqlStatement::with_consistency(
                 DELETE_LIST,
                 scylla::frame::types::Consistency::All,
@@ -686,10 +686,6 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 }
                 Err(error) => return Err(Self::internal(error)),
             }
-        } else {
-            self.executor
-                .exec_lwt(&CqlStatement::new(DELETE_LIST), values())
-                .map_err(Self::internal)?
         };
         if outcome.applied {
             Ok(())
@@ -907,7 +903,8 @@ mod tests {
         assert!(literal.contains("partition_config: {'group': 'blue'}"));
         assert_eq!(task_ttl(&task), Some(2), "Go truncates TTL seconds");
         assert!(!task_not_expired(&task, task.expiry_nanos));
-        assert!(task_not_expired(&task, task.expiry_nanos - 1));
+        assert!(!task_not_expired(&task, task.expiry_nanos - 1));
+        assert!(task_not_expired(&task, task.expiry_nanos - 1_000_000_000));
         let capped = TaskData {
             created_nanos: 1,
             expiry_nanos: i64::MAX,
@@ -1098,6 +1095,55 @@ mod recording_tests {
             applied: true,
             range_id: 0,
         }
+    }
+
+    #[test]
+    fn go_cassandra_backend_error_categories_and_consistency_fallback_are_distinct() {
+        let db_error = |kind, message: &str| {
+            ExecFailure::Execution(Box::new(ExecutionError::LastAttemptError(
+                RequestAttemptError::DbError(kind, message.into()),
+            )))
+        };
+        for (message, expected) in [
+            ("unavailable", BackendErrorKind::Internal),
+            ("Cannot perform LWT operation", BackendErrorKind::DbUnavailable),
+            ("Cannot Achieve Consistency Level ALL", BackendErrorKind::DbUnavailable),
+        ] {
+            let error = db_error(
+                DbError::Unavailable { consistency: Consistency::All, required: 3, alive: 1 },
+                message,
+            );
+            assert!(error.is_unavailable());
+            assert!(matches!(
+                CassandraMatchingTaskStore::internal(error),
+                MatchingTaskStoreError::Backend { kind, .. } if kind == expected
+            ));
+        }
+        let overloaded = db_error(DbError::Overloaded, "busy");
+        assert!(!overloaded.is_unavailable());
+        assert_eq!(overloaded.backend_error_kind(), BackendErrorKind::Throttled);
+        let timeout = ExecFailure::Execution(Box::new(ExecutionError::RequestTimeout(
+            std::time::Duration::from_secs(1),
+        )));
+        assert_eq!(timeout.backend_error_kind(), BackendErrorKind::Timeout);
+        let write_timeout = db_error(
+            DbError::WriteTimeout {
+                consistency: Consistency::All,
+                received: 1,
+                required: 3,
+                write_type: scylla::errors::WriteType::Simple,
+            },
+            "write timed out",
+        );
+        assert_eq!(write_timeout.backend_error_kind(), BackendErrorKind::Timeout);
+        let closed = ExecFailure::Execution(Box::new(ExecutionError::LastAttemptError(
+            RequestAttemptError::BrokenConnectionError(
+                scylla::errors::BrokenConnectionErrorKind::WriteError(
+                    std::io::Error::from(std::io::ErrorKind::BrokenPipe),
+                ).into(),
+            ),
+        )));
+        assert_eq!(closed.backend_error_kind(), BackendErrorKind::Timeout);
     }
 
     fn unavailable() -> ExecFailure {
@@ -1451,6 +1497,35 @@ mod recording_tests {
         );
     }
 
+    #[test]
+    fn go_insert_tasks_skips_subsecond_expiry_but_preserves_fence() {
+        let recorder = Arc::new(Recorder::default());
+        let mut task = AllocatedTask {
+            task_id: 3,
+            data: TaskData {
+                expiry_nanos: BASE_NANOS + 999_999_999,
+                ..Default::default()
+            },
+        };
+        store(&recorder, false)
+            .create_tasks_with_domains(&key(), 25, BASE_NANOS, &[(key().domain_id, &task)])
+            .unwrap();
+        let calls = recorder.calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].batch);
+        assert!(calls[0].text.contains("IF range_id = 25"));
+
+        let recorder = Arc::new(Recorder::default());
+        task.data.expiry_nanos = BASE_NANOS + 1_000_000_000;
+        store(&recorder, false)
+            .create_tasks_with_domains(&key(), 25, BASE_NANOS, &[(key().domain_id, &task)])
+            .unwrap();
+        let calls = recorder.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].text.ends_with(" USING TTL 1"));
+        assert!(calls[1].text.contains("IF range_id = 25"));
+    }
+
     /// TestInsertTasks "batch cas failed": a rejected fence is a condition failure.
     #[test]
     fn go_insert_tasks_not_applied_is_condition_failure() {
@@ -1586,10 +1661,10 @@ mod recording_tests {
         assert_call(&calls[0], GO_DELETE_LIST, delete_values());
         assert_eq!(calls[0].consistency, Some(Consistency::All));
 
-        // Flag off: default consistency.
+        // Go always uses ALL for DeleteTaskList, including with the flag off.
         let recorder = Arc::new(Recorder::default());
         store(&recorder, false).delete_task_list(&key(), 35).unwrap();
-        assert_eq!(recorder.calls()[0].consistency, None);
+        assert_eq!(recorder.calls()[0].consistency, Some(Consistency::All));
     }
 
     #[test]
@@ -1609,14 +1684,15 @@ mod recording_tests {
     fn go_delete_task_list_retries_at_default_consistency_when_all_unavailable() {
         let recorder = Arc::new(Recorder::default());
         recorder.push_lwt(Err(unavailable()));
-        store(&recorder, true).delete_task_list(&key(), 35).unwrap();
+        store(&recorder, false).delete_task_list(&key(), 35).unwrap();
         let calls = recorder.calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].consistency, Some(Consistency::All));
         assert_eq!(calls[1].consistency, Some(Consistency::LocalQuorum));
         assert_call(&calls[1], GO_DELETE_LIST, delete_values());
 
-        // Retry also failing is an error (unavailable maps to DbUnavailable).
+        // Generic UNAVAILABLE is Internal; only Go's actionable messages
+        // become DbUnavailable. Fallback still depends only on the error code.
         let recorder = Arc::new(Recorder::default());
         recorder.push_lwt(Err(unavailable()));
         recorder.push_lwt(Err(unavailable()));
@@ -1626,7 +1702,7 @@ mod recording_tests {
         assert!(matches!(
             error,
             MatchingTaskStoreError::Backend {
-                kind: BackendErrorKind::DbUnavailable,
+                kind: BackendErrorKind::Internal,
                 ..
             }
         ));

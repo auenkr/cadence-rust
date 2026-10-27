@@ -76,6 +76,33 @@ pub enum ExecFailure {
 }
 
 impl ExecFailure {
+    /// Go's timeout/throttle/database-unavailability categories. Consistency
+    /// fallback deliberately uses the broader code-only `is_unavailable` below.
+    pub fn backend_error_kind(&self) -> crate::matching_task_store::BackendErrorKind {
+        use crate::matching_task_store::BackendErrorKind;
+        let Self::Execution(error) = self else {
+            return BackendErrorKind::Internal;
+        };
+        match error.as_ref() {
+            ExecutionError::RequestTimeout(_) => BackendErrorKind::Timeout,
+            ExecutionError::LastAttemptError(attempt) => match attempt {
+                RequestAttemptError::BrokenConnectionError(_)
+                | RequestAttemptError::DbError(DbError::WriteTimeout { .. }, _) => {
+                    BackendErrorKind::Timeout
+                }
+                RequestAttemptError::DbError(DbError::Overloaded, _) => BackendErrorKind::Throttled,
+                RequestAttemptError::DbError(DbError::Unavailable { .. }, message)
+                    if message.contains("Cannot perform LWT operation")
+                        || message.to_lowercase().contains("cannot achieve consistency level") =>
+                {
+                    BackendErrorKind::DbUnavailable
+                }
+                _ => BackendErrorKind::Internal,
+            },
+            _ => BackendErrorKind::Internal,
+        }
+    }
+
     pub fn is_unavailable(&self) -> bool {
         matches!(
             self,
