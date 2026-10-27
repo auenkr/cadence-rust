@@ -111,7 +111,8 @@ def check_go_schema_only():
     )
 
 
-def validate_matching_exporter(exporter, work, repository, expected_domain, expected_cold_domain=None):
+def validate_matching_exporter(exporter, work, repository, expected_domain, expected_cold_domain=None,
+                               expected_prometheus_endpoints=None):
     """Decode captured exporter output and require SDK-driven Matching metrics."""
     required = ('cadence_requests_per_tl', 'cadence_tasklist_request', 'poll_success_per_tl',
                 'cadence_client_requests')
@@ -131,12 +132,13 @@ def validate_matching_exporter(exporter, work, repository, expected_domain, expe
         snapshots_path = work / 'prometheus-scrape-samples.jsonl.gz'
         snapshots = gzip.open(snapshots_path, 'rt', encoding='utf-8') if snapshots_path.is_file() else None
         if snapshots is not None:
-            scrape_iter = (json.loads(line)['body'] for line in snapshots if line.strip())
+            scrape_iter = (json.loads(line) for line in snapshots if line.strip())
         else:
             legacy_path = work / 'prometheus-scrape-samples.jsonl'
-            scrape_iter = ((json.loads(line)['body'] for line in legacy_path.open(encoding='utf-8') if line.strip())
-                           if legacy_path.is_file() else iter([(work / 'prometheus-scrape.txt').read_text(encoding='utf-8')]))
+            scrape_iter = ((json.loads(line) for line in legacy_path.open(encoding='utf-8') if line.strip())
+                           if legacy_path.is_file() else iter([{'body': (work / 'prometheus-scrape.txt').read_text(encoding='utf-8')}]))
         sample_count = 0
+        scraped_endpoints = set()
         metric_values = {metric: [] for metric in required}
         request_lines = set()
         prometheus_labels = {
@@ -149,7 +151,11 @@ def validate_matching_exporter(exporter, work, repository, expected_domain, expe
                 'operation': 'RespondQueryTaskCompleted',
             }.items()
         }
-        for scrape in scrape_iter:
+        for record in scrape_iter:
+            scrape = record['body']
+            endpoint = record.get('endpoint')
+            if endpoint:
+                scraped_endpoints.add(endpoint)
             for line in scrape.splitlines():
                 if not line or line.startswith('#'):
                     continue
@@ -172,6 +178,9 @@ def validate_matching_exporter(exporter, work, repository, expected_domain, expe
             snapshots.close()
         if sample_count == 0:
             raise RuntimeError('Prometheus scrape succeeded but returned no metric samples')
+        missing_endpoints = set(expected_prometheus_endpoints or ()) - scraped_endpoints
+        if missing_endpoints:
+            raise RuntimeError(f'Prometheus did not capture nonempty samples from every expected Matching endpoint: {sorted(missing_endpoints)}')
         for metric in required:
             if not metric_values[metric]:
                 raise RuntimeError(f'Prometheus metric {metric} has no positive SDK-driven sample')
@@ -205,6 +214,7 @@ def validate_matching_exporter(exporter, work, repository, expected_domain, expe
             if cold_probe.get('grpcCode') != 8 or not cold_samples:
                 raise RuntimeError('cold-domain probe did not record RESOURCE_EXHAUSTED and its positive canonical AddDecisionTask Prometheus sample')
         semantic = {'format': exporter, 'sampleCount': sample_count,
+                    'scrapedEndpoints': sorted(scraped_endpoints),
                     'requiredMetrics': list(required), 'expectedDomain': expected_domain,
                     'prometheusExpectedLabels': prometheus_labels,
                     'positiveRequiredMetricSamples': {key: len(value) for key, value in metric_values.items()},
@@ -922,6 +932,8 @@ def copy_evidence(destination, results):
     config_files = sorted(config.glob('*.yaml'))
     if production_matching:
         config_files += [Path(rust_config), Path(rust_dynamic_config)]
+        if rust_secondary_config:
+            config_files.append(Path(rust_secondary_config))
     binaries = {'goBinary': Path(binary)}
     if production_matching:
         binaries['rustProductionBinary'] = Path(rust_matching_binary)
@@ -1272,6 +1284,8 @@ try:
             results['goServicesAliveAfterProbe'] = server.poll() is None
             results['matchingExporter'] = args.matching_exporter
             results['matchingExporterAddress'] = exporter_address if production_matching else None
+            results['matchingExporterEndpoints'] = ([exporter_address] + ([secondary_exporter_address]
+                if secondary_exporter_address else [])) if production_matching else None
             observations_path = work / 'rust-matching' / 'db-observations.json'
             if not observations_path.is_file():
                 observations_path = work / 'db-observations.json'
@@ -1301,7 +1315,9 @@ try:
                 if probe_result is None:
                     raise RuntimeError('SDK probe did not report its registered domain for exporter label validation')
                 semantics = validate_matching_exporter(
-                    args.matching_exporter, work, root, probe_result['domain'], cold_domain_name)
+                    args.matching_exporter, work, root, probe_result['domain'], cold_domain_name,
+                    ([exporter_address, secondary_exporter_address]
+                     if secondary_exporter_address else None))
                 results['matchingExporterSemantics'] = semantics
                 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         finally:
