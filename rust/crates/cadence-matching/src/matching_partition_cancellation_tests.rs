@@ -1,7 +1,6 @@
 //! Go throttleRetry observes ctx.Done during its retry wait, even without a deadline.
 use super::*;
 use crate::grpc_matching::Matching;
-use cadence_proto::api as p;
 use cadence_persistence::{
     matching_blob::{BlobEncoding, TaskListData},
     matching_sqlite::SqliteTaskStore,
@@ -10,6 +9,7 @@ use cadence_persistence::{
     },
     StoredPartitionConfig,
 };
+use cadence_proto::api as p;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Condvar,
@@ -270,7 +270,10 @@ async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller(
             1,
             "expired caller still runs first read, then cancels retry waiting"
         );
-        assert_eq!(handle.partitions.get().unwrap(), cached);
+        let after = handle.partitions.get().unwrap();
+        assert_eq!(after.version, cached.version);
+        assert_eq!(after.read_partitions, cached.read_partitions);
+        assert_eq!(after.write_partitions, cached.write_partitions);
         assert!(
             !handle.queue.is_stopped(),
             "refresh failure does not stop the Go manager"
