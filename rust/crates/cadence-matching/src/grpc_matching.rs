@@ -469,7 +469,7 @@ impl Matching {
             // Go consumers read the cache directly. Rust's quota and workflow
             // consumers use this metadata view; publish cold discoveries before
             // they run. Go's change callback intentionally omits new entries.
-            domains.sync_matching_metadata(std::slice::from_ref(&domain));
+            domains.insert_matching_metadata_if_missing(&domain);
             Some(domain.info.name)
         }));
         self
