@@ -47,5 +47,33 @@ is progressing with narrow source reads and all validation remains CI-only.
 
 Foundation source: 00ce7a04f. Focused common+Thrift Clippy/test and runner
 formatting CI: https://github.com/auenkr/cadence-rust/actions/runs/40546474520.
-Conclusion pending. This is not handler, persistence or raw-byte service
-acceptance evidence. Apply the runner formatting patch before the next pin.
+Conclusion **success**. Downloaded artifact head matches, Clippy/test exits
+are0, and the common/Thrift raw-byte tests execute successfully. Compact proof
+is memory/evidence/matching-raw-foundation-40546474520/. Runner formatting
+patch applied in e7a932f17. This is not production integration evidence.
+
+e7a932f17 adds go_db_shard_id_bytes and makes the existing UTF-8 entry point
+delegate to it. The new entry point hashes canonical domain UUID bytes, an
+underscore, then the original task-list bytes. A new Go oracle emits FarmHash32,
+byte lengths/UTF-8 validity and encoding/json output for ten cases (including
+NUL, ff/fe, replacement rune, overlong/truncated encodings and Unicode).
+The persistence test compares raw names against that executable Go output
+across five shard counts. It runs with the fixture exported by rust-ci; without
+the environment fixture it provides no Go-oracle evidence.
+
+Current focused common+Thrift+persistence CI:
+https://github.com/auenkr/cadence-rust/actions/runs/40548080744, head e7a932f17;
+conclusion pending. Apply its runner formatting before a new candidate.
+
+Integration decision still to implement: native Matching requests must use
+byte-valued string fields in a transport-neutral model, with a protobuf adapter
+that performs explicit UTF-8 validation at that actual transport boundary.
+The present shared handler implementation directly consumes cadence_proto
+String-bearing requests, so changing Thrift getters alone cannot solve this.
+Prefer explicit typed bytes over a surrogate Unicode encoding or ambient raw
+byte lookup table. Public protobuf contracts must stay unchanged.
+
+JSON caution: Rust from_utf8_lossy groups some malformed sequences differently
+from Go utf8.DecodeRuneInString/encoding/json (Go consumes one byte per invalid
+rune). Use the retained Go oracle when implementing task-token JSON behavior;
+do not assume whole-buffer lossy conversion has Go's replacement semantics.
