@@ -11,10 +11,74 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/cadence"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
+	"go.uber.org/cadence/.gen/go/shared"
 	"go.uber.org/cadence/client"
 	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
 )
+
+// retryHistoryDiagnostic deliberately uses a fresh bounded context: the suite's
+// context is commonly expired by the time run.Get reports its deadline.
+func retryHistoryDiagnostic(rpc workflowserviceclient.Interface, domain, workflowID, runID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if runID == "" {
+		description, err := rpc.DescribeWorkflowExecution(ctx, &shared.DescribeWorkflowExecutionRequest{
+			Domain: &domain, Execution: &shared.WorkflowExecution{WorkflowId: &workflowID},
+		})
+		if err != nil {
+			return fmt.Sprintf("history diagnostic could not resolve run ID for workflow %s: %v", workflowID, err)
+		}
+		runID = description.WorkflowExecutionInfo.GetExecution().GetRunId()
+	}
+	request := &shared.GetWorkflowExecutionHistoryRequest{Domain: &domain,
+		Execution: &shared.WorkflowExecution{WorkflowId: &workflowID, RunId: &runID}}
+	counts := make(map[string]int)
+	total, pages := 0, 0
+	seenTokens := make(map[string]bool)
+	for {
+		response, err := rpc.GetWorkflowExecutionHistory(ctx, request)
+		if err != nil {
+			return fmt.Sprintf("history diagnostic failed for workflow %s/%s after %d events/%d pages: %v", workflowID, runID, total, pages, err)
+		}
+		pages++
+		if response.History != nil {
+			for _, event := range response.History.Events {
+				counts[event.GetEventType().String()]++
+				total++
+			}
+		}
+		if len(response.NextPageToken) == 0 {
+			return fmt.Sprintf("history workflow=%s/%s events=%d pages=%d eventTypes=%v", workflowID, runID, total, pages, counts)
+		}
+		token := string(response.NextPageToken)
+		if seenTokens[token] {
+			return fmt.Sprintf("history diagnostic repeated page token for workflow %s/%s after %d events/%d pages eventTypes=%v", workflowID, runID, total, pages, counts)
+		}
+		seenTokens[token] = true
+		request.NextPageToken = response.NextPageToken
+	}
+}
+
+func mixedRunGetError(rpc workflowserviceclient.Interface, domain, scenario string, run interface {
+	GetID() string
+	GetRunID() string
+}, err error) error {
+	workflowID, runID := run.GetID(), run.GetRunID()
+	diagnostic := retryHistoryDiagnostic(rpc, domain, workflowID, runID)
+	return fmt.Errorf("%s workflow %s/%s failed: %w; %s", scenario, workflowID, runID, err, diagnostic)
+}
+
+func remaining(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	if time.Until(deadline) < 0 {
+		return 0
+	}
+	return time.Until(deadline).Round(time.Millisecond)
+}
 
 // The domain is provisioned by the mixed-service harness. Every worker poll and
 // task append crosses original Go Frontend/History and Rust Matching RPCs.
@@ -59,17 +123,39 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 	}
 	defer w.Stop()
 	c := client.NewClient(rpc, domain, nil)
+	if os.Getenv("CADENCE_MIXED_MATCHING_RETRY_ONLY") == "1" {
+		started := time.Now()
+		fmt.Printf("scenario start name=workflow-task-retry-only workflowID=%s taskList=%s suiteBudgetRemaining=%s\n", taskList+"-workflow-task-retry-only", taskList, remaining(ctx))
+		run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: taskList + "-workflow-task-retry-only", TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, WorkflowTaskRetryWorkflow)
+		if err != nil {
+			fmt.Printf("scenario end name=workflow-task-retry-only workflowID=%s outcome=start-error duration=%s suiteBudgetRemaining=%s error=%v\n", taskList+"-workflow-task-retry-only", time.Since(started), remaining(ctx), err)
+			panic(fmt.Errorf("workflow-task-retry-only start failed for %s: %w", taskList+"-workflow-task-retry-only", err))
+		}
+		var result string
+		if err := run.Get(ctx, &result); err != nil {
+			fmt.Printf("scenario end name=workflow-task-retry-only workflowID=%s runID=%s outcome=error duration=%s suiteBudgetRemaining=%s\n", run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
+			panic(mixedRunGetError(rpc, domain, "workflow-task-retry-only", run, err))
+		}
+		require(result == "workflow-task-recovered", "mixed Matching retry-only result changed")
+		fmt.Printf("scenario end name=workflow-task-retry-only workflowID=%s runID=%s duration=%s suiteBudgetRemaining=%s\n", run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
+		return
+	}
 	if loadJSON := os.Getenv("CADENCE_MIXED_MATCHING_LOAD_IDS"); loadJSON != "" {
 		var ids []string
 		if err := json.Unmarshal([]byte(loadJSON), &ids); err != nil {
 			panic(err)
 		}
 		for _, id := range ids {
+			started := time.Now()
+			fmt.Printf("scenario start name=adaptive-load workflowID=%s suiteBudgetRemaining=%s\n", id, remaining(ctx))
 			var value string
-			if err := c.GetWorkflow(ctx, id, "").Get(ctx, &value); err != nil {
-				panic(err)
+			run := c.GetWorkflow(ctx, id, "")
+			if err := run.Get(ctx, &value); err != nil {
+				fmt.Printf("scenario end name=adaptive-load workflowID=%s runID=%s outcome=error duration=%s suiteBudgetRemaining=%s\n", run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
+				panic(mixedRunGetError(rpc, domain, "adaptive-load", run, err))
 			}
 			require(value == "adaptive-load", "adaptive scaler load result changed")
+			fmt.Printf("scenario end name=adaptive-load workflowID=%s runID=%s duration=%s suiteBudgetRemaining=%s\n", run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
 		}
 		fmt.Printf("Completed %d adaptive scaler load workflows on %s\n", len(ids), taskList)
 	}
@@ -93,15 +179,21 @@ func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interfac
 		{"workflow-task-retry", WorkflowTaskRetryWorkflow, "workflow-task-recovered"},
 		{"activity-timeout", ActivityTimeoutWorkflow, "activity-timed-out"},
 	} {
-		run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: taskList + "-" + scenario.name, TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second, RetryPolicy: &workflow.RetryPolicy{InitialInterval: time.Second, MaximumAttempts: 3}}, scenario.workflow)
+		started := time.Now()
+		workflowID := taskList + "-" + scenario.name
+		fmt.Printf("scenario start name=%s workflowID=%s suiteBudgetRemaining=%s\n", scenario.name, workflowID, remaining(ctx))
+		run, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: workflowID, TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second, RetryPolicy: &workflow.RetryPolicy{InitialInterval: time.Second, MaximumAttempts: 3}}, scenario.workflow)
 		if err != nil {
+			fmt.Printf("scenario end name=%s workflowID=%s outcome=start-error duration=%s suiteBudgetRemaining=%s error=%v\n", scenario.name, workflowID, time.Since(started), remaining(ctx), err)
 			panic(err)
 		}
 		var result string
 		if err := run.Get(ctx, &result); err != nil {
-			panic(fmt.Errorf("%s: %w", scenario.name, err))
+			fmt.Printf("scenario end name=%s workflowID=%s runID=%s outcome=error duration=%s suiteBudgetRemaining=%s\n", scenario.name, run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
+			panic(mixedRunGetError(rpc, domain, scenario.name, run, err))
 		}
 		require(result == scenario.want, "mixed Matching scenario result changed: "+scenario.name)
+		fmt.Printf("scenario end name=%s workflowID=%s runID=%s duration=%s suiteBudgetRemaining=%s\n", scenario.name, run.GetID(), run.GetRunID(), time.Since(started), remaining(ctx))
 	}
 	signal, err := c.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: taskList + "-signal", TaskList: taskList, ExecutionStartToCloseTimeout: time.Minute, DecisionTaskStartToCloseTimeout: 10 * time.Second}, SignalWorkflow)
 	if err != nil {

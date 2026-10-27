@@ -7,6 +7,10 @@ on:
         type: choice
         options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive]
         default: postgres
+      adaptive_retry_only:
+        description: Run a fresh-process workflow-task-retry SDK probe before the full adaptive suite
+        type: boolean
+        default: false
 concurrency:
   group: matching-production-validation
   cancel-in-progress: true
@@ -17,6 +21,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: /tmp/cargo-target-final-${{ github.run_id }}
       LANE: ${{ inputs.lane }}
+      ADAPTIVE_RETRY_ONLY: ${{ inputs.adaptive_retry_only }}
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init go/idls
@@ -62,7 +67,9 @@ jobs:
             shard-distributor) extra=(--real-shard-distributor) ;;
             configstore) extra=(--matching-configstore) ;;
             mysql-probes) extra=(--matching-backlog-forward --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint) ;;
-            adaptive) extra=(--probe-adaptive-scaler) ;;
+            adaptive)
+              extra=(--probe-adaptive-scaler)
+              if [[ "$ADAPTIVE_RETRY_ONLY" == "true" ]]; then extra+=(--probe-adaptive-retry-only); fi ;;
             *) exit 2 ;;
           esac
           printf '%q ' "$wrapper" out/gate "$CARGO_TARGET_DIR/debug/cadence-matching" "${common[@]}" "${extra[@]}" > out/command.txt

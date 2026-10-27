@@ -21,6 +21,10 @@ on:
         description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
         type: boolean
         default: false
+      go_sdk_compile:
+        description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -44,6 +48,47 @@ jobs:
         with:
           go-version: "1.25.14"
           cache: false
+      - uses: actions/setup-node@v4
+        if: inputs.go_sdk_compile == true
+        with:
+          node-version: 22
+      - name: Compile Go SDK mixed Matching fixture
+        if: inputs.go_sdk_compile == true
+        working-directory: tests/go-sdk
+        run: |
+          evidence="$RUNNER_TEMP/go-sdk-fixture"
+          mkdir -p "$evidence"
+          set +e
+          gofmt -d main.go mixed_matching.go > "$evidence/gofmt.diff" 2>&1
+          fmt_result=$?
+          if [ -s "$evidence/gofmt.diff" ] && [ "$fmt_result" = 0 ]; then fmt_result=1; fi
+          echo "$fmt_result" > "$evidence/gofmt.exit"
+          go test -run '^$' . > "$evidence/compile.log" 2>&1
+          compile_result=$?
+          echo "$compile_result" > "$evidence/compile.exit"
+          cat "$evidence/gofmt.diff" "$evidence/compile.log"
+          if [ "$fmt_result" != 0 ] || [ "$compile_result" != 0 ]; then exit 1; fi
+      - name: Check adaptive probe syntax
+        if: inputs.go_sdk_compile == true
+        run: |
+          evidence="$RUNNER_TEMP/go-sdk-fixture"
+          mkdir -p "$evidence"
+          set +e
+          node --check tests/matching-probe-scenarios.cjs > "$evidence/node-check.log" 2>&1
+          node_result=$?
+          echo "$node_result" > "$evidence/node-check.exit"
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" python3 -m py_compile tests/run-go-service-baseline.py > "$evidence/python-check.log" 2>&1
+          python_result=$?
+          echo "$python_result" > "$evidence/python-check.exit"
+          cat "$evidence/node-check.log" "$evidence/python-check.log"
+          if [ "$node_result" != 0 ] || [ "$python_result" != 0 ]; then exit 1; fi
+      - name: Upload Go SDK fixture validation evidence
+        if: always() && inputs.go_sdk_compile == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-sdk-fixture-validation
+          retention-days: 3
+          path: ${{ runner.temp }}/go-sdk-fixture
       - name: Run original Go malformed DescribeTaskList oracle
         working-directory: go
         run: |
