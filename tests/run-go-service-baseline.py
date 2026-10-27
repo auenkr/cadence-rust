@@ -865,6 +865,21 @@ if production_matching:
             raise RuntimeError('could not switch Rust dynamicconfig.client to configstore')
         rust_text = rust_text.replace('  client: filebased', '  client: configstore')
     rust_config.write_text(rust_text)
+    rust_secondary_config = None
+    secondary_exporter_address = None
+    if args.matching_failure_recovery and args.matching_exporter == 'prometheus':
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            secondary_exporter_address = f'127.0.0.1:{listener.getsockname()[1]}'
+        secondary_metrics_config = work / 'rust-matching-secondary.yaml'
+        secondary_text, replaced_secondary_metrics = re.subn(
+            r'(?m)^(\s+listenAddress:)\s*' + re.escape(json.dumps(exporter_address)) + r'\s*$',
+            lambda match: match.group(1) + ' ' + json.dumps(secondary_exporter_address),
+            rust_text, count=1)
+        if replaced_secondary_metrics != 1:
+            raise RuntimeError('could not configure secondary Rust Matching Prometheus listener')
+        secondary_metrics_config.write_text(secondary_text)
+        rust_secondary_config = secondary_metrics_config
     (work / 'rust-matching-command.json').write_text(json.dumps([
         str(rust_matching_binary), 'start', '--config', str(rust_config), '--root', str(work),
         '--services', 'matching', '--port', '0', '--history-grpc-port', ports['HISTORY_PORT_GRPC'],
@@ -1125,17 +1140,22 @@ try:
                         work / 'prometheus-scrape-samples.jsonl.gz', 'wt', encoding='utf-8')
                     def scrape_prometheus():
                         while not udp_stop.is_set():
-                            try:
-                                with urllib.request.urlopen(f'http://{exporter_address}/metrics', timeout=1) as response:
-                                    scrape = response.read().decode('utf-8')
-                                    if any(line and not line.startswith('#') for line in scrape.splitlines()):
-                                        prometheus_capture.write(json.dumps({
-                                            'capturedAtUnixNs': time.time_ns(), 'body': scrape}) + '\n')
-                                        prometheus_capture.flush()
-                                        prometheus_scrape_count[0] += 1
-                                        prometheus_last_scrape[0] = scrape
-                            except Exception:
-                                pass
+                            addresses = [exporter_address]
+                            if secondary_exporter_address:
+                                addresses.append(secondary_exporter_address)
+                            for address in addresses:
+                                try:
+                                    with urllib.request.urlopen(f'http://{address}/metrics', timeout=1) as response:
+                                        scrape = response.read().decode('utf-8')
+                                        if any(line and not line.startswith('#') for line in scrape.splitlines()):
+                                            prometheus_capture.write(json.dumps({
+                                                'capturedAtUnixNs': time.time_ns(), 'endpoint': address,
+                                                'body': scrape}) + '\n')
+                                            prometheus_capture.flush()
+                                            prometheus_scrape_count[0] += 1
+                                            prometheus_last_scrape[0] = scrape
+                                except Exception:
+                                    pass
                             udp_stop.wait(0.2)
 
                     prometheus_thread = threading.Thread(target=scrape_prometheus, daemon=True)
@@ -1151,6 +1171,8 @@ try:
                         'CADENCE_RUST_MATCHING_PRODUCTION_HISTORY_GRPC_PORT': ports['HISTORY_PORT_GRPC'],
                         'CADENCE_RUST_MATCHING_PRODUCTION_DATA_DIR': str(work / 'rust-matching-data'),
                         'CADENCE_MATCHING_SQLITE_DB': str(work / 'cadence.db')}
+                    if rust_secondary_config:
+                        probe_environment['CADENCE_RUST_MATCHING_SECONDARY_CONFIG'] = str(rust_secondary_config)
                     if args.matching_cold_domain_metric_probe:
                         probe_environment['CADENCE_MATCHING_COLD_DOMAIN'] = cold_domain_name
                     if args.postgres:
