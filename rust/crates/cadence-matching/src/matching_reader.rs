@@ -1911,7 +1911,11 @@ mod tests {
             .expect("restored dispatch rate should deliver the pending task")
             .expect("reader should return the durable task");
         assert_eq!(delivered.data.schedule_id, 3);
-        assert_eq!(queue.levels().1, 0, "delivery alone must not acknowledge work");
+        assert_eq!(
+            queue.levels().1,
+            0,
+            "delivery alone must not acknowledge work"
+        );
         queue.complete(delivered.task_id).unwrap();
         assert_eq!(queue.levels().1, 1, "accepted task is acknowledged");
         stop(queue, reader).await;
