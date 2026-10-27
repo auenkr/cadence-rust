@@ -2301,7 +2301,8 @@ impl QueueRegistry {
         handle: QueueHandle,
         config: Option<cadence_persistence::StoredPartitionConfig>,
     ) -> Result<(), Status> {
-        self.refresh_partition_config_with_deadline(key, handle, config, None).await
+        self.refresh_partition_config_with_deadline(key, handle, config, None)
+            .await
     }
     pub async fn refresh_partition_config_with_deadline(
         &self,

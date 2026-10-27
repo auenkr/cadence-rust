@@ -1,5 +1,7 @@
 //! Go throttleRetry observes ctx.Done during its retry wait, even without a deadline.
 use super::*;
+use crate::grpc_matching::Matching;
+use cadence_proto::api as p;
 use cadence_persistence::{
     matching_blob::{BlobEncoding, TaskListData},
     matching_sqlite::SqliteTaskStore,
@@ -13,6 +15,7 @@ use std::sync::{
     Condvar,
 };
 use std::time::Duration;
+use tonic::Request;
 
 struct BlockedPartitionStore {
     inner: Arc<SqliteTaskStore>,
@@ -183,10 +186,20 @@ async fn dropped_partition_update_without_deadline_cancels_retry_and_counts_fail
 async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller() {
     use cadence_api::types::DomainInfo;
     use cadence_proto::matching::matching_api_server::MatchingApi;
-    for kind in [BackendErrorKind::Permanent, BackendErrorKind::Timeout, BackendErrorKind::Throttled] {
+    for kind in [
+        BackendErrorKind::Permanent,
+        BackendErrorKind::Timeout,
+        BackendErrorKind::Throttled,
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(BlockedPartitionStore {
-            inner: Arc::new(SqliteTaskStore::create(directory.path().join("refresh.db"), BlobEncoding::ThriftRW).unwrap()),
+            inner: Arc::new(
+                SqliteTaskStore::create(
+                    directory.path().join("refresh.db"),
+                    BlobEncoding::ThriftRW,
+                )
+                .unwrap(),
+            ),
             entered: tokio::sync::Notify::new(),
             released: (Mutex::new(true), Condvar::new()),
             updates: AtomicUsize::new(1),
@@ -195,23 +208,55 @@ async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller(
         });
         let history = MatchingHistoryClient::new(
             tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
-            Duration::from_secs(1), 1024,
+            Duration::from_secs(1),
+            1024,
         );
         let registry = QueueRegistry::new(store.clone(), history, NonZeroU32::new(100).unwrap());
-        let key = TaskListKey { domain_id: Uuid::from_u128(1), name: "refresh-failure".into(), task_type: 0 };
+        let key = TaskListKey {
+            domain_id: Uuid::from_u128(1),
+            name: "refresh-failure".into(),
+            task_type: 0,
+        };
         let state = crate::handlers::AppState::default();
-        state.domains.create(DomainInfo { name: "refresh-domain".into(), uuid: key.domain_id.to_string(), ..Default::default() }, Default::default(), Default::default(), false).unwrap();
-        let matching = Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(5));
-        let handle = matching.durable_queue(&key.domain_id.to_string(), &p::TaskList { name: key.name.clone(), kind: 1, ..Default::default() }, 0).await.unwrap();
-        let cached = StoredPartitionConfig { version: 7, read_partitions: HashMap::from([(0, vec![])]), write_partitions: HashMap::from([(0, vec![])]) };
+        state
+            .domains
+            .create(
+                DomainInfo {
+                    name: "refresh-domain".into(),
+                    uuid: key.domain_id.to_string(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
+        let matching =
+            Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(5));
+        let handle = registry.get(key.clone(), 0, 1).await.unwrap();
+        let cached = StoredPartitionConfig {
+            version: 7,
+            read_partitions: HashMap::from([(0, vec![])]),
+            write_partitions: HashMap::from([(0, vec![])]),
+        };
         handle.partitions.push(&cached);
         store.reads.store(0, Ordering::SeqCst);
         *store.read_failure.lock().unwrap() = Some(kind);
         let mut request = Request::new(m::RefreshTaskListPartitionConfigRequest {
-            domain_id: key.domain_id.to_string(), task_list: Some(p::TaskList { name: key.name.clone(), kind: 1, ..Default::default() }), task_list_type: 1, ..Default::default()
+            domain_id: key.domain_id.to_string(),
+            task_list: Some(p::TaskList {
+                name: key.name.clone(),
+                kind: 1,
+                ..Default::default()
+            }),
+            task_list_type: 1,
+            ..Default::default()
         });
         request.set_timeout(Duration::ZERO);
-        let status = matching.refresh_task_list_partition_config(request).await.unwrap_err();
+        let status = matching
+            .refresh_task_list_partition_config(request)
+            .await
+            .unwrap_err();
         if kind == BackendErrorKind::Throttled {
             assert_eq!(status.code(), tonic::Code::ResourceExhausted);
             assert!(!status.details().is_empty());
@@ -220,9 +265,16 @@ async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller(
             assert!(status.details().is_empty());
         }
         assert!(status.message().contains("partition refresh failed"));
-        assert_eq!(store.reads.load(Ordering::SeqCst), 1, "expired caller still runs first read, then cancels retry waiting");
+        assert_eq!(
+            store.reads.load(Ordering::SeqCst),
+            1,
+            "expired caller still runs first read, then cancels retry waiting"
+        );
         assert_eq!(handle.partitions.get().unwrap(), cached);
-        assert!(!handle.queue.is_stopped(), "refresh failure does not stop the Go manager");
+        assert!(
+            !handle.queue.is_stopped(),
+            "refresh failure does not stop the Go manager"
+        );
         *store.read_failure.lock().unwrap() = None;
         registry.shutdown(3).await.unwrap();
     }

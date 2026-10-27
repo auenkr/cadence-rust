@@ -172,14 +172,17 @@ impl PartitionCache {
         cancelled: impl Fn() -> bool,
     ) -> Result<(), Status> {
         // Explicit reload replaces even a newer cache and can clear it.
-        let config = cadence_persistence::matching_retry::persistence_until(|| store.get_task_list(root), cancelled)
-            .map_err(|error| match error {
-                StorageError::NotFound => Status::not_found(error.to_string()),
-                _ => update_failure_status(&error),
-            })?
-            .data
-            .adaptive_partition_config
-            .map(from_storage);
+        let config = cadence_persistence::matching_retry::persistence_until(
+            || store.get_task_list(root),
+            cancelled,
+        )
+        .map_err(|error| match error {
+            StorageError::NotFound => Status::not_found(error.to_string()),
+            _ => update_failure_status(&error),
+        })?
+        .data
+        .adaptive_partition_config
+        .map(from_storage);
         *self.0.lock().expect("Matching partition cache lock") = config;
         Ok(())
     }
