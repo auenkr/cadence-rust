@@ -122,6 +122,39 @@ fn now_nanos() -> i64 {
 }
 
 impl InMemoryDomainStore {
+    /// Publish metadata discovered by Matching only when this consumer has no
+    /// record for the UUID. Cache lookups may race a refresh callback, so they
+    /// must never replace metadata that the callback has already published.
+    pub fn insert_matching_metadata_if_missing(
+        &self,
+        metadata: &crate::matching_domain_metadata::MatchingDomainMetadata,
+    ) {
+        let mut inner = self.inner.write().expect("domain store lock");
+        if inner.by_id.contains_key(&metadata.info.uuid) {
+            return;
+        }
+        let record = DomainRecord {
+            info: metadata.info.clone(),
+            configuration: metadata.configuration.clone(),
+            replication: metadata.replication.clone(),
+            failover_version: metadata.failover_version,
+            failover_notification_version: metadata.failover_notification_version,
+            is_global_domain: metadata.is_global_domain,
+            archival_bucket: metadata.archival_bucket.clone(),
+            failover_audit: Vec::new(),
+            config_version: metadata.config_version,
+            last_updated_time_nanos: metadata.last_updated_time_nanos,
+            failover_end_time: metadata.failover_end_time_nanos,
+            previous_failover_version: metadata.previous_failover_version,
+            isolation_groups: metadata.decoded_isolation_groups.clone(),
+            async_workflow_config: metadata.decoded_async_workflow_config.clone(),
+        };
+        inner
+            .by_id
+            .insert(record.info.uuid.clone(), record.info.name.clone());
+        inner.by_name.insert(record.info.name.clone(), record);
+    }
+
     /// Merge a complete SQLite-backed Matching metadata refresh into the
     /// domain view used by Matching consumers. Existing failover audit history
     /// remains owned by the frontend domain handler; refreshed persistence
@@ -959,6 +992,7 @@ mod tests {
         };
         let mut failover = domains.subscribe_failover(id);
         domains.sync_matching_metadata(&[metadata.clone()]);
+        let stale_discovery = metadata.clone();
         let view = domains
             .describe(&cadence_api::service_types::DescribeDomainRequest {
                 name: Some("go-seeded".into()),
@@ -1047,6 +1081,39 @@ mod tests {
         assert!(failover.has_changed().unwrap());
         assert!(!domains.is_active_in(id, "active-a").unwrap());
         assert!(domains.is_active_in(id, "active-b").unwrap());
+
+        // A cold cache lookup can finish after a newer refresh callback. Its
+        // stale snapshot must not roll back configuration or failover state.
+        domains.insert_matching_metadata_if_missing(&stale_discovery);
+        let view = domains
+            .describe(&cadence_api::service_types::DescribeDomainRequest {
+                name: Some("go-seeded".into()),
+                uuid: None,
+            })
+            .unwrap();
+        assert_eq!(view.failover_version, 9);
+        assert_eq!(
+            view.configuration
+                .unwrap()
+                .workflow_execution_retention_period_in_days,
+            18
+        );
+        assert!(domains.is_active_in(id, "active-b").unwrap());
+
+        let mut newly_discovered = stale_discovery;
+        newly_discovered.info.uuid = "00000000-0000-0000-0000-000000000078".into();
+        newly_discovered.info.name = "cold-discovered".into();
+        domains.insert_matching_metadata_if_missing(&newly_discovered);
+        assert_eq!(
+            domains
+                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                    name: Some("cold-discovered".into()),
+                    uuid: None,
+                })
+                .unwrap()
+                .failover_version,
+            newly_discovered.failover_version
+        );
     }
 
     #[test]
