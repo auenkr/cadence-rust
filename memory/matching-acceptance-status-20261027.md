@@ -6,6 +6,24 @@ status and blocker claims in `matching-final-acceptance-ledger-20261026.md`,
 `matching-resume-checkpoint-20261027.md`. Those notes and their historical
 artifacts remain unchanged as provenance.
 
+## Active combined candidate v4 (09:40 UTC)
+
+Immutable tag `matching-acceptance-20261027-v4` points to
+`64e709b96c398bb1613fd2a9a9b83a8d5babf6f4`, including typed name-lookup RPC
+mapping, regression fixes, dual exporter capture and late-domain name probes.
+Use this tag for subsequent serial lanes; documentation commits may follow on
+master. No final acceptance pass is credited yet.
+
+- Fresh uncached workspace CI: https://github.com/auenkr/cadence-rust/actions/runs/40482431857
+- Two-node MySQL, Prometheus and late-domain probes: https://github.com/auenkr/cadence-rust/actions/runs/40482436756
+
+Both were dispatched at the candidate SHA and remain pending review. Duplicate
+automatic workspace run40482429103 was cancelled in favor of the explicit
+fresh-target run. Earlier name-readthrough focused run40481424583 failed
+compilation of its regression (Result/Option assertion); candidate64e709b96
+corrects that and decodes tonic status detail bytes with prost. Source and
+runtime results still require actual CI artifacts. Never infer pass from fix.
+
 ## Latest follow-up (09:37 UTC)
 
 Adaptive single-node diagnostic [40480825761](https://github.com/auenkr/cadence-rust/actions/runs/40480825761)
