@@ -88,6 +88,44 @@ impl CassandraMatchingTaskStore {
             message: error.to_string(),
         }
     }
+    fn get_task_list_for(&self, key: &TaskListKey, operation: &str) -> Result<TaskListRecord> {
+        let Some((range_id, data)) = self
+            .executor
+            .select_task_list(
+                &CqlStatement::new(SELECT_LIST),
+                vec![
+                    bound(key.domain_id),
+                    bound(key.name.clone()),
+                    bound(key.task_type),
+                    bound(LIST_ROW),
+                    bound(LIST_SENTINEL),
+                ],
+            )
+            .map_err(|error| Self::operation_error(operation, error))?
+        else {
+            return Err(MatchingTaskStoreError::NotFound);
+        };
+        Ok(TaskListRecord {
+            range_id,
+            data: Self::list_data(data)?,
+        })
+    }
+
+    fn operation_error(
+        operation: &str,
+        error: impl std::fmt::Display + 'static,
+    ) -> MatchingTaskStoreError {
+        let MatchingTaskStoreError::Backend { kind, message } = Self::internal(error) else {
+            unreachable!("internal always constructs a backend error")
+        };
+        let message = if kind == BackendErrorKind::Timeout {
+            format!("{operation} timed out. Error: {message}")
+        } else {
+            format!("{operation} operation failed. Error: {message}")
+        };
+        MatchingTaskStoreError::Backend { kind, message }
+    }
+
     fn condition(message: impl Into<String>) -> MatchingTaskStoreError {
         MatchingTaskStoreError::ConditionFailed(message.into())
     }
@@ -133,6 +171,7 @@ impl CassandraMatchingTaskStore {
     fn range_delete_tasks(
         &self,
         key: &TaskListKey,
+        operation: &str,
         min_exclusive: i64,
         max_inclusive: i64,
     ) -> Result<()> {
@@ -149,14 +188,14 @@ impl CassandraMatchingTaskStore {
                         CqlStatement::with_consistency(RANGE_DELETE_TASKS, FALLBACK_CONSISTENCY);
                     self.executor
                         .exec(&fallback, values())
-                        .map_err(Self::internal)?;
+                        .map_err(|error| Self::operation_error(operation, error))?;
                 }
-                Err(error) => return Err(Self::internal(error)),
+                Err(error) => return Err(Self::operation_error(operation, error)),
             }
         } else {
             self.executor
                 .exec(&CqlStatement::new(RANGE_DELETE_TASKS), values())
-                .map_err(Self::internal)?;
+                .map_err(|error| Self::operation_error(operation, error))?;
         }
         Ok(())
     }
@@ -396,26 +435,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
     }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
-        let Some((range_id, data)) = self
-            .executor
-            .select_task_list(
-                &CqlStatement::new(SELECT_LIST),
-                vec![
-                    bound(key.domain_id),
-                    bound(key.name.clone()),
-                    bound(key.task_type),
-                    bound(LIST_ROW),
-                    bound(LIST_SENTINEL),
-                ],
-            )
-            .map_err(Self::internal)?
-        else {
-            return Err(MatchingTaskStoreError::NotFound);
-        };
-        Ok(TaskListRecord {
-            range_id,
-            data: Self::list_data(data)?,
-        })
+        self.get_task_list_for(key, "GetTaskList")
     }
 
     fn lease(
@@ -425,7 +445,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         previous_range: i64,
         now_nanos: i64,
     ) -> Result<TaskListRecord> {
-        let current = match self.get_task_list(key) {
+        let current = match self.get_task_list_for(key, "LeaseTaskList") {
             Ok(row) => row,
             Err(MatchingTaskStoreError::NotFound) => {
                 let data = TaskListData {
@@ -449,7 +469,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                             bound(timestamp(now_nanos)?),
                         ],
                     )
-                    .map_err(Self::internal)?;
+                    .map_err(|error| Self::operation_error("LeaseTaskList", error))?;
                 if outcome.applied {
                     return Ok(TaskListRecord {
                         range_id: INITIAL_RANGE_ID,
@@ -478,7 +498,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                 &CqlStatement::new(UPDATE_LIST),
                 Self::update_list_values(key, next, udt, now_nanos, current.range_id)?,
             )
-            .map_err(Self::internal)?;
+            .map_err(|error| Self::operation_error("LeaseTaskList", error))?;
         if !outcome.applied {
             return Err(Self::condition(format!(
                 "leaseTaskList: taskList:{}, taskListType:{}, haveRangeID:{}, gotRangeID:{}",
@@ -520,14 +540,14 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                         Self::update_list_values(key, range, udt, now_nanos, range)?,
                     ],
                 )
-                .map_err(Self::internal)?
+                .map_err(|error| Self::operation_error("UpdateTaskList", error))?
         } else {
             self.executor
                 .exec_lwt(
                     &CqlStatement::new(UPDATE_LIST),
                     Self::update_list_values(key, range, udt, now_nanos, range)?,
                 )
-                .map_err(Self::internal)?
+                .map_err(|error| Self::operation_error("UpdateTaskList", error))?
         };
         if outcome.applied {
             Ok(())
@@ -571,7 +591,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         let outcome = self
             .executor
             .batch_lwt(&statements, values)
-            .map_err(Self::internal)?;
+            .map_err(|error| Self::operation_error("CreateTasks", error))?;
         if outcome.applied {
             Ok(())
         } else {
@@ -611,7 +631,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                     bound(cql_batch_size),
                 ],
             )
-            .map_err(Self::internal)?;
+            .map_err(|error| Self::operation_error("GetTasks", error))?;
         let mut tasks = Vec::new();
         for (id, task, ttl) in rows {
             tasks.push(task_from_udt(id, task, ttl)?);
@@ -642,7 +662,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         // Go CompleteTask issues the same range delete as CompleteTasksLessThan
         // with exclusive min `taskID-1` and inclusive max `taskID`
         // (nosql_task_store.go:420-440), so it honors the ALL-consistency flag.
-        self.range_delete_tasks(key, task_id.wrapping_sub(1), task_id)
+        self.range_delete_tasks(key, "CompleteTask", task_id.wrapping_sub(1), task_id)
     }
 
     fn complete_tasks_less_than(
@@ -655,7 +675,7 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
         // COUNT query and reports `persistence.UnknownNumRowsAffected` (-1),
         // which task_gc.go treats as "fewer than a full batch": a single
         // delete drains everything. Zero is the usize equivalent.
-        self.range_delete_tasks(key, 0, inclusive_task_id)?;
+        self.range_delete_tasks(key, "CompleteTasksLessThan", 0, inclusive_task_id)?;
         Ok(0)
     }
 
@@ -682,9 +702,9 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
                         CqlStatement::with_consistency(DELETE_LIST, FALLBACK_CONSISTENCY);
                     self.executor
                         .exec_lwt(&fallback, values())
-                        .map_err(Self::internal)?
+                        .map_err(|error| Self::operation_error("DeleteTaskList", error))?
                 }
-                Err(error) => return Err(Self::internal(error)),
+                Err(error) => return Err(Self::operation_error("DeleteTaskList", error)),
             }
         };
         if outcome.applied {
@@ -1095,6 +1115,38 @@ mod recording_tests {
             applied: true,
             range_id: 0,
         }
+    }
+
+    #[test]
+    fn go_cassandra_operation_errors_include_operation_and_timeout_wording() {
+        let timeout = ExecFailure::Execution(Box::new(ExecutionError::RequestTimeout(
+            std::time::Duration::from_secs(1),
+        )));
+        let detail = timeout.to_string();
+        assert!(matches!(
+            CassandraMatchingTaskStore::operation_error("LeaseTaskList", timeout),
+            MatchingTaskStoreError::Backend { kind: BackendErrorKind::Timeout, message }
+                if message == format!("LeaseTaskList timed out. Error: {detail}")
+        ));
+        let recorder = Arc::new(Recorder::default());
+        recorder.push_lwt(Err(ExecFailure::Other("boom".into())));
+        assert!(matches!(
+            store(&recorder, false).delete_task_list(&key(), 35),
+            Err(MatchingTaskStoreError::Backend { kind: BackendErrorKind::Internal, message })
+                if message == "DeleteTaskList operation failed. Error: boom"
+        ));
+        recorder.exec.lock().unwrap().push_back(Err(ExecFailure::Other("boom".into())));
+        assert!(matches!(
+            store(&recorder, false).complete_task(&key(), 35),
+            Err(MatchingTaskStoreError::Backend { message, .. })
+                if message == "CompleteTask operation failed. Error: boom"
+        ));
+        recorder.exec.lock().unwrap().push_back(Err(ExecFailure::Other("boom".into())));
+        assert!(matches!(
+            store(&recorder, false).complete_tasks_less_than(&key(), 35, 10),
+            Err(MatchingTaskStoreError::Backend { message, .. })
+                if message == "CompleteTasksLessThan operation failed. Error: boom"
+        ));
     }
 
     #[test]
