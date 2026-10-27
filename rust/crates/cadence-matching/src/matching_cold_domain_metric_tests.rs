@@ -120,7 +120,6 @@ async fn name_lookup_preserves_domain_cache_error_classification() {
                     name: "queue".into(),
                     ..Default::default()
                 }),
-                ..Default::default()
             }),
         )
         .await
@@ -150,7 +149,6 @@ async fn empty_name_lookup_is_bad_request() {
                 name: "queue".into(),
                 ..Default::default()
             }),
-            ..Default::default()
         }),
     )
     .await
@@ -177,7 +175,6 @@ async fn name_based_listing_handlers_read_through_cold_domain_cache() {
                 &matching,
                 Request::new(m::GetTaskListsByDomainRequest {
                     domain: DOMAIN_NAME.into(),
-                    ..Default::default()
                 }),
             )
             .await
@@ -195,7 +192,6 @@ async fn name_based_listing_handlers_read_through_cold_domain_cache() {
                         kind: 0,
                         ..Default::default()
                     }),
-                    ..Default::default()
                 }),
             )
             .await
