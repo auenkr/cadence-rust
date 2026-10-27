@@ -38,8 +38,13 @@ done
 docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 \
   -e 'CREATE DATABASE IF NOT EXISTS cadence; CREATE DATABASE IF NOT EXISTS cadence_visibility;' || exit 5
 export CADENCE_MYSQL_ADDR="127.0.0.1:${PORT}" CADENCE_MYSQL_PASSWORD="$PASSWORD" CADENCE_MYSQL_DOCKER_CONTAINER="$CONTAINER"
-python3 "$ROOT/tests/run-go-service-baseline.py" --rust-services matching --mysql \
-  --rust-production-binary "$BINARY" --artifacts-dir "$ARTIFACTS/run" "$@"
+if [[ "${CADENCE_MATCHING_GO_CONTROL:-}" == "1" ]]; then
+  python3 "$ROOT/tests/run-go-service-baseline.py" --adaptive-go-control --mysql \
+    --artifacts-dir "$ARTIFACTS/run" "$@"
+else
+  python3 "$ROOT/tests/run-go-service-baseline.py" --rust-services matching --mysql \
+    --rust-production-binary "$BINARY" --artifacts-dir "$ARTIFACTS/run" "$@"
+fi
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

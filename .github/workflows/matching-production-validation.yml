@@ -58,10 +58,16 @@ jobs:
       - name: Mixed Go and Rust validation
         run: |
           set +e
+          mkdir -p out
+          git rev-parse HEAD > out/commit.txt
           if [[ "$LANE" == "adaptive-go-control" ]]; then
-            printf '%q ' python3 tests/run-go-service-baseline.py --adaptive-go-control --artifacts-dir out/go-control > out/command.txt
-            python3 tests/run-go-service-baseline.py --adaptive-go-control --artifacts-dir out/go-control > out/gate.log 2>&1
+            export CADENCE_MATCHING_GO_CONTROL=1
+            control_args=(--matching-idle-check-seconds 3)
+            if [[ "$ADAPTIVE_RETRY_ONLY" == "true" ]]; then control_args+=(--probe-adaptive-retry-only); fi
+            printf '%q ' tests/gates/run-mysql-lane.sh out/gate - "${control_args[@]}" > out/command.txt
+            tests/gates/run-mysql-lane.sh out/gate - "${control_args[@]}" > out/gate.log 2>&1
             result=$?
+            if [ -f out/gate/run/cadence-server ]; then sha256sum out/gate/run/cadence-server > out/go-binary.sha256; fi
             echo "$result" > out/gate.exit
             tail -60 out/gate.log | cut -c1-300
             exit "$result"

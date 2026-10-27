@@ -248,8 +248,12 @@ async function adaptiveScaler(ctx) {
   const listRequest = { domain: ctx.domain, taskList: { name: taskList } };
   const rustListings = [];
   for (const node of ctx.directClients) {
+    const metadata = new ctx.grpc.Metadata();
+    metadata.set('rpc-service', 'cadence-matching');
+    metadata.set('rpc-encoding', 'proto');
+    metadata.set('rpc-caller', 'cadence-probe-scenarios');
     const response = await new Promise((resolve, reject) => node.client.ListTaskListPartitions(listRequest,
-      new ctx.grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, value) => (error ? reject(error) : resolve(value))));
+      metadata, { deadline: Date.now() + 10000 }, (error, value) => (error ? reject(error) : resolve(value))));
     rustListings.push({ source: node.tchannel, response });
   }
   const goListing = await ctx.call('WorkflowAPI', 'ListTaskListPartitions', listRequest);
@@ -376,7 +380,7 @@ async function adaptiveScaler(ctx) {
     staticListing: goListing.decisionTaskListPartitions.map(partition => partition.key),
     sdk: 'existing Go SDK worker and client completed workflow plus activity after scaler update',
     routingExecutions, routingEvidence,
-    servingPartitionProof: 'requested live read partition delivered the expected task through an addressed Rust Matching endpoint (owner retry may choose another candidate endpoint); current RPC response has no field identifying the internal partition that physically served after forwarding' };
+    servingPartitionProof: `requested live read partition delivered the expected task through an addressed ${ctx.matchingImplementation || 'Rust Matching'} endpoint (owner retry may choose another candidate endpoint); current RPC response has no field identifying the internal partition that physically served after forwarding` };
 }
 
 // CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a Rust Matching restart and

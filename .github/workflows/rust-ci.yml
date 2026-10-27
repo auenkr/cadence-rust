@@ -80,6 +80,9 @@ jobs:
           set +e
           node --check tests/matching-probe-scenarios.cjs > "$evidence/node-check.log" 2>&1
           node_result=$?
+          node --check tests/matching-adaptive-go-control.cjs >> "$evidence/node-check.log" 2>&1
+          control_result=$?
+          if [ "$control_result" != 0 ]; then node_result="$control_result"; fi
           echo "$node_result" > "$evidence/node-check.exit"
           PYTHONPYCACHEPREFIX="$RUNNER_TEMP/python-cache" python3 -m py_compile tests/run-go-service-baseline.py > "$evidence/python-check.log" 2>&1
           python_result=$?

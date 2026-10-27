@@ -349,7 +349,7 @@ if args.adaptive_go_control and (rust_services or args.probe_adaptive_scaler):
     parser.error('--adaptive-go-control requires the all-Go baseline and cannot be combined with Rust service or Matching probe options')
 if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler) and not production_matching:
     parser.error('Matching probes require --rust-services matching')
-if args.probe_adaptive_retry_only and not args.probe_adaptive_scaler:
+if args.probe_adaptive_retry_only and not (args.probe_adaptive_scaler or args.adaptive_go_control):
     parser.error('--probe-adaptive-retry-only requires --probe-adaptive-scaler')
 if args.probe_auto_config_hint and not production_matching:
     parser.error('--probe-auto-config-hint requires --rust-services matching')
@@ -357,7 +357,7 @@ if args.probe_auto_config_hint and args.matching_configstore:
     parser.error('--probe-auto-config-hint cannot be combined with --matching-configstore, which seeds matching.enableClientAutoConfig=true')
 if args.matching_backlog_forward and not production_matching:
     parser.error('--matching-backlog-forward requires --rust-services matching')
-if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not production_matching):
+if args.matching_idle_check_seconds is not None and (args.matching_idle_check_seconds < 1 or not (production_matching or args.adaptive_go_control)):
     parser.error('--matching-idle-check-seconds must be positive and requires --rust-services matching')
 if production_matching and args.matching_delivery:
     parser.error('--matching-delivery is a Go-overlay lane and cannot run with Rust matching in --rust-services')
@@ -369,7 +369,7 @@ if args.matching_rpc_tls and not production_matching:
     parser.error('--matching-rpc-tls requires --rust-services matching')
 if args.matching_transport != 'grpc' and not production_matching:
     parser.error('--matching-transport thrift requires --rust-services matching')
-if args.mysql and not production_matching:
+if args.mysql and not (production_matching or args.adaptive_go_control):
     parser.error('--mysql requires --rust-services matching')
 if args.postgres and not production_matching:
     parser.error('--postgres requires --rust-services matching')
@@ -492,7 +492,7 @@ config = work / 'config'
 config.mkdir(exist_ok=True)
 dynamic_config = work / 'dynamic-config.yaml'
 dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
-if production_matching or args.rust_matching or args.matching_restart:
+if production_matching or args.rust_matching or args.matching_restart or args.adaptive_go_control:
     dynamic_text += (
         '\nsystem.enableTasklistIsolation:\n'
         '  - value: true\n'
@@ -1056,6 +1056,8 @@ try:
                     probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
                 probe_environment = None
+                if args.adaptive_go_control and args.probe_adaptive_retry_only:
+                    probe_environment = {**os.environ, 'CADENCE_ADAPTIVE_RETRY_ONLY': '1'}
                 udp_capture = None
                 udp_thread = None
                 udp_packets = []
@@ -1184,7 +1186,7 @@ try:
                             'CADENCE_MATCHING_FAILURE_RECOVERY': '1',
                         })
                 result = subprocess.run(probe, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery or args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler or args.probe_pg_gc_domain else (600 if args.matching_delivery or args.rust_matching else 120)))
+                    env=probe_environment, timeout=1200 if (args.matching_restart and production_matching) else (900 if args.matching_restart or args.matching_backlog_forward or args.matching_failure_recovery or args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler or args.adaptive_go_control or args.probe_pg_gc_domain else (600 if args.matching_delivery or args.rust_matching else 120)))
                 if udp_capture:
                     udp_stop.set()
                     udp_thread.join(timeout=2)

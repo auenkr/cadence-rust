@@ -25,7 +25,7 @@ function call(service, method, request) {
   const metadata = new grpc.Metadata();
   metadata.set('rpc-service', service === 'Matching' ? 'cadence-matching' : 'cadence-frontend');
   metadata.set('rpc-encoding', 'proto'); metadata.set('rpc-caller', 'cadence-adaptive-go-control');
-  return new Promise((resolve, reject) => clients[service][method](request, metadata,
+  return new Promise((resolve, reject) => (service === 'Matching' ? matching : clients[service])[method](request, metadata,
     { deadline: Date.now() + 20000 }, (error, value) => error ? reject(error) : resolve(value)));
 }
 async function main() {
@@ -41,7 +41,8 @@ async function main() {
   process.argv[6] = tchannelPeer;
   process.env.CADENCE_PROBE_ADAPTIVE_SCALER = '1';
   const probeScenarios = await runProbeScenarios({ grpc, call, directClients, domain, domainId, id, startRequest, work,
-    durableTaskCount: () => ({ status: 0, stdout: '0' }) });
+    matchingImplementation: 'original Go Matching',
+  });
   assert.equal(probeScenarios.adaptiveScaler.result, 'passed');
   const result = { result: 'passed', acceptanceEligible: false,
     topology: 'original Go Frontend/History/Matching/Worker; adaptive control only', probeScenarios };

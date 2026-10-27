@@ -17,9 +17,9 @@ Go source confirms `getDomainByID` probes the literal `id` before and after `ref
 
 ## Normalization, handler, metrics, and quota
 
-Rust cache normalization is only used to form the lookup ID for `get_domain_by_id`; after `e2f2bd5cd`, an unrecognized spelling falls back to the original input and is passed into `DomainMetadataSource::get_domain`. This preserves the source/backend validation error path instead of synthesizing an invalid-Cassandra-UUID cache error. For recognized canonical forms, the normalized cache lookup can still hit the canonical key.
+The unmerged patch `e2f2bd5cd` normalizes recognized cache lookup spellings. Current master does not contain that patch and uses raw keys. Normalizing a recognized spelling would allow a canonical cache hit where Go retains a raw-key miss, so that patch must not be adopted as a cache parity fix. Its malformed-input fallback does not resolve this recognized-input difference.
 
-The production matching handler resolver calls `domain_name(id)` for quota/error handling, and `metric_domain_name(id)` is explicitly cache-only through `cached_domain_name`. Therefore the normalization fallback does preserve the intended backend error behavior on an uncached malformed ID, and a cached canonicalizable ID can still resolve by its canonical cache key. The mocked Go oracle does not prove backend normalization or a Rust mixed-cluster outcome. In particular, it must not be cited as proving metric labels or quota attribution for alternate spellings; the Go oracle tests `GetDomainName`, not Matching RPC telemetry/quota paths. No concrete production divergence is demonstrated by this source review.
+The production matching handler resolver calls `domain_name(id)` for quota/error handling, and `metric_domain_name(id)` is explicitly cache-only through `cached_domain_name`. The mocked Go oracle does not prove a Matching RPC telemetry/quota outcome or real backend parsing. In particular, do not cite it as a complete handler metric/quota comparison; it tests `GetDomainName`. Canonical cold-cache telemetry behavior requires its own source trace if a discrepancy is identified.
 
 The initial Cassandra normalization work remains unmerged on `t3/cassandra-uuid-cache-parity`; it is outside this reviewed branch and this note makes no acceptance claim for it.
 

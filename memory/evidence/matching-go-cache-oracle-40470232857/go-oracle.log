@@ -1,0 +1,42 @@
+=== RUN   TestDomainCacheSuite
+=== RUN   TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+=== RUN   TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.421Z	DEBUG	Domain change callbacks are going to triggered	{"number": 0, "logging-call-at": "domainCache.go:701"}
+    logger.go:146: 2026-10-27T07:58:17.421Z	DEBUG	Domain change callbacks are completed	{"number": 0, "logging-call-at": "domainCache.go:705"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB
+    domain_cache_uuid_oracle_test.go:45: cold/refresh alternate="ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+    domain_cache_uuid_oracle_test.go:54: warm alternate="ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.421Z	DEBUG	GetDomainByID returning domain uuid-spelling-oracle-domain, failoverVersion: 0	{"logging-call-at": "domainCache.go:633"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB
+    domain_cache_uuid_oracle_test.go:59: canonical alternate="ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB" name="uuid-spelling-oracle-domain" error=<nil>
+=== RUN   TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/abcdefabcdefabcdefabcdefabcdefab
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	Domain change callbacks are going to triggered	{"number": 0, "logging-call-at": "domainCache.go:701"}
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	Domain change callbacks are completed	{"number": 0, "logging-call-at": "domainCache.go:705"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/abcdefabcdefabcdefabcdefabcdefab
+    domain_cache_uuid_oracle_test.go:45: cold/refresh alternate="abcdefabcdefabcdefabcdefabcdefab" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+    domain_cache_uuid_oracle_test.go:54: warm alternate="abcdefabcdefabcdefabcdefabcdefab" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	GetDomainByID returning domain uuid-spelling-oracle-domain, failoverVersion: 0	{"logging-call-at": "domainCache.go:633"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/abcdefabcdefabcdefabcdefabcdefab
+    domain_cache_uuid_oracle_test.go:59: canonical alternate="abcdefabcdefabcdefabcdefabcdefab" name="uuid-spelling-oracle-domain" error=<nil>
+=== RUN   TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/-abcdefab-cdef-abcd-efab-cdefabcdefab-
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	Domain change callbacks are going to triggered	{"number": 0, "logging-call-at": "domainCache.go:701"}
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	Domain change callbacks are completed	{"number": 0, "logging-call-at": "domainCache.go:705"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/-abcdefab-cdef-abcd-efab-cdefabcdefab-
+    domain_cache_uuid_oracle_test.go:45: cold/refresh alternate="-abcdefab-cdef-abcd-efab-cdefabcdefab-" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+    domain_cache_uuid_oracle_test.go:54: warm alternate="-abcdefab-cdef-abcd-efab-cdefabcdefab-" name="" error_type=*types.InternalServiceError error=DefaultDomainCache encounter case where domain exists but cannot be loaded
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle
+    logger.go:146: 2026-10-27T07:58:17.422Z	DEBUG	GetDomainByID returning domain uuid-spelling-oracle-domain, failoverVersion: 0	{"logging-call-at": "domainCache.go:633"}
+=== NAME  TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/-abcdefab-cdef-abcd-efab-cdefabcdefab-
+    domain_cache_uuid_oracle_test.go:59: canonical alternate="-abcdefab-cdef-abcd-efab-cdefabcdefab-" name="uuid-spelling-oracle-domain" error=<nil>
+--- PASS: TestDomainCacheSuite (0.00s)
+    --- PASS: TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle (0.00s)
+        --- PASS: TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB (0.00s)
+        --- PASS: TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/abcdefabcdefabcdefabcdefabcdefab (0.00s)
+        --- PASS: TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle/-abcdefab-cdef-abcd-efab-cdefabcdefab- (0.00s)
+PASS
+ok  	github.com/uber/cadence/common/cache	0.011s
