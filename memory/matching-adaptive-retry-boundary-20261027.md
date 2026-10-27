@@ -30,3 +30,7 @@ With `CADENCE_MATCHING_RETRY_TRACE_TASK_LIST=production-adaptive-scaler-probe`, 
 Parent may rerun the existing adaptive lane with `--probe-adaptive-retry-only` after building this instrumentation. Keep the 60s assertions unchanged. If no Add reaches Matching, correlate the trace with original History transfer-processor logs and the workflow's persisted transfer task/visibility time; if those don't expose the boundary, add a test-only observer to the existing gate. First inspect those boundaries and the scaler samples; only then choose a production fix.
 
 This change is instrumentation only. No Go History behavior, workflow timeout, retry count, or static listing assertion was modified.
+
+## Validation
+
+Focused Actions run [40468304743](https://github.com/auenkr/cadence-rust/actions/runs/40468304743) completed successfully for `cadence-matching` with the Go SDK fixture checks enabled. It validated instrumentation source head `7d072c25422c165c92e6912d4210de7b8bb741a4`; the subsequent commit `8ea7b0ee20302aec2a5f9e2c900c1545f595327a` only corrected this memory note. No mixed gate was dispatched by this worker.
