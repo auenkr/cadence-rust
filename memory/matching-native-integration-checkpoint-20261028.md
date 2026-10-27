@@ -23,3 +23,9 @@ No Cargo, Go, or rustfmt commands ran locally. git diff --check passed.
 Pre-existing uncommitted dynamic_config.rs and matching-native-config-filters-20261028.md were left untouched and are excluded from this CI pin.
 
 Remaining: native backend implementations, handler/queue/History/token adoption, production tonic/Thrift registration, full native response graphs, invalid-byte mixed Go oracles, final workspace and mixed gates at one verified source pin. The scheduled continuation must remain enabled while Matching is incomplete.
+
+## Integrated backend checkpoint
+
+Commit b243fd999 contains the SQLite/MySQL/PostgreSQL native stores, dynamic config byte helpers, activity-scheduled dispatch adapter, retained raw lease error messages, and runner-generated formatting patch. Each remains unverified. New CI: https://github.com/auenkr/cadence-rust/actions/runs/40584900096 at head b243fd999 (resolve full SHA with git), fresh uncached target, five affected crates, format_matching_parity_files=true. Pending at dispatch.
+
+Previous replacement 40583973417 concluded failure: clippy chunks_exact_to_as_chunks in native_wire_edges.rs. That lint was fixed in b243fd999. No Go or Cargo command ran locally. The pinned IDL submodule was initialized with git only to inspect source field definitions.
