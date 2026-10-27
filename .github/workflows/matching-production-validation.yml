@@ -5,7 +5,7 @@ on:
       lane:
         description: Supported deployment scenario
         type: choice
-        options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive, adaptive-go-control]
+        options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive, adaptive-single-diagnostic, adaptive-go-control]
         default: postgres
       adaptive_retry_only:
         description: Run a fresh-process workflow-task-retry SDK probe before the full adaptive suite
@@ -73,6 +73,13 @@ jobs:
             exit "$result"
           fi
           common=(--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3)
+          if [[ "$LANE" == "adaptive-single-diagnostic" ]]; then
+            # Diagnostic topology: one Rust Matching process, with the same
+            # adaptive SDK/load/routing assertions and process restart as adaptive.
+            # The acceptance lane above keeps its two-instance recovery scenario.
+            common=(--matching-restart --matching-idle-check-seconds 3)
+            printf '%s\n' 'diagnostic-only: adaptive SDK/load/routing with one Rust Matching; Go Frontend/History/Worker; no Go Matching; process restart enabled; two-instance failure recovery omitted' > out/lane.txt
+          fi
           wrapper=tests/gates/run-mysql-lane.sh
           case "$LANE" in
             postgres)
@@ -83,6 +90,9 @@ jobs:
             configstore) extra=(--matching-configstore) ;;
             mysql-probes) extra=(--matching-backlog-forward --probe-query-standby --probe-list-partitions --probe-durable-restart --probe-auto-config-hint) ;;
             adaptive)
+              extra=(--probe-adaptive-scaler)
+              if [[ "$ADAPTIVE_RETRY_ONLY" == "true" ]]; then extra+=(--probe-adaptive-retry-only); fi ;;
+            adaptive-single-diagnostic)
               extra=(--probe-adaptive-scaler)
               if [[ "$ADAPTIVE_RETRY_ONLY" == "true" ]]; then extra+=(--probe-adaptive-retry-only); fi ;;
             *) exit 2 ;;
