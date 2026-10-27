@@ -8,3 +8,5 @@ Trace source pointers:
 - `rust/crates/cadence-matching/src/matching_registry.rs`: `scaler_update` emits tick timestamp, observed QPS, current read/write partition counts, proposed write count, and isolation assignment.
 
 The selector matches the probe root and parsed child partitions. Tracing is disabled unless the exact environment value above is set. No timeout or scaler algorithm behavior is changed. Focused CI evidence is recorded after dispatch; mixed runtime validation remains parent-owned.
+
+Focused CI dispatch: [rust-ci run 40476193408](https://github.com/auenkr/cadence-rust/actions/runs/40476193408), package `cadence-matching`, head `6c0ed7c769e770c81946720a9bfc417a63111d4b`. Last observed status was `in_progress`; no conclusion is available yet.
