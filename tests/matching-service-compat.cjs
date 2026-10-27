@@ -448,7 +448,7 @@ async function run() {
   function startSecondaryRust() {
     const output = fs.openSync(path.join(work, 'rust-server-secondary.log'), 'w');
     const child = spawn(productionBinary, [
-      'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
+      'start', '--config', process.env.CADENCE_RUST_MATCHING_SECONDARY_CONFIG || rustConfig, '--services', 'matching', '--port', '0',
       '--history-grpc-port', historyGrpcPort,
       '--matching-grpc-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT,
       '--matching-tchannel-port', process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL,
