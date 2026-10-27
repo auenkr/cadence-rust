@@ -61,3 +61,18 @@ Luna medium/default-tier delegates (shared checkout, disjoint ownership):
 - 8232ab5c-efc8-4675-9b1a-bdbce829028d: read-only ignored-test reconciliation.
 Their completions wake the parent automatically; do not poll delegated tasks.
 Focused run 40531087779 reached Test after passing Clippy; no result credited yet.
+
+## Focused test result and corrections (15:33 UTC)
+
+40531087779 failed tests: 753 passed, 3 failed, 2 ignored. Clippy passed.
+`4c6b2c6a9` corrects three regression expectations/fixture lifecycle points:
+- Native partition fencing must now expect Internal with no typed details,
+  matching the already-reviewed Go handleErr correction (not Unavailable).
+- The Thrift exception descriptor uses ServiceBusyError (capital S).
+- The standalone reader-fatal fixture must call reader.stop before joining
+  all reader loops, as production registry owner shutdown does. Receiving the
+  fatal notification alone does not stop dispatch loops; the pump stops the
+  queue and host/registry supervision owns shutdown. The separate blocked-sink
+  and runtime shutdown notification tests passed on this run.
+Focused Matching CI has been redispatched at 4c6b2c6a9. The concurrent test
+worker has uncommitted edits in its owned file; do not stage those prematurely.
