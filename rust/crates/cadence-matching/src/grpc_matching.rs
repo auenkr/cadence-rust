@@ -483,10 +483,15 @@ impl Matching {
     async fn metric_domain_name(&self, id: &str) -> Option<String> {
         if let Some(resolve) = self.domain_name_resolver.as_ref().cloned() {
             let id = id.to_owned();
-            return tokio::task::spawn_blocking(move || resolve(&id))
-                .await
-                .ok()
-                .flatten();
+            return match tokio::task::spawn_blocking(move || resolve(&id)).await {
+                Ok(domain_name) => domain_name,
+                Err(error) if error.is_panic() => {
+                    // Keep resolver panics inside matching_panic::capture, as they
+                    // were before crossing the blocking-task boundary.
+                    std::panic::resume_unwind(error.into_panic())
+                }
+                Err(_) => None,
+            };
         }
         domain_name_for(&self.frontend.state.domains, id)
     }
@@ -3138,11 +3143,13 @@ impl m::matching_api_server::MatchingApi for Matching {
     ) -> Result<Response<m::AcquireSemaphoreResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AcquireSemaphoreResponse>, Status>("acquire_semaphore", async move {
         self.domain_lookup_guard(&request.get_ref().domain_id, "acquire_semaphore")?;
+        let metric_domain_name = self
+            .metric_domain_name(request.get_ref().domain_id.as_str())
+            .await;
         self.metrics
             .matching_request(
                 "AcquireSemaphore",
-                self.metric_domain_name(request.get_ref().domain_id.as_str()).await
-                    .as_deref(),
+                metric_domain_name.as_deref(),
                 Some((request.get_ref().semaphore_name.as_str(), Some(0))),
                 Some(
                     crate::matching_metrics::MatchingMetrics::context_from_metadata(
@@ -3223,8 +3230,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                         Err(error) => match caller_ended(deadline, cancelled.as_ref()) {
                             Some(ended) => {
                                 self.metrics.semaphore_context_timeout(
-                                    self.metric_domain_name(request.get_ref().domain_id.as_str()).await
-                                        .as_deref(),
+                                    metric_domain_name.as_deref(),
                                     request.get_ref().semaphore_name.as_str(),
                                     Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(
                                         request.metadata(),
