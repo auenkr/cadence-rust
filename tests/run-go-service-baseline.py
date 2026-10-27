@@ -111,7 +111,7 @@ def check_go_schema_only():
     )
 
 
-def validate_matching_exporter(exporter, work, repository, expected_domain):
+def validate_matching_exporter(exporter, work, repository, expected_domain, expected_cold_domain=None):
     """Decode captured exporter output and require SDK-driven Matching metrics."""
     required = ('cadence_requests_per_tl', 'cadence_tasklist_request', 'poll_success_per_tl',
                 'cadence_client_requests')
@@ -179,29 +179,31 @@ def validate_matching_exporter(exporter, work, repository, expected_domain):
         if not request_lines:
             raise RuntimeError('Prometheus lacks a positive query request sample with the expected domain/caller/transport/service labels')
 
-    cold_probe_path = work / 'matching-cold-domain-metric-probe.json'
-    cold_probe = json.loads(cold_probe_path.read_text()) if cold_probe_path.is_file() else None
-    if cold_probe is not None:
-        labels = {
-            'caller': 'cadence-cold-domain-metric-probe', 'transport': 'grpc',
-            'cadence_service': 'cadence-matching', 'domain': cold_probe['domain'],
-            'operation': 'AddDecisionTask', 'tasklist': cold_probe['taskList'],
-        }
-        cold_samples = []
-        cold_snapshots = gzip.open(snapshots_path, 'rt', encoding='utf-8') if snapshots_path.is_file() else None
-        cold_scrapes = (json.loads(line)['body'] for line in cold_snapshots if line.strip()) if cold_snapshots else iter([])
-        for scrape in cold_scrapes:
-            for line in scrape.splitlines():
-                if 'cadence_requests_per_tl' not in line:
-                    continue
-                if all(f'{key}="{re.sub(r"[^A-Za-z0-9_]", "_", value)}"' in line for key, value in labels.items()):
-                    match = re.search(r'\s([-+0-9.eE]+)$', line)
-                    if match and float(match.group(1)) > 0:
-                        cold_samples.append(line)
-        if cold_snapshots:
-            cold_snapshots.close()
-        if cold_probe.get('grpcCode') != 8 or not cold_samples:
-            raise RuntimeError('cold-domain probe did not record RESOURCE_EXHAUSTED and its positive canonical AddDecisionTask Prometheus sample')
+        cold_probe_path = work / 'rust-matching' / 'matching-cold-domain-metric-probe.json'
+        cold_probe = json.loads(cold_probe_path.read_text()) if cold_probe_path.is_file() else None
+        if expected_cold_domain and (cold_probe is None or cold_probe.get('domain') != expected_cold_domain):
+            raise RuntimeError('requested cold-domain probe evidence is missing or has the wrong domain')
+        if cold_probe is not None:
+            labels = {
+                'caller': 'cadence-cold-domain-metric-probe', 'transport': 'grpc',
+                'cadence_service': 'cadence-matching', 'domain': cold_probe['domain'],
+                'operation': 'AddDecisionTask', 'tasklist': cold_probe['taskList'],
+            }
+            cold_samples = []
+            cold_snapshots = gzip.open(snapshots_path, 'rt', encoding='utf-8') if snapshots_path.is_file() else None
+            cold_scrapes = (json.loads(line)['body'] for line in cold_snapshots if line.strip()) if cold_snapshots else iter([])
+            for scrape in cold_scrapes:
+                for line in scrape.splitlines():
+                    if 'cadence_requests_per_tl' not in line:
+                        continue
+                    if all(f'{key}="{re.sub(r"[^A-Za-z0-9_]", "_", value)}"' in line for key, value in labels.items()):
+                        match = re.search(r'\s([-+0-9.eE]+)$', line)
+                        if match and float(match.group(1)) > 0:
+                            cold_samples.append(line)
+            if cold_snapshots:
+                cold_snapshots.close()
+            if cold_probe.get('grpcCode') != 8 or not cold_samples:
+                raise RuntimeError('cold-domain probe did not record RESOURCE_EXHAUSTED and its positive canonical AddDecisionTask Prometheus sample')
         semantic = {'format': exporter, 'sampleCount': sample_count,
                     'requiredMetrics': list(required), 'expectedDomain': expected_domain,
                     'prometheusExpectedLabels': prometheus_labels,
@@ -524,7 +526,7 @@ dynamic_config = work / 'dynamic-config.yaml'
 dynamic_text = (root / 'go/config/dynamicconfig/development.yaml').read_text()
 cold_domain_name = f'matching-cold-{secrets.token_hex(8)}' if args.matching_cold_domain_metric_probe else None
 if cold_domain_name:
-    dynamic_text += ('\nmatching.domainrps:\n'
+    dynamic_text += ('\nmatching.domainworkerrps:\n'
         '  - value: 0\n'
         f'    constraints: {{domainName: {cold_domain_name}}}\n')
 if production_matching or args.rust_matching or args.matching_restart or args.adaptive_go_control:
@@ -1277,7 +1279,7 @@ try:
                 if probe_result is None:
                     raise RuntimeError('SDK probe did not report its registered domain for exporter label validation')
                 semantics = validate_matching_exporter(
-                    args.matching_exporter, work, root, probe_result['domain'])
+                    args.matching_exporter, work, root, probe_result['domain'], cold_domain_name)
                 results['matchingExporterSemantics'] = semantics
                 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         finally:

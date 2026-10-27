@@ -1910,9 +1910,9 @@ impl QueueRegistry {
                 now,
                 root.name,
                 observed_qps,
-                current.read_partitions.values().map(Vec::len).sum::<usize>(),
-                current.write_partitions.values().map(Vec::len).sum::<usize>(),
-                prepared.write.values().map(Vec::len).sum::<usize>(),
+                current.read_partitions.len(),
+                current.write_partitions.len(),
+                prepared.write.len(),
                 config.isolation_assignment,
             );
         }

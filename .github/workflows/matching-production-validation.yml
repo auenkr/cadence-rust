@@ -11,6 +11,10 @@ on:
         description: Run a fresh-process workflow-task-retry SDK probe before the full adaptive suite
         type: boolean
         default: false
+      adaptive_trace:
+        description: Capture bounded adaptive probe delivery and scaler traces
+        type: boolean
+        default: false
 concurrency:
   group: matching-production-validation
   cancel-in-progress: true
@@ -22,6 +26,7 @@ jobs:
       CARGO_TARGET_DIR: /tmp/cargo-target-final-${{ github.run_id }}
       LANE: ${{ inputs.lane }}
       ADAPTIVE_RETRY_ONLY: ${{ inputs.adaptive_retry_only }}
+      CADENCE_MATCHING_ADAPTIVE_TRACE: ${{ inputs.adaptive_trace && 'production-adaptive-scaler-probe' || '' }}
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init go/idls

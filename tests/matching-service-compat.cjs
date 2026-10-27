@@ -389,29 +389,6 @@ async function run() {
     }
   }
   const domainId = (await call('DomainAPI', 'DescribeDomain', { name: domain })).domain.id;
-  const coldDomain = process.env.CADENCE_MATCHING_COLD_DOMAIN;
-  if (coldDomain) {
-    assert(productionMode, 'cold-domain quota probe requires production Matching');
-    await call('DomainAPI', 'RegisterDomain', { name: coldDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
-    const canonicalDomain = await call('DomainAPI', 'DescribeDomain', { name: coldDomain });
-    const coldTaskList = `cold-domain-${id}`;
-    const metadata = new grpc.Metadata();
-    metadata.set('rpc-service', 'cadence-matching');
-    metadata.set('rpc-encoding', 'proto');
-    metadata.set('rpc-caller', 'cadence-cold-domain-metric-probe');
-    const rejected = await new Promise(resolve => clients.Matching.AddDecisionTask({
-      domainId: canonicalDomain.domain.id,
-      workflowExecution: { workflowId: `cold-${id}`, runId: randomUUID() },
-      taskList: { name: coldTaskList }, scheduleId: '1',
-      scheduleToStartTimeout: { seconds: '10' }, source: 'TASK_SOURCE_HISTORY',
-    }, metadata, { deadline: Date.now() + 20000 }, error => resolve(error)));
-    assert(rejected, 'exact zero domain RPS must reject direct AddDecisionTask');
-    assert.equal(rejected.code, grpc.status.RESOURCE_EXHAUSTED, `expected RESOURCE_EXHAUSTED, got ${rejected.message}`);
-    fs.writeFileSync(path.join(work, 'matching-cold-domain-metric-probe.json'), `${JSON.stringify({
-      domain: canonicalDomain.domain.name, domainId: canonicalDomain.domain.id,
-      taskList: coldTaskList, grpcCode: rejected.code, grpcMessage: rejected.message,
-    }, null, 2)}\n`);
-  }
   let pageTokenDomain, domainPages = 0;
   if (cassandraGate) {
     pageTokenDomain = `service-compat-page-${id}`;
@@ -548,6 +525,33 @@ async function run() {
   let semaphoreOwner;
   try {
     await waitForRustReady('before-restart');
+  const coldDomain = process.env.CADENCE_MATCHING_COLD_DOMAIN;
+  if (coldDomain) {
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assert(productionMode, 'cold-domain quota probe requires production Matching');
+    await call('DomainAPI', 'RegisterDomain', { name: coldDomain, workflowExecutionRetentionPeriod: { seconds: '259200' } });
+    const canonicalDomain = await call('DomainAPI', 'DescribeDomain', { name: coldDomain });
+    const coldTaskList = `cold-domain-${id}`;
+    const metadata = new grpc.Metadata();
+    metadata.set('rpc-service', 'cadence-matching');
+    metadata.set('rpc-encoding', 'proto');
+    metadata.set('rpc-caller', 'cadence-cold-domain-metric-probe');
+    const coldClient = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    const rejected = await new Promise(resolve => coldClient.AddDecisionTask({
+      domainId: canonicalDomain.domain.id,
+      workflowExecution: { workflowId: `cold-${id}`, runId: randomUUID() },
+      taskList: { name: coldTaskList }, scheduleId: '1',
+      scheduleToStartTimeout: { seconds: '10' }, source: 'TASK_SOURCE_HISTORY',
+    }, metadata, { deadline: Date.now() + 20000 }, error => resolve(error)));
+    coldClient.close();
+    assert(rejected, 'exact zero domain RPS must reject direct AddDecisionTask');
+    assert.equal(rejected.code, grpc.status.RESOURCE_EXHAUSTED, `expected RESOURCE_EXHAUSTED, got ${rejected.message}`);
+    fs.writeFileSync(path.join(work, 'matching-cold-domain-metric-probe.json'), `${JSON.stringify({
+      domain: canonicalDomain.domain.name, domainId: canonicalDomain.domain.id,
+      taskList: coldTaskList, grpcCode: rejected.code, grpcMessage: rejected.message,
+    }, null, 2)}\n`);
+  }
+
   const startRequest = {
     domain, workflowId: id, workflowType: { name: 'ServiceCompatibility' }, taskList,
     requestId: randomUUID(), executionStartToCloseTimeout: { seconds: '300' },
