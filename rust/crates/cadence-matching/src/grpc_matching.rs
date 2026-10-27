@@ -364,6 +364,7 @@ pub struct Matching {
     pub(crate) poll_expiration: std::time::Duration,
     metrics: crate::matching_metrics::MatchingMetrics,
     domain_name_resolver: Option<DomainNameResolver>,
+    domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
     /// Test-only engine failure seam: `(rpc name, message)` makes that RPC's engine
     /// call fail with `message`. See `injected_engine_fault`.
@@ -417,6 +418,7 @@ impl Matching {
             poll_expiration: std::time::Duration::from_secs(60),
             metrics: crate::matching_metrics::MatchingMetrics::default(),
             domain_name_resolver: None,
+            domain_cache: None,
             domain_id_parse: Default::default(),
             #[cfg(test)]
             engine_fault: Default::default(),
@@ -463,6 +465,7 @@ impl Matching {
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> Self {
         self.domain_id_parse = cache.domain_id_parse();
+        self.domain_cache = Some(cache.clone());
         let domains = self.frontend.state.domains.clone();
         self.domain_name_resolver = Some(Arc::new(move |id| {
             let domain = cache.get_domain_by_id(id).ok()?;
@@ -502,6 +505,34 @@ impl Matching {
             };
         }
         domain_name_for(&self.frontend.state.domains, id)
+    }
+    /// Resolve a domain name the way Go's Matching domain cache does. The
+    /// persistence read is blocking, and a cold result must also reach the
+    /// in-memory view used by workflow and quota handlers.
+    async fn domain_id_by_name(&self, name: &str) -> Result<String, Status> {
+        if let Some(cache) = self.domain_cache.clone() {
+            let domains = self.frontend.state.domains.clone();
+            let name = name.to_owned();
+            return match tokio::task::spawn_blocking(move || {
+                let domain = cache.get_domain(&name).map_err(|error| error.to_string())?;
+                domains.insert_matching_metadata_if_missing(&domain);
+                Ok::<_, String>(domain.info.uuid)
+            })
+            .await
+            {
+                Ok(Ok(id)) => Ok(id),
+                Ok(Err(error)) => Err(crate::grpc::domain_not_found(error)),
+                Err(error) if error.is_panic() => {
+                    std::panic::resume_unwind(error.into_panic())
+                }
+                Err(error) => Err(Status::internal(error.to_string())),
+            };
+        }
+        self.frontend
+            .state
+            .domains
+            .domain_id(name)
+            .map_err(|error| crate::grpc::domain_not_found(error.message))
     }
     /// Incremental durable delivery backend. Domain metadata and the remaining
     /// administrative/query methods still use the supplied application state.
@@ -3124,10 +3155,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 Some(&request.get_ref().domain),
                             )?;
                             let r = request.get_ref().clone();
-                            let domain =
-                                self.frontend.state.domains.domain_id(&r.domain).map_err(
-                                    |error| crate::grpc::domain_not_found(error.message),
-                                )?;
+                            let domain = self.domain_id_by_name(&r.domain).await?;
                             if let Some(queues) = &self.queues {
                                 let domain = uuid::Uuid::parse_str(&domain)
                                     .map_err(|_| Status::internal("Invalid domain ID."))?;
@@ -3196,12 +3224,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                             let task_list = r.task_list.unwrap_or_default();
                             // Go resolves `request.GetDomain()` through the domain cache; the
                             // single-process store is keyed by name and yields the UUID.
-                            let domain_id = self
-                                .frontend
-                                .state
-                                .domains
-                                .domain_id(&r.domain)
-                                .map_err(|e| crate::grpc::domain_not_found(e.message))?;
+                            let domain_id = self.domain_id_by_name(&r.domain).await?;
                             // Go Identifier returns an untyped error, wrapped by handleErr.
                             let name =
                                 TaskListName::parse(&task_list.name).map_err(Status::internal)?;
