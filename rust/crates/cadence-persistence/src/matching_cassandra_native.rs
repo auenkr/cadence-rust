@@ -841,7 +841,10 @@ mod tests {
     fn create_tasks_binds_raw_names_fences_range_and_rejects_malformed_run_id() {
         let fake = Arc::new(Fake::default());
         let s = store(fake.clone());
-        let mut data = TaskDataBytes { workflow_id: GoString::from(&b"w\xff"[..]), ..Default::default() };
+        let data = TaskDataBytes {
+            workflow_id: GoString::from(&b"w\xff"[..]),
+            ..Default::default()
+        };
         let task = AllocatedTaskBytes {
             task_id: 7,
             data: data.clone(),

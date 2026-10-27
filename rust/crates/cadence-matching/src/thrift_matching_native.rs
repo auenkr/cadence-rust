@@ -37,7 +37,6 @@ fn nested(s: &Struct, id: i16) -> Result<Option<&Struct>, Error> {
     }
 }
 
-
 fn int(s: &Struct, id: i16) -> Option<i32> {
     s.fields.iter().rev().find_map(|(field, v)| {
         if *field == id {

@@ -146,7 +146,7 @@ pub struct MatchingHistoryClient {
 #[derive(Clone)]
 enum HistoryConnection {
     /// Typed client plus its configured channel, for native raw-byte calls.
-    Grpc(h::history_api_client::HistoryApiClient<Channel>, Channel),
+    Grpc(Box<h::history_api_client::HistoryApiClient<Channel>>, Channel),
     Tchannel(
         crate::matching_history_tchannel::TChannelHistoryClient,
         Duration,
@@ -219,7 +219,10 @@ impl MatchingHistoryClient {
         self.record_started_timeout = Some(provider);
         self
     }
-    pub fn with_record_started_timeout_bytes(mut self, provider: RecordStartedTimeoutBytes) -> Self {
+    pub fn with_record_started_timeout_bytes(
+        mut self,
+        provider: RecordStartedTimeoutBytes,
+    ) -> Self {
         self.record_started_timeout_bytes = Some(provider);
         self
     }
@@ -267,9 +270,10 @@ impl MatchingHistoryClient {
         &self,
         peer: &str,
     ) -> Result<(h::history_api_client::HistoryApiClient<Channel>, Channel), Status> {
-        let channel = crate::grpc_tls::endpoint_channel(peer, self.tls.as_ref()).map_err(|error| {
-            Status::unavailable(format!("Invalid resolved History endpoint: {error}"))
-        })?;
+        let channel =
+            crate::grpc_tls::endpoint_channel(peer, self.tls.as_ref()).map_err(|error| {
+                Status::unavailable(format!("Invalid resolved History endpoint: {error}"))
+            })?;
         Ok((
             h::history_api_client::HistoryApiClient::new(channel.clone())
                 .max_decoding_message_size(self.max_message_size)
@@ -524,9 +528,9 @@ impl MatchingHistoryClient {
             }
             (false, Some(peer)) => {
                 let (client, channel) = self.client_for_peer(peer)?;
-                HistoryConnection::Grpc(client, channel)
+                HistoryConnection::Grpc(Box::new(client), channel)
             }
-            (false, None) => HistoryConnection::Grpc(self.history.clone(), self.channel.clone()),
+            (false, None) => HistoryConnection::Grpc(Box::new(self.history.clone()), self.channel.clone()),
         };
         loop {
             let remaining =
@@ -578,7 +582,7 @@ impl MatchingHistoryClient {
                         )
                     } else {
                         let (client, channel) = self.client_for_peer(&peer)?;
-                        HistoryConnection::Grpc(client, channel)
+                        HistoryConnection::Grpc(Box::new(client), channel)
                     };
                 }
             }
@@ -958,11 +962,8 @@ struct HistoryCallMetricGuard {
 
 impl HistoryCallMetricGuard {
     fn complete(&mut self, failed: bool) {
-        self.metrics.history_completed(
-            self.tags.clone(),
-            self.started.elapsed(),
-            failed,
-        );
+        self.metrics
+            .history_completed(self.tags.clone(), self.started.elapsed(), failed);
         self.completed = true;
     }
 }

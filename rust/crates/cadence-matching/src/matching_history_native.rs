@@ -151,9 +151,9 @@ pub(super) fn activity_response(
         input: attributes.input.clone(),
         scheduled_time: event.event_time,
         started_time: started.started_time,
-        schedule_to_close_timeout: attributes.schedule_to_close_timeout.clone(),
-        start_to_close_timeout: attributes.start_to_close_timeout.clone(),
-        heartbeat_timeout: attributes.heartbeat_timeout.clone(),
+        schedule_to_close_timeout: attributes.schedule_to_close_timeout,
+        start_to_close_timeout: attributes.start_to_close_timeout,
+        heartbeat_timeout: attributes.heartbeat_timeout,
         attempt: started.attempt,
         scheduled_time_of_this_attempt: started.scheduled_time_of_this_attempt,
         heartbeat_details: started.heartbeat_details,
@@ -410,7 +410,7 @@ mod tests {
         let event = n::api::HistoryEvent {
             attributes: Some(
                 n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    attributes.into(),
+                    attributes,
                 ),
             ),
             ..Default::default()
