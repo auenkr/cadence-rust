@@ -25,6 +25,10 @@ on:
         description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
         type: boolean
         default: false
+      go_domain_cache_uuid_oracle:
+        description: "Run the original-Go Matching domain-cache UUID spelling oracle"
+        type: boolean
+        default: false
   push:
     branches: ["master", "matching-*"]
     paths: ["rust/**", ".github/workflows/rust-ci.yml", "go/idls"]
@@ -116,6 +120,34 @@ jobs:
           name: matching-describe-tasklist-go-oracle
           retention-days: 3
           path: ${{ runner.temp }}/matching-describe-tasklist-go-oracle
+      - name: Run original-Go domain-cache UUID spelling oracle
+        if: inputs.go_domain_cache_uuid_oracle == true
+        working-directory: go
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/domain-cache-uuid-oracle"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          cat > "$RUNNER_TEMP/domain-cache-uuid-overlay.json" <<EOF
+          {"Replace":{"$GITHUB_WORKSPACE/go/common/cache/domain_cache_uuid_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-domain-cache-uuid-oracle_test.go"}}
+          EOF
+          cp "$RUNNER_TEMP/domain-cache-uuid-overlay.json" "$evidence/overlay.json"
+          printf '%s\n' 'go test -overlay $RUNNER_TEMP/domain-cache-uuid-overlay.json ./common/cache -run ^TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle$ -count=1 -v' > "$evidence/command.txt"
+          set +e
+          go test -overlay "$RUNNER_TEMP/domain-cache-uuid-overlay.json" ./common/cache \
+            -run '^TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle$' -count=1 -v \
+            > "$evidence/go-oracle.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/go-oracle.exit"
+          cat "$evidence/go-oracle.log"
+          exit "$result"
+      - name: Upload original-Go domain-cache UUID oracle evidence
+        if: always() && inputs.go_domain_cache_uuid_oracle == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain-cache-uuid-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/domain-cache-uuid-oracle
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
       - name: Verify reviewed Go History TChannel wire fixture
