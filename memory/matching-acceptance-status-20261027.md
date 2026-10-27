@@ -6,6 +6,27 @@ status and blocker claims in `matching-final-acceptance-ledger-20261026.md`,
 `matching-resume-checkpoint-20261027.md`. Those notes and their historical
 artifacts remain unchanged as provenance.
 
+## Latest follow-up (09:37 UTC)
+
+Adaptive single-node diagnostic [40480825761](https://github.com/auenkr/cadence-rust/actions/runs/40480825761)
+**succeeded** at `d8759bd09c4b74908d77818a14e5a9f15a3aab4a`.
+Downloaded artifact verifies build/gate/runtime/probe exits0, Go
+Frontend/History/Worker and no Go Matching, load24/24, scaling1->12 write/read
+partitions, SDK completion and process restart. Binary SHA256:
+`5076795be1078e189066c1be5d3148026638f933e5c6a8000b7a877140059ff8`.
+Compact proof: `memory/evidence/matching-adaptive-single-40480825761/`.
+The unchanged assertions passed once; this does not prove the prior delay fixed,
+nor two-node recovery or final-pin acceptance. Worker comparison is pending.
+Combined workspace CI40480829938 was cancelled by later master pushes during
+its test step; it is not a passing combined validation result.
+
+Native name read-through9bca9b856, cache source classification7a159cea8,
+dual-exporter capture/reviewd0b68d53e/5860bf54e and late name probe8160da894
+are integrated on master. Typed RPC mapping remains in progress; source
+classification alone does not fix the handler's all-not-found conversion.
+Optional live name probes retain the shared-cache/background-refresh limitation.
+All ten final-pin acceptance lanes remain required.
+
 ## Immutable pins and current state
 
 | Item | Pin / result | What it establishes |
