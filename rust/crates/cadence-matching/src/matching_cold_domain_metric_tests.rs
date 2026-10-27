@@ -32,7 +32,8 @@ struct LateDomainSource {
 
 impl DomainMetadataSource for LateDomainSource {
     fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
-        Ok(1)
+        // Refresh includes rows strictly below the metadata notification bound.
+        Ok(2)
     }
 
     fn list_domains(
