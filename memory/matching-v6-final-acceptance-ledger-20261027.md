@@ -158,3 +158,11 @@ matching-concurrent-go-parity and matching-standby-error-exhaustion-tests.
 Workers completed; replacement starts held by host load above6 (peaked13.9)
 with sufficient memory. No local heavy validation or new workers started while
 over the guard. Final candidate and all ten mixed lanes still pending.
+
+Latest combined diagnostic run (live at15:17UTC):
+https://github.com/auenkr/cadence-rust/actions/runs/40529351815
+Immutable ref matching-source-check-20261027-2, full head
+089c0b0a44a41a35b04ac30797caba10e965edee. Full workspace selection, optional
+Matching parity formatting enabled. Download/apply matching-format-patch before
+final v7 pin. Duplicate automatic unformatted run40529331608 cancelled. Host
+load6.06 at15:17UTC; no replacement workers yet under the >6 start guard.
