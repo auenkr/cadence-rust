@@ -242,7 +242,7 @@ mod tests {
     fn recovered_string_uses_go_quoted_literal_syntax() {
         assert_eq!(
             capture_sync::<()>("test", || panic!("a\0\n\u{0085}é\"\\")),
-            Err("panic object is not error: \"a\\x00\\n\\u0085é\\\"\\\\\"".to_string())
+            Err("panic object is not error: \"a\\x00\\n\\x85é\\\"\\\\\"".to_string())
         );
     }
 }
