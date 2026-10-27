@@ -15,3 +15,13 @@ Cancellation note: cancelling a request stops awaiting the blocking task but can
 ## Limits / integration recommendation
 
 The added Rust regression test uses an injected resolver and verifies metric attribution, not a real cold persistence cache, Go SDK workflow, or mixed Go/Rust cluster. CI pass `40472811597` is focused crate validation only. Parent integration owner should separately verify cold domain creation immediately before an RPC against the real cache/persistence adapter and confirm domain tagging before quota rejection; broader Matching mixed-cluster gates remain necessary for service completion.
+
+## Integrated harness review (2026-10-27)
+
+Reviewed the integrated optional probe in `tests/run-go-service-baseline.py` and `tests/matching-service-compat.cjs` at repository head `79b97f26a`. Source-only review; no Cargo/Go build, runtime gate, or Actions run was performed.
+
+One concrete blocker: `run-go-service-baseline.py:529-531` configures `matching.domainworkerrps` to `0`, but `matching_quota.rs:233-247` treats any nonpositive domain rate as a fallback to `matching.workerrps` (the default unlimited rate). Therefore `matching-service-compat.cjs:547-548` cannot validly expect this setting to reject `AddDecisionTask`; it should be admitted and may create a durable task. To test a rejection instead, configure a positive rate of `1` and launch two `AddDecisionTask` calls concurrently for that domain, asserting one is rejected with `RESOURCE_EXHAUSTED`. The bucket's one-token initial burst admits one call and rejects the other; concurrent calls avoid timing the first call's backend completion against the one-second refill.
+
+Other reviewed assertions are source-consistent: the probe runs after `waitForRustReady`, sends through the exact primary Rust gRPC client, and uses `AddDecisionTask` (the worker quota class). `matching_request` emits the canonical request counter before entering the future where `check_rpc_quota` rejects, and receives `rpc-caller` plus `grpc` from the request metadata. The `domain` and `tasklist` labels match request-tag names; Prometheus sanitizes values by replacing non-ASCII-alphanumeric/underscore characters with `_`, matching the validator. The 1.1-second delay follows readiness; production cache startup performs its initial scan synchronously, and cold ID lookup does a read-through plus refresh, so the late registered domain can resolve before quota rejection. The evidence file is written under the supplied `rust-matching` directory and the validator reads that same path.
+
+Validation limit: these are source-level conclusions only. The integrated probe has not been run in Actions or against a mixed cluster, and its current zero-rate rejection claim is invalid until corrected.
