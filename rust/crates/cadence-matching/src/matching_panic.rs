@@ -62,15 +62,62 @@ pub fn is_captured_panic_message(message: &str) -> bool {
 
 fn panic_message(operation: &str, payload: Box<dyn Any + Send>) -> String {
     let value = if let Some(text) = payload.downcast_ref::<&str>() {
-        format!("{text:?}")
+        go_quote(text)
     } else if let Some(text) = payload.downcast_ref::<String>() {
-        format!("{text:?}")
+        go_quote(text)
     } else {
         "<non-string panic payload>".to_string()
     };
     let message = format!("panic object is not error: {value}");
     eprintln!("ERROR Panic is captured operation={operation} error={message}");
     message
+}
+
+/// `fmt`'s `%#v` uses Go string-literal quoting (`strconv.Quote`), which differs
+/// from Rust `Debug` for control characters (notably NUL: `\\x00`, not `\\0`).
+fn go_quote(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\u{0007}' => quoted.push_str("\\a"),
+            '\u{0008}' => quoted.push_str("\\b"),
+            '\u{000c}' => quoted.push_str("\\f"),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            '\u{000b}' => quoted.push_str("\\v"),
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            c if !go_is_print(c) => {
+                let n = c as u32;
+                if n <= 0xff {
+                    quoted.push_str(&format!("\\x{n:02x}"));
+                } else if n <= 0xffff {
+                    quoted.push_str(&format!("\\u{n:04x}"));
+                } else {
+                    quoted.push_str(&format!("\\U{n:08x}"));
+                }
+            }
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+// Go strconv.IsPrint follows Unicode graphic categories, with only ASCII space
+// from the separator category printable. Rust's `is_control` covers Cc; include
+// the format and separator characters commonly represented in valid Rust strings.
+fn go_is_print(ch: char) -> bool {
+    let n = ch as u32;
+    !ch.is_control()
+        && !matches!(n,
+            0x00ad | 0x034f | 0x061c | 0x115f..=0x1160 | 0x17b4..=0x17b5 |
+            0x180b..=0x180f | 0x2000..=0x200f | 0x2028..=0x202f |
+            0x205f..=0x206f | 0x3000 | 0x3164 | 0xfe00..=0xfe0f |
+            0xfeff | 0xffa0 | 0xfff0..=0xfff8 | 0x1bca0..=0x1bca3 |
+            0x1d173..=0x1d17a | 0xe0000..=0xe0fff)
 }
 
 /// Plain captured-panic status (gRPC Unknown / Thrift 0x05) for a panic Go raises as a string,
@@ -188,6 +235,14 @@ mod tests {
         assert_eq!(
             capture_sync::<()>("test", || std::panic::panic_any(42_u8)),
             Err("panic object is not error: <non-string panic payload>".to_string())
+        );
+    }
+
+    #[test]
+    fn recovered_string_uses_go_quoted_literal_syntax() {
+        assert_eq!(
+            capture_sync::<()>("test", || panic!("a\0\n\u{0085}é\"\\")),
+            Err("panic object is not error: \"a\\x00\\n\\u0085é\\\"\\\\\"".to_string())
         );
     }
 }
