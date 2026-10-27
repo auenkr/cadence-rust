@@ -1,6 +1,6 @@
 # Matching domain-cache UUID spelling oracle (2026-10-27)
 
-Status: first Actions attempt exposed a test-only compile defect (`testing` imported but unused); fixed in the follow-up commit, with rerun pending.
+Status: original-Go UUID spelling oracle passed on Actions. Follow-up Rust `cadence-matching` workflow was still running at last status check.
 
 The Actions workflow accepts `workflow_dispatch` input `go_domain_cache_uuid_oracle=true`. It overlays `tests/go-domain-cache-uuid-oracle_test.go` at a virtual test path in `go/common/cache`, then runs only `TestDomainCacheSuite/TestDomainCacheUUIDSpellingOracle`. Production Go files are unchanged. Runner logs and the overlay/command/source SHA are uploaded as a three-day artifact.
 
@@ -16,6 +16,8 @@ First Actions run: https://github.com/auenkr/cadence-rust/actions/runs/404697918
 First run head SHA: `ada08789d553cf71238f1ebe2fa11a024c71e5ff`.
 First conclusion: failure before test execution. Step `Run original-Go domain-cache UUID spelling oracle` failed because the overlay file imported unused `testing`; this was an oracle harness defect, not a Go cache result. The push-triggered duplicate run `40469781867` was canceled by configured concurrency.
 
-Rerun URL: pending.
-Rerun head SHA: pending.
-Rerun conclusion: pending; do not treat this checkpoint as validated until the optional oracle step passes or produces a concrete sourced defect.
+Rerun URL: https://github.com/auenkr/cadence-rust/actions/runs/40470232857
+Rerun head SHA: `b93b162061cb32b62caecc22673241579edbec30`.
+Oracle step conclusion: success, exit `0`. The log shows each alternate spelling has a successful existence check followed by the expected `*types.InternalServiceError` on both cold/refresh and warm access; canonical ID resolves to `uuid-spelling-oracle-domain`. Artifact `domain-cache-uuid-oracle` contains the run log, command, overlay, source SHA, and exit code. The `cadence-matching` CI job had reached Rust tests after clippy and format passed, but the workflow had not yet completed at the last check; do not report its overall conclusion as passed.
+
+Conclusion: Go and current Rust cache lookup shape agree on exact raw-key lookups. This oracle supplies no evidence for changing Rust production behavior. The alternate-spelling canonicalization behavior of any particular persistence backend remains outside this cache-only test.
