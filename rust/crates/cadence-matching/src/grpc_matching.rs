@@ -1862,6 +1862,7 @@ impl m::matching_api_server::MatchingApi for Matching {
             return Err(Status::invalid_argument("Context timeout is not set."));
         }
         let r = request.get_ref().clone();
+        let received_at = std::time::Instant::now();
         let mut payload = r.request.unwrap_or_default();
         // Go getters are nil-safe: an absent TaskList is the empty-named list, and the
         // identifier is validated before any domain lookup.
@@ -1880,6 +1881,11 @@ impl m::matching_api_server::MatchingApi for Matching {
             });
         }
         let task_list = payload.task_list.as_ref().expect("defaulted").name.clone();
+        adaptive_scaler_trace(
+            &task_list,
+            "poll_received",
+            &format!("poller_id={} request_id=unavailable", r.poller_id),
+        );
         let guard = self.register_poll(PollKey {
             domain: r.domain_id.clone(),
             task_list,
@@ -1901,7 +1907,7 @@ impl m::matching_api_server::MatchingApi for Matching {
                 &queue,
             )?;
             let poll_started = std::time::Instant::now();
-            adaptive_scaler_trace(&guard.key.task_list, "poll_wait_start", "");
+            adaptive_scaler_trace(&guard.key.task_list, "poll_wait_start", &format!("poller_id={} elapsed_ms={}", guard.key.poller, received_at.elapsed().as_millis()));
             let expiration =
                 self.poll_timeout(&r.domain_id, &guard.key.task_list, 0, incoming_deadline);
             if queue.stop_if_isolation_changed() {
@@ -2016,7 +2022,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                             &guard.key.task_list,
                             "poll_result",
                             &format!(
-                                "elapsed_ms={} token_present={} workflow={} run={} started_event_id={}",
+                                "poller_id={} request_id=unavailable elapsed_ms={} token_present={} workflow={} run={} started_event_id={}",
+                                guard.key.poller,
                                 poll_started.elapsed().as_millis(),
                                 !response.task_token.is_empty(),
                                 response.workflow_execution.as_ref().map_or("", |execution| execution.workflow_id.as_str()),
@@ -2028,6 +2035,9 @@ impl m::matching_api_server::MatchingApi for Matching {
                             response.partition_config=queue.partitions.get().map(partition_config_to_internal);
                         response.auto_config_hint=Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started));
                         Response::new(response)
+                    }).map_err(|error| {
+                        adaptive_scaler_trace(&guard.key.task_list, "poll_error", &format!("poller_id={} elapsed_ms={} code={:?}", guard.key.poller, poll_started.elapsed().as_millis(), error.code()));
+                        error
                     }),
                 _=failover.changed()=>{
                     if let (Some(registry), Ok(domain)) = (&self.queues, uuid::Uuid::parse_str(&r.domain_id)) {
@@ -2042,11 +2052,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                 },
                 // Go returns an empty poll response (nil error) when a poll is cancelled.
                 _=guard.cancel.notified()=>Ok(Response::new(m::PollForDecisionTaskResponse {
+                    // Cancellation returns the empty response expected by Go long polls.
+                    // Keep this bounded trace to distinguish it from a token handoff.
+                    //
+                    // The trace contains no task token or payload.
                     auto_config_hint: Some(self.auto_config_hint(&r.domain_id, &guard.key.task_list, 0, poll_started)),
                     load_balancer_hints: queue.load_balancer_hints(matching_now()),
                     partition_config: queue.partitions.get().map(partition_config_to_internal),
                     ..Default::default()
-                })),
+                })).map(|response| {
+                    adaptive_scaler_trace(&guard.key.task_list, "poll_cancelled", &format!("poller_id={} elapsed_ms={}", guard.key.poller, poll_started.elapsed().as_millis()));
+                    response
+                }),
             };
         }
         let expiration =
@@ -2339,6 +2356,18 @@ impl m::matching_api_server::MatchingApi for Matching {
                     let add_started = tokio::time::Instant::now();
                     let parent_deadline = crate::matching_sync::request_deadline(&request);
                     let r = request.get_ref().clone();
+                    let trace_ids = format!(
+                        "workflow={} run={} schedule_id={}",
+                        r.workflow_execution.as_ref().map_or("", |execution| execution.workflow_id.as_str()),
+                        r.workflow_execution.as_ref().map_or("", |execution| execution.run_id.as_str()),
+                        r.schedule_id,
+                    );
+                    let trace_task_list = r.task_list.as_ref().map_or("", |list| list.name.as_str());
+                    adaptive_scaler_trace(
+                        trace_task_list,
+                        "decision_add_received",
+                        &format!("{trace_ids} request_id=unavailable"),
+                    );
                     log_received_add_task("Received AddDecisionTask", &r.domain_id, r.task_list.as_ref(), r.workflow_execution.as_ref(), 0, r.schedule_id);
                     task_list_name(
                         r.task_list
@@ -2410,7 +2439,6 @@ impl m::matching_api_server::MatchingApi for Matching {
                         .with_request_run_id(&execution.run_id)
                         .at_creation(matching_now(), 0);
                         let forwarded = !r.forwarded_from.is_empty();
-                        let trace_ids = format!("workflow={} run={} schedule_id={}", execution.workflow_id, execution.run_id, r.schedule_id);
                         // Go `taskListManagerImpl.AddTask`: only a non-forwarded add marks
                         // liveness and reports arrival QPS, grouped by the task's isolation
                         // group when it has one.
@@ -2447,6 +2475,11 @@ impl m::matching_api_server::MatchingApi for Matching {
                                 &self.frontend.state.current_cluster_name,
                             )
                             .map_err(|error| crate::grpc::domain_not_found(error.message))?;
+                        adaptive_scaler_trace(
+                            &list.name,
+                            "decision_add_ready_for_sync",
+                            &format!("{trace_ids} elapsed_ms={}", add_started.elapsed().as_millis()),
+                        );
                         if active {
                             adaptive_scaler_trace(&list.name, "decision_add_sync_start", &trace_ids);
                             let matched = self
