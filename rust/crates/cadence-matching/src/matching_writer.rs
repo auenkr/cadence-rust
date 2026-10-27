@@ -343,7 +343,9 @@ impl TaskWriter {
                         use cadence_persistence::{
                             matching_queue::QueueError, matching_sqlite::StorageError,
                         };
-                        let retryable = matches!(&error, QueueError::Storage(StorageError::Sql(_)))
+                        // Go persistence.IsTransientError: Internal, ServiceBusy,
+                        // Timeout and DBUnavailable (SQL driver and Backend kinds).
+                        let retryable = matches!(&error, QueueError::Storage(e) if e.is_transient())
                             || matches!(
                                 (&error, kind),
                                 (QueueError::Storage(StorageError::ConditionFailed(_)), 1)
@@ -767,6 +769,114 @@ mod tests {
             !WriteError::from(Status::deadline_exceeded("context deadline exceeded")).retryable
         );
     }
+    /// Fails the first `failures` CreateTasks calls with `error`, then delegates.
+    struct FlakyCreateStore {
+        inner: Arc<SqliteTaskStore>,
+        kind: cadence_persistence::matching_task_store::BackendErrorKind,
+        failures: std::sync::atomic::AtomicUsize,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl cadence_persistence::matching_task_store::MatchingTaskStore for FlakyCreateStore {
+        fn get_task_list(&self, key: &TaskListKey) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+            self.inner.get_task_list(key)
+        }
+        fn lease(&self, key: &TaskListKey, kind: i16, previous_range: i64, now_nanos: i64) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+            self.inner.lease(key, kind, previous_range, now_nanos)
+        }
+        fn update_task_list(&self, key: &TaskListKey, range: i64, data: cadence_persistence::matching_blob::TaskListData, now_nanos: i64) -> cadence_persistence::matching_task_store::Result<()> {
+            self.inner.update_task_list(key, range, data, now_nanos)
+        }
+        fn create_tasks_with_domains(&self, key: &TaskListKey, range: i64, now_nanos: i64, tasks: &[(Uuid, &AllocatedTask)]) -> cadence_persistence::matching_task_store::Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let remaining = self.failures.load(Ordering::SeqCst);
+            if remaining > 0 {
+                self.failures.store(remaining - 1, Ordering::SeqCst);
+                return Err(cadence_persistence::matching_task_store::MatchingTaskStoreError::Backend {
+                    kind: self.kind,
+                    message: "injected".into(),
+                });
+            }
+            self.inner.create_tasks_with_domains(key, range, now_nanos, tasks)
+        }
+        fn get_tasks(&self, key: &TaskListKey, read_level: i64, max_read_level: i64, batch_size: i64) -> cadence_persistence::matching_task_store::Result<Vec<AllocatedTask>> {
+            self.inner.get_tasks(key, read_level, max_read_level, batch_size)
+        }
+        fn task_list_size(&self, key: &TaskListKey, ack_level: i64) -> cadence_persistence::matching_task_store::Result<i64> {
+            self.inner.task_list_size(key, ack_level)
+        }
+        fn complete_task(&self, key: &TaskListKey, task_id: i64) -> cadence_persistence::matching_task_store::Result<()> {
+            self.inner.complete_task(key, task_id)
+        }
+        fn complete_tasks_less_than(&self, key: &TaskListKey, id: i64, limit: i64) -> cadence_persistence::matching_task_store::Result<usize> {
+            self.inner.complete_tasks_less_than(key, id, limit)
+        }
+        fn delete_task_list(&self, key: &TaskListKey, range: i64) -> cadence_persistence::matching_task_store::Result<()> {
+            self.inner.delete_task_list(key, range)
+        }
+    }
+
+    /// Returns (calls made, rewrite outcome) after `failures` injected errors.
+    async fn rewrite_with_flaky_store(
+        kind: cadence_persistence::matching_task_store::BackendErrorKind,
+        failures: usize,
+    ) -> (usize, Result<AllocatedTask, Status>) {
+        let directory = tempfile::tempdir().unwrap();
+        let inner = Arc::new(
+            SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
+                .unwrap(),
+        );
+        let store = Arc::new(FlakyCreateStore {
+            inner,
+            kind,
+            failures: std::sync::atomic::AtomicUsize::new(failures),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let domain = Uuid::from_u128(1);
+        let queue = Arc::new(
+            DurableTaskQueue::open(
+                store.clone(),
+                TaskListKey { domain_id: domain, name: "rewrite-transient".into(), task_type: 0 },
+                0,
+                NonZeroU32::new(100).unwrap(),
+                1,
+            )
+            .unwrap(),
+        );
+        let writer = TaskWriter::new(queue, Arc::new(Notify::new()), WriterConfig::default());
+        let result = writer
+            .append_rewrite(WriteTask {
+                data: TaskData::default(),
+                source_domain: domain,
+                schedule_to_start_seconds: 0,
+            })
+            .await;
+        writer.stop();
+        (store.calls.load(Ordering::SeqCst), result)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn matching_writer_rewrite_retries_transient_backend_errors_like_go() {
+        use cadence_persistence::matching_task_store::BackendErrorKind;
+        for kind in [
+            BackendErrorKind::Timeout,
+            BackendErrorKind::Throttled,
+            BackendErrorKind::Internal,
+            BackendErrorKind::DbUnavailable,
+        ] {
+            let (calls, result) = rewrite_with_flaky_store(kind, 1).await;
+            assert_eq!(calls, 2, "{kind:?} must be retried once");
+            assert!(result.is_ok(), "{kind:?} retry must succeed: {result:?}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn matching_writer_rewrite_does_not_retry_nontransient_backend_errors() {
+        use cadence_persistence::matching_task_store::BackendErrorKind;
+        let (calls, result) = rewrite_with_flaky_store(BackendErrorKind::Permanent, 1).await;
+        assert_eq!(calls, 1);
+        assert!(result.is_err());
+    }
+
     #[test]
     fn matching_writer_original_go_batches() {
         let cases: serde_json::Value = serde_json::from_str(include_str!(
