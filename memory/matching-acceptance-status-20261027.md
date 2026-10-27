@@ -6,7 +6,40 @@ status and blocker claims in `matching-final-acceptance-ledger-20261026.md`,
 `matching-resume-checkpoint-20261027.md`. Those notes and their historical
 artifacts remain unchanged as provenance.
 
-## Active combined candidate v4 (09:40 UTC)
+## Current candidate v5 (09:46 UTC)
+
+Immutable tag `matching-acceptance-20261027-v5` pins
+`8d7dac38e8d7e5a8114c6da5e0c3cc3afcbc77d0`. This adds only a fixture wait
+for Go's one-second domain-cache refresh minimum after registering the second
+late name; production source matches v4.
+
+- Fresh uncached workspace CI: https://github.com/auenkr/cadence-rust/actions/runs/40483216431
+- Two-node MySQL + Prometheus + late-domain name/quota probes:
+  https://github.com/auenkr/cadence-rust/actions/runs/40483221504
+
+Both are confirmed running at v5. Use this immutable tag for remaining serial
+mixed lanes; do not change the pin for documentation-only follow-ups.
+V4 MySQL40482436756 failed before SDK/recovery at the second late-name lookup,
+with Internal exists-but-not-loaded; Go and Rust both suppress refresh within
+one second. Source diagnosis and retained failed artifacts are in
+`matching-v4-name-probe-throttle-20261027.md` and
+`evidence/matching-v4-mysql-40482436756/`. No production mismatch is inferred.
+V4 explicit workspace40482431857 was cancelled/superseded by v5; cancellation
+of duplicate automatic run40482429103 required the force-cancel API after its
+job stopped reporting an active step. Neither establishes a validation pass.
+
+The source classification-only focused CI40481661096 passed, including the
+new typed missing/internal cache regression and731 unit tests (2 ignored).
+Compact evidence is in `evidence/matching-cache-source-classification-40481661096/`.
+The later error-RPC worker focused40482240725 failed on the two regression
+compile errors already corrected in v4/v5. Final combined validation still
+requires v5 workspace CI and all ten v5 mixed lanes. Zero final lanes credited.
+
+Three Luna workers are closing bounded source audit records at v5: RPC native/
+Thrift method coverage, ignored-test exclusions, lifecycle/persistence audit
+checklist. They must not change the candidate or infer runtime results.
+
+## Superseded combined candidate v4 (09:40 UTC)
 
 Immutable tag `matching-acceptance-20261027-v4` points to
 `64e709b96c398bb1613fd2a9a9b83a8d5babf6f4`, including typed name-lookup RPC
