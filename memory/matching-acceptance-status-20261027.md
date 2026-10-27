@@ -30,10 +30,13 @@ artifacts remain unchanged as provenance.
 
 The stronger regression's focused run40474488446 failed Clippy on
 `field_reassign_with_default`; master51ba24f8a initializes the request directly.
-Replacement fresh workspace CI:
-https://github.com/auenkr/cadence-rust/actions/runs/40474883530,
-source51ba24f8a (pending at dispatch). Run40474658191 is superseded by this
-test-only correction. No runtime result is inferred from the lint failure.
+Source review then found the test fixture's row notification version equaled
+the exclusive metadata bound, which correctly prevents cache insertion.
+Master866b210d4 raises that mock bound above the row version. Replacement
+fresh workspace CI (also includes Go SDK fixture and canonical Go cache oracle):
+https://github.com/auenkr/cadence-rust/actions/runs/40475730254,
+source866b210d4 (pending at dispatch). Runs40474658191 and40474883530 are
+superseded. No runtime result is inferred from either fixture correction.
 
 Merged baseline branch `t3/matching-cold-cache-metrics` at005b7849f was verified
 an ancestor of pushed master, clean and inactive, then its worktree
