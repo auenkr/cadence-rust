@@ -22,3 +22,26 @@ after that startup coordination fix; keep existing transport/SDK assertions.
 Raw server log remains under
 `/mnt/storage/service/ci-evidence/40469948997/matching-production-thrift/gate/run/server.log`.
 Compact actual results and source/binary identity are retained here.
+
+## Harness startup coordination follow-up
+
+`tests/run-go-service-baseline.py` now waits for the original Go Worker's
+`"msg":"worker started"` log marker, in addition to the Frontend TCP listener,
+when and only when `worker` is included in `go_services`. The existing 90-second
+startup deadline and live server process check remain in force; timeout errors
+identify which readiness condition was missing. Successful startup records the
+required marker and whether it was observed in `results.json` as
+`workerReadiness`.
+
+The marker is emitted at the end of `go/service/worker/service.go:Start`, after
+`ensureDomainExists(system)` and, when batcher is enabled,
+`ensureDomainExists(batcher)`. This coordinates against the demonstrated
+domain-metadata version race without retrying or hiding a dead Worker. It does
+not create a startup dependency cycle: the compatibility probe starts Rust
+Matching after domain registration, while Worker startup/readiness completes
+before that probe is launched.
+
+Focused validation: pending `rust-ci.yml` dispatch with `go_sdk_compile=true`;
+this compiles Go SDK compatibility code and checks Python syntax on the CI
+runner. The full mixed Thrift gate is intentionally left for the parent after
+review.
