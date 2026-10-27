@@ -18,12 +18,15 @@ fn adaptive_reader_trace(task_list: &str, event: &str, fields: std::fmt::Argumen
         && cadence_common::task_list::TaskListName::parse(task_list)
             .is_ok_and(|parsed| parsed.root() == "production-adaptive-scaler-probe")
     {
-        eprintln!("matching_adaptive_trace task_list={task_list} {event} {fields}");
+        eprintln!(
+            "matching_adaptive_trace ts={} task_list={task_list} boundary={event} {fields}",
+            crate::grpc_matching::matching_now()
+        );
     }
 }
 
 fn reader_partition_parts(name: &str) -> (&str, &str) {
-    match name.rsplit_once('/') {
+    match name.strip_prefix("/__cadence_sys/").and_then(|name| name.rsplit_once('/')) {
         Some((root, leaf)) if leaf.parse::<u32>().is_ok() => (root, "child"),
         _ => (name, "root"),
     }
@@ -755,12 +758,12 @@ impl TaskReader {
                                     Ok(Err(error)) => format!("error:{error:?}"),
                                     Err(_) => "deadline_exceeded".to_owned(),
                                 };
-                                let parent_destination = match trace_list.rsplit_once('/') {
-                                    Some((root, leaf)) if leaf.parse::<u32>().is_ok() => root.to_owned(),
-                                    _ => String::new(),
-                                };
+                                // Routing lives in the forwarder's closure. Its
+                                // destination cannot be inferred by stripping
+                                // the child ID from the partition name.
+                                let parent_destination = "unknown";
                                 adaptive_reader_trace(&trace_list, "reader_forward_attempt", format_args!(
-                                    "root_partition={} partition={} parent_destination={} workflow_id={} run_id={} schedule_id={} task_id={} elapsed_ms={} status={} outer_dispatch_deadline_ms={} child_forward_deadline_ms=2000",
+                                    "root_partition={} partition={} parent_destination={} workflow_id={} run_id={} schedule_id={} task_id={} elapsed_ms={} status={:?} outer_remaining_after_forward_ms={} child_forward_deadline_ms=2000",
                                     trace_root, trace_partition, parent_destination, task.data.workflow_id,
                                     task.data.run_id_string(), task.data.schedule_id, task.task_id,
                                     forward_started.elapsed().as_millis(), forward_status,
