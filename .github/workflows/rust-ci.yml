@@ -264,10 +264,28 @@ jobs:
           set +e
           set -o pipefail
           if [ -n "$PKG" ]; then SEL="-p $PKG"; else SEL="--workspace"; fi
+          if [ "$PKG" = "cadence-matching" ] || [ -z "$PKG" ]; then
+            evidence="$RUNNER_TEMP/matching-panic-quote-oracle"
+            mkdir -p "$evidence"
+            set +e
+            go run "$GITHUB_WORKSPACE/tests/matching-panic-quote-oracle.go" > "$evidence/go-1.25.14-quote.txt" 2> "$evidence/go-1.25.14-quote.log"
+            result=$?
+            echo "$result" > "$evidence/go-1.25.14-quote.exit"
+            cat "$evidence/go-1.25.14-quote.log"
+            if [ "$result" -ne 0 ]; then exit "$result"; fi
+            echo "MATCHING_GO_PANIC_ORACLE=$evidence/go-1.25.14-quote.txt" >> "$GITHUB_ENV"
+          fi
           cargo test $SEL 2>&1 | tee test.log
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Upload Go panic quote oracle evidence
+        if: always() && (inputs.package == 'cadence-matching' || inputs.package == '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-panic-quote-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-panic-quote-oracle
       - name: Compare live Go tally and Rust Matching emissions
         if: success() && (inputs.package == '' || inputs.package == 'cadence-server')
         run: |
