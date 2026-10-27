@@ -26,6 +26,20 @@ artifacts remain unchanged as provenance.
 
 ## Superseded claims and evidence boundaries
 
+### Latest integrated validation follow-up
+
+The stronger regression's focused run40474488446 failed Clippy on
+`field_reassign_with_default`; master51ba24f8a initializes the request directly.
+Replacement fresh workspace CI:
+https://github.com/auenkr/cadence-rust/actions/runs/40474883530,
+source51ba24f8a (pending at dispatch). Run40474658191 is superseded by this
+test-only correction. No runtime result is inferred from the lint failure.
+
+Merged baseline branch `t3/matching-cold-cache-metrics` at005b7849f was verified
+an ancestor of pushed master, clean and inactive, then its worktree
+`/home/auenkr/.t3/worktrees/cadence-rust/t3-6d878a3e`, local branch and remote
+branch were removed. Source and review evidence remain in master.
+
 - **Cassandra normalization is not a mandatory acceptance change.** The Go
   oracle confirms raw-string cache lookup after the persistence existence
   check. The prior ledger's requirement to normalize recognized UUID spellings
