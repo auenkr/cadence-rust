@@ -1,10 +1,11 @@
 // Go Frontend/History/Worker routed to the Rust Matching protobuf listener.
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, X509Certificate } = require('node:crypto');
 const fs = require('node:fs');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
+const tls = require('node:tls');
 const { createTaskObserver } = require('./matching-task-observer.cjs');
 const { runProbeScenarios } = require('./matching-probe-scenarios.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
@@ -28,6 +29,39 @@ const failureRecoveryMode = process.env.CADENCE_MATCHING_FAILURE_RECOVERY === '1
 const matchingCredentials = process.env.CADENCE_MATCHING_GRPC_CA_FILE
   ? grpc.credentials.createSsl(fs.readFileSync(process.env.CADENCE_MATCHING_GRPC_CA_FILE))
   : grpc.credentials.createInsecure();
+
+async function recordVerifiedMatchingTls(work, port, label, pid) {
+  const caFile = process.env.CADENCE_MATCHING_GRPC_CA_FILE;
+  if (!caFile) return;
+  const expected = new X509Certificate(fs.readFileSync(process.env.CADENCE_MATCHING_SERVER_CERT_FILE));
+  const ca = new X509Certificate(fs.readFileSync(caFile));
+  const observed = await new Promise((resolve, reject) => {
+    const socket = tls.connect({
+      host: '127.0.0.1', port: Number(port), servername: 'localhost',
+      ca: fs.readFileSync(caFile), rejectUnauthorized: true, ALPNProtocols: ['h2'],
+    });
+    socket.once('error', reject);
+    socket.setTimeout(5000, () => socket.destroy(new Error('Matching TLS evidence handshake timed out')));
+    socket.once('secureConnect', () => {
+      try {
+        assert.equal(socket.authorized, true, String(socket.authorizationError));
+        assert.equal(socket.alpnProtocol, 'h2');
+        const peer = new X509Certificate(socket.getPeerCertificate().raw);
+        assert.equal(peer.fingerprint256, expected.fingerprint256, 'running Matching certificate differs from configured certificate');
+        resolve({ label, pid, endpoint: `127.0.0.1:${port}`, serverName: 'localhost',
+          rejectUnauthorized: true, authorized: socket.authorized, alpn: socket.alpnProtocol,
+          caFingerprint256: ca.fingerprint256, serverFingerprint256: peer.fingerprint256,
+          subject: peer.subject, issuer: peer.issuer, subjectAltName: peer.subjectAltName,
+          verifiedAt: new Date().toISOString() });
+      } catch (error) { reject(error); }
+      finally { socket.end(); }
+    });
+  });
+  const file = path.join(work, 'matching-tls-handshakes.json');
+  const handshakes = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [];
+  handshakes.push(observed);
+  fs.writeFileSync(file, JSON.stringify(handshakes, null, 2) + '\n');
+}
 const shardManagerControl = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_CONTROL;
 const shardManagerNamespace = process.env.CADENCE_MATCHING_SHARD_DISTRIBUTOR_NAMESPACE || 'matching';
 const clients = Object.fromEntries(['DomainAPI', 'WorkflowAPI', 'WorkerAPI', 'SemaphoreAPI'].map(name => [name, new api[name](peer, grpc.credentials.createInsecure())]));
@@ -497,6 +531,7 @@ async function run() {
           // restarted primary is still binding its listener. Verify the exact
           // process endpoint before callers use its direct client.
           await directPartitionOwner(primaryReadinessClient, domain, `primary-ready-${id}`);
+          await recordVerifiedMatchingTls(work, rustGrpcPort, label, rust.pid);
           primaryReadinessClient.close();
           return;
         } catch (error) {

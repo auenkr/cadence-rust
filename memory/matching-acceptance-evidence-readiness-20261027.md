@@ -1,5 +1,13 @@
 # Matching final acceptance evidence readiness — 2026-10-27
 
+Current-source corrections: the shard-distributor production lane now passes
+--real-shard-distributor and runs the real Go service with single-node etcd,
+rather than the earlier handler-only fixture described below. Verify the exact
+current artifacts against matching-v7-transport-discovery-evidence-guide-20261027.md.
+The TLS probe now retains matching-tls-handshakes.json; see
+matching-tls-runtime-evidence-20261027.md. Historical collector comments below
+describe the source pin recorded in this original review.
+
 Read-only workflow/collector review at source `64e709b96c398bb1613fd2a9a9b83a8d5babf6f4` (branch `t3/acceptance-evidence-map`, same tree as master at review). No gate was dispatched or polled; no local Cargo, Go, build, test, format, or runtime command was run. The ten required lanes in `matching-acceptance-status-20261027.md` remain unchanged and mandatory. This note is a dispatch/review map, not a pass claim.
 
 ## Dispatch and common credit rule

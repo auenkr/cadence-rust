@@ -1208,6 +1208,7 @@ try:
                             probe_environment['CADENCE_MYSQL_DOCKER_CONTAINER'] = os.environ['CADENCE_MYSQL_DOCKER_CONTAINER']
                     if tls_files:
                         probe_environment['CADENCE_MATCHING_GRPC_CA_FILE'] = str(tls_files[0])
+                        probe_environment['CADENCE_MATCHING_SERVER_CERT_FILE'] = str(tls_files[1])
                     probe_environment['CADENCE_MATCHING_TRANSPORT'] = args.matching_transport
                     if args.matching_backlog_forward:
                         probe_environment['CADENCE_MATCHING_BACKLOG_FORWARD'] = '1'
