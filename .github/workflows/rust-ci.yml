@@ -273,7 +273,7 @@ jobs:
             echo "$result" > "$evidence/go-1.25.14-quote.exit"
             cat "$evidence/go-1.25.14-quote.log"
             if [ "$result" -ne 0 ]; then exit "$result"; fi
-            echo "MATCHING_GO_PANIC_ORACLE=$evidence/go-1.25.14-quote.txt" >> "$GITHUB_ENV"
+            export MATCHING_GO_PANIC_ORACLE="$evidence/go-1.25.14-quote.txt"
           fi
           cargo test $SEL 2>&1 | tee test.log
           result=${PIPESTATUS[0]}
