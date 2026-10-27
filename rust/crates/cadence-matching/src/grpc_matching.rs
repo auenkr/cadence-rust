@@ -4176,40 +4176,5 @@ mod query_forward_family_tests;
 mod handler_go_tests;
 
 #[cfg(test)]
-mod cold_domain_metric_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn cold_domain_name_is_resolved_before_request_metric_emission() {
-        let mut matching = Matching::new(crate::handlers::AppState::default());
-        matching.domain_name_resolver = Some(Arc::new(|id| {
-            (id == "00000000-0000-0000-0000-000000000042")
-                .then(|| "created-after-cache-scan".to_owned())
-        }));
-        let domain_id = "00000000-0000-0000-0000-000000000042";
-        let domain_name = matching.metric_domain_name(domain_id).await;
-        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
-        let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
-
-        metrics
-            .matching_request(
-                "AddDecisionTask",
-                domain_name.as_deref(),
-                Some(("queue", Some(0))),
-                None,
-                async { Ok::<(), Status>(()) },
-            )
-            .await
-            .unwrap();
-
-        let request = sink
-            .events()
-            .into_iter()
-            .find(|event| event.name == crate::matching_metrics::CADENCE_REQUESTS_PER_TASK_LIST)
-            .expect("request metric emitted");
-        assert_eq!(
-            request.tags.get(crate::matching_metrics::DOMAIN_TAG),
-            Some(&"created-after-cache-scan".to_owned())
-        );
-    }
-}
+#[path = "matching_cold_domain_metric_tests.rs"]
+mod cold_domain_metric_tests;
