@@ -43,3 +43,5 @@ Commit 102f1c077 registers the full native durable queue and raw Cassandra backe
 Run 40585964293 at 102f1c077 concluded failure in clippy. Reported only lints: duplicated allow(dead_code) on all three native adapter modules, test-module ordering in the decision adapter, and field_reassign_with_default in Cassandra/Postgres tests. Removed duplicate inner attributes, moved the test module to the end, and initialized test fields directly. Applied the CI-generated formatting patch locally without invoking rustfmt.
 
 Integrated the additive native gRPC History task-start client and raw workflow/domain peer hashing. Parent corrected the lossy timeout key, added a native byte-aware timeout provider seam, and preserved malformed persisted-UUID errors. TChannel raw History still unsupported; native runtime/provider adoption remains pending. Next CI pin required; no Matching completion claim.
+
+Native History and clippy-correction commit a04f6ab98 is under fresh five-crate CI: https://github.com/auenkr/cadence-rust/actions/runs/40586873102 (head a04f6ab98; conclusion pending at dispatch). All checks remain runner-only.
