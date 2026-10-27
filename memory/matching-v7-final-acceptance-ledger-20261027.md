@@ -83,6 +83,15 @@ matching exit files and cleanup proof. Job conclusion alone is insufficient.
 
 ## Source audit closure record
 
+- Unresolved malformed-Thrift boundary: the decoder review records that Rust
+  rejects invalid UTF-8 in string fields while Go's FromWire accepts the raw
+  bytes. See matching-thrift-decoder-review-20261027.md, "Invalid UTF-8
+  limitation", and matching-thrift-full-decode-parity-20261027.md. No user
+  acceptance of this divergence is recorded. Do not treat successful valid
+  string SDK/mixed gates as proof of parity for those inputs or silently mark
+  the source audit fully closed. Lossy conversion would alias identifiers and
+  is not a parity fix; downstream Go behavior and a lossless approach still
+  need resolution before an unrestricted parity-completion claim.
 - RPC inventory: matching-v6-rpc-audit-20261027.md closes method surface.
   U1/U4 source fixes and review corrections are recorded in
   matching-thrift-full-decode-parity-20261027.md and later combined checkpoints;
