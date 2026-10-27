@@ -12,6 +12,107 @@ use prost::Message;
 use std::{collections::HashMap, time::Instant};
 use tonic::{Request, Status};
 
+#[rustfmt::skip]
+#[path = "thrift_matching_schema.rs"]
+mod schema;
+
+fn wire_type(value: &Value) -> u8 {
+    match value {
+        Value::Bool(_) => 2,
+        Value::I8(_) => 3,
+        Value::F64(_) => 4,
+        Value::I16(_) => 6,
+        Value::I32(_) => 8,
+        Value::I64(_) => 10,
+        Value::Bytes(_) => 11,
+        Value::Struct(_) => 12,
+        Value::Map(_) => 13,
+        Value::Set(_) => 14,
+        Value::List(_) => 15,
+    }
+}
+
+/// Mirrors Go's generated `FromWire` for the Matching request structs: a known field id whose wire
+/// type differs from the IDL type is skipped (never widened or rejected), a later duplicate wins,
+/// and a list/map whose declared element type differs decodes to nil. The `cadence-thrift`
+/// getters stay strict because persistence and other services decode through them.
+fn normalize(name: &str, value: &Struct) -> Struct {
+    let Some(schema) = schema::fields(name) else {
+        return value.clone();
+    };
+    let mut fields: Vec<(i16, Value)> = Vec::new();
+    for (id, field) in &value.fields {
+        let Some((_, wire, inner)) = schema.iter().find(|(known, _, _)| known == id) else {
+            continue;
+        };
+        if wire_type(field) != *wire {
+            continue;
+        }
+        let field = match (inner, field) {
+            (schema::Inner::Struct(name), Value::Struct(v)) => Value::Struct(normalize(name, v)),
+            (schema::Inner::List(element, nested), Value::List(items)) => {
+                if items.first().is_some_and(|v| wire_type(v) != *element) {
+                    continue;
+                }
+                match nested {
+                    Some(name) => Value::List(
+                        items
+                            .iter()
+                            .map(|item| match item {
+                                Value::Struct(v) => Value::Struct(normalize(name, v)),
+                                other => other.clone(),
+                            })
+                            .collect(),
+                    ),
+                    None => field.clone(),
+                }
+            }
+            (schema::Inner::Map(key, element, nested), Value::Map(entries)) => {
+                if entries
+                    .first()
+                    .is_some_and(|(k, v)| wire_type(k) != *key || wire_type(v) != *element)
+                {
+                    continue;
+                }
+                match nested {
+                    Some(name) => Value::Map(
+                        entries
+                            .iter()
+                            .map(|(k, v)| match v {
+                                Value::Struct(v) => (k.clone(), Value::Struct(normalize(name, v))),
+                                other => (k.clone(), other.clone()),
+                            })
+                            .collect(),
+                    ),
+                    None => field.clone(),
+                }
+            }
+            _ => field.clone(),
+        };
+        fields.retain(|(existing, _)| existing != id);
+        fields.push((*id, field));
+    }
+    Struct { fields }
+}
+
+/// Go request struct (`matching` package, except the shared `GetTaskListsByDomainRequest`) each
+/// MatchingService method decodes as argument 1.
+fn request_struct(method: &str) -> Option<&'static str> {
+    Some(match method {
+        "PollForDecisionTask" => "matching.PollForDecisionTaskRequest",
+        "PollForActivityTask" => "matching.PollForActivityTaskRequest",
+        "AddDecisionTask" => "matching.AddDecisionTaskRequest",
+        "AddActivityTask" => "matching.AddActivityTaskRequest",
+        "QueryWorkflow" => "matching.QueryWorkflowRequest",
+        "RespondQueryTaskCompleted" => "matching.RespondQueryTaskCompletedRequest",
+        "CancelOutstandingPoll" => "matching.CancelOutstandingPollRequest",
+        "DescribeTaskList" => "matching.DescribeTaskListRequest",
+        "GetTaskListsByDomain" => "shared.GetTaskListsByDomainRequest",
+        "ListTaskListPartitions" => "matching.ListTaskListPartitionsRequest",
+        _ => return None,
+    })
+}
+
 fn invalid(error: Error) -> Status {
     Status::invalid_argument(error.to_string())
 }
@@ -400,8 +501,8 @@ async fn invoke(
                         .map(|v| p::WorkflowType { name: v.name }),
                     workflow_domain: string(info, 80)?,
                 }),
-                None => None,
-                _ => return Err(Status::invalid_argument("Invalid activity dispatch info.")),
+                // Go `FromWire` skips a field of the wrong wire type, leaving the info nil.
+                _ => None,
             };
             matching
                 .add_activity_task(rpc_request(
@@ -732,17 +833,39 @@ async fn dispatch_inner(
     if method.service != "MatchingService" {
         return Err("Unknown Matching service".into());
     }
+    // Go's generated `Args.FromWire` skips field 1 when it is absent or has a different wire
+    // type and leaves the argument nil; it is never a decode error. The mapper and handler
+    // getters are nil-safe, so those methods behave like an empty request. Poll, Add* and
+    // DescribeTaskList dereference the nil request in the engine (`req.PollRequest`,
+    // `request.Execution`, `request.DescRequest`); `CapturePanic` returns the plain runtime
+    // error, which the transport reports as an unexpected error.
+    matching.wait_started().await;
     let empty = Struct::default();
     let request = match args.get(1) {
         Some(Value::Struct(v)) => v,
-        None => &empty,
         _ => {
-            return Ok(application_error(
-                method,
-                Status::invalid_argument("Invalid request argument."),
-            ))
+            use crate::matching_quota::MatchingRpc as Rpc;
+            let nil_deref = match method.method {
+                "PollForDecisionTask" => Some(("PollForDecisionTask", Rpc::PollForDecisionTask)),
+                "PollForActivityTask" => Some(("PollForActivityTask", Rpc::PollForActivityTask)),
+                "AddDecisionTask" => Some(("AddDecisionTask", Rpc::AddDecisionTask)),
+                "AddActivityTask" => Some(("AddActivityTask", Rpc::AddActivityTask)),
+                "DescribeTaskList" => Some(("DescribeTaskList", Rpc::DescribeTaskList)),
+                _ => None,
+            };
+            if let Some((name, rpc)) = nil_deref {
+                let status = matching.thrift_nil_request(name, rpc).await;
+                return if crate::matching_panic::is_captured_panic(&status) {
+                    Err(status.message().to_owned())
+                } else {
+                    Ok(application_error(method, status))
+                };
+            }
+            &empty
         }
     };
+    let normalized = request_struct(method.method).map(|name| normalize(name, request));
+    let request = normalized.as_ref().unwrap_or(request);
     let outcome = if matches!(method.method, "PollForDecisionTask" | "PollForActivityTask") {
         let budget = deadline
             .saturating_duration_since(Instant::now())
@@ -1102,6 +1225,235 @@ mod tests {
         assert!(!crate::matching_panic::is_captured_panic(&Status::internal(
             r#"panic object is not error: "boom""#
         )));
+    }
+
+    #[tokio::test]
+    async fn matching_thrift_nil_request_argument_follows_go_from_wire() {
+        // Go `Args.FromWire` leaves a missing or wrong-typed field 1 nil. Poll, Add* and
+        // DescribeTaskList dereference it in the engine and CapturePanic returns a plain
+        // error; every other method reads through nil-safe getters like an empty request.
+        let matching = Matching::new(crate::handlers::AppState::default());
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let wrong_type = Struct { fields: vec![(1, Value::I32(7))] };
+        for method in [
+            "PollForDecisionTask",
+            "PollForActivityTask",
+            "AddDecisionTask",
+            "AddActivityTask",
+            "DescribeTaskList",
+        ] {
+            let procedure = format!("MatchingService::{method}");
+            for args in [&Struct::default(), &wrong_type] {
+                let error = dispatch(&matching, &procedure, args, deadline)
+                    .await
+                    .expect_err(method);
+                assert_eq!(error, crate::matching_panic::NIL_DEREFERENCE_MESSAGE);
+                assert_eq!(tchannel_error_code(&error), 0x05);
+            }
+        }
+        // Nil-safe in Go: handled as an empty request, never a transport error.
+        let (_, error) = dispatch(&matching, "MatchingService::CancelOutstandingPoll", &wrong_type, deadline)
+            .await
+            .expect("nil-safe method");
+        assert!(error.is_none_or(|(_, message)| !message.contains("Invalid request argument")));
+    }
+
+    fn quota_value(value: i64) -> cadence_api::admin::DynamicConfigValue {
+        cadence_api::admin::DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob::new(
+                cadence_api::enums::EncodingType::JSON,
+                serde_json::to_vec(&serde_json::json!(value)).unwrap(),
+            )),
+            filters: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn matching_thrift_nil_request_runs_metrics_and_host_quota_before_engine_panic() {
+        // Go handler order: startProfiling (startup wait, request counter), host limiter, then the
+        // engine's nil dereference. A throttled nil request is therefore ServiceBusy, not the panic.
+        use crate::matching_metrics::{RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
+        let sink = std::sync::Arc::new(RecordingMetricSink::default());
+        let state = crate::handlers::AppState::default();
+        {
+            let mut config = state.admin.dynamic_config.lock().unwrap();
+            config.update(false, "matching.rps", vec![quota_value(1)]);
+            config.update(false, "matching.workerrps", vec![quota_value(1)]);
+        }
+        let matching = Matching::new(state).with_metrics(sink.clone());
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let nil = Struct::default();
+        for method in [
+            "DescribeTaskList", // user host limiter
+            "AddDecisionTask",  // worker host limiter
+            "PollForDecisionTask",
+        ] {
+            let procedure = format!("MatchingService::{method}");
+            // The first call spends the single token and reaches the engine panic.
+            let first = dispatch(&matching, &procedure, &nil, deadline).await;
+            if method == "PollForDecisionTask" {
+                // Shares the worker bucket already spent by AddDecisionTask.
+                let (_, error) = first.expect("throttled, not a panic");
+                assert!(error.unwrap().1.contains("Matching host rps exceeded"), "{method}");
+                continue;
+            }
+            assert_eq!(first.unwrap_err(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE, "{method}");
+            let (_, error) = dispatch(&matching, &procedure, &nil, deadline)
+                .await
+                .expect("throttled, not a panic");
+            let (name, message) = error.expect("ServiceBusy exception");
+            assert_eq!(name, "serviceBusyError", "{method}");
+            assert_eq!(message, "Matching host rps exceeded", "{method}");
+        }
+        let counted = |operation: &str| {
+            sink.events()
+                .iter()
+                .filter(|event| {
+                    event.name == CADENCE_REQUESTS_PER_TASK_LIST
+                        && event.tags.get("operation").map(String::as_str) == Some(operation)
+                })
+                .count()
+        };
+        assert_eq!(counted("DescribeTaskList"), 2);
+        assert_eq!(counted("AddDecisionTask"), 2);
+        assert_eq!(counted("PollForDecisionTask"), 1);
+    }
+
+    #[tokio::test]
+    async fn matching_thrift_nil_request_waits_for_startup_like_go_start_profiling() {
+        let matching = Matching::new(crate::handlers::AppState::default()).with_start_pending();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let pending = dispatch(&matching, "MatchingService::AddActivityTask", &Struct::default(), deadline);
+        tokio::pin!(pending);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut pending)
+                .await
+                .is_err(),
+            "must wait for Start() like Go's startWG"
+        );
+        matching.mark_started();
+        assert_eq!(pending.await.unwrap_err(), crate::matching_panic::NIL_DEREFERENCE_MESSAGE);
+    }
+
+    fn field(s: &Struct, id: i16) -> Option<&Value> {
+        s.fields.iter().find(|(f, _)| *f == id).map(|(_, v)| v)
+    }
+
+    #[test]
+    fn matching_thrift_wrong_wire_type_fields_are_skipped_like_go_from_wire() {
+        // Go: `if field.Value.Type() == wire.TI64 { ... }` per field; anything else is skipped,
+        // so i32 on an i64 field, i64 on an i32 field and i16 on an i32/enum field are all absent.
+        let args = Struct {
+            fields: vec![
+                (10, text("domain")),
+                (20, Value::I32(1)),        // execution: struct expected
+                (30, structure(vec![(10, Value::I32(5)), (20, Value::I32(2))])), // taskList: name i32, kind i32 ok
+                (40, Value::I32(9)),        // scheduleId i64 expected, sent i32
+                (50, Value::I64(9)),        // scheduleToStart i32 expected, sent i64
+                (59, Value::I16(1)),        // source (enum i32), sent i16
+                (60, Value::I64(3)),        // forwardedFrom string expected
+                (70, Value::List(vec![text("a")])), // partitionConfig map expected
+            ],
+        };
+        let out = normalize("matching.AddDecisionTaskRequest", &args);
+        assert_eq!(out.fields.iter().map(|(id, _)| *id).collect::<Vec<_>>(), vec![10, 30]);
+        // Nested struct is normalised too: TaskList.name is binary (id 10), kind i32 (id 20).
+        let Some(Value::Struct(list)) = field(&out, 30) else { panic!() };
+        assert_eq!(list.fields, vec![(20, Value::I32(2))]);
+        // The strict getter would have widened or rejected these; the normalised struct is absent.
+        assert!(args.opt_i64(40).unwrap().is_some());
+        assert_eq!(out.opt_i64(40).unwrap(), None);
+        assert!(args.opt_i32(59).unwrap().is_some());
+        assert_eq!(out.opt_i32(59).unwrap(), None);
+        assert!(args.opt_i32(50).is_err());
+        assert_eq!(out.opt_i32(50).unwrap(), None);
+    }
+
+    #[test]
+    fn matching_thrift_wrong_type_known_fields_cover_every_request_struct() {
+        // (struct, field id, wrong-typed value): each is present before and skipped after.
+        let cases: Vec<(&str, i16, Value)> = vec![
+            ("matching.PollForDecisionTaskRequest", 10, Value::I32(1)),
+            ("matching.PollForDecisionTaskRequest", 15, Value::I64(1)),
+            ("matching.PollForDecisionTaskRequest", 20, Value::Bytes(vec![])),
+            ("matching.PollForDecisionTaskRequest", 30, Value::Bool(true)),
+            ("matching.PollForDecisionTaskRequest", 40, Value::I32(1)),
+            ("matching.PollForActivityTaskRequest", 20, Value::I32(1)),
+            ("matching.PollForActivityTaskRequest", 40, Value::I16(1)),
+            ("matching.AddDecisionTaskRequest", 40, Value::I32(1)),
+            ("matching.AddActivityTaskRequest", 50, Value::I32(1)),
+            ("matching.AddActivityTaskRequest", 60, Value::I64(1)),
+            ("matching.AddActivityTaskRequest", 69, Value::I64(1)),
+            ("matching.AddActivityTaskRequest", 80, Value::Bytes(vec![])),
+            ("matching.QueryWorkflowRequest", 20, Value::I32(1)),
+            ("matching.QueryWorkflowRequest", 30, Value::I32(1)),
+            ("matching.RespondQueryTaskCompletedRequest", 30, Value::I32(1)),
+            ("matching.RespondQueryTaskCompletedRequest", 40, Value::Bytes(vec![])),
+            ("matching.CancelOutstandingPollRequest", 20, Value::I16(1)),
+            ("matching.CancelOutstandingPollRequest", 20, Value::I64(1)),
+            ("matching.DescribeTaskListRequest", 10, Value::I32(1)),
+            ("matching.DescribeTaskListRequest", 20, Value::I32(1)),
+            ("shared.GetTaskListsByDomainRequest", 10, Value::I32(1)),
+            ("matching.ListTaskListPartitionsRequest", 10, Value::I32(1)),
+            ("matching.ListTaskListPartitionsRequest", 20, Value::I32(1)),
+            // Nested requests and structs reached through them.
+            ("shared.PollForDecisionTaskRequest", 10, Value::I32(1)),
+            ("shared.PollForActivityTaskRequest", 30, Value::I32(1)),
+            ("shared.TaskListMetadata", 10, Value::I32(1)),
+            ("shared.QueryWorkflowRequest", 20, Value::I32(1)),
+            ("shared.WorkflowQuery", 10, Value::I32(1)),
+            ("shared.RespondQueryTaskCompletedRequest", 10, Value::I64(1)),
+            ("shared.WorkflowQueryResult", 10, Value::I64(1)),
+            ("shared.DescribeTaskListRequest", 20, Value::I64(1)),
+            ("shared.WorkflowExecution", 10, Value::I32(1)),
+            ("shared.TaskList", 20, Value::I64(1)),
+            ("matching.ActivityTaskDispatchInfo", 20, Value::I32(1)),
+            ("matching.ActivityTaskDispatchInfo", 30, Value::I32(1)),
+            ("matching.ActivityTaskDispatchInfo", 70, Value::I32(1)),
+            ("shared.HistoryEvent", 10, Value::I32(1)),
+        ];
+        for (name, id, wrong) in cases {
+            let input = Struct { fields: vec![(id, wrong)] };
+            assert!(
+                normalize(name, &input).fields.is_empty(),
+                "{name} field {id} should be skipped"
+            );
+        }
+        // Right-typed fields survive unchanged.
+        let ok = Struct { fields: vec![(40, Value::I64(7)), (10, text("d"))] };
+        assert_eq!(normalize("matching.AddDecisionTaskRequest", &ok).fields.len(), 2);
+    }
+
+    #[test]
+    fn matching_thrift_container_and_nested_wrong_types_follow_go_readers() {
+        // `_Map_String_String_Read` returns nil for a non-binary key/value type; a later duplicate
+        // field replaces the earlier one; nested structs inside a dispatch info are normalised.
+        let bad_map = Value::Map(vec![(Value::I32(1), text("v"))]);
+        let good_map = Value::Map(vec![(text("k"), text("v"))]);
+        let out = normalize(
+            "matching.AddDecisionTaskRequest",
+            &Struct { fields: vec![(70, bad_map.clone())] },
+        );
+        assert!(out.fields.is_empty());
+        let out = normalize(
+            "matching.AddDecisionTaskRequest",
+            &Struct { fields: vec![(70, good_map.clone()), (70, bad_map), (10, Value::I32(1)), (10, text("d"))] },
+        );
+        assert_eq!(out.fields, vec![(70, good_map), (10, text("d"))]);
+
+        let info = structure(vec![
+            (10, structure(vec![(10, Value::I32(1)), (20, Value::I64(2))])), // HistoryEvent: eventId i64
+            (70, structure(vec![(10, Value::I64(1))])),                       // WorkflowType.name wrong
+        ]);
+        let out = normalize(
+            "matching.AddActivityTaskRequest",
+            &Struct { fields: vec![(80, info)] },
+        );
+        let Some(Value::Struct(info)) = field(&out, 80) else { panic!() };
+        let Some(Value::Struct(event)) = field(info, 10) else { panic!() };
+        assert_eq!(event.fields, vec![(20, Value::I64(2))]);
+        let Some(Value::Struct(workflow_type)) = field(info, 70) else { panic!() };
+        assert!(workflow_type.fields.is_empty());
     }
 
     #[test]

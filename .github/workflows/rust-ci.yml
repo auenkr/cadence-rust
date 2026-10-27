@@ -13,6 +13,10 @@ on:
         description: "Use a fresh uncached target for final validation"
         type: boolean
         default: false
+      format_matching_parity_files:
+        description: "Format files touched by Matching parity fixes and upload the patch"
+        type: boolean
+        default: false
       format_tls_files:
         description: "Apply rustfmt to the four Matching TLS-touched Rust files and upload the patch"
         type: boolean
@@ -164,6 +168,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Format Matching parity files
+        if: inputs.format_matching_parity_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          files=(
+            crates/cadence-matching/src/grpc_matching.rs
+            crates/cadence-matching/src/thrift_matching.rs
+            crates/cadence-matching/src/matching_writer.rs
+            crates/cadence-matching/src/matching_reader.rs
+            crates/cadence-matching/src/matching_partition.rs
+            crates/cadence-matching/src/matching_runtime.rs
+            crates/cadence-matching/src/launcher.rs
+            crates/cadence-matching/src/matching_cold_domain_metric_tests.rs
+            crates/cadence-matching/tests/matching_partial_upgrade_e.rs
+          )
+          rustfmt --edition 2021 --config skip_children=true "${files[@]}"
+          git diff --binary -- "${files[@]}" > "$RUNNER_TEMP/matching-format.patch"
+      - name: Upload Matching parity formatting patch
+        if: always() && inputs.format_matching_parity_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-format.patch
       - name: Format TLS-touched Rust files
         if: inputs.format_tls_files == true
         working-directory: rust

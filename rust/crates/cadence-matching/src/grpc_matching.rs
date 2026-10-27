@@ -1860,6 +1860,31 @@ impl Matching {
         }
         .domain_name(id)
     }
+    /// Thrift argument that Go's `Args.FromWire` left nil for a method whose engine dereferences
+    /// it. The handler still runs startup wait, metrics scope, domain-name lookup of the empty ID
+    /// and the host quota before the engine's nil
+    /// dereference (a TChannel call always carries a deadline, so the poll's timeout-set check passes and
+    /// the engine's own context check runs only after the dereference), which `CapturePanic` returns as a plain error (no failure counter: the panic
+    /// skips `handleErr`).
+    pub(crate) async fn thrift_nil_request(
+        &self,
+        method: &'static str,
+        rpc: crate::matching_quota::MatchingRpc,
+    ) -> Status {
+        self.wait_started().await;
+        let domain = self.metric_domain_name("").await;
+        let outcome = self
+            .metrics
+            .matching_request(method, domain.as_deref(), None, None, async {
+                self.check_rpc_quota(rpc, Some(""), None)?;
+                Ok(())
+            })
+            .await;
+        match outcome {
+            Err(status) => status,
+            Ok(()) => Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE),
+        }
+    }
     fn check_rpc_quota(
         &self,
         method: crate::matching_quota::MatchingRpc,
