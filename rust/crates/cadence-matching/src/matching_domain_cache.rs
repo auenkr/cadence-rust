@@ -336,6 +336,12 @@ pub enum DomainCacheError {
     EmptyName,
     EmptyId,
     Source(String),
+    /// A persistence source error whose Go-compatible classification must
+    /// survive the cache boundary (for example, a missing domain).
+    SourceClassified {
+        message: String,
+        class: DomainErrorClass,
+    },
     ExistsButNotLoaded(String),
     Stopped,
 }
@@ -346,6 +352,7 @@ impl std::fmt::Display for DomainCacheError {
             Self::EmptyName => f.write_str("Domain name is empty"),
             Self::EmptyId => f.write_str("DomainID is empty."),
             Self::Source(error) => f.write_str(error),
+            Self::SourceClassified { message, .. } => f.write_str(message),
             Self::ExistsButNotLoaded(identity) => write!(
                 f,
                 "DefaultDomainCache encounter case where domain exists but cannot be loaded: {identity}"
@@ -360,6 +367,17 @@ impl std::error::Error for DomainCacheError {}
 impl From<MatchingDomainMetadataError> for DomainCacheError {
     fn from(error: MatchingDomainMetadataError) -> Self {
         Self::Source(error.to_string())
+    }
+}
+
+fn cache_source_error(error: DomainMetadataSourceError) -> DomainCacheError {
+    if error.class == DomainErrorClass::Internal {
+        DomainCacheError::Source(error.message)
+    } else {
+        DomainCacheError::SourceClassified {
+            message: error.message,
+            class: error.class,
+        }
     }
 }
 
@@ -703,7 +721,7 @@ impl MatchingDomainCache {
         }
         self.source
             .get_domain(Some(name), None, DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
-            .map_err(|error| DomainCacheError::Source(error.message))?;
+            .map_err(cache_source_error)?;
         self.refresh_after_miss(Some(name), None)?;
         self.by_name(name)
             .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(name.to_string()))
@@ -718,7 +736,7 @@ impl MatchingDomainCache {
         }
         self.source
             .get_domain(None, Some(id), DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
-            .map_err(|error| DomainCacheError::Source(error.message))?;
+            .map_err(cache_source_error)?;
         self.refresh_after_miss(None, Some(id))?;
         self.by_id(id)
             .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(id.to_string()))
@@ -1098,6 +1116,7 @@ mod tests {
         timeouts: Mutex<Vec<Duration>>,
         metadata_delay: Mutex<Duration>,
         metadata_gate: Mutex<Option<(SyncSender<()>, Receiver<()>)>>,
+        get_domain_error: Mutex<Option<DomainMetadataSourceError>>,
     }
     impl FakeSource {
         fn put(&self, record: MatchingDomainMetadata) {
@@ -1176,6 +1195,9 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(format!("get:{}", name.or(id).unwrap_or("")));
+            if let Some(error) = self.get_domain_error.lock().unwrap().take() {
+                return Err(error);
+            }
             let domain = self
                 .records
                 .lock()
@@ -1728,6 +1750,32 @@ mod tests {
         assert_eq!(
             source.calls.lock().unwrap().as_slice(),
             ["metadata", "page:0", "metadata", "page:0"]
+        );
+    }
+
+    #[test]
+    fn name_cache_miss_preserves_typed_missing_domain_and_internal_errors() {
+        let source = Arc::new(FakeSource::default());
+        let clock = Arc::new(FakeClock::default());
+        let cache = cache(&source, &clock);
+
+        *source.get_domain_error.lock().unwrap() = Some(
+            DomainMetadataSourceError::permanent("Domain absent does not exist.")
+                .with_class(DomainErrorClass::NotFound),
+        );
+        assert_eq!(
+            cache.get_domain("absent"),
+            Err(DomainCacheError::SourceClassified {
+                message: "Domain absent does not exist.".into(),
+                class: DomainErrorClass::NotFound,
+            })
+        );
+
+        *source.get_domain_error.lock().unwrap() =
+            Some(DomainMetadataSourceError::permanent("database read failed"));
+        assert_eq!(
+            cache.get_domain("broken"),
+            Err(DomainCacheError::Source("database read failed".into()))
         );
     }
 
