@@ -1,0 +1,7 @@
+Existing Go SDK resumed and completed the pre-restart workflow/activity
+
+{"level":"info","ts":"2026-10-27T16:32:51.037Z","caller":"internal/internal_worker.go:182","msg":"No logger configured for cadence worker. Created default one."}
+{"level":"info","ts":"2026-10-27T16:32:51.037Z","caller":"internal/internal_worker.go:186","msg":"No metrics scope configured for cadence worker. Use NoopScope as default."}
+{"level":"info","ts":"2026-10-27T16:32:51.070Z","caller":"internal/internal_worker.go:858","msg":"Started Workflow Worker","Domain":"service-compat-c7744ee6-55a0-4ad5-854c-737b4a7d5064","TaskList":"restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064","WorkerID":"9259@runnervmtai0g@restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064@c2c5ec7a-ee40-4c38-9d50-73c0e461fad2"}
+{"level":"info","ts":"2026-10-27T16:32:51.071Z","caller":"internal/internal_worker.go:883","msg":"Started Activity Worker","Domain":"service-compat-c7744ee6-55a0-4ad5-854c-737b4a7d5064","TaskList":"restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064","WorkerID":"9259@runnervmtai0g@restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064@c2c5ec7a-ee40-4c38-9d50-73c0e461fad2"}
+{"level":"info","ts":"2026-10-27T16:32:51.128Z","caller":"internal/internal_worker.go:1010","msg":"Stopped Worker","Domain":"service-compat-c7744ee6-55a0-4ad5-854c-737b4a7d5064","TaskList":"restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064","WorkerID":"9259@runnervmtai0g@restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064@c2c5ec7a-ee40-4c38-9d50-73c0e461fad2"}

@@ -1,0 +1,797 @@
+{
+  "runUrl": "https://github.com/auenkr/cadence-rust/actions/runs/40541390213",
+  "lane": "postgres",
+  "headSha": "f5963951befb12dc64b72bb366c44a464939b87a",
+  "binarySha256": "3607288508d933f28eace17ec92f92e55a7435007d0419409f4560441b1294f6",
+  "buildExit": 0,
+  "gateExit": 0,
+  "runtimeResults": {
+    "topology": "Go Frontend/History/Worker with Rust Matching via production Ringpop",
+    "goMatchingStarted": false,
+    "rustServices": [
+      "matching"
+    ],
+    "goServices": [
+      "frontend",
+      "history",
+      "worker"
+    ],
+    "rustProductionBinary": "/tmp/cargo-target-final-40541390213/debug/cadence-matching",
+    "ringpopGate": "original Go PeerProvider is active; the production probe must discover Rust Matching through Go Frontend before SDK operations",
+    "historyTransport": "grpc",
+    "matchingTransport": "grpc",
+    "rustDynamicConfigFile": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-dynamic-config.yaml",
+    "historyRoutingGate": "Rust Matching resolves History peers through its joined Ringpop view and uses the selected gRPC/Thrift-TChannel client",
+    "acceptanceEligible": false,
+    "persistence": null,
+    "shardDistributor": null,
+    "serverCommand": [
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/cadence-server",
+      "--config",
+      "/home/runner/work/cadence-rust/cadence-rust/out/gate/run/config",
+      "--zone",
+      "postgres",
+      "start",
+      "--auto-setup",
+      "--services",
+      "frontend,history,worker"
+    ],
+    "artifactsDirectory": "/home/runner/work/cadence-rust/cadence-rust/out/gate/run",
+    "workerReadiness": {
+      "required": true,
+      "marker": "\"msg\":\"worker started\"",
+      "observed": true
+    },
+    "probeExitCode": 0,
+    "goServicesPid": 8925,
+    "goServicesAliveAfterProbe": true,
+    "matchingExporter": null,
+    "matchingExporterAddress": null,
+    "matchingExporterEndpoints": [
+      null
+    ],
+    "runExitCode": 0,
+    "failure": null
+  },
+  "observedProbeResults": [
+    {
+      "result": "preliminary-passed",
+      "acceptanceEligible": false,
+      "topology": "Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery",
+      "idleUnloadAndRecovery": "production process idle eviction and recovery",
+      "gracefulDrainRecovery": {
+        "workflowId": "graceful-drain-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+        "runId": "d677e702-57b5-432f-a963-566521133ff6",
+        "taskList": "graceful-drain-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+        "taskListOwner": "127.0.0.1:20572",
+        "queuedRowsBeforeSignal": 1,
+        "rangeBeforeSignal": 1,
+        "queuedRowsAfterRecovery": 0,
+        "drainingPid": 9196,
+        "recoveredByRustPid": 9274,
+        "completionEvents": 1,
+        "goServicesPid": 8925
+      },
+      "queryDispatch": "passed",
+      "isolationDispatch": "passed",
+      "nativePartitionConfig": "passed",
+      "backlogForward": "not requested",
+      "configstore": "not requested",
+      "probeScenarios": {
+        "postgresGcDomain": {
+          "result": "passed",
+          "ackedList": "pg-gc-acked-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "pendingList": "pg-gc-pending-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "watermark": 1,
+          "taskGarbageCollection": {
+            "pendingTaskRows": 1,
+            "statements": [
+              "SELECT task_type, range_id, HEX(data), data_encoding FROM task_lists WHERE shard_id=0 AND domain_id=UNHEX('01a17e34dde0796b9a49d60e8af004a8') AND name='pg-gc-acked-c7744ee6-55a0-4ad5-854c-737b4a7d5064' ORDER BY task_type",
+              "SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('01a17e34dde0796b9a49d60e8af004a8') AND task_list_name='pg-gc-pending-c7744ee6-55a0-4ad5-854c-737b4a7d5064'"
+            ],
+            "snapshots": [
+              {
+                "at": "2026-10-27T16:32:56.109Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:56.677Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:57.244Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:57.813Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:58.392Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:58.960Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:32:59.528Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:33:00.104Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": false,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 0,
+                    "persistedRange": 1,
+                    "liveRange": 1
+                  }
+                }
+              },
+              {
+                "at": "2026-10-27T16:33:00.721Z",
+                "pendingTasks": 1,
+                "converged": true,
+                "acksCoverRemovedRows": true,
+                "queues": {
+                  "pgDecision": {
+                    "taskRows": 0,
+                    "maxRowId": null,
+                    "ackLevel": 1,
+                    "persistedRange": 2,
+                    "liveRange": 2
+                  }
+                }
+              }
+            ],
+            "queues": {
+              "pgDecision": {
+                "taskList": "pg-gc-acked-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+                "taskType": 0,
+                "remainingTaskRows": 0,
+                "throttledResidue": false,
+                "ackLevel": 1,
+                "observedMaxTaskId": 1,
+                "minAck": null,
+                "persistedRange": 2,
+                "liveBlock": {
+                  "startId": 100001,
+                  "endId": 200000
+                },
+                "dataEncoding": "thriftrw"
+              }
+            },
+            "rangeSize": 100000
+          },
+          "domainMetadata": {
+            "domain": "service-compat-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+            "domainId": "01a17e34dde0796b9a49d60e8af004a8",
+            "isGlobal": 0,
+            "dataEncoding": "thriftrw",
+            "dataLength": 493,
+            "notificationVersions": [
+              5
+            ]
+          }
+        },
+        "queryStandbyForwarding": {
+          "result": "passed",
+          "rootPartition": "query-standby-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "childPartition": "/__cadence_sys/query-standby-c7744ee6-55a0-4ad5-854c-737b4a7d5064/1",
+          "directChildAnswered": true,
+          "frontendAnswered": 6
+        },
+        "listTaskListPartitions": {
+          "result": "passed",
+          "transport": "grpc",
+          "nodes": 2,
+          "lists": [
+            {
+              "requested": "probe-list-partitions-root",
+              "keys": [
+                "probe-list-partitions-root",
+                "/__cadence_sys/probe-list-partitions-root/1",
+                "/__cadence_sys/probe-list-partitions-root/2"
+              ],
+              "owners": [
+                "127.0.0.1:20572",
+                "127.0.0.1:20572",
+                "127.0.0.1:20572"
+              ],
+              "describes": [
+                {
+                  "key": "probe-list-partitions-root",
+                  "servedBy": "127.0.0.1:20572"
+                },
+                {
+                  "key": "/__cadence_sys/probe-list-partitions-root/1",
+                  "servedBy": "127.0.0.1:20572"
+                },
+                {
+                  "key": "/__cadence_sys/probe-list-partitions-root/2",
+                  "servedBy": "127.0.0.1:20572"
+                }
+              ],
+              "sources": [
+                "127.0.0.1:19952",
+                "127.0.0.1:20572",
+                "go-frontend"
+              ]
+            },
+            {
+              "requested": "/__cadence_sys/probe-list-partitions-child/2",
+              "keys": [
+                "probe-list-partitions-child",
+                "/__cadence_sys/probe-list-partitions-child/1",
+                "/__cadence_sys/probe-list-partitions-child/2"
+              ],
+              "owners": [
+                "127.0.0.1:19952",
+                "127.0.0.1:19952",
+                "127.0.0.1:19952"
+              ],
+              "describes": [
+                {
+                  "key": "probe-list-partitions-child",
+                  "servedBy": "127.0.0.1:19952"
+                },
+                {
+                  "key": "/__cadence_sys/probe-list-partitions-child/1",
+                  "servedBy": "127.0.0.1:19952"
+                },
+                {
+                  "key": "/__cadence_sys/probe-list-partitions-child/2",
+                  "servedBy": "127.0.0.1:19952"
+                }
+              ],
+              "sources": [
+                "127.0.0.1:19952",
+                "127.0.0.1:20572",
+                "go-frontend"
+              ]
+            }
+          ]
+        },
+        "adaptiveScaler": "not requested",
+        "durableRestartDrain": {
+          "result": "passed",
+          "rootPartition": "durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "queuedBeforeRestart": [
+            {
+              "partition": "durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+              "activityId": "durable-0",
+              "rows": 1
+            },
+            {
+              "partition": "/__cadence_sys/durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064/1",
+              "activityId": "durable-1",
+              "rows": 1
+            },
+            {
+              "partition": "/__cadence_sys/durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064/2",
+              "activityId": "durable-2",
+              "rows": 1
+            }
+          ],
+          "restart": {
+            "killedPid": 9211,
+            "restartedPid": 9437
+          },
+          "drainedAfterRestart": [
+            {
+              "partition": "durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+              "activityId": "durable-0"
+            },
+            {
+              "partition": "/__cadence_sys/durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064/1",
+              "activityId": "durable-1"
+            },
+            {
+              "partition": "/__cadence_sys/durable-restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064/2",
+              "activityId": "durable-2"
+            }
+          ]
+        },
+        "autoConfigHint": {
+          "result": "passed",
+          "decisionHint": {
+            "enableAutoConfig": false
+          },
+          "activityHint": {
+            "enableAutoConfig": false
+          }
+        },
+        "activeOffer": "not requested"
+      },
+      "processRestart": {
+        "workflowId": "restart-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+        "runId": "b5002c05-5a3c-4da0-97e1-871a989fb429",
+        "taskList": "restart-tasks-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+        "durableTaskRowsBeforeKill": 1,
+        "taskRangeBeforeKill": 1,
+        "durableWatermarkBeforeKill": null,
+        "firstRustPid": 8995,
+        "secondRustPid": 9211,
+        "completionEvents": 1,
+        "goServicesPid": 8925
+      },
+      "parityGate": "production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra",
+      "productionDatabaseEvidence": "not collected",
+      "shardDistributor": "not requested",
+      "peer": "127.0.0.1:25863",
+      "domain": "service-compat-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+      "execution": {
+        "workflowId": "c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+        "runId": "7ea2cdf6-7d21-497a-9927-7f50bc3b0ea7"
+      },
+      "attributes": [
+        "workflowExecutionStartedEventAttributes",
+        "decisionTaskScheduledEventAttributes",
+        "decisionTaskStartedEventAttributes",
+        "decisionTaskCompletedEventAttributes",
+        "activityTaskScheduledEventAttributes",
+        "activityTaskStartedEventAttributes",
+        "activityTaskCompletedEventAttributes",
+        "decisionTaskScheduledEventAttributes",
+        "decisionTaskStartedEventAttributes",
+        "decisionTaskCompletedEventAttributes",
+        "workflowExecutionCompletedEventAttributes"
+      ]
+    }
+  ],
+  "sdkEvidenceFiles": {
+    "go-sdk.log": {
+      "status": "present"
+    },
+    "restart-sdk.log": {
+      "status": "present"
+    },
+    "graceful-drain-sdk.log": {
+      "status": "present"
+    },
+    "adaptive-scaler-sdk.log": {
+      "status": "missing"
+    },
+    "adaptive-scaler-retry-only-sdk.log": {
+      "status": "missing"
+    },
+    "production-idle-recovery-sdk.log": {
+      "status": "present"
+    },
+    "production-crash-recovery-sdk.log": {
+      "status": "present"
+    },
+    "gc-backlog-sdk.log": {
+      "status": "missing"
+    }
+  },
+  "recoveryEvidence": {
+    "matching-shutdown.json": {
+      "status": "present",
+      "recorded": {
+        "signal": "SIGTERM",
+        "sigtermSentUnixNs": 1793118798527000000,
+        "exitCode": 0,
+        "childSignal": null,
+        "completedAtUnixNs": 1793118798617000000
+      }
+    },
+    "production-failure-recovery-checkpoints.json": {
+      "status": "present",
+      "recorded": {
+        "topology": "two Rust Matching hosts with Go Frontend/History/Worker",
+        "sameRingOwnershipMap": [
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:20572",
+            "secondaryOwner": "127.0.0.1:20572"
+          },
+          {
+            "primaryOwner": "127.0.0.1:19952",
+            "secondaryOwner": "127.0.0.1:19952"
+          }
+        ],
+        "idleEviction": {
+          "taskList": "production-idle-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "releasedWithEmptyResponse": true,
+          "sdkCompletedWorkflow": "production-idle-recovery-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "completionEvents": 1
+        },
+        "crashRecovery": {
+          "taskList": "production-crash-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "crashedPid": 9007,
+          "crashedHostIndex": 1,
+          "survivorPid": 8995,
+          "workflowId": "production-crash-recovery-c7744ee6-55a0-4ad5-854c-737b4a7d5064",
+          "completionEvents": 1,
+          "rangeBefore": 1,
+          "rangeAfter": 2,
+          "ackBefore": 0,
+          "ackAfter": 1,
+          "queuedRowsAfterCompletion": 0
+        },
+        "cassandraDomainPageToken": null
+      }
+    },
+    "db-observations.json": {
+      "status": "missing"
+    },
+    "matching-cold-domain-metric-probe.json": {
+      "status": "missing"
+    }
+  },
+  "databaseCleanup": {
+    "postgres-container-cleanup.txt": {
+      "status": "present",
+      "recordedOutput": "cadence-rust-gate-postgres-lane-20261027T163216-8511",
+      "sha256": "08166781a233a48bd8dba93f8550e7161a3c86e42bec611e6a8a187fcaec1bc4"
+    }
+  },
+  "retainedFiles": [
+    "commit.txt",
+    "binary.sha256",
+    "build.exit",
+    "gate.exit",
+    "gate/run/results.json",
+    "gate/run/probe.log",
+    "command.txt",
+    "gate/run/run.exit",
+    "gate/postgres-container-cleanup.txt",
+    "gate/run/rust-matching/go-sdk.log",
+    "gate/run/rust-matching/restart-sdk.log",
+    "gate/run/rust-matching/graceful-drain-sdk.log",
+    "gate/run/rust-matching/production-idle-recovery-sdk.log",
+    "gate/run/rust-matching/production-crash-recovery-sdk.log",
+    "gate/run/rust-matching/production-failure-recovery-checkpoints.json",
+    "gate/run/rust-matching/matching-shutdown.json"
+  ],
+  "originalFileSha256": {
+    "commit.txt": "12303bf6ba2ec65ff4517b9e0874886a1f8cf3260c8d8d3614fc266df096c4cf",
+    "binary.sha256": "ed29136f271d950bfdfe81dcf3bb674dc8c288776fb19502f57862e9ca7ffa8c",
+    "build.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "gate.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "gate/run/results.json": "4cf142d6054d559f3c3ed0dee5597df845486ee4b78f90f9cf24088504ee9588",
+    "gate/run/probe.log": "10d49b667f528c6c280c807c8a6e8e71094f5dfb5779142c22edf4e899a92c89",
+    "command.txt": "fd47565899822d32dd5a3de192d14bb0c80585d7817af1cee73b78506ea30c65",
+    "gate/run/run.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "gate/postgres-container-cleanup.txt": "08166781a233a48bd8dba93f8550e7161a3c86e42bec611e6a8a187fcaec1bc4",
+    "gate/run/rust-matching/go-sdk.log": "9eab755ee1a268c9ef595f98820f46cefe41aa90870808c61ef69f5812df5a92",
+    "gate/run/rust-matching/restart-sdk.log": "756e54c043e88776fd44286d2fd42a61df9e44b1d0e20bff1845e60ae391341e",
+    "gate/run/rust-matching/graceful-drain-sdk.log": "e92e7cc84d03afb2a05b902ccc9972fc784ecd183eb774fe5cc4246a7fb028a6",
+    "gate/run/rust-matching/production-idle-recovery-sdk.log": "c199d41cf6d1cd427883238d1041ec9f3a8846a826c33d59884c90368a32cb63",
+    "gate/run/rust-matching/production-crash-recovery-sdk.log": "20ea965629716428c0dc38c5b833eb5860a2b264176cccdbd46710edaca3ce95",
+    "gate/run/rust-matching/production-failure-recovery-checkpoints.json": "c50c7f42146b1d23ad79a3dcce2db0de196fb884392b020a5c2220f51bb16ddf",
+    "gate/run/rust-matching/matching-shutdown.json": "57ad96bc32e193f9c4055165c2f3f8dd01ff442ca0fcd3e46e7dddb7374d5a82"
+  },
+  "serviceAcceptance": false,
+  "reviewRequired": "Inspect actual lane-specific result rows, SDK/recovery evidence, cleanup output, and source parity ledger. Missing files and requested flags are not execution evidence."
+}
