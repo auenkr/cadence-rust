@@ -35,3 +35,18 @@ that evidence before either accepting normalization or closing the old finding.
 Active assignments: pinned-Go panic quoting repair, Go domain-cache caller
 oracle, and Matching isolation production-path audit. Matching incomplete;
 no final source pin and no final mixed acceptance is claimed.
+
+## Integrated diagnostic validation and mixed dispatch
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40465258975 succeeded
+on6f001112c67a572a6868be09df7eeed143725889 (focused Matching CI with optional
+Go SDK compile checks enabled). This includes the parent's complete-history
+diagnostics. Actual artifact exits still need retention/review.
+
+Adaptive mixed experiment https://github.com/auenkr/cadence-rust/actions/runs/40465991711
+is running on c268c99cde16c4b12e7ab7edd048c13443329ad3, with lane=adaptive and
+adaptive_retry_only=true. This source includes diagnostics but predates pending
+panic quoting and cache caller-oracle work; it is a diagnostic run, not final
+Matching acceptance. No other mixed gate was active at dispatch. Inspect actual
+retry-only/full-suite histories, timing, all24 completion checks and live queue
+routing results before drawing a conclusion. Preserve binary SHA256.
