@@ -70,8 +70,8 @@ matching exit files and cleanup proof. Job conclusion alone is insufficient.
 | --- | --- | --- |
 | Fresh uncached workspace Clippy followed by tests | [40539581017](https://github.com/auenkr/cadence-rust/actions/runs/40539581017), v7 tag | PASS: reviewed fresh target, exact commit, Clippy0/test0; 52 suite summaries retained |
 | PostgreSQL | [40541390213](https://github.com/auenkr/cadence-rust/actions/runs/40541390213), v7 tag | PASS: reviewed exact source/binary identity, SDK, GC/domain, standby query, partitions, durable restart/drain, crash/idle recovery and container removal; compact evidence matching-v7-postgres-40541390213 |
-| MySQL probes | [40542820380](https://github.com/auenkr/cadence-rust/actions/runs/40542820380), v7 tag | Running; evidence pending |
-| Thrift | Not dispatched | Pending |
+| MySQL probes | [40542820380](https://github.com/auenkr/cadence-rust/actions/runs/40542820380), v7 tag | PASS: reviewed exact source/binary, Go schema (no missing/extra tables), GC/domain, SDK, forwarding/query/partitions, restart/drain/crash/idle and cleanup; evidence matching-v7-mysql-probes-40542820380 |
+| Thrift | [40543897866](https://github.com/auenkr/cadence-rust/actions/runs/40543897866), v7 tag | Running; evidence pending |
 | Configstore | Not dispatched | Pending |
 | Shard distributor | Not dispatched | Pending |
 | Two-node MySQL | Not dispatched | Pending |
