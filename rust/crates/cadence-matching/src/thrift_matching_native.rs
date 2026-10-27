@@ -307,7 +307,7 @@ pub fn poll_for_decision_task_response(v: n::PollForDecisionTaskResponse) -> Res
         f.push((90, structure(info_fields)));
     }
     if let Some(x) = v.auto_config_hint { f.push((170, hint_out(x))); }
-    f.push((150, Value::Map(v.queries.into_iter().map(|(k, v)| (bytes(k), query_out(v))).collect()));
+    f.push((150, Value::Map(v.queries.into_iter().map(|(k, v)| (bytes(k), query_out(v))).collect())));
     // The production Thrift decision adapter predates partition-config and
     // load-balancer fields; these have no fields in its Thrift response.
     Ok(Struct { fields: f })

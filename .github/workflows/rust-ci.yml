@@ -210,6 +210,8 @@ jobs:
             crates/cadence-api/src/lib.rs
             crates/cadence-thrift/src/value.rs
             crates/cadence-persistence/src/matching_task_store.rs
+            crates/cadence-persistence/src/matching_native_task_store.rs
+            crates/cadence-persistence/src/dynamic_config.rs
             crates/cadence-proto/build.rs
             crates/cadence-proto/build/native_model.rs
             crates/cadence-proto/build/native_wire.rs
