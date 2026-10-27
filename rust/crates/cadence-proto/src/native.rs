@@ -33,6 +33,14 @@ mod tests {
     use cadence_common::go_string::GoString;
 
     #[test]
+    fn native_matching_trait_covers_the_full_matching_rpc_surface() {
+        assert_eq!(NATIVE_MATCHING_METHODS.len(), 13);
+        for method in ["PollForDecisionTask", "AddActivityTask", "AcquireSemaphore", "RefreshTaskListPartitionConfig"] {
+            assert!(NATIVE_MATCHING_METHODS.contains(&method), "missing {method}");
+        }
+    }
+
+    #[test]
     fn native_matching_roundtrips_valid_public_protobuf_requests() {
         let original = crate::matching::AddDecisionTaskRequest {
             domain_id: "domain".into(),
@@ -69,11 +77,13 @@ mod tests {
 
     #[test]
     fn native_matching_nested_identity_does_not_require_utf8() {
-        let mut native = matching::PollForDecisionTaskRequest::default();
-        native.request = Some(api::PollForDecisionTaskRequest {
-            identity: GoString::from(vec![0xff, 0, 0xfe]),
+        let native = matching::PollForDecisionTaskRequest {
+            request: Some(api::PollForDecisionTaskRequest {
+                identity: GoString::from(vec![0xff, 0, 0xfe]),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         assert_eq!(
             native.request.as_ref().unwrap().identity.as_bytes(),
             &[0xff, 0, 0xfe]

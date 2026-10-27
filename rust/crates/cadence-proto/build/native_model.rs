@@ -469,6 +469,21 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
     let mut generated =
         String::from("// Generated from Matching's reachable protobuf descriptors.\n");
     tree.emit(&mut generated, &[]);
+    for file in &set.file {
+        if file.package() != "uber.cadence.matching.v1" { continue; }
+        for service in &file.service {
+            if service.name() != "MatchingAPI" { continue; }
+            generated.push_str("#[::tonic::async_trait]\npub trait NativeMatchingApi: Send + Sync + 'static {\n");
+            for method in &service.method {
+                let input = path(&messages[method.input_type()], true);
+                let output = path(&messages[method.output_type()], true);
+                writeln!(generated, "async fn {}(&self, request: ::tonic::Request<{input}>) -> Result<::tonic::Response<{output}>, ::tonic::Status>;", method.name().to_snake_case())?;
+            }
+            generated.push_str("}\npub const NATIVE_MATCHING_METHODS: &[&str] = &[\n");
+            for method in &service.method { writeln!(generated, "{:?},", method.name())?; }
+            generated.push_str("];\n");
+        }
+    }
     generated.push_str("pub use uber::cadence::{api::v1 as api, matching::v1 as matching, history::v1 as history};\n");
     std::fs::write(output, generated)?;
     Ok(())
