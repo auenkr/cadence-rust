@@ -5,7 +5,7 @@ on:
       lane:
         description: Supported deployment scenario
         type: choice
-        options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive]
+        options: [postgres, thrift, shard-distributor, configstore, mysql-probes, adaptive, adaptive-go-control]
         default: postgres
       adaptive_retry_only:
         description: Run a fresh-process workflow-task-retry SDK probe before the full adaptive suite
@@ -39,6 +39,7 @@ jobs:
         if: inputs.lane == 'postgres'
         run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
       - name: Build fresh Rust Matching
+        if: inputs.lane != 'adaptive-go-control'
         run: |
           mkdir -p out
           git rev-parse HEAD > out/commit.txt
@@ -57,6 +58,14 @@ jobs:
       - name: Mixed Go and Rust validation
         run: |
           set +e
+          if [[ "$LANE" == "adaptive-go-control" ]]; then
+            printf '%q ' python3 tests/run-go-service-baseline.py --adaptive-go-control --artifacts-dir out/go-control > out/command.txt
+            python3 tests/run-go-service-baseline.py --adaptive-go-control --artifacts-dir out/go-control > out/gate.log 2>&1
+            result=$?
+            echo "$result" > out/gate.exit
+            tail -60 out/gate.log | cut -c1-300
+            exit "$result"
+          fi
           common=(--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3)
           wrapper=tests/gates/run-mysql-lane.sh
           case "$LANE" in

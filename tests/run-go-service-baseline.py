@@ -69,6 +69,7 @@ parser.add_argument('--probe-pg-gc-domain', action='store_true', help='probe sce
 parser.add_argument('--probe-query-standby', action='store_true', help='probe scenario: QueryWorkflow answered by a poller that only polls the parent partition (requires --rust-services matching)')
 parser.add_argument('--probe-list-partitions', action='store_true', help='probe scenario: ListTaskListPartitions/DescribeTaskList compared with Go semantics on every Rust node and through the Go Frontend; sets matching.numTasklistWritePartitions=3 (requires --rust-services matching)')
 parser.add_argument('--probe-adaptive-scaler', action='store_true', help='probe adaptive Matching scaling with Go SDK completion on a scaled queue (requires --rust-services matching)')
+parser.add_argument('--adaptive-go-control', action='store_true', help='diagnostic-only adaptive scaler control against original Go Matching with all four Go services')
 parser.add_argument('--probe-adaptive-retry-only', action='store_true', help='run an additional fresh-process workflow-task-retry SDK probe on the adaptive scaler queue (requires --probe-adaptive-scaler)')
 parser.add_argument('--probe-durable-restart', action='store_true', help='probe scenario: stop Rust Matching with multi-partition backlog rows, restart, drain every partition (requires --rust-services matching)')
 parser.add_argument('--probe-auto-config-hint', action='store_true', help='probe scenario: decision and activity polls through Go Frontend carry autoConfigHint with enableAutoConfig=false; sets matching.enableClientAutoConfig=false in the dynamic config (requires --rust-services matching, not with --matching-configstore)')
@@ -344,6 +345,8 @@ if args.matching_failure_recovery and not production_matching:
     parser.error('--matching-failure-recovery requires --rust-services matching')
 if args.probe_pg_gc_domain and not args.postgres:
     parser.error('--probe-pg-gc-domain requires --postgres')
+if args.adaptive_go_control and (rust_services or args.probe_adaptive_scaler):
+    parser.error('--adaptive-go-control requires the all-Go baseline and cannot be combined with Rust service or Matching probe options')
 if (args.probe_query_standby or args.probe_list_partitions or args.probe_durable_restart or args.probe_adaptive_scaler) and not production_matching:
     parser.error('Matching probes require --rust-services matching')
 if args.probe_adaptive_retry_only and not args.probe_adaptive_scaler:
@@ -506,7 +509,7 @@ if args.matching_idle_check_seconds is not None:
         '\nmatching.idleTasklistCheckInterval:\n'
         f'  - value: {args.matching_idle_check_seconds}s\n'
     )
-if args.probe_adaptive_scaler:
+if args.probe_adaptive_scaler or args.adaptive_go_control:
     # Go's scaler requires both adaptive scaling and cached partition counts.
     # Keep both settings scoped to the probe decision queue; static partition
     # listing remains at its default of one and is independent of adaptive config.
@@ -1045,6 +1048,10 @@ try:
                 elif args.matching_delivery:
                     probe = ['node', str(root / 'tests/matching-history-compat.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["HISTORY_PORT_GRPC"]}']
+                elif args.adaptive_go_control:
+                    probe = ['node', str(root / 'tests/matching-adaptive-go-control.cjs'),
+                        f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}',
+                        f'127.0.0.1:{ports["MATCHING_PORT"]}', str(work)]
                 else:
                     probe = ['node', str(root / 'tests/service-workflow-compat.cjs'),
                         f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', f'127.0.0.1:{ports["MATCHING_PORT_GRPC"]}']
