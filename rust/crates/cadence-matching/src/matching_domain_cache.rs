@@ -79,6 +79,12 @@ impl From<String> for DomainMetadataSourceError {
 }
 
 pub trait DomainMetadataSource: Send + Sync + 'static {
+    /// Normalize IDs only when the backing store's UUID decoder does so.
+    /// SQL stores keep their strict UUID handling; gocql accepts UUID hex
+    /// with optional hyphens between byte pairs.
+    fn normalize_domain_id(&self, id: &str) -> Option<String> {
+        Some(id.to_owned())
+    }
     fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError>;
     fn list_domains(
         &self,
@@ -203,6 +209,10 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
 }
 
 impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
+    fn normalize_domain_id(&self, id: &str) -> Option<String> {
+        gocql_uuid_string(id)
+    }
+
     fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
         self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
     }
@@ -243,6 +253,32 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
                 _ => DomainMetadataSourceError::transient(error.to_string()),
             })
     }
+}
+
+/// Mirrors the pinned gocql ParseUUID: 32 hex digits, with hyphens ignored
+/// only at byte boundaries. Unlike RFC UUID parsing, hyphens need not be at
+/// the canonical 8-4-4-4-12 positions.
+fn gocql_uuid_string(input: &str) -> Option<String> {
+    let mut bytes = [0_u8; 16];
+    let mut digit_index = 0;
+    for byte in input.bytes() {
+        if byte == b'-' && digit_index % 2 == 0 {
+            continue;
+        }
+        let value = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        };
+        if digit_index == 32 {
+            return None;
+        }
+        let shift = if digit_index % 2 == 0 { 4 } else { 0 };
+        bytes[digit_index / 2] |= value << shift;
+        digit_index += 1;
+    }
+    (digit_index == 32).then(|| uuid::Uuid::from_bytes(bytes).to_string())
 }
 
 impl DomainMetadataSource for cadence_persistence::matching_domain_mysql::MySqlDomainMetadataStore {
@@ -713,14 +749,17 @@ impl MatchingDomainCache {
         if id.is_empty() {
             return Err(DomainCacheError::EmptyId);
         }
-        if let Some(entry) = self.by_id(id) {
+        let lookup_id = self.source.normalize_domain_id(id).ok_or_else(|| {
+            DomainCacheError::Source(format!("invalid Cassandra UUID {id:?}"))
+        })?;
+        if let Some(entry) = self.by_id(&lookup_id) {
             return Ok(entry);
         }
         self.source
-            .get_domain(None, Some(id), DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
+            .get_domain(None, Some(&lookup_id), DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
             .map_err(|error| DomainCacheError::Source(error.message))?;
-        self.refresh_after_miss(None, Some(id))?;
-        self.by_id(id)
+        self.refresh_after_miss(None, Some(&lookup_id))?;
+        self.by_id(&lookup_id)
             .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(id.to_string()))
     }
 
@@ -736,7 +775,8 @@ impl MatchingDomainCache {
     /// refreshing persistence. Telemetry must never make a cache miss block an
     /// RPC handler on the synchronous domain metadata store.
     pub fn cached_domain_name(&self, id: &str) -> Option<String> {
-        self.by_id(id).map(|domain| domain.info.name)
+        let id = self.source.normalize_domain_id(id)?;
+        self.by_id(&id).map(|domain| domain.info.name)
     }
 
     fn by_name(&self, name: &str) -> Option<MatchingDomainMetadata> {
@@ -915,9 +955,12 @@ impl MatchingDomainCache {
         };
         drop(old);
         let mut changed_entries = Vec::new();
-        for record in records {
+        for mut record in records {
             if record.notification_version >= metadata_version {
                 break;
+            }
+            if let Some(id) = self.source.normalize_domain_id(&record.info.uuid) {
+                record.info.uuid = id;
             }
             let previous = next.by_id.get(&record.info.uuid);
             if previous
@@ -1088,6 +1131,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeSource {
+        gocql_ids: bool,
         version: Mutex<i64>,
         records: Mutex<Vec<MatchingDomainMetadata>>,
         yield_page_size: Mutex<Option<usize>>,
@@ -1113,6 +1157,13 @@ mod tests {
         }
     }
     impl DomainMetadataSource for FakeSource {
+        fn normalize_domain_id(&self, id: &str) -> Option<String> {
+            if self.gocql_ids {
+                gocql_uuid_string(id)
+            } else {
+                Some(id.to_owned())
+            }
+        }
         fn metadata_version(&self, timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
             assert!(!timeout.is_zero() && timeout <= DOMAIN_CACHE_PERSISTENCE_TIMEOUT);
             self.calls.lock().unwrap().push("metadata".into());
@@ -1229,6 +1280,58 @@ mod tests {
             decoded_async_workflow_config: None,
             config_decode_error: None,
         }
+    }
+
+    #[test]
+    fn cassandra_uuid_spellings_resolve_to_the_same_cached_domain() {
+        assert_eq!(
+            gocql_uuid_string("0000000000000000000000000000000A").as_deref(),
+            Some("00000000-0000-0000-0000-00000000000a")
+        );
+        assert_eq!(
+            gocql_uuid_string("00000000-0000-0000-0000-00000000000A").as_deref(),
+            Some("00000000-0000-0000-0000-00000000000a")
+        );
+        assert!(gocql_uuid_string("0000000-0000-0000-0000-00000000000a").is_none());
+        assert!(gocql_uuid_string("00000000-0000-0000-0000-00000000000ag").is_none());
+
+        let source = Arc::new(FakeSource {
+            gocql_ids: true,
+            ..FakeSource::default()
+        });
+        let mut metadata = record(10, 1);
+        metadata.info.uuid = "00000000-0000-0000-0000-00000000000A".into();
+        metadata.info.name = "quota-label-domain".into();
+        source.put(metadata);
+        *source.version.lock().unwrap() = 2;
+        let cache = MatchingDomainCache::new(source);
+        cache.refresh_domains().unwrap();
+
+        assert_eq!(
+            cache.cached_domain_name("0000000000000000000000000000000a").as_deref(),
+            Some("quota-label-domain")
+        );
+        assert!(cache.cached_domain_name("not-a-uuid").is_none());
+    }
+
+    #[test]
+    fn non_cassandra_domain_cache_keeps_uuid_keys_exact() {
+        let source = Arc::new(FakeSource::default());
+        let mut metadata = record(10, 1);
+        metadata.info.uuid = "00000000-0000-0000-0000-00000000000a".into();
+        metadata.info.name = "sql-domain".into();
+        source.put(metadata);
+        *source.version.lock().unwrap() = 2;
+        let cache = MatchingDomainCache::new(source);
+        cache.refresh_domains().unwrap();
+
+        assert_eq!(
+            cache.cached_domain_name("00000000-0000-0000-0000-00000000000a").as_deref(),
+            Some("sql-domain")
+        );
+        assert!(cache
+            .cached_domain_name("0000000000000000000000000000000a")
+            .is_none());
     }
 
     fn oracle_record(
