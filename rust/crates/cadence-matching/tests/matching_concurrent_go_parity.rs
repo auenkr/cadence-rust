@@ -79,12 +79,14 @@ impl h::history_api_server::HistoryApi for StartingHistory {
         let request = request.into_inner();
         Ok(Response::new(h::RecordActivityTaskStartedResponse {
             scheduled_event: Some(p::HistoryEvent {
-                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    p::ActivityTaskScheduledEventAttributes {
-                        activity_id: request.schedule_id.to_string(),
-                        ..Default::default()
-                    },
-                )),
+                attributes: Some(
+                    p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                        p::ActivityTaskScheduledEventAttributes {
+                            activity_id: request.schedule_id.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             }),
             ..Default::default()
@@ -97,7 +99,9 @@ async fn start_history() -> (String, tokio::task::JoinHandle<()>) {
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(h::history_api_server::HistoryApiServer::new(StartingHistory))
+            .add_service(h::history_api_server::HistoryApiServer::new(
+                StartingHistory,
+            ))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await
             .unwrap();
@@ -126,68 +130,144 @@ fn fixture_with_store(
             ("system.enableTasklistIsolation", "true"),
             ("system.allIsolationGroups", "[\"a\",\"b\"]"),
         ] {
-            config.update(false, key, vec![DynamicConfigValue {
-                value: Some(DataBlob::new(EncodingType::JSON, value.as_bytes().to_vec())),
-                filters: vec![],
-            }]);
+            config.update(
+                false,
+                key,
+                vec![DynamicConfigValue {
+                    value: Some(DataBlob::new(EncodingType::JSON, value.as_bytes().to_vec())),
+                    filters: vec![],
+                }],
+            );
         }
     }
-    state.domains.create(
-        DomainInfo { name: "concurrent-test".into(), uuid: DOMAIN_ID.to_string(), ..Default::default() },
-        Default::default(), Default::default(), false,
-    ).unwrap();
-    (Arc::new(Matching::with_durable_queues(state, queues.clone(), Duration::from_millis(50))), queues)
+    state
+        .domains
+        .create(
+            DomainInfo {
+                name: "concurrent-test".into(),
+                uuid: DOMAIN_ID.to_string(),
+                ..Default::default()
+            },
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+    (
+        Arc::new(Matching::with_durable_queues(
+            state,
+            queues.clone(),
+            Duration::from_millis(50),
+        )),
+        queues,
+    )
 }
 
-async fn add_task(matching: &Matching, task_list: &str, task_type: i32, schedule_id: i64, isolated: bool) {
+async fn add_task(
+    matching: &Matching,
+    task_list: &str,
+    task_type: i32,
+    schedule_id: i64,
+    isolated: bool,
+) {
     let execution = Some(p::WorkflowExecution {
         workflow_id: format!("wf-{schedule_id}"),
         run_id: Uuid::from_u128(schedule_id as u128).to_string(),
     });
     let partition_config = if isolated {
-        std::collections::HashMap::from([("isolation-group".into(), if schedule_id % 2 == 0 { "a" } else { "b" }.into())])
+        std::collections::HashMap::from([(
+            "isolation-group".into(),
+            if schedule_id % 2 == 0 { "a" } else { "b" }.into(),
+        )])
     } else {
         Default::default()
     };
     if task_type == 1 {
-        matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
-            domain_id: DOMAIN_ID.to_string(), source_domain_id: DOMAIN_ID.to_string(),
-            workflow_execution: execution, task_list: Some(list(task_list)), schedule_id,
-            partition_config, ..Default::default()
-        })).await.unwrap();
+        matching
+            .add_activity_task(Request::new(m::AddActivityTaskRequest {
+                domain_id: DOMAIN_ID.to_string(),
+                source_domain_id: DOMAIN_ID.to_string(),
+                workflow_execution: execution,
+                task_list: Some(list(task_list)),
+                schedule_id,
+                partition_config,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
     } else {
-        matching.add_decision_task(Request::new(m::AddDecisionTaskRequest {
-            domain_id: DOMAIN_ID.to_string(), workflow_execution: execution,
-            task_list: Some(list(task_list)), schedule_id, partition_config, ..Default::default()
-        })).await.unwrap();
+        matching
+            .add_decision_task(Request::new(m::AddDecisionTaskRequest {
+                domain_id: DOMAIN_ID.to_string(),
+                workflow_execution: execution,
+                task_list: Some(list(task_list)),
+                schedule_id,
+                partition_config,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
     }
 }
 
-async fn poll_task(matching: &Matching, task_list: &str, task_type: i32, worker: usize, isolated: bool) -> Option<i64> {
-    let group = if isolated { if worker % 2 == 0 { "a" } else { "b" } } else { "" };
+async fn poll_task(
+    matching: &Matching,
+    task_list: &str,
+    task_type: i32,
+    worker: usize,
+    isolated: bool,
+) -> Option<i64> {
+    let group = if isolated {
+        if worker.is_multiple_of(2) {
+            "a"
+        } else {
+            "b"
+        }
+    } else {
+        ""
+    };
     if task_type == 1 {
         let mut request = Request::new(m::PollForActivityTaskRequest {
-            domain_id: DOMAIN_ID.to_string(), isolation_group: group.into(),
-            request: Some(p::PollForActivityTaskRequest { task_list: Some(list(task_list)), ..Default::default() }),
+            domain_id: DOMAIN_ID.to_string(),
+            isolation_group: group.into(),
+            request: Some(p::PollForActivityTaskRequest {
+                task_list: Some(list(task_list)),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         request.set_timeout(Duration::from_secs(20));
-        let response = matching.poll_for_activity_task(request).await.unwrap().into_inner();
+        let response = matching
+            .poll_for_activity_task(request)
+            .await
+            .unwrap()
+            .into_inner();
         (!response.task_token.is_empty()).then(|| response.activity_id.parse::<i64>().unwrap())
     } else {
         let mut request = Request::new(m::PollForDecisionTaskRequest {
-            domain_id: DOMAIN_ID.to_string(), isolation_group: group.into(),
-            request: Some(p::PollForDecisionTaskRequest { task_list: Some(list(task_list)), ..Default::default() }),
+            domain_id: DOMAIN_ID.to_string(),
+            isolation_group: group.into(),
+            request: Some(p::PollForDecisionTaskRequest {
+                task_list: Some(list(task_list)),
+                ..Default::default()
+            }),
             ..Default::default()
         });
         request.set_timeout(Duration::from_secs(20));
-        let response = matching.poll_for_decision_task(request).await.unwrap().into_inner();
+        let response = matching
+            .poll_for_decision_task(request)
+            .await
+            .unwrap()
+            .into_inner();
         (!response.task_token.is_empty()).then_some(response.started_event_id - 1)
     }
 }
 
 fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as i64
 }
 
 fn list(name: &str) -> p::TaskList {
@@ -286,7 +366,9 @@ async fn concurrent_delivery(task_type: i32, isolated: bool) {
     const EACH: i64 = 25;
     let (history, history_server) = start_history().await;
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(SqliteTaskStore::create(dir.path().join("delivery.db"), BlobEncoding::ThriftRW).unwrap());
+    let store = Arc::new(
+        SqliteTaskStore::create(dir.path().join("delivery.db"), BlobEncoding::ThriftRW).unwrap(),
+    );
     let (matching, registry) = fixture_with_store(store.clone(), &history, isolated);
     let task_list = "concurrent-delivery";
     let mut polls = Vec::new();
@@ -295,7 +377,8 @@ async fn concurrent_delivery(task_type: i32, isolated: bool) {
         polls.push(tokio::spawn(async move {
             let mut received = Vec::new();
             while received.len() < EACH as usize {
-                if let Some(id) = poll_task(&matching, task_list, task_type, worker, isolated).await {
+                if let Some(id) = poll_task(&matching, task_list, task_type, worker, isolated).await
+                {
                     received.push(id);
                 }
             }
@@ -312,31 +395,56 @@ async fn concurrent_delivery(task_type: i32, isolated: bool) {
             }
         }));
     }
-    for writer in writers { writer.await.unwrap(); }
+    for writer in writers {
+        writer.await.unwrap();
+    }
     let mut delivered = Vec::new();
     tokio::time::timeout(Duration::from_secs(30), async {
-        for poll in polls { delivered.extend(poll.await.unwrap()); }
-    }).await.expect("concurrent delivery did not finish");
+        for poll in polls {
+            delivered.extend(poll.await.unwrap());
+        }
+    })
+    .await
+    .expect("concurrent delivery did not finish");
     delivered.sort_unstable();
-    assert_eq!(delivered, (1..=(WORKERS as i64 * EACH)).collect::<Vec<_>>(), "every distinct task must be delivered once");
+    assert_eq!(
+        delivered,
+        (1..=(WORKERS as i64 * EACH)).collect::<Vec<_>>(),
+        "every distinct task must be delivered once"
+    );
     registry.shutdown(now()).await.unwrap();
-    let key = TaskListKey { domain_id: DOMAIN_ID, name: task_list.into(), task_type };
-    assert!(store.get_tasks(&key, 0, i64::MAX, 200).unwrap().is_empty(), "shutdown must flush task acknowledgements and GC");
+    let key = TaskListKey {
+        domain_id: DOMAIN_ID,
+        name: task_list.into(),
+        task_type,
+    };
+    assert!(
+        store.get_tasks(&key, 0, i64::MAX, 200).unwrap().is_empty(),
+        "shutdown must flush task acknowledgements and GC"
+    );
     history_server.abort();
     assert!(history_server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
-async fn go_concurrent_add_and_poll_delivers_every_activity_once() { concurrent_delivery(1, false).await; }
+async fn go_concurrent_add_and_poll_delivers_every_activity_once() {
+    concurrent_delivery(1, false).await;
+}
 
 #[tokio::test]
-async fn go_concurrent_add_and_poll_delivers_every_decision_once() { concurrent_delivery(0, false).await; }
+async fn go_concurrent_add_and_poll_delivers_every_decision_once() {
+    concurrent_delivery(0, false).await;
+}
 
 #[tokio::test]
-async fn go_concurrent_add_and_poll_activity_isolation() { concurrent_delivery(1, true).await; }
+async fn go_concurrent_add_and_poll_activity_isolation() {
+    concurrent_delivery(1, true).await;
+}
 
 #[tokio::test]
-async fn go_concurrent_add_and_poll_decision_isolation() { concurrent_delivery(0, true).await; }
+async fn go_concurrent_add_and_poll_decision_isolation() {
+    concurrent_delivery(0, true).await;
+}
 
 /// Two independent Matching handlers share durable persistence. Engine two
 /// advances the lease, the old owner's next public add is rejected, and the
@@ -345,40 +453,75 @@ async fn go_concurrent_add_and_poll_decision_isolation() { concurrent_delivery(0
 async fn go_two_live_matching_owners_steal_lease_and_deliver_all_work() {
     let (history, history_server) = start_history().await;
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(SqliteTaskStore::create(dir.path().join("live-owners.db"), BlobEncoding::ThriftRW).unwrap());
+    let store = Arc::new(
+        SqliteTaskStore::create(dir.path().join("live-owners.db"), BlobEncoding::ThriftRW).unwrap(),
+    );
     let (old, old_registry) = fixture_with_store(store.clone(), &history, false);
     let (new, new_registry) = fixture_with_store(store.clone(), &history, false);
     let task_list = "live-owner-steal";
     for (owner_index, matching) in [&old, &new].into_iter().enumerate() {
         for schedule_id in 1..=10_i64 {
             let schedule_id = schedule_id + owner_index as i64 * 10;
-            matching.add_activity_task(Request::new(m::AddActivityTaskRequest {
-                domain_id: DOMAIN_ID.to_string(), source_domain_id: DOMAIN_ID.to_string(),
-                workflow_execution: Some(p::WorkflowExecution { workflow_id: format!("wf-{schedule_id}"), run_id: Uuid::from_u128(schedule_id as u128).to_string() }),
-                task_list: Some(list(task_list)), schedule_id, ..Default::default()
-            })).await.unwrap();
+            matching
+                .add_activity_task(Request::new(m::AddActivityTaskRequest {
+                    domain_id: DOMAIN_ID.to_string(),
+                    source_domain_id: DOMAIN_ID.to_string(),
+                    workflow_execution: Some(p::WorkflowExecution {
+                        workflow_id: format!("wf-{schedule_id}"),
+                        run_id: Uuid::from_u128(schedule_id as u128).to_string(),
+                    }),
+                    task_list: Some(list(task_list)),
+                    schedule_id,
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
         }
     }
-    let stale = old.add_activity_task(Request::new(m::AddActivityTaskRequest {
-        domain_id: DOMAIN_ID.to_string(), source_domain_id: DOMAIN_ID.to_string(),
-        workflow_execution: Some(p::WorkflowExecution { workflow_id: "stale".into(), run_id: Uuid::from_u128(99).to_string() }),
-        task_list: Some(list(task_list)), schedule_id: 99, ..Default::default()
-    })).await;
-    assert!(stale.is_err(), "the former live owner must be fenced after the replacement takes the lease");
+    let stale = old
+        .add_activity_task(Request::new(m::AddActivityTaskRequest {
+            domain_id: DOMAIN_ID.to_string(),
+            source_domain_id: DOMAIN_ID.to_string(),
+            workflow_execution: Some(p::WorkflowExecution {
+                workflow_id: "stale".into(),
+                run_id: Uuid::from_u128(99).to_string(),
+            }),
+            task_list: Some(list(task_list)),
+            schedule_id: 99,
+            ..Default::default()
+        }))
+        .await;
+    assert!(
+        stale.is_err(),
+        "the former live owner must be fenced after the replacement takes the lease"
+    );
     let mut delivered = Vec::new();
     for _ in 0..20 {
         let mut request = Request::new(m::PollForActivityTaskRequest {
-            domain_id: DOMAIN_ID.to_string(), request: Some(p::PollForActivityTaskRequest { task_list: Some(list(task_list)), ..Default::default() }), ..Default::default()
+            domain_id: DOMAIN_ID.to_string(),
+            request: Some(p::PollForActivityTaskRequest {
+                task_list: Some(list(task_list)),
+                ..Default::default()
+            }),
+            ..Default::default()
         });
         request.set_timeout(Duration::from_secs(20));
-        let response = new.poll_for_activity_task(request).await.unwrap().into_inner();
+        let response = new
+            .poll_for_activity_task(request)
+            .await
+            .unwrap()
+            .into_inner();
         delivered.push(response.activity_id.parse::<i64>().unwrap());
     }
     delivered.sort_unstable();
     assert_eq!(delivered, (1..=20).collect::<Vec<_>>());
     old_registry.shutdown(now()).await.unwrap();
     new_registry.shutdown(now()).await.unwrap();
-    let key = TaskListKey { domain_id: DOMAIN_ID, name: task_list.into(), task_type: 1 };
+    let key = TaskListKey {
+        domain_id: DOMAIN_ID,
+        name: task_list.into(),
+        task_type: 1,
+    };
     assert!(store.get_tasks(&key, 0, i64::MAX, 100).unwrap().is_empty());
     history_server.abort();
     assert!(history_server.await.unwrap_err().is_cancelled());
