@@ -996,6 +996,24 @@ impl MatchingMetrics {
         poll_forwarded: bool,
         partition: Option<&BTreeMap<String, String>>,
     ) {
+        let isolation_success = partition.and_then(|config| {
+            config.get("isolation-group").map(|current| {
+                config.get("original-isolation-group").unwrap_or(current)
+                    == &context.poller_isolation_group
+            })
+        }).unwrap_or(false);
+        self.poll_match_with_isolation_result(context, task_forwarded, poll_forwarded, partition, isolation_success);
+    }
+
+    /// Native callers compare raw Go strings before converting metric labels.
+    pub fn poll_match_with_isolation_result(
+        &self,
+        context: &PollMetricContext,
+        task_forwarded: bool,
+        poll_forwarded: bool,
+        partition: Option<&BTreeMap<String, String>>,
+        isolation_success: bool,
+    ) {
         let name = match (task_forwarded, poll_forwarded) {
             (false, false) => LOCAL_TO_LOCAL_MATCH,
             (false, true) => LOCAL_TO_REMOTE_MATCH,
@@ -1028,7 +1046,7 @@ impl MatchingMetrics {
                 ),
             ]),
         );
-        if original == &context.poller_isolation_group {
+        if isolation_success {
             self.task_list_counter(
                 ISOLATION_SUCCESS,
                 context,

@@ -73,7 +73,7 @@ fn metrics_poll_observer_factory_with_names(
                 Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(
                     metrics.clone(),
                     context,
-                )) as Arc<dyn NativePollObserver>,
+                ).with_raw_isolation_group(isolation_group.clone())) as Arc<dyn NativePollObserver>,
             )
         },
     )
@@ -384,6 +384,24 @@ impl NativeQueryContext for NativeMatchingEngineContext {
 mod tests {
     use super::*;
     use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
+
+    #[test]
+    fn isolation_success_compares_raw_names_before_label_sanitization() {
+        use crate::matching_metrics::{MatchingMetrics, RecordingMetricSink, ISOLATION_TASK_MATCH, ISOLATION_SUCCESS};
+        use std::collections::BTreeMap;
+        let domain = GoString::from(uuid::Uuid::nil().to_string());
+        let task_group = GoString::from(b"zone-\xff".as_slice());
+        for (poller, matched) in [(task_group.clone(), true), (GoString::from(b"zone-\xfe".as_slice()), false), (GoString::from("zone-\u{fffd}"), false)] {
+            let sink = Arc::new(RecordingMetricSink::default());
+            let factory = metrics_poll_observer_factory_with_names(MatchingMetrics::new(sink.clone()), Arc::new(|_| Some("domain-a".into())));
+            let observer = factory(&domain, &GoString::from("list"), 0, 0, &poller).unwrap();
+            let partition = BTreeMap::from([(GoString::from("isolation-group"), task_group.clone())]);
+            observer.poll_match(false, false, Some(&partition));
+            let events = sink.events();
+            assert!(events.iter().any(|event| event.name == ISOLATION_TASK_MATCH));
+            assert_eq!(events.iter().any(|event| event.name == ISOLATION_SUCCESS), matched);
+        }
+    }
 
     #[test]
     fn poll_observers_keep_normal_and_sticky_tags_distinct() {

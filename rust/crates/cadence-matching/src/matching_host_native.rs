@@ -41,13 +41,19 @@ pub type NativeSemaphore = Arc<
 pub struct NativeMetricsPollObserver {
     metrics: crate::matching_metrics::MatchingMetrics,
     context: crate::matching_metrics::PollMetricContext,
+    raw_poller_isolation_group: GoString,
 }
 impl NativeMetricsPollObserver {
     pub fn new(
         metrics: crate::matching_metrics::MatchingMetrics,
         context: crate::matching_metrics::PollMetricContext,
     ) -> Self {
-        Self { metrics, context }
+        let raw_poller_isolation_group = GoString::from(context.poller_isolation_group.as_str());
+        Self { metrics, context, raw_poller_isolation_group }
+    }
+    pub fn with_raw_isolation_group(mut self, group: GoString) -> Self {
+        self.raw_poller_isolation_group = group;
+        self
     }
 }
 impl NativePollObserver for NativeMetricsPollObserver {
@@ -82,11 +88,18 @@ impl NativePollObserver for NativeMetricsPollObserver {
                 })
                 .collect()
         });
-        self.metrics.poll_match(
+        let isolation_success = partition.and_then(|config| {
+            config.get(b"isolation-group".as_slice()).map(|current| {
+                config.get(b"original-isolation-group".as_slice()).unwrap_or(current)
+                    == &self.raw_poller_isolation_group
+            })
+        }).unwrap_or(false);
+        self.metrics.poll_match_with_isolation_result(
             &self.context,
             task_forwarded,
             poll_forwarded,
             labels.as_ref(),
+            isolation_success,
         );
     }
     fn async_match_latency(&self, elapsed: Duration) {

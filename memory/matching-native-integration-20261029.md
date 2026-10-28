@@ -95,3 +95,20 @@ pin must include the cold-domain correction, typed-cache correction, timeout
 provider and runner formatting. PR https://github.com/auenkr/cadence-rust/pull/1
 is draft. T3 link/watch calls have failed with “The calling provider no longer
 owns an active thread run”; no successful automatic PR watch is established.
+
+Current workspace validation:
+https://github.com/auenkr/cadence-rust/actions/runs/40750262783 at
+`78bda6afcc3852eabeb4eade2110ca16609bb533` was confirmed live in the Go
+raw-string oracle prerequisite. Run 40749929974 concluded cancelled. Preserve
+the live run's eventual result; do not restart it merely for waiting.
+
+Follow-up source correction (not covered by that earlier pin): native poll
+observers now retain the raw poller isolation group and compare it with the
+task's original/current raw group before diagnostic label conversion. The
+shared metric emitter accepts that precomputed match result; existing string
+callers compute the same equality as before. Added an observer-factory
+regression for raw ff matching itself but not raw fe or U+FFFD, which all
+otherwise collapse to the same sanitized label. Label rendering remains the
+existing sink behavior; a label collision can no longer cause a false
+isolation-success increment. This source still needs runner formatting and
+fresh CI after reviewing the live earlier-pin run.
