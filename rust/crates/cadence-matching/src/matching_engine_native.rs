@@ -180,7 +180,10 @@ impl NativeMatchingEngine {
         };
         let kind = crate::matching_handler_native::persistence_kind(list.kind);
         let now = crate::grpc_matching::matching_now();
-        let entry = self.registry.get_with_deadline(key.clone(), kind, now, request_deadline).await?;
+        let entry = self
+            .registry
+            .get_with_deadline(key.clone(), kind, now, request_deadline)
+            .await?;
         if entry.stop_if_isolation_changed() {
             return Err(Status::internal("task list shutting down"));
         }
