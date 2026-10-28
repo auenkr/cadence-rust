@@ -95,3 +95,30 @@ their completed worktrees clean, then removed those worktrees and deleted
 local/remote `t3/matching-runtime-ownership`, `t3/native-matching-live-routing`
 and `t3/native-matching-assembly`. Evidence remains in master. The current
 second-wave workers use separate provisioned worktrees and were not removed.
+
+Second wave is integrated via real merges on master `10a9431ac`: automatic
+registry async admission and routing lifetime fix; actual weak-host publication
+and outer handler panic/forwarded metrics; queue-scoped scaler and engine poll
+metrics. Their notes describe required launcher/host call-site adaptations.
+Three current Terra tasks implement the configured production switch, bound
+queue admission by RPC deadlines, and add actual TCP HTTP Thrift/TChannel
+tests. At 16:48 UTC the second-wave CI runs40729269215/40729275395/40729369298
+were still in progress; first run was confirmed in Clippy. No pass is claimed.
+
+Second-wave completed worktrees were clean and their three remote heads were
+verified merged into origin/master; removed their worktrees and local/remote
+branches `t3/native-async-shard-admission`, `t3/activate-native-matching`, and
+`t3/matching-scoped-metrics`. Evidence remains in master.
+
+Source-confirmed remaining metric gap for next available implementation slot:
+`matching_dispatch_native.rs` delivery calls `observer.poll_match` with only
+task/poll forwarded booleans. `NativeMetricsPollObserver` consequently passes
+None as partition config. Legacy `matching_dispatch.rs` passes the actual task
+partition map into `MatchingMetrics::poll_match`, which emits
+`ISOLATION_TASK_MATCH` and `ISOLATION_SUCCESS` from isolation-group and
+original-isolation-group. Extend the native observer contract to pass the real
+byte-valued task partition metadata and update both registry and engine
+observer adapters. Preserve existing match counters; add a delivery-level
+regression. Reader isolation-leak metrics already exist; do not conflate those
+with these missing match emissions. This is source evidence, not a runtime
+parity conclusion. Current three tasks do not own native dispatch.
