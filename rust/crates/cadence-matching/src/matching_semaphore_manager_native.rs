@@ -116,6 +116,26 @@ struct LoadInFlight<'a> {
     completed: bool,
 }
 
+/// Restores a reserved slot when a conditional write future is cancelled or
+/// returns an ambiguous error. A confirmed SlotTaken disarms this guard.
+struct Reservation<'a> {
+    manager: &'a Manager,
+    token_id: i32,
+    restore: bool,
+}
+
+impl Reservation<'_> {
+    fn consumed(&mut self) { self.restore = false; }
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if self.restore {
+            self.manager.restore_reservation(self.token_id);
+        }
+    }
+}
+
 impl Drop for LoadInFlight<'_> {
     fn drop(&mut self) {
         if !self.completed {
@@ -358,6 +378,7 @@ impl Manager {
             let Some(token_id) = self.reserve() else {
                 break;
             };
+            let mut reservation = Reservation { manager: self, token_id, restore: true };
             let outcome = self.store.grant_semaphore_token(
                 &self.id.domain_id,
                 &self.id.semaphore_name,
@@ -370,37 +391,38 @@ impl Manager {
                 Err(error) => {
                     // Like Go, an ambiguous failed write must not drain the
                     // cache. The next conditional write resolves ownership.
-                    self.unreserve(token_id);
                     return Err(error.into());
                 }
             };
             match outcome {
                 GrantOutcome::Applied => {
-                    self.record_hold(owner_id, token_id);
+                    reservation.consumed();
+                    self.record_hold_if_running(owner_id, token_id);
                     return Ok(AcquireResult {
                         outcome: SemaphoreAcquireOutcome::Acquired,
                         token_id,
                     });
                 }
-                GrantOutcome::SlotTaken => continue,
+                GrantOutcome::SlotTaken => { reservation.consumed(); continue },
                 GrantOutcome::Unknown => {
                     // Like Go's default branch: an outcome we cannot read says
                     // nothing about the slot, so the id goes back.
-                    self.unreserve(token_id);
                     return Err(ManagerError::Internal(format!(
                         "unexpected grant outcome for bucket {}",
                         self.id.to_log_string().go_quoted_string()
                     )));
                 }
                 GrantOutcome::AlreadyHeld(held_token) => {
-                    self.unreserve(token_id);
+                    // Return the tentative slot before removing the authoritative
+                    // held slot; the ids may be the same.
+                    drop(reservation);
                     if held_token < 1 {
                         return Err(ManagerError::Internal(format!(
                             "grant reported an already-held slot without a token for bucket {}",
                             self.id.to_log_string().go_quoted_string()
                         )));
                     }
-                    self.record_hold(owner_id, held_token);
+                    self.record_hold_if_running(owner_id, held_token);
                     return Ok(AcquireResult {
                         outcome: SemaphoreAcquireOutcome::Acquired,
                         token_id: held_token,
@@ -448,14 +470,19 @@ impl Manager {
         Some(token_id)
     }
 
-    fn unreserve(&self, token_id: i32) {
-        add_to_free_set(&mut self.index.lock().expect("semaphore manager lock"), token_id);
+    fn restore_reservation(&self, token_id: i32) {
+        let mut index = self.index.lock().expect("semaphore manager lock");
+        if index.state == State::Running {
+            add_to_free_set(&mut index, token_id);
+        }
     }
 
-    fn record_hold(&self, owner_id: &GoString, token_id: i32) {
+    fn record_hold_if_running(&self, owner_id: &GoString, token_id: i32) {
         let mut index = self.index.lock().expect("semaphore manager lock");
-        index.held.insert(owner_id.clone(), token_id);
-        remove_from_free_set(&mut index, token_id);
+        if index.state == State::Running {
+            index.held.insert(owner_id.clone(), token_id);
+            remove_from_free_set(&mut index, token_id);
+        }
     }
 
     fn drop_stale_hold(&self, owner_id: &GoString, token_id: i32, still_free: bool) {
@@ -638,9 +665,61 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_persistence::semaphores_native::{InMemorySemaphorePersistenceBytes, SemaphorePersistenceBytes};
+    use cadence_persistence::{semaphores::{AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata}, semaphores_native::{InMemorySemaphorePersistenceBytes, SemaphoreBucketPageBytes, SemaphorePersistenceBytes}};
+    use async_trait::async_trait;
+    use tokio::sync::Notify;
 
     fn bytes(value: &[u8]) -> GoString { GoString::from(value.to_vec()) }
+
+    #[derive(Debug)]
+    struct ParkGrant {
+        inner: InMemorySemaphorePersistenceBytes,
+        entered: Notify,
+        release: Notify,
+        scan_pages: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait]
+    impl SemaphorePersistenceBytes for ParkGrant {
+        async fn create_semaphore(&self, d: &GoString, n: &GoString, s: i32, b: i32) -> Result<SemaphoreMetadata, SemaphoreError> { self.inner.create_semaphore(d,n,s,b).await }
+        async fn get_semaphore_metadata(&self,d:&GoString,n:&GoString)->Result<SemaphoreMetadata,AcquireError>{ self.inner.get_semaphore_metadata(d,n).await }
+        async fn scan_semaphore_bucket(&self,d:&GoString,n:&GoString,b:i32,_p:usize,t:Option<&[u8]>)->Result<SemaphoreBucketPageBytes,AcquireError>{
+            self.scan_pages.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let all = self.inner.scan_semaphore_bucket(d,n,b,usize::MAX,None).await?;
+            let offset = t.and_then(|v| std::str::from_utf8(v).ok()).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+            let end = (offset + 1).min(all.rows.len());
+            let next_page_token = (end < all.rows.len()).then(|| end.to_string().into_bytes());
+            Ok(SemaphoreBucketPageBytes { rows: all.rows.into_iter().skip(offset).take(1).collect(), next_page_token })
+        }
+        async fn get_semaphore_ownership_by_token(&self,d:&GoString,n:&GoString,b:i32,t:i32)->Result<GoString,AcquireError>{ self.inner.get_semaphore_ownership_by_token(d,n,b,t).await }
+        async fn get_semaphore_ownership_by_owner(&self,d:&GoString,n:&GoString,b:i32,o:&GoString)->Result<i32,AcquireError>{ self.inner.get_semaphore_ownership_by_owner(d,n,b,o).await }
+        async fn grant_semaphore_token(&self,d:&GoString,n:&GoString,b:i32,t:i32,o:&GoString)->Result<GrantOutcome,AcquireError>{ self.entered.notify_one(); self.release.notified().await; self.inner.grant_semaphore_token(d,n,b,t,o).await }
+        async fn release_semaphore_token(&self,d:&GoString,n:&GoString,b:i32,t:i32,o:&GoString)->Result<bool,AcquireError>{ self.inner.release_semaphore_token(d,n,b,t,o).await }
+    }
+
+    #[tokio::test]
+    async fn cancelled_conditional_write_restores_reservation_and_restart_scans_consistently() {
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        let domain = bytes(b"cancel-d");
+        let name = bytes(b"cancel-s");
+        inner.create_semaphore(&domain, &name, 3, 3).await.unwrap();
+        let store = Arc::new(ParkGrant { inner, entered: Notify::new(), release: Notify::new(), scan_pages: std::sync::atomic::AtomicUsize::new(0) });
+        let registry = Registry::new(store.clone());
+        let id = Identifier::new(domain.clone(), name.clone(), 0).unwrap();
+        let manager = registry.get_or_create(id.clone()).await.unwrap();
+        assert!(store.scan_pages.load(std::sync::atomic::Ordering::SeqCst) > 1, "startup fixture must page across multiple rows");
+        let pending = { let manager = manager.clone(); tokio::spawn(async move { manager.acquire(&bytes(b"1:x:r:1"), None).await }) };
+        store.entered.notified().await;
+        pending.abort();
+        let _ = pending.await;
+        store.release.notify_one();
+        assert_eq!(manager.free_count(), 1);
+        let result = manager.acquire(&bytes(b"1:y:r:2"), None).await.unwrap();
+        assert_eq!(result.outcome, SemaphoreAcquireOutcome::Acquired);
+        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, result.token_id).await.unwrap(), bytes(b"1:y:r:2"));
+        manager.stop();
+        let restarted = registry.get_or_create(id).await.unwrap();
+        assert_eq!(restarted.acquire(&bytes(b"1:y:r:2"), None).await.unwrap().token_id, result.token_id);
+    }
 
     #[tokio::test]
     async fn native_acquire_reacquires_exact_owner_bytes_and_respects_fencing() {
@@ -669,13 +748,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn startup_scans_pages_and_stopped_manager_is_replaced() {
+    async fn startup_discovers_hold_and_stopped_manager_is_replaced() {
         let store = Arc::new(InMemorySemaphorePersistenceBytes::default());
         let domain = bytes(b"d");
         let name = bytes(b"s");
         store.create_semaphore(&domain, &name, 3, 3).await.unwrap();
-        // Seed a hold that startup must discover; the page size is intentionally tiny here
-        // through a direct manager load fixture in the persistence scan contract.
+        // Seed a hold that startup must discover.
         let held_owner = bytes(b"1:w:r:9");
         store.grant_semaphore_token(&domain, &name, 0, 2, &held_owner).await.unwrap();
         let registry = Registry::new(store);

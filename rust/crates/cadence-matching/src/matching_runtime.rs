@@ -89,6 +89,7 @@ use tokio::{sync::oneshot, task::JoinHandle};
 pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
 pub type EvictFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 pub type EvictSelf = Arc<dyn Fn() -> EvictFuture + Send + Sync>;
+type NativeMembershipTask = (oneshot::Sender<()>, JoinHandle<Result<(), tonic::Status>>);
 
 fn ensure_queue_registry_unowned(
     legacy: bool,
@@ -125,13 +126,16 @@ pub struct MatchingRuntime {
     matching: Matching,
     registry: Option<crate::matching_registry::QueueRegistry>,
     native_registry: Option<crate::matching_registry_native::NativeQueueRegistry>,
+    native_host: Option<Arc<crate::matching_service_native::NativeMatchingService<crate::matching_host_native::NativeMatchingHost>>>,
+    native_semaphore: Option<crate::matching_semaphore_service_native::NativeSemaphoreService>,
+    native_semaphore_maintenance: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     maintenance_stop: Option<oneshot::Sender<()>>,
     maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     membership_maintenance_stop: Option<oneshot::Sender<()>>,
     membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     native_domain_registry: Arc<Mutex<Option<crate::matching_registry_native::NativeQueueRegistry>>>,
-    native_membership_maintenance: Option<(oneshot::Sender<()>, JoinHandle<Result<(), tonic::Status>>)>,
+    native_membership_maintenance: Option<NativeMembershipTask>,
     membership: Option<crate::matching_membership::Membership>,
     dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
@@ -170,6 +174,9 @@ impl MatchingRuntime {
             matching: Matching::new(state),
             registry: None,
             native_registry: None,
+            native_host: None,
+            native_semaphore: None,
+            native_semaphore_maintenance: None,
             maintenance_stop: None,
             maintenance: None,
             membership_maintenance_stop: None,
@@ -214,6 +221,9 @@ impl MatchingRuntime {
             matching,
             registry: Some(registry),
             native_registry: None,
+            native_host: None,
+            native_semaphore: None,
+            native_semaphore_maintenance: None,
             maintenance_stop: Some(stop),
             maintenance: Some(maintenance),
             membership_maintenance_stop: None,
@@ -264,6 +274,51 @@ impl MatchingRuntime {
             self.start_native_membership_maintenance(membership);
         }
         Ok(self)
+    }
+
+    /// Attach the native host lifecycle before exposing listeners. The semaphore
+    /// uses the same membership stream as queue ownership and is swept even on
+    /// an otherwise idle host.
+    pub fn with_native_host(
+        mut self,
+        registry: crate::matching_registry_native::NativeQueueRegistry,
+        host: Arc<crate::matching_service_native::NativeMatchingService<crate::matching_host_native::NativeMatchingHost>>,
+        semaphore: crate::matching_semaphore_service_native::NativeSemaphoreService,
+        membership: crate::matching_membership::Membership,
+    ) -> anyhow::Result<Self> {
+        self = self.with_native_queues(registry, host.clone())?;
+        let mut changes = membership.subscribe();
+        let (stop, mut stopped) = oneshot::channel();
+        let service = semaphore.clone();
+        let task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            for error in service.sweep_non_owned() {
+                eprintln!("Native Matching semaphore membership cleanup failed: {error}");
+            }
+            loop {
+                tokio::select! {
+                    _ = &mut stopped => break,
+                    _ = interval.tick() => service.sweep_idle(crate::grpc_matching::matching_now()),
+                    changed = changes.changed() => {
+                        if changed.is_err() { break; }
+                        for error in service.sweep_non_owned() {
+                            eprintln!("Native Matching semaphore membership cleanup failed: {error}");
+                        }
+                    }
+                }
+            }
+        });
+        self.native_host = Some(host);
+        self.native_semaphore = Some(semaphore);
+        self.native_semaphore_maintenance = Some((stop, task));
+        Ok(self)
+    }
+
+    /// Open native admission only after the shared listener and membership start.
+    pub fn mark_started(&self) {
+        if let Some(host) = &self.native_host {
+            host.integration.mark_started();
+        }
     }
 
     /// Go `matchingEngineImpl.isShuttingDown`: false until the drain completes.
@@ -777,6 +832,9 @@ impl MatchingRuntime {
         // known", the shard-distributor executor stops) only in handler.Stop,
         // i.e. after EvictSelf and the drain sleep.
         self.matching.begin_shutdown();
+        if let Some(host) = &self.native_host {
+            host.integration.begin_shutdown();
+        }
         if let Some(drain) = &self.shard_distributor_drain {
             let _ = drain.send(true);
         }
@@ -863,6 +921,13 @@ impl MatchingRuntime {
         if let Some(registry) = &self.native_registry {
             registry.wait_for_writers().await;
         }
+        let native_semaphore_result = if let Some((stop, task)) = self.native_semaphore_maintenance.take() {
+            let _ = stop.send(());
+            task.await.map_err(|error| anyhow::anyhow!("joining native semaphore maintenance: {error}"))
+        } else { Ok(()) };
+        if let Some(semaphore) = &self.native_semaphore {
+            semaphore.stop_all();
+        }
         // Go Stop also stops every semaphore bucket, not only the ones the ring moved away.
         self.matching.stop_semaphores();
         let membership_result = if let Some(maintenance) = self.membership_maintenance.take() {
@@ -885,6 +950,7 @@ impl MatchingRuntime {
         }
         maintenance_result?;
         native_membership_result?;
+        native_semaphore_result?;
         membership_result?;
         peer_cleanup_result?;
         dynamic_config_result?;
@@ -908,6 +974,13 @@ impl Drop for MatchingRuntime {
         }
         if let Some(task) = self.membership_maintenance.take() {
             task.abort();
+        }
+        if let Some((stop, task)) = self.native_semaphore_maintenance.take() {
+            let _ = stop.send(());
+            task.abort();
+        }
+        if let Some(semaphore) = &self.native_semaphore {
+            semaphore.stop_all();
         }
         if let Some((stop, task)) = self.native_membership_maintenance.take() {
             let _ = stop.send(());

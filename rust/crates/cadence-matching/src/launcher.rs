@@ -793,15 +793,19 @@ pub async fn run(
                 } else {
                     None
                 };
+            let mut _native_semaphore_store = None;
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
                 // Go constructs semaphore persistence from the configured
                 // default datastore and shares that datastore's limiter with
                 // task and domain persistence.
-                let store =
-                    crate::matching_task_store::open_configured_semaphore_store(&cfg.persistence)
+                let stores =
+                    crate::matching_task_store::open_configured_semaphore_stores(&cfg.persistence)
                         .await?;
                 state.semaphore_persistence = Some(
-                    crate::matching_persistence::limit_semaphore_store(store, limiter.clone()),
+                    crate::matching_persistence::limit_semaphore_store(stores.legacy, limiter.clone()),
+                );
+                _native_semaphore_store = Some(
+                    crate::matching_persistence::limit_semaphore_store_bytes(stores.native, limiter.clone()),
                 );
             }
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
@@ -1561,6 +1565,9 @@ pub async fn run(
                 }
             }
             matching_service.mark_started();
+            if let Some(runtime) = matching_runtime.as_ref() {
+                runtime.mark_started();
+            }
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app

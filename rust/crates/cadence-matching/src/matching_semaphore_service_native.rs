@@ -87,19 +87,24 @@ impl NativeSemaphoreService {
     async fn acquire_inner(&self, r: &n::matching::AcquireSemaphoreRequest, deadline: Option<tokio::time::Instant>, cancelled: Option<tokio::sync::watch::Receiver<bool>>) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         parse_owner_bytes(r.owner_id.as_bytes()).map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
         let id = IdentifierBytes::new(r.domain_id.clone(), r.semaphore_name.clone(), r.bucket).map_err(identifier_status)?;
-        // Startup is independent of the request context and bounded by Go's 30 second timeout.
-        let manager = tokio::time::timeout(Duration::from_secs(30), async {
-            if let Some(manager) = self.registry.by_identifier(&id) {
-                manager.start().await.map_err(status)?;
-                Ok(manager)
-            } else {
-                let domain = (self.domain_name)(&id.domain_id)?;
-                let (enabled, ttl) = (self.config)(&domain);
-                if !enabled { return Err(status(ManagerError::Disabled)); }
-                self.check_ownership(&id)?;
-                self.registry.get_or_create_with_idle_ttl(id, ttl).await.map_err(status)
-            }
-        }).await.map_err(|_| Status::deadline_exceeded("context deadline exceeded"))??;
+        // Go gives only Manager.Start its independent background timeout. Domain
+        // lookup and ring ownership checks happen before that clock starts.
+        let manager = if let Some(manager) = self.registry.by_identifier(&id) {
+            tokio::time::timeout(Duration::from_secs(30), manager.start())
+                .await
+                .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+                .map_err(status)?;
+            manager
+        } else {
+            let domain = (self.domain_name)(&id.domain_id)?;
+            let (enabled, ttl) = (self.config)(&domain);
+            if !enabled { return Err(status(ManagerError::Disabled)); }
+            self.check_ownership(&id)?;
+            tokio::time::timeout(Duration::from_secs(30), self.registry.get_or_create_with_idle_ttl(id, ttl))
+                .await
+                .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+                .map_err(status)?
+        };
         if let Some(ended) = caller_ended(deadline, cancelled.as_ref()) { return Err(Status::internal(ended)); }
         let acquire = manager.acquire(&r.owner_id, deadline);
         tokio::pin!(acquire);

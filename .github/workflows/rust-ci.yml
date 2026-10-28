@@ -245,6 +245,7 @@ jobs:
             crates/cadence-matching/src/matching_control_context_native.rs
             crates/cadence-matching/src/matching_engine_context_native.rs
             crates/cadence-matching/src/matching_host_native.rs
+            crates/cadence-matching/src/matching_launch_native.rs
             crates/cadence-matching/src/matching_semaphore_native.rs
             crates/cadence-matching/src/matching_semaphore_manager_native.rs
             crates/cadence-matching/src/matching_semaphore_service_native.rs

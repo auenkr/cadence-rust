@@ -10,6 +10,7 @@ use crate::{
     matching_history::MatchingHistoryClient,
     matching_registry_native::{NativeDomainHooks, NativeFatalSinks, NativeQueueRegistry},
     matching_reader::ReaderLive,
+    matching_reader_native::NativeIsolationConfig,
 };
 use cadence_common::go_string::GoString;
 use cadence_persistence::{
@@ -153,6 +154,41 @@ pub fn native_queue_registry(
             }
         })
     };
+    let isolation = {
+        let cache = cache.clone();
+        let overlay = overlay.clone();
+        Arc::new(move |domain: &GoString, task: &GoString, _task_type: i32, kind: i16,
+                       _pollers: Arc<crate::matching_registry_native::NativePollerManager>,
+                       _partitions: Arc<crate::matching_partition_native::NativePartitionCache>| {
+            let name = cached_domain_name(&cache, domain);
+            let config = overlay.lock().expect("admin lock");
+            let enabled = cadence_persistence::dynamic_config::boolean(
+                config.property_values("system.enableTasklistIsolation"), name.as_deref(), false);
+            let raw_groups = cadence_persistence::dynamic_config::string_list(
+                config.property_values("system.allIsolationGroups"));
+            let groups: Vec<GoString> = if enabled && kind != 1 {
+                raw_groups.into_iter().map(GoString::from).collect()
+            } else { Vec::new() };
+            let known = groups.clone();
+            let reload_name = name.clone();
+            let reload_overlay = overlay.clone();
+            NativeIsolationConfig {
+                groups,
+                should_reload: Arc::new(move || {
+                    let config = reload_overlay.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::boolean(config.property_values("system.enableTasklistIsolation"), reload_name.as_deref(), false) != enabled
+                }),
+                select: Arc::new(move |data| {
+                    let requested = data.partition_config.as_ref().and_then(|map| map.get(b"isolation-group".as_slice())).cloned().unwrap_or_default();
+                    if enabled && known.contains(&requested) {
+                        (requested, 0, None)
+                    } else {
+                        (GoString::default(), 0, None)
+                    }
+                }),
+            }
+        }) as crate::matching_registry_native::NativeIsolationProvider
+    };
 
     NativeQueueRegistry::new(store, history, range_size)
         .with_domain_hooks(hooks)
@@ -171,6 +207,7 @@ pub fn native_queue_registry(
         .with_idle_tasklist_check_interval(idle_check)
         .with_max_task_delete_batch_size(delete_batch)
         .with_writer_live(writer_live)
+        .with_isolation(isolation)
         .with_fatal_sinks(fatal)
 }
 
@@ -272,6 +309,16 @@ mod tests {
         let replacement = task_list_boolean(&overlay, "native.boolean", &cache, &GoString::from("unknown"), &GoString::from("\u{fffd}"), 0, true);
         assert!(invalid);
         assert!(!replacement);
+    }
+
+    #[test]
+    fn native_isolation_names_preserve_distinct_invalid_bytes() {
+        let replacement = GoString::from("\u{fffd}");
+        let invalid = GoString::from(&b"\xff"[..]);
+        assert_ne!(replacement, invalid);
+        let groups = [replacement, invalid];
+        assert_eq!(groups[0].as_bytes(), "\u{fffd}".as_bytes());
+        assert_eq!(groups[1].as_bytes(), &[0xff]);
     }
 
     #[test]
