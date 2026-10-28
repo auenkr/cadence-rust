@@ -1815,11 +1815,13 @@ mod tests {
             let matcher = matcher.clone();
             tokio::spawn(async move { matcher.poll(&gs(b"g\xff")).await })
         };
+        let group = gs(b"g\xff");
+        let source_domain = gs(b"src");
         let offered = matcher
             .offer(
                 raw_task(b"\xff\xfe"),
-                &gs(b"g\xff"),
-                &gs(b"src"),
+                &group,
+                &source_domain,
                 false,
                 Duration::from_millis(500),
                 tokio::time::Instant::now() + Duration::from_secs(2),
