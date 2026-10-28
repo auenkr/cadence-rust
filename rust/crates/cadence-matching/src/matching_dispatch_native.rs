@@ -1492,14 +1492,12 @@ mod tests {
         );
         let tasks: Vec<TaskDataBytes> = workflows
             .iter()
-            .map(|id| {
-                TaskDataBytes {
-                    workflow_id: gs(id),
-                    schedule_id: 2,
-                    created_nanos: now(),
-                    expiry_nanos: cadence_persistence::matching_blob::GO_ZERO_TIME_NANOS,
-                    ..Default::default()
-                }
+            .map(|id| TaskDataBytes {
+                workflow_id: gs(id),
+                schedule_id: 2,
+                created_nanos: now(),
+                expiry_nanos: cadence_persistence::matching_blob::GO_ZERO_TIME_NANOS,
+                ..Default::default()
             })
             .collect();
         queue.append(&tasks, now()).unwrap();

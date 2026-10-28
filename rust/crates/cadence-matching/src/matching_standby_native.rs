@@ -42,7 +42,10 @@ type Describe = Arc<
             GoString,
             AllocatedTaskBytes,
         ) -> Pin<
-            Box<dyn Future<Output = Result<n::history::DescribeWorkflowExecutionResponse, Status>> + Send>,
+            Box<
+                dyn Future<Output = Result<n::history::DescribeWorkflowExecutionResponse, Status>>
+                    + Send,
+            >,
         > + Send
         + Sync,
 >;
@@ -157,7 +160,11 @@ struct Deps {
 }
 
 /// One completer attempt: `Ok(Some(b))` is final, `Ok(None)` and `Err` retry.
-async fn attempt(deps: &Deps, domain_id: &GoString, task: &AllocatedTaskBytes) -> Result<Option<bool>, Status> {
+async fn attempt(
+    deps: &Deps,
+    domain_id: &GoString,
+    task: &AllocatedTaskBytes,
+) -> Result<Option<bool>, Status> {
     let domain = (deps.domains)(domain_id)?;
     if domain.active_in_cluster {
         return Ok(Some(false));
@@ -186,8 +193,10 @@ async fn attempt(deps: &Deps, domain_id: &GoString, task: &AllocatedTaskBytes) -
                 super::grpc_matching::matching_now().saturating_sub(task.data.created_nanos),
             );
             if matches!(result, Ok(Some(true))) {
-                deps.metrics
-                    .task_list_counter_event(crate::matching_metrics::STANDBY_TASKS_COMPLETED, &deps.context);
+                deps.metrics.task_list_counter_event(
+                    crate::matching_metrics::STANDBY_TASKS_COMPLETED,
+                    &deps.context,
+                );
             }
             result
         }
@@ -238,9 +247,13 @@ fn dispatch(deps: Deps) -> DispatchCheckNative {
         let deps = deps.clone();
         Box::pin(async move {
             let started = std::time::Instant::now();
-            run(deps, task, completer_retry_policy(), tokio::time::sleep, move || {
-                started.elapsed()
-            })
+            run(
+                deps,
+                task,
+                completer_retry_policy(),
+                tokio::time::sleep,
+                move || started.elapsed(),
+            )
             .await
         })
     })
@@ -345,13 +358,19 @@ mod tests {
     fn deps(
         domains: DomainResolverNative,
         task_type: i32,
-        reply: impl Fn() -> Result<n::history::DescribeWorkflowExecutionResponse, Status> + Send + Sync + 'static,
+        reply: impl Fn() -> Result<n::history::DescribeWorkflowExecutionResponse, Status>
+            + Send
+            + Sync
+            + 'static,
     ) -> (Arc<Deps>, Seen, Arc<RecordingMetricSink>) {
         let sink = Arc::new(RecordingMetricSink::default());
         let seen: Seen = Arc::default();
         let recorded = seen.clone();
         let describe: Describe = Arc::new(move |id, name, task| {
-            recorded.lock().unwrap().push((id, name, task.data.workflow_id.clone()));
+            recorded
+                .lock()
+                .unwrap()
+                .push((id, name, task.data.workflow_id.clone()));
             let r = reply();
             Box::pin(async move { r })
         });
@@ -397,10 +416,16 @@ mod tests {
         assert!(task_started_native(1, 5, &with_activity(6, a_sched)).unwrap());
         assert!(!task_started_native(1, 5, &with_activity(5, a_sched)).unwrap());
         let mut closed = with_decision(5, scheduled);
-        closed.workflow_execution_info.as_mut().unwrap().close_status = 1;
+        closed
+            .workflow_execution_info
+            .as_mut()
+            .unwrap()
+            .close_status = 1;
         assert!(task_started_native(0, 5, &closed).unwrap());
         assert_eq!(
-            task_started_native(0, 1, &Default::default()).unwrap_err().message(),
+            task_started_native(0, 1, &Default::default())
+                .unwrap_err()
+                .message(),
             "workflow execution info is nil"
         );
         assert_eq!(
@@ -415,7 +440,10 @@ mod tests {
         assert!(once(d, task(1, 0)).await.unwrap());
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].0.as_bytes(), uuid::Uuid::from_u128(3).to_string().as_bytes());
+        assert_eq!(
+            seen[0].0.as_bytes(),
+            uuid::Uuid::from_u128(3).to_string().as_bytes()
+        );
         assert_eq!(seen[0].1.as_bytes(), b"dom-\xff");
         assert_eq!(seen[0].2.as_bytes(), b"wf-\xff\xfe");
         assert_eq!(count(&sink, STANDBY_TASKS_COMPLETED), 1);
@@ -451,7 +479,9 @@ mod tests {
     #[tokio::test]
     async fn not_started_counts_not_started_and_not_failure_after_exhaustion() {
         let scheduled = p::PendingDecisionState::Scheduled as i32;
-        let (d, seen, sink) = deps(resolver(false, false), 0, move || Ok(with_decision(5, scheduled)));
+        let (d, seen, sink) = deps(resolver(false, false), 0, move || {
+            Ok(with_decision(5, scheduled))
+        });
         let err = run(
             d,
             task(5, 0),
@@ -469,14 +499,18 @@ mod tests {
 
     #[tokio::test]
     async fn domain_lookup_and_history_errors_retry_then_return_original_error_once() {
-        for which in ["error-getting-domain-by-id", "error-describing-workflow-execution"] {
+        for which in [
+            "error-getting-domain-by-id",
+            "error-describing-workflow-execution",
+        ] {
             let domains: DomainResolverNative = if which.starts_with("error-getting") {
                 Arc::new(|_| Err(Status::unavailable("error-getting-domain-by-id")))
             } else {
                 resolver(false, false)
             };
-            let (d, seen, sink) =
-                deps(domains, 0, || Err(Status::unavailable("error-describing-workflow-execution")));
+            let (d, seen, sink) = deps(domains, 0, || {
+                Err(Status::unavailable("error-describing-workflow-execution"))
+            });
             let err = run(
                 d,
                 task(1, 0),
@@ -489,7 +523,11 @@ mod tests {
             assert_eq!(err.message(), which);
             assert_eq!(
                 seen.lock().unwrap().len(),
-                if which.starts_with("error-getting") { 0 } else { 4 }
+                if which.starts_with("error-getting") {
+                    0
+                } else {
+                    4
+                }
             );
             assert_eq!(count(&sink, STANDBY_TASKS_COMPLETION_FAILURE), 1, "{which}");
         }
@@ -499,13 +537,23 @@ mod tests {
     async fn young_missing_execution_waits_and_counts_failure_only_after_exhaustion() {
         // EntityNotExists detail is only recognised by `missing_execution`; an
         // unrecognised NotFound must be returned as a plain History error.
-        let (d, _, sink) = deps(resolver(false, false), 0, || Err(Status::not_found("plain")));
+        let (d, _, sink) = deps(resolver(false, false), 0, || {
+            Err(Status::not_found("plain"))
+        });
         let err = once(d, task(1, 0)).await.unwrap_err();
         assert_eq!(err.message(), "plain");
         assert_eq!(count(&sink, STANDBY_TASKS_COMPLETION_FAILURE), 1);
         assert_eq!(count(&sink, STANDBY_TASKS_COMPLETED), 0);
-        assert_eq!(missing_execution_result(86_400_000_000_000).unwrap_err().code(), tonic::Code::Unavailable);
-        assert_eq!(missing_execution_result(86_400_000_000_001).unwrap(), Some(true));
+        assert_eq!(
+            missing_execution_result(86_400_000_000_000)
+                .unwrap_err()
+                .code(),
+            tonic::Code::Unavailable
+        );
+        assert_eq!(
+            missing_execution_result(86_400_000_000_001).unwrap(),
+            Some(true)
+        );
     }
 
     #[tokio::test]
@@ -519,8 +567,8 @@ mod tests {
                     Vec::new(),
                 ))
             });
-            let created = crate::grpc_matching::matching_now()
-                - if old { 86_401_000_000_000 } else { 0 };
+            let created =
+                crate::grpc_matching::matching_now() - if old { 86_401_000_000_000 } else { 0 };
             let result = once(d, task(1, created)).await;
             assert_eq!(seen.lock().unwrap().len(), 1);
             if old {
@@ -528,8 +576,10 @@ mod tests {
                 assert_eq!(count(&sink, STANDBY_TASKS_COMPLETED), 1);
                 assert_eq!(count(&sink, STANDBY_TASKS_COMPLETION_FAILURE), 0);
             } else {
-                assert_eq!(result.unwrap_err().message(),
-                    "wait time not reached for workflow EntityNotExistsError");
+                assert_eq!(
+                    result.unwrap_err().message(),
+                    "wait time not reached for workflow EntityNotExistsError"
+                );
                 assert_eq!(count(&sink, STANDBY_TASKS_COMPLETED), 0);
                 assert_eq!(count(&sink, STANDBY_TASKS_COMPLETION_FAILURE), 1);
             }
@@ -539,10 +589,14 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_checker_counts_one_completion_failure() {
-        let (d, _, sink) = deps(Arc::new(|_| Err(Status::unavailable("x"))), 0, || Ok(state()));
+        let (d, _, sink) = deps(Arc::new(|_| Err(Status::unavailable("x"))), 0, || {
+            Ok(state())
+        });
         let check = dispatch(Arc::into_inner(d).unwrap());
         let mut future = check(task(1, 0));
-        assert!(tokio::time::timeout(Duration::from_millis(10), &mut future).await.is_err());
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut future)
+            .await
+            .is_err());
         assert!(sink.events().is_empty());
         drop(future);
         assert_eq!(count(&sink, STANDBY_TASKS_COMPLETION_FAILURE), 1);
