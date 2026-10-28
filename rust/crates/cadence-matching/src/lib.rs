@@ -48,6 +48,8 @@ pub mod matching_history_membership;
 pub mod matching_history_peer_resolver;
 #[allow(clippy::result_large_err)]
 pub mod matching_standby;
+#[allow(clippy::result_large_err)]
+pub mod matching_standby_native;
 // Injected client faults are tonic Status, like the forwarding call sites.
 mod matching_blocking;
 pub mod matching_config;

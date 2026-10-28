@@ -232,6 +232,7 @@ jobs:
             crates/cadence-matching/src/thrift_matching_native_responses.rs
             crates/cadence-matching/src/matching_native_status.rs
             crates/cadence-matching/src/matching_dispatch_native.rs
+            crates/cadence-matching/src/matching_standby_native.rs
             crates/cadence-matching/src/matching_query_native.rs
             crates/cadence-matching/src/matching_partition_native.rs
             crates/cadence-matching/src/matching_reader_native.rs

@@ -64,7 +64,8 @@ pub trait NativeMatchingApi: Send + Sync {
 pub trait NativePollObserver: Send + Sync {
     fn poller_count(&self, _count: usize) {}
     fn poll_success(&self, _sync: bool) {}
-    fn poll_match_latency(&self, _elapsed: Duration, _forwarded_poll: bool, _forward_failed: bool) {}
+    fn poll_match_latency(&self, _elapsed: Duration, _forwarded_poll: bool, _forward_failed: bool) {
+    }
     fn poll_match(&self, _task_forwarded: bool, _poll_forwarded: bool) {}
     fn async_match_latency(&self, _latency: Duration) {}
     fn poll_already_started(&self) {}
@@ -124,7 +125,7 @@ impl Drop for NativePollWaitGuard {
     }
 }
 
-pub(crate) enum NativeParent {
+pub enum NativeParent {
     Dispatcher(Box<NativeTaskDispatcher>),
     Service(Arc<dyn NativeMatchingApi>),
 }
@@ -133,7 +134,7 @@ type ParentResolver = dyn Fn() -> ParentFuture + Send + Sync;
 
 /// Go `forwarder.ForwardPoll` / `ForwardTask` state; see legacy `ForwardState`.
 #[derive(Clone)]
-pub(crate) struct NativeForwardState {
+pub struct NativeForwardState {
     resolve: Arc<ParentResolver>,
     source: GoString,
     local_wait: crate::matching_forward::Count,
@@ -157,7 +158,10 @@ trait NativeForwardPollRequest<R>: Clone + Send {
     fn for_parent(&self, name: &GoString) -> Self;
     fn forward(self, target: ForwardPoll) -> ForwardResult<R>;
 }
-fn parent_task_list(request_list: Option<&n::api::TaskList>, name: &GoString) -> Option<n::api::TaskList> {
+fn parent_task_list(
+    request_list: Option<&n::api::TaskList>,
+    name: &GoString,
+) -> Option<n::api::TaskList> {
     Some(n::api::TaskList {
         name: name.clone(),
         kind: request_list.map(|list| list.kind).unwrap_or_default(),
@@ -174,7 +178,10 @@ impl NativeForwardPollRequest<n::matching::PollForDecisionTaskResponse>
             ..Default::default()
         }
     }
-    fn forward(self, target: ForwardPoll) -> ForwardResult<n::matching::PollForDecisionTaskResponse> {
+    fn forward(
+        self,
+        target: ForwardPoll,
+    ) -> ForwardResult<n::matching::PollForDecisionTaskResponse> {
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let request = n::matching::PollForDecisionTaskRequest {
@@ -184,7 +191,10 @@ impl NativeForwardPollRequest<n::matching::PollForDecisionTaskResponse>
                 forwarded_from: target.forwarded_from,
                 isolation_group: target.isolation_group,
             };
-            target.target.poll_for_decision_task(request, target.deadline).await
+            target
+                .target
+                .poll_for_decision_task(request, target.deadline)
+                .await
         })
     }
 }
@@ -198,7 +208,10 @@ impl NativeForwardPollRequest<n::matching::PollForActivityTaskResponse>
             ..Default::default()
         }
     }
-    fn forward(self, target: ForwardPoll) -> ForwardResult<n::matching::PollForActivityTaskResponse> {
+    fn forward(
+        self,
+        target: ForwardPoll,
+    ) -> ForwardResult<n::matching::PollForActivityTaskResponse> {
         Box::pin(async move {
             let payload = self.for_parent(&target.parent_name);
             let request = n::matching::PollForActivityTaskRequest {
@@ -208,7 +221,10 @@ impl NativeForwardPollRequest<n::matching::PollForActivityTaskResponse>
                 forwarded_from: target.forwarded_from,
                 isolation_group: target.isolation_group,
             };
-            target.target.poll_for_activity_task(request, target.deadline).await
+            target
+                .target
+                .poll_for_activity_task(request, target.deadline)
+                .await
         })
     }
 }
@@ -300,7 +316,10 @@ enum WaitResult {
 fn throttled(error: &MatchingTaskStoreError) -> bool {
     matches!(
         error,
-        MatchingTaskStoreError::Backend { kind: BackendErrorKind::Throttled, .. }
+        MatchingTaskStoreError::Backend {
+            kind: BackendErrorKind::Throttled,
+            ..
+        }
     )
 }
 /// Go maps SQL throttling to ServiceBusyError; everything else is Internal.
@@ -314,21 +333,28 @@ fn queue_status(error: NativeQueueError) -> Status {
         _ => false,
     };
     let message = match &error {
-        NativeQueueError::Storage(MatchingTaskStoreBytesError::ConditionFailed { message }) => message.clone(),
+        NativeQueueError::Storage(MatchingTaskStoreBytesError::ConditionFailed { message }) => {
+            message.clone()
+        }
         other => other.to_string().into(),
     };
     if busy {
         return crate::matching_native_status::raw_detailed_status(
-            tonic::Code::ResourceExhausted, &message, "ServiceBusyError", Vec::new(),
+            tonic::Code::ResourceExhausted,
+            &message,
+            "ServiceBusyError",
+            Vec::new(),
         );
     }
     crate::matching_native_status::raw_status(
-        tonic::Code::Internal, &message, tonic::codegen::Bytes::new(),
+        tonic::Code::Internal,
+        &message,
+        tonic::codegen::Bytes::new(),
     )
 }
 
 impl NativeForwardState {
-    pub(crate) fn new(
+    pub fn new(
         resolve: impl Fn() -> ParentFuture + Send + Sync + 'static,
         max_outstanding: crate::matching_forward::Count,
         max_outstanding_adds: Arc<crate::matching_forward::RequestTokens>,
@@ -346,17 +372,17 @@ impl NativeForwardState {
             observer: None,
         }
     }
-    pub(crate) fn with_observer(mut self, observer: Arc<dyn NativePollObserver>) -> Self {
+    pub fn with_observer(mut self, observer: Arc<dyn NativePollObserver>) -> Self {
         self.observer = Some(observer);
         self
     }
-    pub(crate) fn add_tokens(&self) -> Arc<crate::matching_forward::RequestTokens> {
+    pub fn add_tokens(&self) -> Arc<crate::matching_forward::RequestTokens> {
         self.add_permits.clone()
     }
 
     /// `domain_id` is the task-list domain; `source_domain` the task's own
     /// domain. `timeout_seconds` stays zero as in Go persistence GetTasks.
-    pub(crate) async fn forward_backlog_task(
+    pub async fn forward_backlog_task(
         &self,
         task: AllocatedTaskBytes,
         domain_id: &GoString,
@@ -369,9 +395,13 @@ impl NativeForwardState {
             return Err(ForwardError::TaskListKind);
         }
         let name = cadence_common::task_list::TaskListNameBytes::parse(self.source.as_bytes())
-            .map_err(|message| ForwardError::Remote(crate::matching_native_status::raw_status(
-                tonic::Code::InvalidArgument, &message, tonic::codegen::Bytes::new(),
-            )))?;
+            .map_err(|message| {
+                ForwardError::Remote(crate::matching_native_status::raw_status(
+                    tonic::Code::InvalidArgument,
+                    &message,
+                    tonic::codegen::Bytes::new(),
+                ))
+            })?;
         if name.is_root() {
             return Err(ForwardError::NoParent);
         }
@@ -386,7 +416,9 @@ impl NativeForwardState {
             return Err(ForwardError::InvalidTaskListType);
         }
         let (parent, parent_name) = (self.resolve)().await.ok_or_else(|| {
-            ForwardError::Remote(Status::unavailable("cannot resolve parent task list for forwarding"))
+            ForwardError::Remote(Status::unavailable(
+                "cannot resolve parent task list for forwarding",
+            ))
         })?;
         let execution = Some(n::api::WorkflowExecution {
             workflow_id: task.data.workflow_id.clone(),
@@ -407,7 +439,10 @@ impl NativeForwardState {
             kind: i32::from(kind) + 1,
             ..Default::default()
         });
-        let timeout = Some(prost_types::Duration { seconds: 0, nanos: 0 });
+        let timeout = Some(prost_types::Duration {
+            seconds: 0,
+            nanos: 0,
+        });
         let result = match parent {
             NativeParent::Service(service) => {
                 if task_type == 0 {
@@ -473,7 +508,11 @@ pub struct NativeTaskDispatcher {
 }
 
 impl NativeTaskDispatcher {
-    pub fn new(queue: Arc<DurableTaskQueueBytes>, history: MatchingHistoryClient, domain_id: GoString) -> Self {
+    pub fn new(
+        queue: Arc<DurableTaskQueueBytes>,
+        history: MatchingHistoryClient,
+        domain_id: GoString,
+    ) -> Self {
         Self {
             queue,
             history,
@@ -504,11 +543,11 @@ impl NativeTaskDispatcher {
         self.sync_matcher = Some(matcher);
         self
     }
-    pub(crate) fn with_forward(mut self, forward: NativeForwardState) -> Self {
+    pub fn with_forward(mut self, forward: NativeForwardState) -> Self {
         self.forward = Some(forward);
         self
     }
-    pub(crate) fn with_pollers(mut self, pollers: Arc<NativePollerManager>) -> Self {
+    pub fn with_pollers(mut self, pollers: Arc<NativePollerManager>) -> Self {
         self.pollers = Some(pollers);
         self
     }
@@ -521,11 +560,13 @@ impl NativeTaskDispatcher {
     pub fn release_blocked_pollers(&self) {
         self.blocked_pollers.notify_waiters();
     }
-    pub(crate) fn reader_should_reload(&self) -> bool {
-        self.reader.as_ref().is_some_and(|reader| reader.should_reload())
+    pub fn reader_should_reload(&self) -> bool {
+        self.reader
+            .as_ref()
+            .is_some_and(|reader| reader.should_reload())
     }
 
-    pub(crate) async fn accept_forwarded_backlog(
+    pub async fn accept_forwarded_backlog(
         &self,
         task: AllocatedTaskBytes,
         source_domain: &GoString,
@@ -562,7 +603,14 @@ impl NativeTaskDispatcher {
             .cloned()
             .unwrap_or_default();
         if matcher
-            .offer(task.clone(), &group, source_domain, true, local_wait, deadline)
+            .offer(
+                task.clone(),
+                &group,
+                source_domain,
+                true,
+                local_wait,
+                deadline,
+            )
             .await
         {
             return Ok(());
@@ -570,9 +618,15 @@ impl NativeTaskDispatcher {
         if !root {
             if let Some(forward) = &self.forward {
                 if let Some(_permit) = forward.add_permits.try_acquire() {
-                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, source_domain, task_type, 0))
-                        .await
-                        .is_ok()
+                    if Box::pin(forward.forward_backlog_task(
+                        task,
+                        &self.domain_id,
+                        source_domain,
+                        task_type,
+                        0,
+                    ))
+                    .await
+                    .is_ok()
                     {
                         return Ok(());
                     }
@@ -582,7 +636,10 @@ impl NativeTaskDispatcher {
         Err(crate::matching_dispatch::remote_sync_match_failed())
     }
 
-    async fn claim(&self, group: &GoString) -> Result<(Option<AllocatedTaskBytes>, bool), ClaimError> {
+    async fn claim(
+        &self,
+        group: &GoString,
+    ) -> Result<(Option<AllocatedTaskBytes>, bool), ClaimError> {
         if let Some(reader) = &self.reader {
             return reader
                 .poll_group(group.as_bytes())
@@ -599,7 +656,10 @@ impl NativeTaskDispatcher {
         .map(|mut batch| (batch.tasks.pop(), batch.scan_pending))
         .map_err(ClaimError::Queue)
     }
-    async fn claim_delivery(&self, group: &GoString) -> Result<(Option<DeliveryTask>, bool), ClaimError> {
+    async fn claim_delivery(
+        &self,
+        group: &GoString,
+    ) -> Result<(Option<DeliveryTask>, bool), ClaimError> {
         if let Some(matcher) = self.sync_matcher.as_ref().filter(|_| self.reader.is_some()) {
             tokio::select! {
                 task = matcher.poll(group) => task
@@ -615,7 +675,11 @@ impl NativeTaskDispatcher {
         } else {
             self.claim(group).await.map(|(task, pending)| {
                 (
-                    task.map(|task| DeliveryTask { task, sync: None, forwarded: false }),
+                    task.map(|task| DeliveryTask {
+                        task,
+                        sync: None,
+                        forwarded: false,
+                    }),
                     pending,
                 )
             })
@@ -641,7 +705,11 @@ impl NativeTaskDispatcher {
                 .and_then(|text| uuid::Uuid::parse_str(text).ok());
             let result = match (data, source_domain) {
                 (Ok(Ok(data)), Some(source_domain)) => writer
-                    .append_rewrite(PendingTaskBytes { data, source_domain, schedule_to_start_seconds: 0 })
+                    .append_rewrite(PendingTaskBytes {
+                        data,
+                        source_domain,
+                        schedule_to_start_seconds: 0,
+                    })
                     .await
                     .map(|_| ()),
                 (Ok(Ok(_)), None) => Err(Status::internal("invalid Matching domain for rewrite")),
@@ -669,7 +737,9 @@ impl NativeTaskDispatcher {
         .await;
         match result {
             Ok(Ok(())) => (),
-            Ok(Err::<(), NativeQueueError>(error)) => eprintln!("Matching task rewrite failed: {error}"),
+            Ok(Err::<(), NativeQueueError>(error)) => {
+                eprintln!("Matching task rewrite failed: {error}")
+            }
             Err(error) => {
                 eprintln!("Matching task rewrite worker failed: {error}");
                 self.queue.stop();
@@ -719,7 +789,10 @@ impl NativeTaskDispatcher {
             if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                 return true;
             }
-            if deadline.saturating_duration_since(tokio::time::Instant::now()).is_zero() {
+            if deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .is_zero()
+            {
                 return false;
             }
             let resolved = tokio::select! {
@@ -765,7 +838,9 @@ impl NativeTaskDispatcher {
                     };
                     return match result {
                         Ok(value) => {
-                            if let Some(observer) = lifecycle.as_ref().and_then(|l| l.observer.as_ref()) {
+                            if let Some(observer) =
+                                lifecycle.as_ref().and_then(|l| l.observer.as_ref())
+                            {
                                 observer.poll_match_latency(poll_started.elapsed(), true, false);
                             }
                             if let Some(sender) = sender.take() {
@@ -786,7 +861,15 @@ impl NativeTaskDispatcher {
                 Some(lifecycle)
             });
             parent
-                .delivery_loop(poll.for_parent(&parent_name), sender, deliver, lifecycle, deadline, poll_started, None)
+                .delivery_loop(
+                    poll.for_parent(&parent_name),
+                    sender,
+                    deliver,
+                    lifecycle,
+                    deadline,
+                    poll_started,
+                    None,
+                )
                 .await;
             if let Some(observer) = observer {
                 observer.forward_poll_latency(forward_started.elapsed());
@@ -799,7 +882,8 @@ impl NativeTaskDispatcher {
         &self,
         execution: &n::api::WorkflowExecution,
     ) -> Result<n::history::GetMutableStateResponse, Status> {
-        self.query_mutable_state_with_deadline(execution, None).await
+        self.query_mutable_state_with_deadline(execution, None)
+            .await
     }
     pub async fn query_mutable_state_with_deadline(
         &self,
@@ -825,7 +909,8 @@ impl NativeTaskDispatcher {
         lifecycle: NativePollLifecycle,
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForDecisionTaskResponse, Status> {
-        self.poll_decision_inner(poll, expiration, Some(lifecycle), caller_deadline).await
+        self.poll_decision_inner(poll, expiration, Some(lifecycle), caller_deadline)
+            .await
     }
     async fn poll_decision_inner(
         &self,
@@ -835,7 +920,8 @@ impl NativeTaskDispatcher {
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForDecisionTaskResponse, Status> {
         let history = self.history.clone();
-        let caller_deadline = caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
+        let caller_deadline =
+            caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
         self.poll_with_lifecycle(
             poll,
             expiration,
@@ -844,7 +930,12 @@ impl NativeTaskDispatcher {
                 let history = history.clone();
                 async move {
                     history
-                        .start_decision_native_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .start_decision_native_with_deadline(
+                            &domain,
+                            &task,
+                            poll,
+                            Some(caller_deadline),
+                        )
                         .await
                 }
             },
@@ -866,7 +957,8 @@ impl NativeTaskDispatcher {
         lifecycle: NativePollLifecycle,
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForActivityTaskResponse, Status> {
-        self.poll_activity_inner(poll, expiration, Some(lifecycle), caller_deadline).await
+        self.poll_activity_inner(poll, expiration, Some(lifecycle), caller_deadline)
+            .await
     }
     async fn poll_activity_inner(
         &self,
@@ -876,7 +968,8 @@ impl NativeTaskDispatcher {
         caller_deadline: Option<tokio::time::Instant>,
     ) -> Result<n::matching::PollForActivityTaskResponse, Status> {
         let history = self.history.clone();
-        let caller_deadline = caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
+        let caller_deadline =
+            caller_deadline.unwrap_or_else(|| tokio::time::Instant::now() + expiration);
         self.poll_with_lifecycle(
             poll,
             expiration,
@@ -885,7 +978,12 @@ impl NativeTaskDispatcher {
                 let history = history.clone();
                 async move {
                     history
-                        .start_activity_native_with_deadline(&domain, &task, poll, Some(caller_deadline))
+                        .start_activity_native_with_deadline(
+                            &domain,
+                            &task,
+                            poll,
+                            Some(caller_deadline),
+                        )
                         .await
                 }
             },
@@ -953,7 +1051,12 @@ impl NativeTaskDispatcher {
     }
 
     #[cfg(test)]
-    async fn poll<Q, R, F, Fut>(&self, poll: Q, expiration: Duration, mut deliver: F) -> Result<R, Status>
+    async fn poll<Q, R, F, Fut>(
+        &self,
+        poll: Q,
+        expiration: Duration,
+        mut deliver: F,
+    ) -> Result<R, Status>
     where
         Q: NativeForwardPollRequest<R> + 'static,
         R: Default + Send + 'static,
@@ -961,8 +1064,14 @@ impl NativeTaskDispatcher {
         Fut: Future<Output = Result<R, Status>> + Send,
     {
         let caller_deadline = tokio::time::Instant::now() + expiration;
-        self.poll_with_lifecycle(poll, expiration, caller_deadline, move |task, poll, _| deliver(task, poll), None)
-            .await
+        self.poll_with_lifecycle(
+            poll,
+            expiration,
+            caller_deadline,
+            move |task, poll, _| deliver(task, poll),
+            None,
+        )
+        .await
     }
 
     async fn poll_with_lifecycle<Q, R, F, Fut>(
@@ -984,7 +1093,9 @@ impl NativeTaskDispatcher {
         released.as_mut().enable();
         let (sender, mut receiver) = oneshot::channel();
         let observer = lifecycle.as_ref().and_then(|l| l.observer.clone());
-        let blocked_poller = lifecycle.as_ref().map(|poll| (poll.manager.clone(), poll.id.clone()));
+        let blocked_poller = lifecycle
+            .as_ref()
+            .map(|poll| (poll.manager.clone(), poll.id.clone()));
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
@@ -992,7 +1103,15 @@ impl NativeTaskDispatcher {
         let worker_claimed = claimed.clone();
         tokio::spawn(async move {
             worker
-                .delivery_worker(poll, sender, deliver, lifecycle, deadline, poll_started, Some(worker_claimed))
+                .delivery_worker(
+                    poll,
+                    sender,
+                    deliver,
+                    lifecycle,
+                    deadline,
+                    poll_started,
+                    Some(worker_claimed),
+                )
                 .await;
         });
         let response = {
@@ -1054,8 +1173,16 @@ impl NativeTaskDispatcher {
             }
         }
         let mut sender = Some(sender);
-        self.delivery_loop(poll, &mut sender, &mut deliver, lifecycle, deadline, poll_started, claimed)
-            .await;
+        self.delivery_loop(
+            poll,
+            &mut sender,
+            &mut deliver,
+            lifecycle,
+            deadline,
+            poll_started,
+            claimed,
+        )
+        .await;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1077,7 +1204,10 @@ impl NativeTaskDispatcher {
         let mut waiting = None;
         let mut waiting_started = false;
         let mut forward_failed = false;
-        let group = lifecycle.as_ref().map(|l| l.info.isolation_group.clone()).unwrap_or_default();
+        let group = lifecycle
+            .as_ref()
+            .map(|l| l.info.isolation_group.clone())
+            .unwrap_or_default();
         loop {
             if sender.as_ref().is_some_and(|sender| sender.is_closed()) {
                 return;
@@ -1134,7 +1264,14 @@ impl NativeTaskDispatcher {
                 Ok(value) => value,
                 Err(ClaimError::Forward(permit)) => {
                     if self
-                        .forward_poll(poll.clone(), sender, deliver, (deadline, permit), lifecycle.clone(), poll_started)
+                        .forward_poll(
+                            poll.clone(),
+                            sender,
+                            deliver,
+                            (deadline, permit),
+                            lifecycle.clone(),
+                            poll_started,
+                        )
                         .await
                     {
                         return;
@@ -1155,7 +1292,9 @@ impl NativeTaskDispatcher {
                     let status = match error {
                         ClaimError::Queue(error) => queue_status(error),
                         ClaimError::Join(error) => Status::internal(error.to_string()),
-                        ClaimError::Forward(_) | ClaimError::Released => unreachable!("handled above"),
+                        ClaimError::Forward(_) | ClaimError::Released => {
+                            unreachable!("handled above")
+                        }
                     };
                     if let Some(sender) = sender.take() {
                         let _ = sender.send(Err(status));
@@ -1264,7 +1403,8 @@ impl NativeTaskDispatcher {
                                 Some(error.message()),
                             );
                         }
-                        if let Some(observer) = lifecycle.as_ref().and_then(|l| l.observer.as_ref()) {
+                        if let Some(observer) = lifecycle.as_ref().and_then(|l| l.observer.as_ref())
+                        {
                             observer.poll_already_started();
                         }
                         self.finish_delivery(task, Ok(())).await
@@ -1288,7 +1428,12 @@ impl NativeTaskDispatcher {
                         };
                         if self
                             .history
-                            .refresh_workflow_tasks_native_until(&task_domain, &task.task, Some(deadline), caller_gone)
+                            .refresh_workflow_tasks_native_until(
+                                &task_domain,
+                                &task.task,
+                                Some(deadline),
+                                caller_gone,
+                            )
                             .await
                             .is_ok()
                         {
@@ -1322,18 +1467,34 @@ mod tests {
     }
     fn fixture(
         workflows: &[&[u8]],
-    ) -> (tempfile::TempDir, Arc<DurableTaskQueueBytes>, NativeTaskDispatcher) {
+    ) -> (
+        tempfile::TempDir,
+        Arc<DurableTaskQueueBytes>,
+        NativeTaskDispatcher,
+    ) {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(directory.path().join("t.db"), BlobEncoding::ThriftRW).unwrap());
-        let key = TaskListKeyBytes { domain_id: Uuid::from_u128(1), name: gs(b"q\xff"), task_type: 0 };
+        let store = Arc::new(
+            SqliteTaskStore::create(directory.path().join("t.db"), BlobEncoding::ThriftRW).unwrap(),
+        );
+        let key = TaskListKeyBytes {
+            domain_id: Uuid::from_u128(1),
+            name: gs(b"q\xff"),
+            task_type: 0,
+        };
         let queue = Arc::new(
-            DurableTaskQueueBytes::open(store, key, 0, NonZeroU32::new(100).unwrap(), now()).unwrap(),
+            DurableTaskQueueBytes::open(store, key, 0, NonZeroU32::new(100).unwrap(), now())
+                .unwrap(),
         );
         let tasks: Vec<TaskDataBytes> = workflows
             .iter()
             .map(|id| {
-                TaskDataBytes { workflow_id: gs(id), schedule_id: 2, ..Default::default() }
-                    .at_creation(now(), 0)
+                TaskDataBytes {
+                    workflow_id: gs(id),
+                    schedule_id: 2,
+                    created_nanos: now(),
+                    expiry_nanos: cadence_persistence::matching_blob::GO_ZERO_TIME_NANOS,
+                    ..Default::default()
+                }
             })
             .collect();
         queue.append(&tasks, now()).unwrap();
@@ -1342,12 +1503,19 @@ mod tests {
             Duration::from_secs(1),
             32 * 1024 * 1024,
         );
-        let dispatcher =
-            NativeTaskDispatcher::new(queue.clone(), history, GoString::from(Uuid::from_u128(1).to_string()));
+        let dispatcher = NativeTaskDispatcher::new(
+            queue.clone(),
+            history,
+            GoString::from(Uuid::from_u128(1).to_string()),
+        );
         (directory, queue, dispatcher)
     }
     fn pending(queue: &DurableTaskQueueBytes) -> usize {
-        queue.read_batch(100000, NonZeroU32::new(10).unwrap(), now()).unwrap().tasks.len()
+        queue
+            .read_batch(100000, NonZeroU32::new(10).unwrap(), now())
+            .unwrap()
+            .tasks
+            .len()
     }
 
     #[test]
@@ -1362,7 +1530,10 @@ mod tests {
             message: "slow".into(),
         });
         assert_eq!(queue_status(timeout).code(), tonic::Code::Internal);
-        assert_eq!(queue_status(NativeQueueError::Stopped).code(), tonic::Code::Internal);
+        assert_eq!(
+            queue_status(NativeQueueError::Stopped).code(),
+            tonic::Code::Internal
+        );
     }
 
     #[test]
@@ -1370,7 +1541,11 @@ mod tests {
         let request = n::api::PollForActivityTaskRequest {
             domain: gs(b"d\xff"),
             identity: gs(b"w\xfe"),
-            task_list: Some(n::api::TaskList { name: gs(b"/__cadence_sys/q\xff/1"), kind: 1, ..Default::default() }),
+            task_list: Some(n::api::TaskList {
+                name: gs(b"/__cadence_sys/q\xff/1"),
+                kind: 1,
+                ..Default::default()
+            }),
             ..Default::default()
         }
         .for_parent(&gs(b"q\xff"));
@@ -1438,7 +1613,9 @@ mod tests {
         first.abort();
         let _ = first.await;
         let again: Result<Vec<u8>, Status> = dispatcher
-            .poll((), Duration::from_secs(3), |task, ()| async move { Ok(task.data.workflow_id.into_bytes()) })
+            .poll((), Duration::from_secs(3), |task, ()| async move {
+                Ok(task.data.workflow_id.into_bytes())
+            })
             .await;
         assert_eq!(again.unwrap(), b"keep\xff");
         assert_eq!(pending(&queue), 0);
@@ -1470,7 +1647,10 @@ mod tests {
     #[tokio::test]
     async fn native_accept_forwarded_backlog_rejects_non_uuid_source_domain() {
         let (_directory, _queue, dispatcher) = fixture(&[]);
-        let task = AllocatedTaskBytes { task_id: 1, data: TaskDataBytes::default() };
+        let task = AllocatedTaskBytes {
+            task_id: 1,
+            data: TaskDataBytes::default(),
+        };
         let error = dispatcher
             .accept_forwarded_backlog(task, &gs(b"\xff\xfe"), &gs(b"q"), 0)
             .await
@@ -1487,7 +1667,9 @@ mod tests {
             releaser.release_blocked_pollers();
         });
         let result: Result<Vec<u8>, Status> = dispatcher
-            .poll((), Duration::from_secs(5), |_task, ()| async move { Ok(Vec::new()) })
+            .poll((), Duration::from_secs(5), |_task, ()| async move {
+                Ok(Vec::new())
+            })
             .await;
         assert!(result.unwrap().is_empty());
     }

@@ -1,0 +1,43 @@
+url=https://github.com/auenkr/cadence-rust/actions/runs/40616972759
+conclusion=success
+scope=real Go native History TChannel five-call peer; ten PostgreSQL TLS cases
+not_claimed=production native Matching integration or overall Matching completion
+
+source-sha.txt
+858db89d566e3131071f6aaa20e481c2c7f4fd2c
+
+overall.exit
+0
+
+cleanup.exit
+0
+
+cleanup.log
+cadence-dep-oracle-pg-2512
+containers_left=false
+secret_dir_removed=true
+
+history-tchannel-test.exit
+0
+
+history-tchannel-test.log
+running 1 test
+test matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 837 filtered out; finished in 0.02s
+
+go-peer-binary.sha256
+8cfbeac37482284ae4a2a666bcfa2d9626fd0452ddce2555376dd1e8f7cb9a2c  cadence-rust-history-peer
+
+history-tchannel-binary.sha256
+5b1deceaad065b00f5e85b256130312c009950c90a1934c9a1857f13e9437ad6  cadence-matching-lib-tests
+pgcase-disable.exit=0
+pgcase-inline-verify-ca.exit=0
+pgcase-inline-verify-full.exit=0
+pgcase-inline-wrongca.exit=0
+pgcase-require-no-ca.exit=0
+pgcase-require-wrongca.exit=0
+pgcase-verify-ca-valid.exit=0
+pgcase-verify-ca-wrongca.exit=0
+pgcase-verify-full-ip.exit=0
+pgcase-verify-full-local.exit=0
