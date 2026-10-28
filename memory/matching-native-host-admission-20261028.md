@@ -22,3 +22,5 @@ The host metric callbacks still accept only the RPC method (and status on failur
 No test or binary evidence is available from this change. Parent CI run previously reported by task owner: https://github.com/auenkr/cadence-rust/actions/runs/40719459374 (pending at task start; outcome not checked here). Matching remains incomplete; this note does not claim service completion.
 
 Parent registered native semaphore request module for CI. CI 40719459374 failed on native manager passing owned GoString parameters to borrowed store methods and missing Debug on the native semaphore limiter wrapper. Corrected the borrowed parameters, added a wrapper Debug implementation and removed unused copied poison-test hooks. These source fixes are unverified pending the next CI run.
+
+Fresh six-crate CI https://github.com/auenkr/cadence-rust/actions/runs/40720317784 at 8b6fcdac0 (source SHA pinned by workflow), clean target and runner formatting enabled. Conclusion pending. Includes service-core quota changes.
