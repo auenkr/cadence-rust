@@ -119,11 +119,14 @@ impl Membership {
         self.changed.subscribe()
     }
     pub fn owner(&self, key: &str) -> Result<Host, Status> {
+        self.owner_bytes(key.as_bytes())
+    }
+    pub fn owner_bytes(&self, key: &[u8]) -> Result<Host, Status> {
         let owner = self
             .ring
             .read()
             .expect("Matching membership lock")
-            .lookup(key)
+            .lookup_bytes(key)
             .cloned();
         owner.ok_or_else(|| {
             // Go Ring.LookupRaw calls signalSelf on an empty-ring lookup.
@@ -172,6 +175,25 @@ impl Membership {
     }
     pub fn owns(&self, key: &str) -> Result<bool, Status> {
         Ok(self.owner(key)?.identity() == self.identity.as_ref())
+    }
+    pub fn owns_bytes(&self, key: &[u8]) -> Result<bool, Status> {
+        Ok(self.owner_bytes(key)?.identity() == self.identity.as_ref())
+    }
+    pub fn remote_channel_bytes(&self, key: &[u8]) -> Result<Option<tonic::transport::Channel>, Status> {
+        let owner = self.owner_bytes(key)?;
+        self.remote_channel_for_owner(owner.identity(), &owner.grpc_address)
+    }
+    /// Bind the native registry to this live ring. Shard-distributor ownership
+    /// still requires its separate ownership-policy adapter.
+    pub fn native_membership(&self) -> crate::matching_registry_native::NativeMembership {
+        let check = self.clone();
+        let owns = self.clone();
+        let not_owned = self.clone();
+        crate::matching_registry_native::NativeMembership {
+            check_task_list: Arc::new(move |name| check.check_task_list_bytes(name)),
+            owns: Arc::new(move |name| owns.owns_bytes(name.as_bytes())),
+            task_list_not_owned_by: Arc::new(move |name, owner| not_owned.task_list_not_owned_by_bytes(name, owner)),
+        }
     }
     pub fn remote_channel(&self, key: &str) -> Result<Option<tonic::transport::Channel>, Status> {
         let owner = self.owner(key)?;
@@ -247,6 +269,30 @@ impl Membership {
         }
         Err(self.task_list_not_owned_by(name, owner.identity()))
     }
+    pub fn check_task_list_bytes(&self, name: &cadence_common::go_string::GoString) -> Result<(), Status> {
+        let owner = self.owner_bytes(name.as_bytes()).map_err(|error| {
+            Status::internal(format!("failed to lookup task list owner: {}", error.message()))
+        })?;
+        if owner.identity() == self.identity.as_ref() {
+            return Ok(());
+        }
+        Err(self.task_list_not_owned_by_bytes(name, owner.identity()))
+    }
+    pub fn task_list_not_owned_by_bytes(&self, name: &cadence_common::go_string::GoString, owner: &str) -> Status {
+        let mut message = format!(
+            "task list is not owned by this host: OwnedBy: {}, Me: {}, Tasklist: ",
+            owner, self.identity,
+        ).into_bytes();
+        message.extend_from_slice(name.as_bytes());
+        // Go omits the protobuf status details when its outer message has
+        // invalid UTF-8. For valid names retain the existing shared.v1 URL.
+        let details = name.as_utf8().ok()
+            .map(|name| self.task_list_not_owned_by(name, owner).details().to_vec())
+            .unwrap_or_default();
+        crate::matching_native_status::raw_status(
+            tonic::Code::Aborted, &message.into(), details.into(),
+        )
+    }
     pub(crate) fn task_list_not_owned_by(&self, name: &str, owner: &str) -> Status {
         crate::grpc::detailed_status_type(
             tonic::Code::Aborted,
@@ -303,6 +349,27 @@ pub(crate) fn semaphore_not_owned_status(owner: &str, my_identity: &str, bucket_
 mod tests {
     use super::*;
     use prost::Message;
+    #[test]
+    fn native_ownership_error_keeps_raw_name_and_live_ring() {
+        use cadence_common::go_string::GoString;
+        use crate::matching_native_status::RAW_MESSAGE_MARKER;
+        let remote = Host { address: "remote:7935".into(), identity: "remote".into(), grpc_address: "remote:7835".into() };
+        let membership = Membership::new("self", vec![remote]);
+        let adapter = membership.native_membership();
+        let raw = GoString::from(&b"q\xff\xfe"[..]);
+        assert!(!(adapter.owns)(&raw).unwrap());
+        let error = (adapter.check_task_list)(&raw).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Aborted);
+        let bytes = error.metadata().get_bin(RAW_MESSAGE_MARKER).unwrap().to_bytes().unwrap();
+        assert!(bytes.ends_with(raw.as_bytes()));
+        assert!(error.details().is_empty());
+        let valid = GoString::from("queue");
+        let valid_error = (adapter.check_task_list)(&valid).unwrap_err();
+        assert_eq!(valid_error.details(), membership.check_task_list("queue").unwrap_err().details());
+        membership.replace(vec![Host { address: "self:7935".into(), identity: "self".into(), grpc_address: "self:7835".into() }]);
+        assert!((adapter.owns)(&raw).unwrap());
+        (adapter.check_task_list)(&raw).unwrap();
+    }
     #[derive(Message)]
     struct Details {
         #[prost(message, repeated, tag = "3")]

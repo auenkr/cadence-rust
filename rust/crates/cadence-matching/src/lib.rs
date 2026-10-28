@@ -65,6 +65,8 @@ pub mod matching_fault_injection;
 pub mod matching_handler;
 #[allow(clippy::result_large_err)]
 pub mod matching_handler_native;
+#[allow(clippy::result_large_err)]
+pub mod matching_engine_native;
 pub mod matching_host_limiter;
 pub mod matching_limiter;
 #[allow(clippy::result_large_err)]

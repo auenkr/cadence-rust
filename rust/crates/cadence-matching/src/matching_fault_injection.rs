@@ -26,6 +26,10 @@ use std::time::{Duration, Instant};
 use tonic::Status;
 use uuid::Uuid;
 
+#[path = "matching_fault_injection_native.rs"]
+mod native;
+pub use native::inject_task_store_bytes_errors;
+
 const STARTUP_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -118,6 +118,21 @@ mod fingerprint_tests {
         ]);
         assert_eq!(ring.lookup("�").unwrap().address, "10.8.0.2:7934");
     }
+
+    #[test]
+    fn raw_ring_keys_do_not_alias_replacement_rune() {
+        let ring = Ring::new((1..=64).map(|id| Host {
+            address: format!("10.8.0.{id}:7934"),
+            identity: String::new(),
+            grpc_address: String::new(),
+        }));
+        let raw = ring.lookup_bytes(b"\xff").unwrap();
+        let replacement = ring.lookup("�").unwrap();
+        assert_ne!(raw.address, replacement.address);
+        assert_eq!(ring.lookup_n_bytes(b"\xff", 3)[0], raw);
+        assert_eq!(ring.lookup_bytes("ünï".as_bytes()), ring.lookup("ünï"));
+        assert!(Ring::default().lookup_bytes(b"\xff").is_none());
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,7 +183,10 @@ impl Ring {
         Self { hosts, points }
     }
     pub fn lookup(&self, key: &str) -> Option<&Host> {
-        let hash = fingerprint32(key.as_bytes());
+        self.lookup_bytes(key.as_bytes())
+    }
+    pub fn lookup_bytes(&self, key: &[u8]) -> Option<&Host> {
+        let hash = fingerprint32(key);
         let start = self.points.partition_point(|point| point.0 < hash);
         self.points
             .get(start)
@@ -179,11 +197,14 @@ impl Ring {
         &self.hosts
     }
     pub fn lookup_n(&self, key: &str, count: usize) -> Vec<&Host> {
+        self.lookup_n_bytes(key.as_bytes(), count)
+    }
+    pub fn lookup_n_bytes(&self, key: &[u8], count: usize) -> Vec<&Host> {
         let mut result = Vec::new();
         if count == 0 || self.points.is_empty() {
             return result;
         }
-        let hash = fingerprint32(key.as_bytes());
+        let hash = fingerprint32(key);
         let start = self.points.partition_point(|point| point.0 < hash);
         let mut seen = HashSet::new();
         for point in self.points[start..].iter().chain(&self.points[..start]) {

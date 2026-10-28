@@ -1,4 +1,4 @@
-//! Native Matching engine foundations. The four RPCs are not implemented yet.
+//! Native Matching engine foundations and decision-task add flow.
 //!
 //! This module is deliberately not wired into the service: `get` by itself is
 //! not the handler ownership check, and bypassing the forwarding chain can lose
@@ -7,7 +7,12 @@ use std::collections::BTreeMap;
 
 use cadence_common::go_string::GoString;
 use cadence_persistence::matching_blob::{TaskDataBytes, GO_ZERO_TIME_NANOS};
-use cadence_proto::native::api;
+use cadence_proto::native::{api, matching};
+use cadence_persistence::matching_native_task_store::{AllocatedTaskBytes, TaskListKeyBytes};
+use std::{sync::Arc, time::Duration};
+use tonic::Status;
+use crate::matching_dispatch_native::{NativeFuture, NativeMatchingApi};
+use crate::matching_registry_native::{NativeQueueHandle, SyncMatchOutcome};
 
 use crate::matching_registry_native::NativeQueueRegistry;
 
@@ -21,6 +26,144 @@ pub struct NativeMatchingEngine {
 impl NativeMatchingEngine {
     pub fn new(registry: NativeQueueRegistry) -> Self {
         Self { registry }
+    }
+}
+
+/// Production dependencies outside the queue algorithm. The caller has already
+/// performed handler startup, quota, domain lookup and entry ownership checks.
+/// Parent routing returns None for a local owner; a routing error aborts the
+/// forwarding attempt and leaves the task on the entry partition.
+pub trait DecisionAddContext: Send + Sync {
+    fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status>;
+    fn forward_degree(&self, domain: uuid::Uuid, root: &GoString) -> i64;
+    fn check_write_partition(&self, key: &TaskListKeyBytes, handle: &NativeQueueHandle) -> Result<(), Status>;
+    fn remote_parent(&self, name: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>>;
+}
+
+fn response_config(handle: &NativeQueueHandle) -> Option<matching::TaskListPartitionConfig> {
+    handle.partitions.get().map(|config| {
+        let read_count = config.read_partitions.len() as i32;
+        let write_count = config.write_partitions.len() as i32;
+        let convert = |map: std::collections::HashMap<i32, Vec<GoString>>| {
+            map.into_iter().map(|(id, isolation_groups)| {
+                (id, matching::TaskListPartition { isolation_groups })
+            }).collect()
+        };
+        matching::TaskListPartitionConfig {
+            version: config.version,
+            num_read_partitions: read_count,
+            num_write_partitions: write_count,
+            read_partitions: convert(config.read_partitions),
+            write_partitions: convert(config.write_partitions),
+        }
+    })
+}
+
+impl NativeMatchingEngine {
+    /// Executes the queue portion of AddDecisionTask. Handler admission and
+    /// entry ownership must be checked before calling this method.
+    pub async fn add_decision_task(
+        &self,
+        request: matching::AddDecisionTaskRequest,
+        request_deadline: Option<tokio::time::Instant>,
+        context: &dyn DecisionAddContext,
+    ) -> Result<matching::AddDecisionTaskResponse, Status> {
+        let list = request.task_list.clone().unwrap_or_default();
+        let parsed = crate::matching_handler_native::task_list_name(&list.name)?;
+        let domain = request.domain_id.as_utf8().ok()
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .ok_or_else(|| Status::invalid_argument("DomainUUID is not valid."))?;
+        let key = TaskListKeyBytes { domain_id: domain, name: list.name.clone(), task_type: 0 };
+        let kind = crate::matching_handler_native::persistence_kind(list.kind);
+        let now = crate::grpc_matching::matching_now();
+        let entry = self.registry.get(key.clone(), kind, now).await?;
+        if entry.stop_if_isolation_changed() {
+            return Err(Status::internal("task list shutting down"));
+        }
+        context.check_write_partition(&key, &entry)?;
+        if list.kind == 2 && !entry.has_poller_after(now.saturating_sub(10_000_000_000)) {
+            return Err(crate::grpc::detailed_status(
+                tonic::Code::Unavailable,
+                "sticky worker is unavailable, please use non-sticky task list.",
+                "StickyWorkerUnavailableError",
+                cadence_proto::api::StickyWorkerUnavailableError {},
+            ));
+        }
+        let data = add_task_data(request.workflow_execution.as_ref(), request.schedule_id,
+            request.partition_config.clone().into_iter().collect(), now);
+        let forwarded = !request.forwarded_from.is_empty();
+        if !forwarded {
+            entry.mark_alive();
+            if let Some(group) = data.partition_config.as_ref().and_then(|c| c.get(&GoString::from("isolation-group"))) {
+                entry.qps.report_group(group.as_bytes(), 1);
+            } else {
+                entry.qps.report_counter(1);
+            }
+        }
+        let now_instant = tokio::time::Instant::now();
+        let deadline = if forwarded {
+            request_deadline.unwrap_or(now_instant + Duration::from_millis(200))
+        } else {
+            now_instant + crate::matching_sync::sync_match_budget(
+                request_deadline.map(|d| d.saturating_duration_since(now_instant)))
+        };
+        let source = GoString::from(domain.to_string());
+        let task = AllocatedTaskBytes { task_id: 0, data: data.clone() };
+        if context.domain_active(domain)? {
+            let degree = context.forward_degree(domain, parsed.root()).max(1);
+            let mut current = list.clone();
+            let mut handle = entry.clone();
+            let mut ancestor = false;
+            let mut permits = Vec::new();
+            loop {
+                let matched = if ancestor || forwarded {
+                    handle.try_sync_match_forwarded(&task, &source, deadline).await
+                } else {
+                    handle.try_sync_match_observed(&task, &source, deadline).await == SyncMatchOutcome::Matched
+                };
+                if matched {
+                    return Ok(matching::AddDecisionTaskResponse { partition_config: response_config(&entry) });
+                }
+                let name = crate::matching_handler_native::task_list_name(&current.name)?;
+                if request.source == 2 && (ancestor || forwarded) && name.is_root() {
+                    if handle.offer_forwarded_backlog(&task, &source, deadline).await {
+                        return Ok(matching::AddDecisionTaskResponse { partition_config: response_config(&entry) });
+                    }
+                    break;
+                }
+                if name.is_root() || current.kind == 2 || tokio::time::Instant::now() >= deadline { break; }
+                let parent = name.parent(degree);
+                if parent.is_empty() { break; }
+                let Some(permit) = handle.try_forward_task() else { break; };
+                permits.push(permit);
+                let previous = current.name.clone();
+                current.name = parent.clone();
+                match context.remote_parent(parent.clone()).await {
+                    Ok(Some(remote)) => {
+                        let mut next = request.clone();
+                        next.domain_id = source.clone();
+                        next.task_list = Some(current.clone());
+                        next.forwarded_from = previous;
+                        if remote.add_decision_task(next, deadline).await.is_ok() {
+                            return Ok(matching::AddDecisionTaskResponse { partition_config: response_config(&entry) });
+                        }
+                        break;
+                    }
+                    Err(_) => break,
+                    Ok(None) => {}
+                }
+                let parent_key = TaskListKeyBytes { domain_id: domain, name: parent, task_type: 0 };
+                handle = match self.registry.get(parent_key.clone(), kind, crate::grpc_matching::matching_now()).await {
+                    Ok(handle) => handle,
+                    Err(_) => break,
+                };
+                if handle.stop_if_isolation_changed() || context.check_write_partition(&parent_key, &handle).is_err() { break; }
+                ancestor = true;
+            }
+        }
+        if forwarded { return Err(crate::matching_dispatch::remote_sync_match_failed()); }
+        entry.enqueue(data, domain, request.schedule_to_start_timeout.map(|d| d.seconds as i32).unwrap_or_default()).await?;
+        Ok(matching::AddDecisionTaskResponse { partition_config: response_config(&entry) })
     }
 }
 
@@ -52,6 +195,55 @@ fn add_task_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestContext;
+    impl DecisionAddContext for TestContext {
+        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> { Ok(true) }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString) -> i64 { 20 }
+        fn check_write_partition(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
+        fn remote_parent(&self, _: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    fn fixture() -> (tempfile::TempDir, NativeMatchingEngine) {
+        use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1), 32 * 1024 * 1024,
+        );
+        let registry = NativeQueueRegistry::new(store, history, std::num::NonZeroU32::new(100).unwrap());
+        (dir, NativeMatchingEngine::new(registry))
+    }
+
+    #[tokio::test]
+    async fn forwarded_failure_never_persists_raw_identifiers() {
+        let (_dir, engine) = fixture();
+        let domain = uuid::Uuid::from_u128(1);
+        let request = matching::AddDecisionTaskRequest {
+            domain_id: domain.to_string().into(),
+            task_list: Some(api::TaskList { name: vec![0xff, 0xfe].into(), ..Default::default() }),
+            workflow_execution: Some(api::WorkflowExecution { workflow_id: vec![0xff].into(), run_id: vec![0xfe].into() }),
+            forwarded_from: vec![0x80].into(),
+            ..Default::default()
+        };
+        let error = engine.add_decision_task(request, Some(tokio::time::Instant::now()), &TestContext).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        let queue = engine.registry.get(TaskListKeyBytes { domain_id: domain, name: vec![0xff, 0xfe].into(), task_type: 0 }, 0, crate::grpc_matching::matching_now()).await.unwrap();
+        assert_eq!(queue.queue.task_list_size().unwrap(), 0);
+        engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_raw_domain_is_rejected_without_loading_queue() {
+        let (_dir, engine) = fixture();
+        let request = matching::AddDecisionTaskRequest { domain_id: vec![0xff, 0].into(), ..Default::default() };
+        let error = engine.add_decision_task(request, None, &TestContext).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(engine.registry.loaded_owner_count(), 0);
+    }
 
     #[test]
     fn add_payload_preserves_arbitrary_string_bytes() {
