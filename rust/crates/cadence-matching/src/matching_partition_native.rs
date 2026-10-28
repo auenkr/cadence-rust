@@ -53,6 +53,22 @@ impl PartitionError {
             message: message.into(),
         }
     }
+    /// Requires RawStatusService around the native unary service.
+    pub fn to_native_status(&self) -> Status {
+        use crate::matching_native_status::{raw_detailed_status, raw_status};
+        let code = match self.kind {
+            PartitionErrorKind::InvalidArgument => tonic::Code::InvalidArgument,
+            PartitionErrorKind::NotFound => tonic::Code::NotFound,
+            PartitionErrorKind::Internal => tonic::Code::Internal,
+            PartitionErrorKind::ServiceBusy => tonic::Code::ResourceExhausted,
+        };
+        if self.kind == PartitionErrorKind::ServiceBusy {
+            raw_detailed_status(code, &self.message, "ServiceBusyError", Vec::new())
+        } else {
+            raw_status(code, &self.message, tonic::codegen::Bytes::new())
+        }
+    }
+
     pub fn to_diagnostic_status(&self) -> Status {
         let message = String::from_utf8_lossy(self.message.as_bytes()).into_owned();
         match self.kind {
@@ -593,31 +609,31 @@ mod tests {
             if let Some(error) = self.script.lock().unwrap().pop_front() {
                 return Err(error);
             }
-            self.inner.get_task_list(key)
+            MatchingTaskStoreBytes::get_task_list(self.inner.as_ref(), key)
         }
         fn lease(&self, key: &TaskListKeyBytes, kind: i16, previous_range: i64, now_nanos: i64) -> cadence_persistence::matching_native_task_store::Result<TaskListRecordBytes> {
             MatchingTaskStoreBytes::lease(self.inner.as_ref(), key, kind, previous_range, now_nanos)
         }
         fn update_task_list(&self, key: &TaskListKeyBytes, range: i64, data: TaskListDataBytes, now_nanos: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
-            self.inner.update_task_list(key, range, data, now_nanos)
+            MatchingTaskStoreBytes::update_task_list(self.inner.as_ref(), key, range, data, now_nanos)
         }
         fn create_tasks_with_domains(&self, key: &TaskListKeyBytes, range: i64, now_nanos: i64, tasks: &[(Uuid, &AllocatedTaskBytes)]) -> cadence_persistence::matching_native_task_store::Result<()> {
-            self.inner.create_tasks_with_domains(key, range, now_nanos, tasks)
+            MatchingTaskStoreBytes::create_tasks_with_domains(self.inner.as_ref(), key, range, now_nanos, tasks)
         }
         fn get_tasks(&self, key: &TaskListKeyBytes, read_level: i64, max_read_level: i64, batch_size: i64) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>> {
-            self.inner.get_tasks(key, read_level, max_read_level, batch_size)
+            MatchingTaskStoreBytes::get_tasks(self.inner.as_ref(), key, read_level, max_read_level, batch_size)
         }
         fn task_list_size(&self, key: &TaskListKeyBytes, ack_level: i64) -> cadence_persistence::matching_native_task_store::Result<i64> {
-            self.inner.task_list_size(key, ack_level)
+            MatchingTaskStoreBytes::task_list_size(self.inner.as_ref(), key, ack_level)
         }
         fn complete_task(&self, key: &TaskListKeyBytes, task_id: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
-            self.inner.complete_task(key, task_id)
+            MatchingTaskStoreBytes::complete_task(self.inner.as_ref(), key, task_id)
         }
         fn complete_tasks_less_than(&self, key: &TaskListKeyBytes, inclusive_task_id: i64, limit: i64) -> cadence_persistence::matching_native_task_store::Result<usize> {
-            self.inner.complete_tasks_less_than(key, inclusive_task_id, limit)
+            MatchingTaskStoreBytes::complete_tasks_less_than(self.inner.as_ref(), key, inclusive_task_id, limit)
         }
         fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
-            self.inner.delete_task_list(key, range)
+            MatchingTaskStoreBytes::delete_task_list(self.inner.as_ref(), key, range)
         }
     }
     fn backend(kind: BackendErrorKind, message: &str) -> StoreError {

@@ -70,7 +70,9 @@ impl WorkerAnswer {
 #[derive(Debug)]
 pub enum NativeQueryError {
     /// Go `QueryFailedError{Message}` with the worker's raw error message.
-    QueryFailed { message: GoString },
+    QueryFailed {
+        message: GoString,
+    },
     /// Go `ClientVersionNotSupportedError` with raw worker-supplied strings.
     ClientVersionNotSupported {
         feature_version: GoString,
@@ -78,6 +80,37 @@ pub enum NativeQueryError {
         supported_versions: GoString,
     },
     Status(Status),
+}
+
+impl NativeQueryError {
+    /// Requires RawStatusService around the native unary service. The outer
+    /// grpc-message uses Go's rune replacement; typed detail fields retain bytes.
+    pub fn into_status(self) -> Status {
+        use crate::matching_native_status::raw_detailed_status;
+        match self {
+            Self::Status(status) => status,
+            Self::QueryFailed { message } => raw_detailed_status(
+                tonic::Code::InvalidArgument, &message, "QueryFailedError", Vec::new(),
+            ),
+            Self::ClientVersionNotSupported {
+                feature_version, client_impl, supported_versions,
+            } => {
+                let mut detail = Vec::new();
+                for (tag, value) in [
+                    (1, feature_version), (2, client_impl), (3, supported_versions),
+                ] {
+                    if !value.is_empty() {
+                        cadence_proto::native::wire::encode_string(tag, &value, &mut detail);
+                    }
+                }
+                raw_detailed_status(
+                    tonic::Code::FailedPrecondition,
+                    &GoString::from("Client version not supported"),
+                    "ClientVersionNotSupportedError", detail,
+                )
+            }
+        }
+    }
 }
 
 type Waiting = HashMap<GoString, (u64, oneshot::Sender<QueryOutcome>)>;
@@ -249,7 +282,10 @@ impl QueryChannel {
         receiver
     }
 
-    pub fn register_waiter(self: &Arc<Self>, task_id: &GoString) -> oneshot::Receiver<QueryOutcome> {
+    pub fn register_waiter(
+        self: &Arc<Self>,
+        task_id: &GoString,
+    ) -> oneshot::Receiver<QueryOutcome> {
         self.install_waiter(task_id).1
     }
 
@@ -569,7 +605,8 @@ mod tests {
             .deliver(&idb, QueryOutcome::Internal(Status::internal("b")))
             .unwrap();
         assert!(rb.blocking_recv().is_ok());
-        assert!(a.complete(&idb, QueryOutcome::Internal(Status::internal("")))
+        assert!(a
+            .complete(&idb, QueryOutcome::Internal(Status::internal("")))
             .is_err());
         index
             .deliver(&ida, QueryOutcome::Internal(Status::internal("a")))
@@ -628,7 +665,10 @@ mod tests {
         let exec = response.workflow_execution.unwrap();
         assert_eq!((exec.workflow_id, exec.run_id), (raw(3), raw(4)));
         channel
-            .complete(&id, QueryOutcome::Worker(WorkerAnswer::new(answered(b"a\xff"))))
+            .complete(
+                &id,
+                QueryOutcome::Worker(WorkerAnswer::new(answered(b"a\xff"))),
+            )
             .unwrap();
         let response = query_outcome(receiver.await.unwrap(), false).unwrap();
         assert_eq!(response.query_result.unwrap().data, b"a\xff".to_vec());
@@ -659,7 +699,13 @@ mod tests {
 
     #[test]
     fn feature_versions_validate_on_bytes_without_replacement_aliasing() {
-        for ok in [&b"1"[..], b"v1.5", b"01.05.0", b"1.5.0+build.42", b"2.0.0.1"] {
+        for ok in [
+            &b"1"[..],
+            b"v1.5",
+            b"01.05.0",
+            b"1.5.0+build.42",
+            b"2.0.0.1",
+        ] {
             assert!(supports_sticky_query(b"uber-go", ok), "{ok:?}");
         }
         for bad in [
@@ -706,8 +752,11 @@ mod tests {
             Err(NativeQueryError::ClientVersionNotSupported { .. })
         ));
         // Eventual queries never check the version.
-        assert!(query_outcome(QueryOutcome::Worker(WorkerAnswer::new(answered(b"x"))), false)
-            .is_ok());
+        assert!(query_outcome(
+            QueryOutcome::Worker(WorkerAnswer::new(answered(b"x"))),
+            false
+        )
+        .is_ok());
     }
 
     #[test]
@@ -731,7 +780,10 @@ mod tests {
             Err(NativeQueryError::Status(s)) => assert_eq!(s.code(), tonic::Code::Internal),
             other => panic!("unexpected {other:?}"),
         }
-        match query_outcome(QueryOutcome::Internal(Status::internal("history down")), false) {
+        match query_outcome(
+            QueryOutcome::Internal(Status::internal("history down")),
+            false,
+        ) {
             Err(NativeQueryError::Status(s)) => assert!(s.message().contains("history down")),
             other => panic!("unexpected {other:?}"),
         }

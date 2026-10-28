@@ -177,7 +177,9 @@ fn is_condition_failed(error: &StoreError) -> bool {
         error,
         StoreError::ConditionFailed { .. }
             | StoreError::Legacy(
-                cadence_persistence::matching_task_store::MatchingTaskStoreError::ConditionFailed(_)
+                cadence_persistence::matching_task_store::MatchingTaskStoreError::ConditionFailed(
+                    _
+                )
             )
     )
 }
@@ -511,14 +513,19 @@ mod tests {
             Arc::new(Notify::new()),
             WriterConfig::default(),
         );
-        let allocated = writer
-            .append(pending(b"wf\xff\x00", source))
-            .await
-            .unwrap();
+        let allocated = writer.append(pending(b"wf\xff\x00", source)).await.unwrap();
         assert_eq!(allocated.data.workflow_id.as_bytes(), b"wf\xff\x00");
-        assert!(MatchingTaskStoreBytes::get_tasks(s.as_ref(), &k, 0, i64::MAX, 100).unwrap().is_empty());
-        let source_key = TaskListKeyBytes { domain_id: source, ..k.clone() };
-        let rows = MatchingTaskStoreBytes::get_tasks(s.as_ref(), &source_key, 0, i64::MAX, 100).unwrap();
+        assert!(
+            MatchingTaskStoreBytes::get_tasks(s.as_ref(), &k, 0, i64::MAX, 100)
+                .unwrap()
+                .is_empty()
+        );
+        let source_key = TaskListKeyBytes {
+            domain_id: source,
+            ..k.clone()
+        };
+        let rows =
+            MatchingTaskStoreBytes::get_tasks(s.as_ref(), &source_key, 0, i64::MAX, 100).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].data.workflow_id.as_bytes(), b"wf\xff\x00");
         assert_eq!(rows[0].task_id, allocated.task_id);
@@ -604,7 +611,11 @@ mod tests {
         let stale = queue(&s, k.clone(), kind);
         // A second owner leases a newer range and fences the first.
         let _owner = queue(&s, k, kind);
-        let writer = NativeTaskWriter::new(stale.clone(), Arc::new(Notify::new()), WriterConfig::default());
+        let writer = NativeTaskWriter::new(
+            stale.clone(),
+            Arc::new(Notify::new()),
+            WriterConfig::default(),
+        );
         // Isolate the mapped write response from owner shutdown, which Go
         // permits to race that response. The queue still records the lost lease.
         stale.set_stop_waker(Arc::new(|| {}));

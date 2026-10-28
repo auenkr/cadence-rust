@@ -18,7 +18,32 @@ import (
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/service/matching/tasklist"
 	"go.uber.org/yarpc/encoding/protobuf"
+    "go.uber.org/yarpc/yarpcerrors"
+    gogorpc "github.com/gogo/googleapis/google/rpc"
+    gogostatus "github.com/gogo/status"
+    grpcstatus "google.golang.org/grpc/status"
+    googleproto "google.golang.org/protobuf/proto"
+    cadencetypes "github.com/uber/cadence/common/types"
+    protomapper "github.com/uber/cadence/common/types/mapper/proto"
+
 )
+
+// Follow YARPC's gogo error envelope -> grpc-go status conversion. The
+// transport uses protobuf/v2 for the outer google.rpc.Status marshal and drops
+// grpc-status-details-bin if it fails (for example invalid Status.message).
+func grpcErrorCase(err error) map[string]interface{} {
+    mapped := yarpcerrors.FromError(protomapper.FromError(err))
+    envelope := &gogorpc.Status{}
+    if err := proto.Unmarshal(mapped.Details(), envelope); err != nil { panic(err) }
+    status, ok := grpcstatus.FromError(gogostatus.ErrorProto(envelope))
+    if !ok { panic("expected gogo GRPCStatus conversion") }
+    encoded, marshalErr := googleproto.Marshal(status.Proto())
+    if marshalErr != nil { encoded = nil }
+    return map[string]interface{}{
+        "code": int32(status.Code()), "messageHex": hex.EncodeToString([]byte(status.Message())),
+        "transportDetailsHex": hex.EncodeToString(encoded), "marshalError": errorText(marshalErr),
+    }
+}
 
 // Build wire strings independently of the generated marshal implementation so
 // inbound acceptance is observable even when outbound marshal rejects a value.
@@ -220,6 +245,10 @@ func main() {
 			"validUtf8": utf8.Valid(raw), "hash32": farm.Hash32(input),
 			"jsonText": string(encoded),
 			"protobuf": protobufCases(raw),
+            "grpcQueryError": grpcErrorCase(&cadencetypes.QueryFailedError{Message: string(raw)}),
+            "grpcVersionError": grpcErrorCase(&cadencetypes.ClientVersionNotSupportedError{
+                FeatureVersion: string(raw), ClientImpl: string(raw), SupportedVersions: ">=1.5.0",
+            }),
 			"taskTokenJSON": string(taskJSON), "queryTokenJSON": string(queryJSON),
 			"googleUUID": map[string]interface{}{"error": errorText(googleErr), "uuidHex": hex.EncodeToString(googleID[:])},
 			"cassandraUUID": map[string]interface{}{"error": errorText(cassandraErr), "uuidHex": hex.EncodeToString(cassandraID[:])},

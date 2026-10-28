@@ -62,6 +62,7 @@ pub mod matching_limiter;
 #[allow(clippy::result_large_err)]
 pub mod matching_membership;
 pub mod matching_membership_lifecycle;
+pub mod matching_native_status;
 pub mod matching_panic;
 #[allow(clippy::result_large_err)]
 pub mod matching_partition;

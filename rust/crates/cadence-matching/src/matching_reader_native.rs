@@ -16,8 +16,8 @@ use cadence_persistence::{
     matching_native_task_store::AllocatedTaskBytes,
 };
 use std::{
-    num::NonZeroU32,
     collections::{BTreeMap, HashMap, VecDeque},
+    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -27,7 +27,8 @@ use tokio::sync::{mpsc, watch, Notify};
 const DIAGNOSTIC_LIMIT: usize = 256;
 /// Diagnostic/metric text only. Never use for selection, routing or keys.
 fn diag(bytes: &[u8]) -> String {
-    let mut text = String::from_utf8_lossy(&bytes[..bytes.len().min(DIAGNOSTIC_LIMIT)]).into_owned();
+    let mut text =
+        String::from_utf8_lossy(&bytes[..bytes.len().min(DIAGNOSTIC_LIMIT)]).into_owned();
     if bytes.len() > DIAGNOSTIC_LIMIT {
         text.push_str("...");
     }
@@ -429,11 +430,7 @@ impl NativeTaskReader {
             .expect("matching reader metrics lock") =
             Some(ReaderMetricContext { metrics, context });
     }
-    pub fn new(
-        queue: Arc<DurableTaskQueueBytes>,
-        wake: Arc<Notify>,
-        config: ReaderConfig,
-    ) -> Self {
+    pub fn new(queue: Arc<DurableTaskQueueBytes>, wake: Arc<Notify>, config: ReaderConfig) -> Self {
         Self::with_fatal_invariant_sink(
             queue,
             wake,
@@ -662,8 +659,10 @@ impl NativeTaskReader {
                             } else {
                                 GoString::default()
                             };
-                            dispatched.data.partition_config =
-                                dispatch_partition_config(&task.data.partition_config, &dispatch_group);
+                            dispatched.data.partition_config = dispatch_partition_config(
+                                &task.data.partition_config,
+                                &dispatch_group,
+                            );
                             let forwarder = backlog_forward
                                 .lock()
                                 .expect("matching reader forwarder lock")
@@ -1060,7 +1059,10 @@ impl NativeTaskReader {
         self.inner.isolated.contains_key(group)
     }
     pub fn record_task_count(&self, task_count: i64) {
-        self.record_gauge(crate::matching_metrics::TASK_COUNT_PER_TASK_LIST, task_count);
+        self.record_gauge(
+            crate::matching_metrics::TASK_COUNT_PER_TASK_LIST,
+            task_count,
+        );
     }
     pub fn record_task_lag(&self, task_lag: i64) {
         self.record_gauge(crate::matching_metrics::TASK_LAG_PER_TASK_LIST, task_lag);
@@ -1165,9 +1167,8 @@ mod tests {
         let store = Arc::new(
             SqliteTaskStore::create(dir.path().join("t.db"), BlobEncoding::ThriftRW).unwrap(),
         );
-        let queue = Arc::new(
-            DurableTaskQueueBytes::open(store, key(b"q\xff"), 0, n(100), 1).unwrap(),
-        );
+        let queue =
+            Arc::new(DurableTaskQueueBytes::open(store, key(b"q\xff"), 0, n(100), 1).unwrap());
         let groups: [&[u8]; 3] = [b"\xff", b"\xfe", "\u{fffd}".as_bytes()];
         let data: Vec<_> = groups
             .iter()
@@ -1316,8 +1317,12 @@ mod tests {
         let entered = Arc::new(Notify::new());
         let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let sink: ReaderFatalSink = {
-            let (finished, details, entered, release) =
-                (finished.clone(), details.clone(), entered.clone(), release.clone());
+            let (finished, details, entered, release) = (
+                finished.clone(),
+                details.clone(),
+                entered.clone(),
+                release.clone(),
+            );
             Arc::new(move |detail| {
                 details.lock().unwrap().push(detail);
                 entered.notify_one();
@@ -1346,17 +1351,25 @@ mod tests {
             .expect("reader reports the invariant");
         reader.stop();
         let returned_while_blocked =
-            tokio::time::timeout(Duration::from_millis(50), reader.wait_stopped()).await.is_ok();
+            tokio::time::timeout(Duration::from_millis(50), reader.wait_stopped())
+                .await
+                .is_ok();
         {
             let (lock, changed) = &*release;
             *lock.lock().unwrap() = true;
             changed.notify_all();
         }
-        assert!(!returned_while_blocked, "shutdown outran the fatal callback");
+        assert!(
+            !returned_while_blocked,
+            "shutdown outran the fatal callback"
+        );
         tokio::time::timeout(Duration::from_secs(5), reader.wait_stopped())
             .await
             .expect("reader stops after fatal invariant");
-        assert!(finished.load(Ordering::SeqCst), "wait_stopped outran the callback");
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "wait_stopped outran the callback"
+        );
         assert_eq!(details.lock().unwrap().len(), 1);
         assert!(queue.is_stopped());
     }
