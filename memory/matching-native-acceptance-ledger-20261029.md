@@ -11,20 +11,27 @@ proved.
 ## Source identity
 
 No final immutable candidate is frozen. Current fresh whole-workspace run
-https://github.com/auenkr/cadence-rust/actions/runs/40756335405 targets
-`58d2887a4a47ec038699ec2c68b317cf7ee6987e` (abbreviated; use Actions headSha as the authoritative full pin).
-It includes all integration code through query/Thrift regressions and the
-PostgreSQL native oracle invocation, with clean target and runner formatting
-enabled. No outcome yet. Selected Matching run40754945697 passed at
-`fb049c5515d0c940adc86e038bd3b1ef31b84880`; that older source cannot validate
-the added query/Thrift tests or oracle invocation. Do not attribute an earlier
-result to changed source.
+https://github.com/auenkr/cadence-rust/actions/runs/40757715608 targets
+`a85e585b9a2e396e247459750398dcf09b612cc5` on the saved validation ref
+`t3/native-matching-candidate-20261029`. It includes the typed-error metric
+classification and async-reader duration corrections, all integration changes,
+and the native PostgreSQL oracle invocation. Clean target, runner parity
+formatting and original-Go UUID oracle enabled. No outcome yet.
+
+Earlier workspace run40756335405 at
+`58d2887a4a47ec038699ec2c68b317cf7ee6987e` passed Clippy and remains live in
+tests at inspection. The separate ref preserves that run and its evidence;
+neither was restarted because of a timeout. No mixed gate runs concurrently.
+Selected Matching run40754945697 passed at
+`fb049c5515d0c940adc86e038bd3b1ef31b84880`; do not attribute an earlier result
+to changed source. After formatting/fixes, final gates still require one frozen
+immutable source and same-pin successful workspace validation.
 
 ## Required evidence
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending run40756335405. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Pending run40757715608; earlier run40756335405 remains live. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |

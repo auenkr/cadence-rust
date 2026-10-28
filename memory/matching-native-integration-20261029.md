@@ -241,3 +241,19 @@ task-type/name filters and invalid byte task names distinct from U+FFFD, plus
 unchanged integer batch/range readers. It uses properly encoded JSON config
 values. No source for another service was changed. This correction postdates
 run40756335405 and needs new CI including runner formatting; no pass is claimed.
+
+## Parallel hosted validation without superseding the live older run
+
+At inspection run40756335405 still had `Test` in progress (Clippy passed),
+so retained it rather than cancelling it. Pushed an exact validation ref
+`t3/native-matching-candidate-20261029` at source
+`a85e585b9a2e396e247459750398dcf09b612cc5` and dispatched fresh uncached
+whole-workspace Clippy then tests, runner formatting and original-Go UUID oracle:
+https://github.com/auenkr/cadence-rust/actions/runs/40757715608 . This includes
+the new duration and metric fixes; no outcome is yet known. The separate ref
+uses a distinct existing workflow concurrency group and preserves older-run
+evidence. Both are standard Ubuntu hosted jobs in the confirmed PUBLIC repo;
+no mixed gate or local build is running. Download both terminal results and
+the newer formatting patch before freezing the final source. The validation
+ref must be removed after the integration merges, subject to branch-cleanup
+rules. No new PR was opened for it. T3 PR ownership linking still fails.
