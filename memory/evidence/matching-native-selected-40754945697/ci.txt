@@ -1,0 +1,5 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40754945697
+headSha: fb049c5515d0c940adc86e038bd3b1ef31b84880
+conclusion: success
+Scope: cadence-matching (not workspace)
+Runner parity formatting enabled; patch already applied to source. Advisory workspace-format.exit=1; changed Matching runtime format exit0.

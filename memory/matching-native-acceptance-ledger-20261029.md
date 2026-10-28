@@ -173,3 +173,7 @@ rejection, valid U+FFFD key separation, range fencing and native/legacy
 cross-read. This new gate step is unexecuted; it does not substitute for the
 mixed PostgreSQL SDK/recovery lane. Local checks: `bash -n` and
 `git diff --check` passed; no local Cargo or Go command ran.
+
+## Selected Matching pass recovered
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40754945697 completed **success** at `fb049c5515d0c940adc86e038bd3b1ef31b84880`. Downloaded logs prove fresh target `/home/runner/work/_temp/cargo-target-final`, selected cadence-matching Clippy exit0 then tests exit0, including native failover and public refresh failure regressions. Compact evidence: `memory/evidence/matching-native-selected-40754945697/`; complete logs: `/mnt/storage/service/ci-evidence/matching-native-workspace-40754945697/`. This was selected-crate CI, despite the historical local directory name. Advisory whole-workspace formatting exit1 remains reported; changed Matching runtime format exit0. Latest query/Thrift regressions and PostgreSQL oracle invocation postdate this source. No workspace or mixed lane pass is claimed.
