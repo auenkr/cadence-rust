@@ -557,22 +557,22 @@ mod tests {
         fn check_domain(&self, _: &GoString, _: &'static str) -> Result<(), Status> { Ok(()) }
         fn acquire_semaphore(&self, _: Request<n::matching::AcquireSemaphoreRequest>) -> NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>> { Box::pin(async { Err(Status::unimplemented("test")) }) }
     }
-    fn service(reject: bool) -> (tempfile::TempDir, NativeMatchingService<Integration>, Arc<crate::matching_metrics::RecordingMetricSink>) {
+    fn service(reject: bool) -> (tempfile::TempDir, NativeMatchingService<Integration>, Arc<crate::matching_metrics::RecordingMetricSink>, Arc<cadence_persistence::matching_sqlite::SqliteTaskStore>) {
         use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
         let history = crate::matching_history::MatchingHistoryClient::new(
             tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(), Duration::from_secs(1), 32 * 1024 * 1024);
-        let registry = crate::matching_registry_native::NativeQueueRegistry::new(store, history, std::num::NonZeroU32::new(100).unwrap());
+        let registry = crate::matching_registry_native::NativeQueueRegistry::new(store.clone(), history, std::num::NonZeroU32::new(100).unwrap());
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         let integration = Integration { metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()), reject };
-        (dir, NativeMatchingService::new(NativeMatchingEngine::new(registry), integration), sink)
+        (dir, NativeMatchingService::new(NativeMatchingEngine::new(registry), integration), sink, store)
     }
     #[tokio::test]
     async fn actual_handler_counts_forwarded_quota_failure_and_captures_panic() {
         use cadence_proto::native::NativeMatchingApi as _;
         use crate::matching_metrics::FORWARDED_PER_TASK_LIST;
-        let (_dir, service, sink) = service(true);
+        let (_dir, service, sink, _) = service(true);
         let request = n::matching::AddDecisionTaskRequest {
             forwarded_from: GoString::from(&b"\xff"[..]),
             task_list: Some(n::api::TaskList { name: "queue".into(), ..Default::default() }),
@@ -587,7 +587,7 @@ mod tests {
     #[tokio::test]
     async fn actual_add_and_control_deadlines_cancel_pending_admission() {
         use cadence_proto::native::NativeMatchingApi as _;
-        let (_dir, service, _) = service(false);
+        let (_dir, service, _, store) = service(false);
         let released = Arc::new(tokio::sync::Notify::new());
         let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let release = released.clone();
@@ -605,15 +605,26 @@ mod tests {
         add.set_timeout(Duration::from_millis(50));
         let err = tokio::time::timeout(Duration::from_secs(2), service.add_decision_task(add)).await.unwrap().unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
+        let mut poll = Request::new(n::matching::PollForDecisionTaskRequest { domain_id: domain.clone(), request: Some(n::api::PollForDecisionTaskRequest { task_list: Some(list.clone()), ..Default::default() }), ..Default::default() });
+        poll.set_timeout(Duration::from_millis(50));
+        let err = tokio::time::timeout(Duration::from_secs(2), service.poll_for_decision_task(poll)).await.unwrap().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        let mut query = Request::new(n::matching::QueryWorkflowRequest { domain_id: domain.clone(), task_list: Some(list.clone()), ..Default::default() });
+        query.set_timeout(Duration::from_millis(50));
+        let err = tokio::time::timeout(Duration::from_secs(2), service.query_workflow(query)).await.unwrap().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
         let mut describe = Request::new(n::matching::DescribeTaskListRequest { domain_id: domain, request: Some(n::api::DescribeTaskListRequest { task_list: Some(list), ..Default::default() }) });
         describe.set_timeout(Duration::from_millis(50));
         let err = tokio::time::timeout(Duration::from_secs(2), service.describe_task_list(describe)).await.unwrap().unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        assert_eq!(entered.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(entered.load(std::sync::atomic::Ordering::SeqCst), 4);
         released.notify_waiters();
         tokio::task::yield_now().await;
         assert_eq!(completed.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(service.engine.registry.loaded_owner_count(), 0);
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
+        let key = TaskListKeyBytes { domain_id: uuid::Uuid::from_u128(1), name: "queue".into(), task_type: 0 };
+        assert!(store.get_task_list(&key).is_err(), "pending admission must not lease storage");
     }
 
     #[test]
