@@ -214,6 +214,7 @@ jobs:
             crates/cadence-persistence/src/matching_task_store.rs
             crates/cadence-persistence/src/matching_native_task_store.rs
             crates/cadence-persistence/src/matching_native_queue.rs
+            crates/cadence-persistence/src/semaphores_native.rs
             crates/cadence-persistence/src/matching_cassandra.rs
             crates/cadence-persistence/src/matching_cassandra_exec.rs
             crates/cadence-persistence/src/matching_cassandra_native.rs

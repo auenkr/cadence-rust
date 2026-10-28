@@ -14,6 +14,7 @@ pub mod history_branch;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;
+pub mod semaphores_native;
 pub mod cassandra;
 pub mod version_history;
 pub mod visibility;
