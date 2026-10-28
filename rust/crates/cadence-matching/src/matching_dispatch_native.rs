@@ -482,9 +482,14 @@ impl NativeForwardState {
                 }
             }
             NativeParent::Dispatcher(dispatcher) => {
-                dispatcher
-                    .accept_forwarded_backlog(task, source_domain, &parent_name, task_type)
-                    .await
+                let operation = if task_type == 0 {
+                    "matching-add-decision-task"
+                } else {
+                    "matching-add-activity-task"
+                };
+                crate::matching_fault_injection::inject_client_call(operation, async {
+                    dispatcher.accept_forwarded_backlog(task, source_domain, &parent_name, task_type).await
+                }).await
             }
         };
         result.map_err(ForwardError::classify)
@@ -1672,5 +1677,174 @@ mod tests {
             })
             .await;
         assert!(result.unwrap().is_empty());
+    }
+
+    #[derive(Default)]
+    struct ScriptedApi {
+        decisions: Mutex<Vec<n::matching::AddDecisionTaskRequest>>,
+        activities: Mutex<Vec<n::matching::AddActivityTaskRequest>>,
+        fail: bool,
+    }
+    impl NativeMatchingApi for ScriptedApi {
+        fn poll_for_decision_task(
+            &self,
+            _r: n::matching::PollForDecisionTaskRequest,
+            _d: tokio::time::Instant,
+        ) -> NativeFuture<Result<n::matching::PollForDecisionTaskResponse, Status>> {
+            Box::pin(async { Err(Status::unimplemented("scripted")) })
+        }
+        fn poll_for_activity_task(
+            &self,
+            _r: n::matching::PollForActivityTaskRequest,
+            _d: tokio::time::Instant,
+        ) -> NativeFuture<Result<n::matching::PollForActivityTaskResponse, Status>> {
+            Box::pin(async { Err(Status::unimplemented("scripted")) })
+        }
+        fn add_decision_task(
+            &self,
+            r: n::matching::AddDecisionTaskRequest,
+            _d: tokio::time::Instant,
+        ) -> NativeFuture<Result<(), Status>> {
+            self.decisions.lock().unwrap().push(r);
+            let fail = self.fail;
+            Box::pin(async move {
+                if fail {
+                    Err(Status::unavailable("parent down"))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+        fn add_activity_task(
+            &self,
+            r: n::matching::AddActivityTaskRequest,
+            _d: tokio::time::Instant,
+        ) -> NativeFuture<Result<(), Status>> {
+            self.activities.lock().unwrap().push(r);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn forward_state(api: Arc<ScriptedApi>, source: &[u8], parent: &'static [u8]) -> NativeForwardState {
+        NativeForwardState::new(
+            move || {
+                let api = api.clone();
+                Box::pin(async move { Some((NativeParent::Service(api), gs(parent))) })
+            },
+            Arc::new(|| 10),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 10))),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 100),
+                now(),
+            )),
+            gs(source),
+            Arc::new(|| 0),
+        )
+    }
+    const RAW_RUNS: [&[u8]; 3] = [b"\xff\xfe", b"a\x00b\xff", b"\"q\\\xfe"];
+    fn raw_task(run: &[u8]) -> AllocatedTaskBytes {
+        AllocatedTaskBytes {
+            task_id: 7,
+            data: TaskDataBytes {
+                workflow_id: gs(b"wf\xff"),
+                raw_run_id: Some(gs(run)),
+                schedule_id: 9,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn native_forward_backlog_keeps_raw_run_id_exact_for_decision_and_activity() {
+        let source = b"/__cadence_sys/q\xff/1";
+        for run in RAW_RUNS {
+            let api = Arc::new(ScriptedApi::default());
+            let state = forward_state(api.clone(), source, b"q\xff");
+            state
+                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 0, 0)
+                .await
+                .unwrap();
+            state
+                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 1, 0)
+                .await
+                .unwrap();
+            let d = api.decisions.lock().unwrap();
+            let a = api.activities.lock().unwrap();
+            for (exec, list, from) in [
+                (&d[0].workflow_execution, &d[0].task_list, &d[0].forwarded_from),
+                (&a[0].workflow_execution, &a[0].task_list, &a[0].forwarded_from),
+            ] {
+                let exec = exec.as_ref().unwrap();
+                assert_eq!(exec.run_id.as_bytes(), run, "RunID must not be quoted");
+                assert_eq!(exec.workflow_id.as_bytes(), b"wf\xff");
+                assert_eq!(list.as_ref().unwrap().name.as_bytes(), b"q\xff");
+                assert_eq!(from.as_bytes(), source);
+            }
+            assert_eq!(d[0].domain_id.as_bytes(), b"src");
+            assert_eq!(a[0].domain_id.as_bytes(), b"dom");
+            assert_eq!(a[0].source_domain_id.as_bytes(), b"src");
+            assert_eq!(d[0].schedule_id, 9);
+        }
+    }
+
+    #[tokio::test]
+    async fn native_forward_backlog_rejects_root_and_maps_parent_failure() {
+        let api = Arc::new(ScriptedApi::default());
+        let root = forward_state(api.clone(), b"q\xff", b"q\xff");
+        assert!(matches!(
+            root.forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0)
+                .await,
+            Err(crate::matching_forward::ForwardError::NoParent)
+        ));
+        assert!(api.decisions.lock().unwrap().is_empty());
+        let failing = Arc::new(ScriptedApi {
+            fail: true,
+            ..Default::default()
+        });
+        let state = forward_state(failing.clone(), b"/__cadence_sys/q\xff/1", b"q\xff");
+        assert!(state
+            .forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0)
+            .await
+            .is_err());
+        assert_eq!(failing.decisions.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn native_sync_matcher_acknowledges_outcome_to_offerer_and_isolates_groups() {
+        let (_stop, receiver) = tokio::sync::watch::channel(false);
+        let matcher = Arc::new(NativeSyncMatcher::new(&[gs(b"g\xff")], receiver));
+        let poller = {
+            let matcher = matcher.clone();
+            tokio::spawn(async move { matcher.poll(&gs(b"g\xff")).await })
+        };
+        let offered = matcher
+            .offer(
+                raw_task(b"\xff\xfe"),
+                &gs(b"g\xff"),
+                &gs(b"src"),
+                false,
+                Duration::from_millis(500),
+                tokio::time::Instant::now() + Duration::from_secs(2),
+            );
+        let (accepted, ()) = tokio::time::timeout(Duration::from_secs(3), async {
+            tokio::join!(offered, async {
+                let task = poller.await.unwrap().expect("poller gets task");
+                assert_eq!(task.task.data.run_id_bytes(), b"\xff\xfe");
+                task.finish(Ok(()));
+            })
+        }).await.expect("sync matcher handoff timed out");
+        assert!(accepted);
+        // A task bound to another group is not handed to a g\xff poller.
+        let refused = matcher
+            .offer(
+                raw_task(b"r"),
+                &gs(b"other"),
+                &gs(b"src"),
+                false,
+                Duration::ZERO,
+                tokio::time::Instant::now() + Duration::from_millis(200),
+            )
+            .await;
+        assert!(!refused);
     }
 }

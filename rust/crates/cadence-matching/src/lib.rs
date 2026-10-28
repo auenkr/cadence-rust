@@ -43,6 +43,8 @@ pub mod matching_dispatch;
 #[allow(clippy::result_large_err)]
 pub mod matching_dispatch_native;
 pub mod matching_forward;
+#[allow(clippy::result_large_err)]
+pub mod matching_forward_native;
 pub mod matching_history_membership;
 #[allow(clippy::result_large_err)]
 pub mod matching_history_peer_resolver;
