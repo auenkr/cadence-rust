@@ -10,3 +10,5 @@ Integration APIs:
 - The existing NativePollObserver `poll_match` interface lacks task partition isolation data and the host adapter passes None to MatchingMetrics; poller isolation is retained in the context but isolation-match metric emissions still require a separate dispatch/observer interface change. The existing metric sink uses string labels and does not preserve invalid UTF-8 labels.
 
 Source regressions inspect emitted scaler names, domain/queue/group tags and normal versus sticky poll tags. They do not establish mixed-cluster parity or lifecycle behavior. No local Cargo, rustfmt, Go, or heavy tests ran; `git diff --check` passed. Parent must complete the host/launcher integration and fresh workspace and same-pin mixed SDK/recovery gates.
+
+CI: https://github.com/auenkr/cadence-rust/actions/runs/40729369298 was dispatched for six crates, clean target and runner formatting at source head `5709c440f418d7d3ce358dcc48a77507a33468e3`. Status was queued and conclusion pending at inspection; no clippy or test pass is claimed. This documentation-only commit records the run and is not the tested head.
