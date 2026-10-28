@@ -2,6 +2,12 @@
 
 ## Latest saved handoff — user requested save and push
 
+## Resumed production integration — 2026-10-28
+
+Fixed the two sync-fixture E0716 borrows in adc67085f487975d4c7517a54908b797c0e6e322. Fresh five-crate CI https://github.com/auenkr/cadence-rust/actions/runs/40681965498 is at that pin: clippy and formatting passed, tests still running at last read. No overall pass claimed; preserve this run rather than cancelling it for later source additions.
+
+Pushed 3e00ce1f5: registered native registry, retained complete raw invalid-name status, registered native handler helpers, native persistence QPS/metering wrapper and regression, runner formatting paths. This later source requires fresh CI. Handler and engine delegates did not implement their requested RPC paths; only reusable helpers/task construction exist, and production adoption is still open. New scaler adapter and actual actor delivery pipeline regression are source-only and need review/CI; scaler telemetry and live remote-description/config callbacks remain gaps. Configured store factory now exposes native and legacy interfaces sharing each concrete backend Arc, with a SQLite cross-view regression; native launcher wrappers/runtime wiring remain open. No local Cargo, Go validation or formatting ran.
+
 Source checkpoint: 609b7980407044616298b0b2e19a77140156f688 on master. Includes the native registry source and served raw-status transport regression plus their memory notes. The registry is not registered in lib.rs; its production callback adapters, compilation and runtime validation remain outstanding. The served transport regression is also unverified. Working tree was clean before this memory update.
 
 Latest CI https://github.com/auenkr/cadence-rust/actions/runs/40618333905 concluded **failure**, head 123b854e33f259b03b9c0e171d992cac1059e4b1. Clippy/type-check reports two E0716 temporary-borrow errors in matching_dispatch_native.rs around the stored sync offer future: borrowed temporary gs(b"g\\xff") and gs(b"src") values must be bound for the future's lifetime. Tests did not establish a pass. Fix these before the next CI dispatch. This run excludes the registry and served-status additions.

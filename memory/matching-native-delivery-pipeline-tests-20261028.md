@@ -1,0 +1,5 @@
+# Native delivery pipeline regression (2026-10-28)
+
+Added `rust/crates/cadence-matching/tests/native_delivery_pipeline.rs`: SQLite byte store, durable queue, writer, reader, sync matcher and dispatcher with a native protobuf History peer. It exercises raw queue, workflow and isolation-group bytes, a synchronous offer, persisted delivery, group isolation, History start, ack advancement and bounded reader/server shutdown. Sync offer is supplied directly to the matcher because the registry owns the add-side orchestration; delivery and History start go through the dispatcher and real reader/matcher actors.
+
+Not validated: user assigned CI to the parent and prohibited local Cargo/Go/rustfmt and CI dispatch. CI must compile and run this test; no pass is claimed. Further coverage remains for registry/add RPC wiring, mixed Go/Rust interoperability, failure/retry, restart/recovery, and full Matching parity. Writer exposes stop but no public completion wait; this test bounds reader and History server shutdown rather than claiming a joined writer.

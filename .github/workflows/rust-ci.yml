@@ -234,6 +234,8 @@ jobs:
             crates/cadence-matching/src/matching_registry_native.rs
             crates/cadence-matching/src/matching_handler_native.rs
             crates/cadence-matching/src/matching_persistence_native.rs
+            crates/cadence-matching/src/matching_scaler_native.rs
+            crates/cadence-matching/tests/native_delivery_pipeline.rs
             crates/cadence-matching/tests/native_raw_status_transport.rs
             crates/cadence-matching/src/matching_dispatch_native.rs
             crates/cadence-matching/src/matching_forward_native.rs

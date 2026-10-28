@@ -91,6 +91,8 @@ pub mod matching_registry_native;
 pub mod matching_ringpop_provider;
 pub mod matching_runtime;
 pub mod matching_scaler;
+#[allow(clippy::result_large_err)]
+pub mod matching_scaler_native;
 pub mod matching_semaphore;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_distributor;
