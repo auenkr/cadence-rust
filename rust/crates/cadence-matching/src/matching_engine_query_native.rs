@@ -158,14 +158,14 @@ impl NativeMatchingEngine {
     }
 }
 
-fn response_config_from_cache(cache: &crate::matching_partition_native::NativePartitionCache) -> Option<matching::TaskListPartitionConfig> {
+fn response_config_from_cache(cache: &crate::matching_partition_native::NativePartitionCache) -> Option<cadence_proto::native::api::TaskListPartitionConfig> {
     cache.get().map(|config| {
         let read_count = config.read_partitions.len() as i32;
         let write_count = config.write_partitions.len() as i32;
         let convert = |map: std::collections::HashMap<i32, Vec<GoString>>| {
-            map.into_iter().map(|(id, isolation_groups)| (id, matching::TaskListPartition { isolation_groups })).collect()
+            map.into_iter().map(|(id, isolation_groups)| (id, cadence_proto::native::api::TaskListPartition { isolation_groups })).collect()
         };
-        matching::TaskListPartitionConfig {
+        cadence_proto::native::api::TaskListPartitionConfig {
             version: config.version,
             num_read_partitions: read_count,
             num_write_partitions: write_count,
