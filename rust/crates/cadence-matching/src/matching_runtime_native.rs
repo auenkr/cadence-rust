@@ -196,66 +196,7 @@ pub fn native_queue_registry(
             (batch, timeout, capacity)
         })
     };
-    let reader_live = {
-        let cache = cache.clone();
-        let overlay = overlay.clone();
-        Arc::new(move |domain: &GoString, task: &GoString, task_type| {
-            let name = cached_domain_name(&cache, domain);
-            let scoped = |key: &'static str, default| {
-                let overlay = overlay.clone();
-                let name = name.clone();
-                let task = task.clone();
-                Arc::new(move || {
-                    let config = overlay.lock().expect("admin lock");
-                    cadence_persistence::dynamic_config::task_list_integer_bytes(
-                        config.property_values(key),
-                        name.as_deref(),
-                        task.as_bytes(),
-                        task_type,
-                        default,
-                    )
-                }) as crate::matching_reader::LiveInt
-            };
-            let global = |key: &'static str, default| {
-                let overlay = overlay.clone();
-                Arc::new(move || {
-                    let config = overlay.lock().expect("admin lock");
-                    cadence_persistence::dynamic_config::integer(
-                        config.property_values(key),
-                        None,
-                        default,
-                    )
-                }) as crate::matching_reader::LiveInt
-            };
-            let ack_overlay = overlay.clone();
-            let ack_name = name.clone();
-            let ack_task = task.clone();
-            ReaderLive {
-                batch_size: scoped(
-                    "matching.getTasksBatchSize",
-                    crate::matching_reader::DEFAULT_TASKS_BATCH_SIZE,
-                ),
-                read_range_size: global(
-                    "matching.readRangeSize",
-                    crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
-                ),
-                dispatch_timeout: scoped(
-                    "matching.asyncTaskDispatchTimeout",
-                    crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
-                ),
-                update_ack_interval: Arc::new(move || {
-                    let config = ack_overlay.lock().expect("admin lock");
-                    cadence_persistence::dynamic_config::task_list_duration_bytes(
-                        config.property_values("matching.updateAckInterval"),
-                        ack_name.as_deref(),
-                        ack_task.as_bytes(),
-                        task_type,
-                        crate::matching_reader::DEFAULT_UPDATE_ACK_INTERVAL_NANOS,
-                    )
-                }),
-            }
-        })
-    };
+    let reader_live = reader_properties_provider(cache.clone(), overlay.clone());
     let isolation = {
         let cache = cache.clone();
         let overlay = overlay.clone();
@@ -424,6 +365,74 @@ fn select_isolation_bytes(
     } else {
         (GoString::default(), 0, Some("expired"))
     }
+}
+
+fn reader_properties_provider(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_registry_native::NativeReaderPropertiesProvider {
+    let dispatch_timeout = duration_provider(
+        cache.clone(), overlay.clone(), "matching.asyncTaskDispatchTimeout",
+        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+    );
+    Arc::new(move |domain: &GoString, task: &GoString, task_type| {
+        let name = cached_domain_name(&cache, domain);
+        let scoped = |key: &'static str, default| {
+            let overlay = overlay.clone();
+            let name = name.clone();
+            let task = task.clone();
+            Arc::new(move || {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values(key),
+                    name.as_deref(),
+                    task.as_bytes(),
+                    task_type,
+                    default,
+                )
+            }) as crate::matching_reader::LiveInt
+        };
+        let global = |key: &'static str, default| {
+            let overlay = overlay.clone();
+            Arc::new(move || {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::integer(
+                    config.property_values(key),
+                    None,
+                    default,
+                )
+            }) as crate::matching_reader::LiveInt
+        };
+        let ack_overlay = overlay.clone();
+        let ack_name = name.clone();
+        let ack_task = task.clone();
+        ReaderLive {
+            batch_size: scoped(
+                "matching.getTasksBatchSize",
+                crate::matching_reader::DEFAULT_TASKS_BATCH_SIZE,
+            ),
+            read_range_size: global(
+                "matching.readRangeSize",
+                crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
+            ),
+            dispatch_timeout: {
+                let provider = dispatch_timeout.clone();
+                let domain = domain.clone();
+                let task = task.clone();
+                Arc::new(move || provider(&domain, &task, task_type))
+            },
+            update_ack_interval: Arc::new(move || {
+                let config = ack_overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration_bytes(
+                    config.property_values("matching.updateAckInterval"),
+                    ack_name.as_deref(),
+                    ack_task.as_bytes(),
+                    task_type,
+                    crate::matching_reader::DEFAULT_UPDATE_ACK_INTERVAL_NANOS,
+                )
+            }),
+        }
+    })
 }
 
 fn task_list_boolean(
@@ -619,6 +628,49 @@ mod tests {
         );
         assert!(invalid);
         assert!(!replacement);
+    }
+
+    #[test]
+    fn reader_dispatch_timeout_reads_live_durations_and_exact_task_filters() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        let provider = reader_properties_provider(Arc::new(empty_cache()), overlay.clone());
+        let domain = GoString::from("00000000-0000-0000-0000-000000000001");
+        let raw = provider(&domain, &GoString::from(&b"queue-\xff"[..]), 0);
+        let valid = provider(&domain, &GoString::from("queue-\u{fffd}"), 0);
+        let activity = provider(&domain, &GoString::from("queue-\u{fffd}"), 1);
+        assert_eq!((raw.dispatch_timeout)(), 3_000_000_000);
+        let value = |json: &[u8], filters| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: json.to_vec(),
+            }),
+            filters,
+        };
+        let filter = |name: &str, json: &[u8]| DynamicConfigFilter {
+            name: name.into(),
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: json.to_vec(),
+            }),
+        };
+        for (json, expected) in [
+            (br#""250ms""#.as_slice(), 250_000_000),
+            (br#""0s""#.as_slice(), 0),
+            (br#""invalid""#.as_slice(), 3_000_000_000),
+        ] {
+            overlay.lock().unwrap().update(false, "matching.asyncTaskDispatchTimeout", vec![
+                value(json, vec![]),
+                value(br#""75ms""#, vec![filter("taskListName", br#""queue-\ufffd""#), filter("taskType", b"0")]),
+            ]);
+            assert_eq!((raw.dispatch_timeout)(), expected, "invalid bytes must not alias U+FFFD");
+            assert_eq!((valid.dispatch_timeout)(), 75_000_000, "decision filter");
+            assert_eq!((activity.dispatch_timeout)(), expected, "task type filter");
+        }
+        // Numeric reader fields retain integer property semantics.
+        overlay.lock().unwrap().update(false, "matching.getTasksBatchSize", vec![value(b"17", vec![])]);
+        overlay.lock().unwrap().update(false, "matching.readRangeSize", vec![value(b"42", vec![])]);
+        assert_eq!((raw.batch_size)(), 17);
+        assert_eq!((raw.read_range_size)(), 42);
     }
 
     #[test]

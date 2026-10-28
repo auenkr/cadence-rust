@@ -758,10 +758,22 @@ impl Matching {
                         "matching.readRangeSize",
                         crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
                     ),
-                    dispatch_timeout: scoped(
-                        "matching.asyncTaskDispatchTimeout",
-                        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
-                    ),
+                    dispatch_timeout: {
+                        let domains = domains.clone();
+                        let overlay = overlay.clone();
+                        let domain_id = domain_id.to_string();
+                        let task_list = task_list.to_string();
+                        Arc::new(move || {
+                            let config = overlay.lock().expect("admin lock");
+                            cadence_persistence::dynamic_config::task_list_duration(
+                                config.property_values("matching.asyncTaskDispatchTimeout"),
+                                domain_name_for(&domains, &domain_id).as_deref(),
+                                &task_list,
+                                task_type,
+                                crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+                            )
+                        })
+                    },
                     update_ack_interval: {
                         let domains = domains.clone();
                         let overlay = overlay.clone();

@@ -220,3 +220,24 @@ Clippy/test results and resolve actual failures before any mixed acceptance lane
 ## Next whole-workspace validation
 
 Preserved selected Matching success40754945697 before dispatching the new source. Fresh uncached whole-workspace Clippy followed by tests: https://github.com/auenkr/cadence-rust/actions/runs/40756335405 at `58d2887a4a47ec038699ec2c68b317cf7ee6987e`, with runner parity formatting and original-Go UUID oracle. Query dispatch and all-method Thrift error regressions are included; PostgreSQL native oracle is wired but executes only in the supplemental dependency workflow. No workspace pass or mixed lane claimed. Keep this run until terminal, preserve its logs/format patch, then freeze source only after any actual fixes/formatting have been validated. No local Cargo/Go validation or replacement workers. PR linking continues to fail with the T3 active-run ownership error.
+
+## Async reader duration correction
+
+Follow-up configuration audit found `matching.asyncTaskDispatchTimeout` used
+`task_list_integer[_bytes]` through a shared integer closure in both legacy
+and native registry builders. Go `service/matching/config/config.go` declares
+`DurationPropertyFnWithTaskListInfoFilters` and `NewConfig` uses
+`GetDurationPropertyFilteredByTaskListInfo`; the property metadata gives a
+3-second default. Consequently valid duration strings such as `"250ms"`
+incorrectly selected the default in Rust. The historical configuration
+reconciliation's statement that the reader was present was too weak to prove
+its type semantics.
+
+Changed both builders to use the task-list duration parser. Native assembly
+now installs an extracted production reader-provider helper, enabling a direct
+regression against the same closures the actual registry receives. The test
+checks the 3-second default, live `"250ms"`, zero, invalid-value fallback,
+task-type/name filters and invalid byte task names distinct from U+FFFD, plus
+unchanged integer batch/range readers. It uses properly encoded JSON config
+values. No source for another service was changed. This correction postdates
+run40756335405 and needs new CI including runner formatting; no pass is claimed.

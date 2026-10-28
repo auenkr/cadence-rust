@@ -204,3 +204,11 @@ Applied the two-file runner formatting patch from run40756335405 for the native
 query and all-method Thrift wrapper regressions. That run is still live and
 must finish; it predates the metric correction. The final source is not frozen.
 No local Cargo, rustfmt or Go command ran; `git diff --check` passed.
+
+Additional configuration audit found and corrected the native/legacy async
+reader timeout's wrong integer parser. Go defines a duration property; both
+Rust builders now parse duration strings. A direct production-provider test
+checks live values, zero, bad-value fallback and byte-exact task filters.
+Details: `matching-native-integration-20261029.md` (Async reader duration
+correction). This code and the error-metric correction postdate the live
+workspace run40756335405 and need fresh validation/formatting. No final pin.
