@@ -28,6 +28,7 @@ use tonic::{Code, Status};
 /// owner for task-list routing.
 pub struct NativeMatchingControlContext {
     cache: Arc<MatchingDomainCache>,
+    domains: cadence_persistence::InMemoryDomainStore,
     registry: NativeQueueRegistry,
     membership: Membership,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
@@ -47,6 +48,7 @@ impl NativeMatchingControlContext {
         }
         Self {
             cache,
+            domains: state.domains.clone(),
             registry,
             membership,
             overlay,
@@ -88,11 +90,12 @@ impl NativeControlContextApi for NativeMatchingControlContext {
         if name.is_empty() {
             return Err(Status::invalid_argument("Domain name is not valid."));
         }
-        let id = self
+        let domain = self
             .cache
-            .get_domain_id(name)
+            .get_domain(name)
             .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
-        uuid::Uuid::parse_str(&id)
+        self.domains.insert_matching_metadata_if_missing(&domain);
+        uuid::Uuid::parse_str(&domain.info.uuid)
             .map_err(|_| Status::internal("Domain cache contains an invalid domain UUID."))
     }
 
@@ -105,6 +108,7 @@ impl NativeControlContextApi for NativeMatchingControlContext {
             .cache
             .get_domain_by_id(&uuid.to_string())
             .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
+        self.domains.insert_matching_metadata_if_missing(&domain);
         Ok(GoString::from(domain.info.name))
     }
 
@@ -256,6 +260,53 @@ mod tests {
             ),
             17
         );
+    }
+
+    #[tokio::test]
+    async fn cold_lookup_publishes_standby_domain_metadata() {
+        use crate::matching_domain_cache::{DomainMetadataSource, DomainMetadataSourceError, DomainMetadataPage};
+        use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
+        use std::time::Duration;
+        struct Source(MatchingDomainMetadata);
+        impl DomainMetadataSource for Source {
+            fn metadata_version(&self, _: Duration) -> Result<i64, DomainMetadataSourceError> { Ok(2) }
+            fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+                Ok(DomainMetadataPage { domains: vec![self.0.clone()], next_page_token: None })
+            }
+            fn get_domain(&self, _: Option<&str>, _: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> { Ok(self.0.clone()) }
+        }
+        let metadata = MatchingDomainMetadata {
+            info: cadence_api::types::DomainInfo { name: "cold-standby".into(), uuid: uuid::Uuid::from_u128(1).to_string(), ..Default::default() },
+            configuration: Default::default(),
+            replication: cadence_api::types::DomainReplicationConfiguration { active_cluster_name: "remote".into(), ..Default::default() },
+            is_global_domain: true, archival_bucket: String::new(), status_raw: 0,
+            archival_status_raw: 0, history_archival_status_raw: 0, visibility_archival_status_raw: 0,
+            config_version: 1, notification_version: 1, failover_notification_version: 1,
+            failover_version: 1, previous_failover_version: -1, failover_end_time_nanos: None,
+            last_updated_time_nanos: 0, bad_binaries: None, isolation_groups: None,
+            async_workflow_config: None, active_clusters_config: None, decoded_bad_binaries: None,
+            decoded_isolation_groups: None, decoded_async_workflow_config: None, config_decode_error: None,
+        };
+        for by_name in [false, true] {
+            let state = AppState::default();
+            let domains = state.domains.clone();
+            let id = metadata.info.uuid.clone();
+            assert!(domains.is_active_in(&id, "local").is_err());
+            let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source(metadata.clone()))));
+            let directory = tempfile::tempdir().unwrap();
+            let store = Arc::new(cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                directory.path().join("cold.db"), cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+            ).unwrap());
+            let history = crate::matching_history::MatchingHistoryClient::new(
+                tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(), Duration::from_secs(1), 1024,
+            );
+            let registry = NativeQueueRegistry::new(store, history, std::num::NonZeroU32::new(100).unwrap());
+            let context = NativeMatchingControlContext::new(state, cache, registry, Membership::new("local", vec![]), None);
+            if by_name { context.domain_id(&GoString::from("cold-standby")).unwrap(); }
+            else { context.domain_name(&GoString::from(id.as_str())).unwrap(); }
+            assert!(!domains.is_active_in(&id, "local").unwrap());
+            assert!(domains.is_active_in(&id, "remote").unwrap());
+        }
     }
 
     #[tokio::test]

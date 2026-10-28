@@ -76,3 +76,22 @@ configuration through the shared metadata cache. It retains the one-second
 default, reads updates on every attempt and passes zero through for the
 existing unbounded-operation behavior. Regression checks default, live update,
 zero and global fallback with invalid domain bytes. Pending CI execution.
+
+Cold-domain source audit: native control resolved cache entries but did not
+publish cold discoveries to `state.domains`, unlike the legacy handler. Since
+the active/standby adapters consume that shared view and Go cache callbacks
+omit new entries after registration, a newly created standby domain could
+default to active. Native name and ID resolution now publish missing metadata
+before returning. Regression exercises both lookup paths without a cache
+callback and verifies the discovered domain is passive locally and active in
+its configured remote cluster. Existing entries retain the callback update
+behavior; the publication helper only inserts absent domains.
+
+Workspace run https://github.com/auenkr/cadence-rust/actions/runs/40749929974
+at `0b5b97051` was in progress at the Go raw-string oracle when the cold-domain
+correction was made. It predates that correction and will be superseded by a
+new whole-workspace run. No tests or Clippy pass is claimed. The next source
+pin must include the cold-domain correction, typed-cache correction, timeout
+provider and runner formatting. PR https://github.com/auenkr/cadence-rust/pull/1
+is draft. T3 link/watch calls have failed with “The calling provider no longer
+owns an active thread run”; no successful automatic PR watch is established.
