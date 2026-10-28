@@ -803,4 +803,254 @@ mod tests {
         });
         assert_eq!(response.task_token, expected);
     }
+
+    #[derive(Default)]
+    struct ControlCaptured {
+        mutable: Vec<n::history::GetMutableStateRequest>,
+        describe: Vec<n::history::DescribeWorkflowExecutionRequest>,
+        refresh: Vec<n::history::RefreshWorkflowTasksRequest>,
+    }
+
+    #[derive(Clone)]
+    struct ScriptedControl(Arc<Mutex<ControlCaptured>>);
+
+    impl tonic::server::NamedService for ScriptedControl {
+        const NAME: &'static str = "uber.cadence.history.v1.HistoryAPI";
+    }
+
+    macro_rules! control_unary {
+        ($name:ident, $req:ty, $resp:ty, $field:ident, $reply:expr) => {
+            struct $name(Arc<Mutex<ControlCaptured>>);
+            impl tonic::server::UnaryService<$req> for $name {
+                type Response = $resp;
+                type Future = std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<
+                                Output = Result<tonic::Response<Self::Response>, Status>,
+                            > + Send,
+                    >,
+                >;
+                fn call(&mut self, request: Request<$req>) -> Self::Future {
+                    let captured = self.0.clone();
+                    Box::pin(async move {
+                        captured.lock().unwrap().$field.push(request.into_inner());
+                        Ok(tonic::Response::new($reply))
+                    })
+                }
+            }
+        };
+    }
+
+    control_unary!(
+        MutableSvc,
+        n::history::GetMutableStateRequest,
+        n::history::GetMutableStateResponse,
+        mutable,
+        n::history::GetMutableStateResponse {
+            next_event_id: 42,
+            workflow_type: Some(n::api::WorkflowType { name: raw(b"mutable-\xff") }),
+            ..Default::default()
+        }
+    );
+    control_unary!(
+        DescribeSvc,
+        n::history::DescribeWorkflowExecutionRequest,
+        n::history::DescribeWorkflowExecutionResponse,
+        describe,
+        n::history::DescribeWorkflowExecutionResponse {
+            workflow_execution_info: Some(n::api::WorkflowExecutionInfo {
+                r#type: Some(n::api::WorkflowType { name: raw(b"describe-\xfe") }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    );
+    control_unary!(
+        RefreshSvc,
+        n::history::RefreshWorkflowTasksRequest,
+        n::history::RefreshWorkflowTasksResponse,
+        refresh,
+        n::history::RefreshWorkflowTasksResponse::default()
+    );
+
+    impl tower::Service<tonic::codegen::http::Request<tonic::body::BoxBody>> for ScriptedControl {
+        type Response = tonic::codegen::http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+        >;
+        fn poll_ready(
+            &mut self,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn call(
+            &mut self,
+            request: tonic::codegen::http::Request<tonic::body::BoxBody>,
+        ) -> Self::Future {
+            let captured = self.0.clone();
+            let path = request.uri().path().to_owned();
+            Box::pin(async move {
+                macro_rules! serve {
+                    ($svc:ident, $req:ty, $resp:ty) => {{
+                        let mut grpc =
+                            tonic::server::Grpc::new(tonic::codec::ProstCodec::<$resp, $req>::default());
+                        Ok(grpc.unary($svc(captured), request).await)
+                    }};
+                }
+                if path == GET_MUTABLE_STATE {
+                    serve!(
+                        MutableSvc,
+                        n::history::GetMutableStateRequest,
+                        n::history::GetMutableStateResponse
+                    )
+                } else if path == DESCRIBE_WORKFLOW_EXECUTION {
+                    serve!(
+                        DescribeSvc,
+                        n::history::DescribeWorkflowExecutionRequest,
+                        n::history::DescribeWorkflowExecutionResponse
+                    )
+                } else if path == REFRESH_WORKFLOW_TASKS {
+                    serve!(
+                        RefreshSvc,
+                        n::history::RefreshWorkflowTasksRequest,
+                        n::history::RefreshWorkflowTasksResponse
+                    )
+                } else {
+                    Ok(Status::unimplemented("unexpected path").into_http())
+                }
+            })
+        }
+    }
+
+    async fn control_client(
+        captured: Arc<Mutex<ControlCaptured>>,
+    ) -> (
+        MatchingHistoryClient,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let _ = tonic::transport::Server::builder()
+                .add_service(ScriptedControl(captured))
+                .serve_with_incoming_shutdown(
+                    tokio_stream::wrappers::TcpListenerStream::new(listener),
+                    async {
+                        let _ = stopped.await;
+                    },
+                )
+                .await;
+        });
+        let resolver = Arc::new(
+            MatchingHistoryPeerResolver::new(
+                16,
+                NamedPort::Grpc,
+                Arc::new(Members(vec![Host {
+                    address: "h:1".into(),
+                    identity: "h".into(),
+                    grpc_address: format!("http://{address}"),
+                }])),
+            )
+            .unwrap(),
+        );
+        let client = MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            1 << 20,
+        )
+        .with_peer_resolver(resolver);
+        (client, stop, server)
+    }
+
+    async fn stop_control_peer(
+        stop: tokio::sync::oneshot::Sender<()>,
+        mut server: tokio::task::JoinHandle<()>,
+    ) {
+        let _ = stop.send(());
+        match tokio::time::timeout(Duration::from_secs(5), &mut server).await {
+            Ok(result) => result.expect("control peer panicked"),
+            Err(_) => {
+                server.abort();
+                let _ = server.await;
+                panic!("control peer did not shut down");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn scripted_peer_control_calls_keep_raw_bytes_and_single_attempt() {
+        tokio::time::timeout(Duration::from_secs(20), async {
+            let captured: Arc<Mutex<ControlCaptured>> = Arc::default();
+            let (client, stop, server) = control_client(captured.clone()).await;
+            let domain = raw(b"dom-\xff");
+            let name = raw(b"name-\xfe");
+            let task = task();
+            let execution = execution(&task).unwrap();
+
+            let mutable = client.mutable_state_native(&domain, &execution).await.unwrap();
+            assert_eq!(mutable.next_event_id, 42);
+            assert_eq!(mutable.workflow_type.unwrap().name.as_bytes(), b"mutable-\xff");
+            let described = client
+                .describe_execution_native(&domain, &name, &task)
+                .await
+                .unwrap();
+            assert_eq!(described.workflow_execution_info.unwrap().r#type.unwrap().name.as_bytes(), b"describe-\xfe");
+            client.refresh_workflow_tasks_native(&domain, &task).await.unwrap();
+
+            {
+            let seen = captured.lock().unwrap();
+            assert_eq!(seen.mutable.len(), 1);
+            assert_eq!(seen.describe.len(), 1);
+            assert_eq!(seen.refresh.len(), 1, "refresh must be one attempt");
+            assert_eq!(seen.mutable[0].domain_id, domain);
+            let e = seen.mutable[0].workflow_execution.as_ref().unwrap();
+            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+            assert_eq!(seen.describe[0].domain_id, domain);
+            let d = seen.describe[0].request.as_ref().unwrap();
+            assert_eq!(d.domain, name);
+            let e = d.workflow_execution.as_ref().unwrap();
+            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+            assert_eq!(seen.refresh[0].domain_id, domain);
+            assert!(seen.refresh[0].domain.as_bytes().is_empty());
+            let e = seen.refresh[0].workflow_execution.as_ref().unwrap();
+            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+            }
+
+            // Empty RefreshWorkflowTasksResponse is a zero-length wire message.
+            use prost::Message;
+            let empty = n::history::RefreshWorkflowTasksResponse::default();
+            assert!(empty.encode_to_vec().is_empty());
+            assert_eq!(
+                n::history::RefreshWorkflowTasksResponse::decode(&[][..]).unwrap(),
+                empty
+            );
+
+            stop_control_peer(stop, server).await;
+        })
+        .await
+        .expect("control peer test timed out");
+    }
+
+    #[tokio::test]
+    async fn refresh_native_until_cancels_when_caller_gone() {
+        tokio::time::timeout(Duration::from_secs(20), async {
+            let captured: Arc<Mutex<ControlCaptured>> = Arc::default();
+            let (client, stop, server) = control_client(captured).await;
+            let error = client
+                .refresh_workflow_tasks_native_until(&raw(b"dom"), &task(), None, async {})
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Cancelled);
+            stop_control_peer(stop, server).await;
+        })
+        .await
+        .expect("cancellation test timed out");
+    }
 }

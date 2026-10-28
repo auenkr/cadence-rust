@@ -182,7 +182,10 @@ mod tests {
     };
 
     fn close(expected: f64, actual: f64) {
-        assert!((expected - actual).abs() < 1e-6, "expected {expected}, got {actual}");
+        assert!(
+            (expected - actual).abs() < 1e-6,
+            "expected {expected}, got {actual}"
+        );
     }
 
     #[test]

@@ -455,9 +455,7 @@ pub(crate) fn get_mutable_state_response_native(
         workflow_execution: field_struct(s, 10)?
             .map(workflow_execution_from_thrift_n)
             .transpose()?,
-        workflow_type: field_struct(s, 20)?
-            .map(workflow_type_n)
-            .transpose()?,
+        workflow_type: field_struct(s, 20)?.map(workflow_type_n).transpose()?,
         next_event_id: field_i64(s, 30)?,
         previous_started_event_id: typed_field(s, 35).map(|v| as_i64(v, 35)).transpose()?,
         last_first_event_id: field_i64(s, 40)?,
@@ -609,14 +607,11 @@ fn workflow_execution_info_n(
             .transpose()?,
         search_attributes: field_struct(s, 101)?
             .map(|_| {
-                payload_map_n(s, 101).map(|indexed_fields| n::api::SearchAttributes {
-                    indexed_fields,
-                })
+                payload_map_n(s, 101)
+                    .map(|indexed_fields| n::api::SearchAttributes { indexed_fields })
             })
             .transpose()?,
-        auto_reset_points: field_struct(s, 110)?
-            .map(reset_points_n)
-            .transpose()?,
+        auto_reset_points: field_struct(s, 110)?.map(reset_points_n).transpose()?,
         task_list,
         task_list_info,
         is_cron: field_bool(s, 130)?,
@@ -666,7 +661,9 @@ fn pending_activity_n(s: &TypedStruct) -> cadence_thrift::Result<n::api::Pending
             Ok(n::api::FailureOptions {
                 failure_category: enum_field_value(options, 10, 3)?,
                 next_retry_interval: duration_from_seconds(
-                    typed_field(options, 20).map(|v| as_i32(v, 20)).transpose()?,
+                    typed_field(options, 20)
+                        .map(|v| as_i32(v, 20))
+                        .transpose()?,
                 ),
             })
         })
@@ -751,9 +748,7 @@ pub(crate) fn describe_workflow_execution_response_native(
             .into_iter()
             .map(pending_child_n)
             .collect::<cadence_thrift::Result<Vec<_>>>()?,
-        pending_decision: field_struct(s, 50)?
-            .map(pending_decision_n)
-            .transpose()?,
+        pending_decision: field_struct(s, 50)?.map(pending_decision_n).transpose()?,
     })
 }
 
@@ -1064,10 +1059,7 @@ mod tests {
         let Some(TypedValue::Struct(inner)) = typed_field(&refresh, 20) else {
             panic!("inner")
         };
-        assert_eq!(
-            typed_field(inner, 10),
-            Some(&TypedValue::Bytes(Vec::new()))
-        );
+        assert_eq!(typed_field(inner, 10), Some(&TypedValue::Bytes(Vec::new())));
         let Some(TypedValue::Struct(run)) = typed_field(inner, 20) else {
             panic!("execution")
         };
@@ -1114,7 +1106,10 @@ mod tests {
         assert_eq!(state.client_library_version.as_bytes(), b"lib\xfe");
         assert_eq!(state.sticky_task_list.unwrap().name.as_bytes(), b"s\xff");
         assert_eq!(
-            state.sticky_task_list_schedule_to_start_timeout.unwrap().seconds,
+            state
+                .sticky_task_list_schedule_to_start_timeout
+                .unwrap()
+                .seconds,
             5
         );
         assert_eq!(state.workflow_state, 2);
