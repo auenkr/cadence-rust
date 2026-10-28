@@ -161,3 +161,15 @@ runner formatting and the original-Go UUID oracle. It predates these fixture
 corrections; preserve its formatting patch before replacing it. No pass claimed.
 T3 PR linking still fails with "The calling provider no longer owns an active
 thread run"; automatic PR monitoring is not established.
+
+
+Fixture corrections and the five-file runner formatting patch were committed
+and pushed as `b5a989545`. Fresh uncached workspace validation including
+original-Go UUID oracle and runner formatting is now dispatched:
+https://github.com/auenkr/cadence-rust/actions/runs/40752202495
+at full source SHA `b5a98954546980095f1be1ba2ad7230af9af33fc` (verify against
+the run before claiming evidence; no outcome yet). Run40751551998 is superseded
+and cancellation requested. No mixed gate has been dispatched for this source.
+Next: inspect current CI, retain its exact identity/logs and apply any formatting
+patch if nonempty, address actual failures, then freeze a successful immutable
+source for serial mixed gates. PR linking still reports the ownership error.
