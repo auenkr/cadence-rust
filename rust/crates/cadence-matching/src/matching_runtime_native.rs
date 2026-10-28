@@ -21,7 +21,7 @@ use std::{
     num::NonZeroU32,
     sync::{Arc, Mutex},
 };
-use tonic::{Code, Status};
+use tonic::Status;
 
 /// Assemble native registry providers from the same domain/config state used
 /// by the legacy Matching builder.
@@ -531,11 +531,9 @@ fn domain_by_raw_id(
     id: &GoString,
 ) -> Result<MatchingDomainMetadata, Status> {
     let raw = std::str::from_utf8(id.as_bytes())
-        .map_err(|_| Status::new(Code::InvalidArgument, "invalid domain UUID"))?;
-    let uuid = uuid::Uuid::parse_str(raw)
-        .map_err(|error| Status::new(Code::InvalidArgument, error.to_string()))?;
+        .map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
     cache
-        .get_domain_by_id(&uuid.to_string())
+        .get_domain_by_id(raw)
         .map_err(crate::matching_domain_cache::DomainCacheError::into_status)
 }
 

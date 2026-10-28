@@ -37,7 +37,7 @@ pub fn metrics_poll_observer_factory(
         metrics,
         Arc::new(move |id| {
             cache
-                .get_domain_by_id(&id.to_string())
+                .get_domain_by_id(id)
                 .ok()
                 .map(|d| d.info.name)
         }),
@@ -46,14 +46,13 @@ pub fn metrics_poll_observer_factory(
 
 fn metrics_poll_observer_factory_with_names(
     metrics: crate::matching_metrics::MatchingMetrics,
-    names: Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>,
+    names: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
 ) -> PollObserverFactory {
     Arc::new(
         move |domain, list, task_type, task_list_kind, isolation_group| {
             let domain = domain
                 .as_utf8()
                 .ok()
-                .and_then(|id| uuid::Uuid::parse_str(id).ok())
                 .and_then(|id| names(id))
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| "_unknown_".to_owned());
@@ -209,9 +208,8 @@ impl NativeMatchingEngineContext {
 
     fn cached_domain_name(&self, id: &GoString) -> Option<String> {
         let id = std::str::from_utf8(id.as_bytes()).ok()?;
-        let uuid = uuid::Uuid::parse_str(id).ok()?;
         self.cache
-            .get_domain_by_id(&uuid.to_string())
+            .get_domain_by_id(id)
             .ok()
             .map(|domain| domain.info.name)
     }

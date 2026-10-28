@@ -91,8 +91,7 @@ fn semaphore_timeout_metric(
         let name = domain
             .as_utf8()
             .ok()
-            .and_then(|id| uuid::Uuid::parse_str(id).ok())
-            .and_then(|id| cache.get_domain_by_id(&id.to_string()).ok())
+            .and_then(|id| cache.get_domain_by_id(id).ok())
             .map(|domain| domain.info.name);
         let semaphore = String::from_utf8_lossy(semaphore.as_bytes());
         metrics.semaphore_context_timeout(
@@ -130,10 +129,8 @@ pub async fn assemble(
         Arc::new(move |id: &GoString| {
             let raw = std::str::from_utf8(id.as_bytes())
                 .map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
-            let id = uuid::Uuid::parse_str(raw)
-                .map_err(|error| Status::invalid_argument(error.to_string()))?;
             let domain = cache
-                .get_domain_by_id(&id.to_string())
+                .get_domain_by_id(raw)
                 .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
             Ok(GoString::from(domain.info.name))
         })

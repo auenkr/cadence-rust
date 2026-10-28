@@ -245,6 +245,7 @@ jobs:
             crates/cadence-matching/src/matching_scaler_runtime_native.rs
             crates/cadence-matching/src/matching_service_native.rs
             crates/cadence-matching/src/matching_control_context_native.rs
+            crates/cadence-matching/src/matching_domain_cache.rs
             crates/cadence-matching/src/matching_engine_context_native.rs
             crates/cadence-matching/src/matching_host_native.rs
             crates/cadence-matching/src/matching_launch_native.rs
@@ -252,6 +253,7 @@ jobs:
             crates/cadence-matching/src/matching_semaphore_manager_native.rs
             crates/cadence-matching/src/matching_semaphore_service_native.rs
             crates/cadence-service-core/src/matching_quota.rs
+            crates/cadence-service-core/src/matching_metrics.rs
             crates/cadence-common/src/semaphore_bytes.rs
             crates/cadence-matching/src/matching_shard_routing.rs
             crates/cadence-matching/src/matching_shard_distributor.rs

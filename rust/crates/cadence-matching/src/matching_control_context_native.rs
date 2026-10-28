@@ -17,7 +17,7 @@ use crate::{
 use cadence_common::go_string::GoString;
 use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
 use std::sync::{Arc, Mutex};
-use tonic::{Code, Status};
+use tonic::Status;
 
 /// Production implementation of the native Matching control dependencies.
 ///
@@ -57,9 +57,8 @@ impl NativeMatchingControlContext {
 
     fn cached_domain_name(&self, id: &GoString) -> Option<String> {
         let id = std::str::from_utf8(id.as_bytes()).ok()?;
-        let uuid = uuid::Uuid::parse_str(id).ok()?;
         self.cache
-            .get_domain_by_id(&uuid.to_string())
+            .get_domain_by_id(id)
             .ok()
             .map(|domain| domain.info.name)
     }
@@ -102,11 +101,9 @@ impl NativeControlContextApi for NativeMatchingControlContext {
     fn domain_name(&self, id: &GoString) -> Result<GoString, Status> {
         let raw = std::str::from_utf8(id.as_bytes())
             .map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
-        let uuid = uuid::Uuid::parse_str(raw)
-            .map_err(|error| Status::new(Code::InvalidArgument, error.to_string()))?;
         let domain = self
             .cache
-            .get_domain_by_id(&uuid.to_string())
+            .get_domain_by_id(raw)
             .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
         self.domains.insert_matching_metadata_if_missing(&domain);
         Ok(GoString::from(domain.info.name))
@@ -297,7 +294,7 @@ mod tests {
         let metadata = MatchingDomainMetadata {
             info: cadence_api::types::DomainInfo {
                 name: "cold-standby".into(),
-                uuid: uuid::Uuid::from_u128(1).to_string(),
+                uuid: uuid::Uuid::from_u128(0xabcd).to_string(),
                 ..Default::default()
             },
             configuration: Default::default(),
@@ -359,6 +356,11 @@ mod tests {
                 context.domain_id(&GoString::from("cold-standby")).unwrap();
             } else {
                 context.domain_name(&GoString::from(id.as_str())).unwrap();
+            }
+            for alias in [id.to_uppercase(), id.replace('-', "")] {
+                let error = context.domain_name(&GoString::from(alias)).unwrap_err();
+                assert_eq!(error.code(), tonic::Code::Internal);
+                assert_eq!(error.message(), "DefaultDomainCache encounter case where domain exists but cannot be loaded");
             }
             assert!(!domains.is_active_in(&id, "local").unwrap());
             assert!(domains.is_active_in(&id, "remote").unwrap());

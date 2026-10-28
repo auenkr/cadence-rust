@@ -112,3 +112,20 @@ otherwise collapse to the same sanitized label. Label rendering remains the
 existing sink behavior; a label collision can no longer cause a false
 isolation-success increment. This source still needs runner formatting and
 fresh CI after reviewing the live earlier-pin run.
+
+Applied the formatting artifact from run 40750262783 for legacy handler,
+native control regressions and native runtime providers. Added domain-cache
+and shared metric files to the runner's explicit formatting list so subsequent
+patch artifacts cover all files changed in this integration.
+
+UUID spelling audit: `matching-domain-cache-uuid-review-20261027.md` and its
+successful original-Go oracle prove exact cache-key lookup, including a
+post-refresh Internal error for aliases of a canonical stored ID. Native
+control, runtime config/standby lookup, semaphore lookup and poll-metric
+resolution were incorrectly parsing and canonicalizing request IDs before
+calling the otherwise-correct shared cache. Removed that normalization at
+these cache boundaries. Parsing a UUID returned by name lookup and typed
+persistence queue identity are unchanged. Extended the native cold-domain
+regression with uppercase and compact aliases of an ID containing hex letters;
+both must retain the Go exists-but-not-loaded Internal result after canonical
+lookup. This new source awaits CI; the live earlier pin cannot validate it.
