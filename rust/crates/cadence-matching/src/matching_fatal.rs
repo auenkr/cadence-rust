@@ -3,12 +3,14 @@
 //! One channel carries every cause so the launcher keeps a single graceful
 //! fatal path: SQL writer RunID conversion failures and task-reader ackManager
 //! invariant violations.
-use cadence_persistence::matching_blob::SqlRunIdError;
+use cadence_persistence::matching_blob::{SqlRunIdBytesError, SqlRunIdError};
 
 #[derive(Debug, Clone)]
 pub enum MatchingFatal {
     /// Go `sqlplugin` RunID parse failure while appending tasks.
     SqlRunId(SqlRunIdError),
+    /// Native writer failure, retaining arbitrary request RunID bytes.
+    SqlRunIdBytes(SqlRunIdBytesError),
     /// Go `task_reader.go` `addSingleTaskToBuffer`: `ackManager.ReadItem`
     /// rejected a duplicate or non-increasing task id.
     ReaderInvariant(String),
@@ -19,6 +21,7 @@ impl std::fmt::Display for MatchingFatal {
         match self {
             // Preserve the pre-existing SQL writer fatal text exactly.
             Self::SqlRunId(cause) => write!(f, "{cause}"),
+            Self::SqlRunIdBytes(cause) => write!(f, "{cause}"),
             Self::ReaderInvariant(detail) => {
                 write!(f, "Matching task reader invariant violated: {detail}")
             }
@@ -29,6 +32,40 @@ impl std::fmt::Display for MatchingFatal {
 impl std::error::Error for MatchingFatal {}
 
 pub type MatchingFatalSender = tokio::sync::mpsc::UnboundedSender<MatchingFatal>;
+
+/// Route both native actor fatal causes through the launcher's single host
+/// shutdown channel. Sending happens in the actor's callback before it releases
+/// its completion guard or replies to the failed write.
+pub fn native_fatal_sinks(sender: MatchingFatalSender) -> crate::matching_registry_native::NativeFatalSinks {
+    let writer = sender.clone();
+    crate::matching_registry_native::NativeFatalSinks {
+        writer: Some(std::sync::Arc::new(move |cause| {
+            let _ = writer.send(MatchingFatal::SqlRunIdBytes(cause));
+        })),
+        reader: Some(std::sync::Arc::new(move |detail| {
+            let _ = sender.send(MatchingFatal::ReaderInvariant(detail));
+        })),
+    }
+}
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+
+    #[test]
+    fn native_actor_sinks_share_host_channel_and_retain_run_id_bytes() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let sinks = native_fatal_sinks(sender);
+        let raw = cadence_common::go_string::GoString::from(&b"\xff\x00\xfe"[..]);
+        sinks.writer.unwrap()(SqlRunIdBytesError { raw: raw.clone(), message: "bad UUID".into() });
+        match receiver.try_recv().unwrap() {
+            MatchingFatal::SqlRunIdBytes(cause) => assert_eq!(cause.raw, raw),
+            cause => panic!("unexpected fatal cause: {cause:?}"),
+        }
+        sinks.reader.unwrap()("duplicate task ID".into());
+        assert!(matches!(receiver.try_recv().unwrap(), MatchingFatal::ReaderInvariant(detail) if detail == "duplicate task ID"));
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod test_support {

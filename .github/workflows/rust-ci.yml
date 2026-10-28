@@ -238,6 +238,7 @@ jobs:
             crates/cadence-common/src/membership.rs
             crates/cadence-matching/src/matching_membership.rs
             crates/cadence-matching/src/matching_fault_injection_native.rs
+            crates/cadence-matching/src/matching_fatal.rs
             crates/cadence-matching/src/matching_scaler_native.rs
             crates/cadence-matching/tests/native_delivery_pipeline.rs
             crates/cadence-matching/tests/native_raw_status_transport.rs

@@ -124,12 +124,20 @@ struct Inner {
     sender: mpsc::Sender<Request>,
     rendezvous: Option<Arc<Rendezvous>>,
     stop: watch::Sender<bool>,
+    completed: watch::Receiver<bool>,
     queue: Arc<DurableTaskQueueBytes>,
     config: WriterConfig,
     live_config: Option<WriterLiveConfig>,
     // Go deliberately leaves appendCh open on stop. Keep the receiver alive
     // while handles exist so a caller already waiting to enqueue times out.
     parked: Mutex<Option<mpsc::Receiver<Request>>>,
+}
+
+struct WriterCompletion(watch::Sender<bool>);
+impl Drop for WriterCompletion {
+    fn drop(&mut self) {
+        let _ = self.0.send(true);
+    }
 }
 
 #[derive(Clone)]
@@ -225,10 +233,12 @@ impl NativeTaskWriter {
         });
         let (sender, receiver) = mpsc::channel(capacity.max(1));
         let (stop, mut stopped_rx) = watch::channel(false);
+        let (completed, completed_rx) = watch::channel(false);
         let inner = Arc::new(Inner {
             sender,
             rendezvous: rendezvous.clone(),
             stop,
+            completed: completed_rx,
             queue: queue.clone(),
             config,
             live_config: live_config.clone(),
@@ -241,7 +251,9 @@ impl NativeTaskWriter {
         let weak = Arc::downgrade(&inner);
         let kind = queue.task_list_kind();
         let task_guard = tracker.map(|tracker| tracker.start());
+        let completion = WriterCompletion(completed);
         tokio::spawn(async move {
+            let _completion = completion;
             let _task_guard = task_guard;
             let mut receiver = receiver;
             loop {
@@ -349,6 +361,16 @@ impl NativeTaskWriter {
     }
     pub fn stop(&self) {
         let _ = self.inner.stop.send(true);
+    }
+    /// Wait for the actor to finish its accepted batch, publish any fatal cause,
+    /// park the receiver and release its tracker. Call stop before waiting.
+    pub async fn wait_stopped(&self) {
+        let mut completed = self.inner.completed.clone();
+        while !*completed.borrow_and_update() {
+            if completed.changed().await.is_err() {
+                return;
+            }
+        }
     }
     pub async fn append(&self, task: PendingTaskBytes) -> Result<AllocatedTaskBytes, Status> {
         self.append_inner(task).await.map_err(|error| error.status)
@@ -663,6 +685,9 @@ mod tests {
         // The caller observed the failure, so the sink must already have run.
         assert_eq!(received.lock().unwrap().len(), 1);
         writer.stop();
+        tokio::time::timeout(Duration::from_secs(2), writer.wait_stopped())
+            .await
+            .expect("native writer completion was not published");
         tokio::time::timeout(Duration::from_secs(2), tracker.wait_idle())
             .await
             .expect("writer actor did not exit after stop");

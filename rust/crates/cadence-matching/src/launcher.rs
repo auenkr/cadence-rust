@@ -1830,7 +1830,8 @@ enum FatalExit {
 impl FatalExit {
     fn from_cause(cause: &crate::matching_fatal::MatchingFatal) -> Self {
         match cause {
-            crate::matching_fatal::MatchingFatal::SqlRunId(_) => Self::Sql(cause.to_string()),
+            crate::matching_fatal::MatchingFatal::SqlRunId(_)
+            | crate::matching_fatal::MatchingFatal::SqlRunIdBytes(_) => Self::Sql(cause.to_string()),
             crate::matching_fatal::MatchingFatal::ReaderInvariant(detail) => {
                 Self::Reader(detail.clone())
             }

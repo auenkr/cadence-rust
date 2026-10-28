@@ -25,6 +25,15 @@ const LIMIT: Duration = Duration::from_secs(5);
 const PATH: &str = "/uber.cadence.history.v1.HistoryAPI/RecordDecisionTaskStarted";
 type Captured = Arc<Mutex<Vec<n::history::RecordDecisionTaskStartedRequest>>>;
 
+// The server task is detached. Abort it if an assertion unwinds before the
+// explicit graceful shutdown at the end of the test.
+struct AbortOnDrop(tokio::task::JoinHandle<Result<(), tonic::transport::Error>>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[derive(Clone)]
 struct History(Captured);
 impl tonic::server::NamedService for History {
@@ -90,9 +99,9 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (shutdown, stopped) = oneshot::channel::<()>();
-    let server = tokio::spawn(tonic::transport::Server::builder()
+    let server = AbortOnDrop(tokio::spawn(tonic::transport::Server::builder()
         .add_service(History(captured.clone()))
-        .serve_with_incoming_shutdown(tokio_stream::wrappers::TcpListenerStream::new(listener), async { let _ = stopped.await; }));
+        .serve_with_incoming_shutdown(tokio_stream::wrappers::TcpListenerStream::new(listener), async { let _ = stopped.await; })));
     let history = MatchingHistoryClient::new(
         tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect_lazy(), LIMIT, 1 << 20,
     );
@@ -138,13 +147,16 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
     let seen = captured.lock().unwrap();
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0].task_id, 0);
+    assert_eq!(seen[0].workflow_execution.as_ref().unwrap().workflow_id.as_bytes(), b"sync-\xff");
+    assert_ne!(seen[0].workflow_execution.as_ref().unwrap().workflow_id.as_bytes(), "sync-�".as_bytes());
     assert_eq!(seen[1].task_id, allocated.task_id);
     assert_eq!(seen[1].workflow_execution.as_ref().unwrap().workflow_id.as_bytes(), b"backlog-\xfe");
     drop(seen);
     reader.stop();
     writer.stop();
     tokio::time::timeout(LIMIT, reader.wait_stopped()).await.unwrap();
+    tokio::time::timeout(LIMIT, writer.wait_stopped()).await.unwrap();
     drop(dispatcher);
     let _ = shutdown.send(());
-    tokio::time::timeout(LIMIT, server).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(LIMIT, &mut server.0).await.unwrap().unwrap().unwrap();
 }
