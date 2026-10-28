@@ -326,6 +326,7 @@ pub struct NativeQueueRegistry {
     changed: Arc<tokio::sync::Notify>,
     startups: Arc<Mutex<StartupGates>>,
     ownership_policy: Arc<RwLock<Option<NativeQueueOwnershipPolicy>>>,
+    admission: Arc<RwLock<Option<crate::matching_runtime::NativeShardOwnershipCheck>>>,
     parent_router: Option<NativeParentRouter>,
     shard_router: NativeShardRouterSlot,
     standby_enabled: Option<EnabledNative>,
@@ -627,6 +628,7 @@ impl NativeQueueRegistry {
             changed: Arc::new(tokio::sync::Notify::new()),
             startups: Arc::new(Mutex::new(HashMap::new())),
             ownership_policy: Arc::new(RwLock::new(None)),
+            admission: Arc::new(RwLock::new(None)),
             parent_router: None,
             shard_router: Arc::default(),
             standby_enabled: None,
@@ -713,6 +715,7 @@ impl NativeQueueRegistry {
         let parent_router = self.shard_router.clone();
         let parent: NativeParentRouter = Arc::new(move |name| {
             let membership = parent_membership.clone();
+            let name = name.clone();
             let router = parent_router.read().expect("native shard router lock").clone();
             Box::pin(async move {
                 let channel = if let Some(router) = router {
@@ -769,6 +772,10 @@ impl NativeQueueRegistry {
             .ownership_policy
             .write()
             .expect("Matching ownership policy lock") = Some(policy);
+    }
+    /// Install async shard admission on every clone before opening listeners.
+    pub fn set_shard_admission(&self, check: crate::matching_runtime::NativeShardOwnershipCheck) {
+        *self.admission.write().expect("Matching admission lock") = Some(check);
     }
     pub fn with_partition_count(mut self, provider: NativeProvider<i64>) -> Self {
         self.partition_count = Some(provider);
@@ -1116,6 +1123,11 @@ impl NativeQueueRegistry {
         Box::pin(async move {
             if !(0..=1).contains(&key.task_type) {
                 return Err(Status::invalid_argument("Unknown persistence task type."));
+            }
+            let check = self.admission.read().expect("Matching admission lock").clone();
+            if let Some(check) = check {
+                let cached = self.contains_cached(&key);
+                check(key.name.clone(), cached).await?;
             }
             let registry = self.clone();
             owner_work(move |readers| registry.get_blocking(key, kind, now, readers)).await
@@ -2434,6 +2446,91 @@ mod tests {
         assert!(!registry.unload(key(b"\xff"), old, now).await.unwrap());
         assert!(registry.contains_cached(&key(b"\xff")));
         registry.shutdown(registry_now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn async_admission_runs_for_raw_cached_and_stopped_queues() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (_dir, registry) = fixture();
+        let assigned = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let seen = calls.clone();
+        let assignment = assigned.clone();
+        let lookup: crate::matching_runtime::NativeShardLookup = Arc::new(move |name| {
+            seen.lock().unwrap().push(name);
+            assignment.store(true, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        });
+        let (drain, receiver) = tokio::sync::watch::channel(false);
+        let check = crate::matching_runtime::native_shard_ownership_check(
+            crate::matching_membership::Membership::new("local", vec![]),
+            Arc::new(|| 100), Arc::new(|| false), receiver, lookup,
+        );
+        registry.set_ownership_policy(NativeQueueOwnershipPolicy {
+            is_shard_distributor_eligible: Arc::new(|_| true),
+            has_local_processor: Arc::new(move |_| assigned.load(Ordering::SeqCst)),
+        });
+        let clone = registry.clone();
+        registry.set_shard_admission(check);
+        let raw = key(b"queue-\xff");
+        let first = clone.get(raw.clone(), 0, registry_now()).await.unwrap();
+        let second = clone.get(raw.clone(), 0, registry_now()).await.unwrap();
+        assert!(Arc::ptr_eq(&first.queue, &second.queue));
+        assert_eq!(*calls.lock().unwrap(), vec![b"queue-\xff".to_vec(), b"queue-\xff".to_vec()]);
+        drain.send(true).unwrap();
+        assert!(clone.get(raw, 0, registry_now()).await.is_err());
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        registry.shutdown(registry_now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn admission_observes_live_cache_and_stopped_owner() {
+        let (_dir, registry) = fixture();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let seen = calls.clone();
+        registry.set_shard_admission(Arc::new(move |_, cached| {
+            seen.lock().unwrap().push(cached);
+            Box::pin(async { Ok(()) })
+        }));
+        let raw = key(b"cached-\xff");
+        let first = registry.get(raw.clone(), 0, registry_now()).await.unwrap();
+        registry.get(raw.clone(), 0, registry_now()).await.unwrap();
+        first.queue.stop();
+        registry.get(raw, 0, registry_now()).await.unwrap();
+        assert_eq!(*calls.lock().unwrap(), vec![false, true, false]);
+        registry.shutdown(registry_now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn admission_failure_cancellation_and_shutdown_never_publish() {
+        let (_dir, registry) = fixture();
+        registry.set_shard_admission(Arc::new(|_, _| Box::pin(async {
+            Err(Status::unavailable("heartbeat failed"))
+        })));
+        assert_eq!(registry.get(key(b"failed"), 0, registry_now()).await.err().unwrap().code(), tonic::Code::Unavailable);
+        assert_eq!(registry.loaded_owner_count(), 0);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let started = entered.clone();
+        let unblock = release.clone();
+        registry.set_shard_admission(Arc::new(move |_, _| {
+            let started = started.clone();
+            let unblock = unblock.clone();
+            Box::pin(async move { started.notify_one(); unblock.notified().await; Ok(()) })
+        }));
+        let pending_registry = registry.clone();
+        let pending = tokio::spawn(async move { pending_registry.get(key(b"race"), 0, registry_now()).await });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        registry.shutdown(registry_now()).await.unwrap();
+        release.notify_one();
+        assert!(tokio::time::timeout(Duration::from_secs(2), pending).await.unwrap().unwrap().is_err());
+        assert_eq!(registry.loaded_owner_count(), 0);
+        let cancelled_registry = registry.clone();
+        let cancelled = tokio::spawn(async move { cancelled_registry.get(key(b"cancel"), 0, registry_now()).await });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        cancelled.abort();
+        let _ = cancelled.await;
+        assert_eq!(registry.loaded_owner_count(), 0);
     }
 
     #[tokio::test]
