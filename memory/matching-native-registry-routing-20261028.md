@@ -15,3 +15,7 @@ Remaining integration and verification gaps:
 2. Host/launcher must provide a generated-client refresher that resolves each raw task-list owner, converts `NativePartitionRefresh` to the generated request without lossy task-list conversion, preserves the deadline, logs owner lookup failure as success, and propagates only RPC errors.
 3. Add bounded tests for raw forwarded parent names, raw partition refresh name/config/deadline, and registry teardown while a weak local host remains. No test/build/check/format command was run here.
 4. `matching_registry_routing_native.rs` is not registered in `lib.rs` by this task; its contract currently has no independent public module path until parent assembly registers it.
+
+## Parent checkpoint follow-up
+
+Registered matching_registry_routing_native in lib.rs and in the CI rustfmt file list. Source review found with_live_routing used an undefined `state` field initializer; replaced it with Arc::downgrade(&self.state), preserving weak ownership. git diff --check passed; compilation and tests remain pending. CI 40724071697 predates this correction; inspect its logs and run a new gate after integrating any additional fixes. Concrete host builder/refresher and production attachment are still required.

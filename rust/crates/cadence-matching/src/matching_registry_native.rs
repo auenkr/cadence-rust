@@ -702,7 +702,7 @@ impl NativeQueueRegistry {
                 detached.state = Arc::new(Mutex::new(State::default()));
                 detached
             },
-            state,
+            state: Arc::downgrade(&self.state),
         };
         let weak_factory: NativeLocalPollFactory = Arc::new(move |_| {
             local_host.registry().map(|registry| build_local(registry))

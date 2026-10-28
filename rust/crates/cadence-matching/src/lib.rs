@@ -90,6 +90,7 @@ pub mod matching_reader_native;
 pub mod matching_registry;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry_native;
+pub mod matching_registry_routing_native;
 pub mod matching_ringpop_provider;
 pub mod matching_runtime;
 #[allow(clippy::result_large_err)]
