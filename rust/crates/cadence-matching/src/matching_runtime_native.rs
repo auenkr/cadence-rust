@@ -236,7 +236,6 @@ pub fn native_queue_registry(
 /// Publish the resulting host as `Arc<dyn cadence_proto::native::NativeMatchingApi>`
 /// through the returned slot before opening admission. The runtime must retain
 /// the strong host; the slot and the registry retain only weak service references.
-/// `scaler_metrics` must be backed by the configured metrics sink.
 #[allow(clippy::too_many_arguments)]
 pub fn attach_live_native_registry(
     registry: NativeQueueRegistry,
@@ -245,9 +244,9 @@ pub fn attach_live_native_registry(
     membership: crate::matching_membership::Membership,
     router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
     metrics: crate::matching_metrics::MatchingMetrics,
-    scaler_metrics: crate::matching_scaler_native::ScalerMetrics,
 ) -> (NativeQueueRegistry, crate::matching_registry_routing_native::NativeServiceSlot) {
     let slot = crate::matching_registry_routing_native::NativeServiceSlot::default();
+    let scaler_metrics = crate::matching_scaler_runtime_native::scoped_scaler_metrics(metrics.clone(), cache.clone());
     let poll_metrics = metrics.clone();
     let registry = registry.with_metrics(metrics).with_poll_observer(Arc::new(move |context| {
         Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(poll_metrics.clone(), context.clone()))
@@ -256,7 +255,7 @@ pub fn attach_live_native_registry(
         membership.clone(), router.clone(), slot.factory(),
         crate::matching_registry_routing_native::partition_refresher(membership.clone()),
     );
-    let registry = crate::matching_scaler_runtime_native::attach_native_scaler(
+    let registry = crate::matching_scaler_runtime_native::attach_scoped_native_scaler(
         registry, state, cache, membership, router, scaler_metrics,
     );
     (registry, slot)

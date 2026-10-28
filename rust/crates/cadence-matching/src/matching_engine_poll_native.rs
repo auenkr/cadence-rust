@@ -44,6 +44,12 @@ pub trait NativePollContext: Send + Sync {
     ) -> Option<Arc<dyn NativePollObserver>> {
         None
     }
+    fn observer_with_context(
+        &self, domain: &GoString, list: &GoString, task_type: i32,
+        _task_list_kind: i32, _isolation_group: &GoString,
+    ) -> Option<Arc<dyn NativePollObserver>> {
+        self.observer(domain, list, task_type)
+    }
 }
 
 fn name(list: &GoString, decision: bool) -> Result<(), Status> {
@@ -190,10 +196,10 @@ impl NativeMatchingEngine {
             info: cadence_common::poller_bytes::Info {
                 identity: payload.identity.clone(),
                 rate_per_second: rate(context, &request.domain_id, &list.name, 0, None, &queue),
-                isolation_group: request.isolation_group,
+                isolation_group: request.isolation_group.clone(),
             },
             forwarded: !request.forwarded_from.is_empty(),
-            observer: context.observer(&request.domain_id, &list.name, 0),
+            observer: context.observer_with_context(&request.domain_id, &list.name, 0, i32::from(crate::matching_handler_native::persistence_kind(list.kind)), &request.isolation_group),
         };
         let active = context.domain_active(&request.domain_id)?;
         let _standby_wait = (!active).then(|| lifecycle.begin());
@@ -297,10 +303,10 @@ impl NativeMatchingEngine {
                     worker_rate,
                     &queue,
                 ),
-                isolation_group: request.isolation_group,
+                isolation_group: request.isolation_group.clone(),
             },
             forwarded: !request.forwarded_from.is_empty(),
-            observer: context.observer(&request.domain_id, &list.name, 1),
+            observer: context.observer_with_context(&request.domain_id, &list.name, 1, i32::from(crate::matching_handler_native::persistence_kind(list.kind)), &request.isolation_group),
         };
         let mut response = tokio::select! {
             result = async {

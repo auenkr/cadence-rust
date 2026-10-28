@@ -18,7 +18,25 @@ use std::{sync::Arc, time::Duration};
 use tonic::Status;
 
 pub type PollRegistrar = Arc<dyn Fn(&GoString, &GoString, i32, &GoString) -> NativePollRegistration + Send + Sync>;
-pub type PollObserverFactory = Arc<dyn Fn(&GoString, &GoString, i32) -> Option<Arc<dyn NativePollObserver>> + Send + Sync>;
+pub type PollObserverFactory = Arc<dyn Fn(&GoString, &GoString, i32, i32, &GoString) -> Option<Arc<dyn NativePollObserver>> + Send + Sync>;
+
+/// Create observers with the live poll request's persistence kind and isolation group.
+pub fn metrics_poll_observer_factory(metrics: crate::matching_metrics::MatchingMetrics, cache: Arc<MatchingDomainCache>) -> PollObserverFactory {
+    metrics_poll_observer_factory_with_names(metrics, Arc::new(move |id| cache.get_domain_by_id(&id.to_string()).ok().map(|d| d.info.name)))
+}
+
+fn metrics_poll_observer_factory_with_names(metrics: crate::matching_metrics::MatchingMetrics, names: Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>) -> PollObserverFactory {
+    Arc::new(move |domain, list, task_type, task_list_kind, isolation_group| {
+        let domain = domain.as_utf8().ok().and_then(|id| uuid::Uuid::parse_str(id).ok())
+            .and_then(|id| names(id)).filter(|n| !n.is_empty()).unwrap_or_else(|| "_unknown_".to_owned());
+        let context = crate::matching_metrics::PollMetricContext {
+            domain, task_list: String::from_utf8_lossy(list.as_bytes()).into_owned(), task_list_kind,
+            task_type: if task_type == 1 { "activity_task" } else { "decision_task" },
+            poller_isolation_group: String::from_utf8_lossy(isolation_group.as_bytes()).into_owned(),
+        };
+        Some(Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(metrics.clone(), context)) as Arc<dyn NativePollObserver>)
+    })
+}
 
 /// Native engine context assembled from the same state as the gRPC Matching
 /// service. Raw names stay `GoString` through config and ownership lookups.
@@ -142,7 +160,7 @@ impl NativePollContext for NativeMatchingEngineContext {
         cadence_persistence::dynamic_config::task_list_float_bytes(config.property_values("matching.overrideTaskListRps"), self.cached_domain_name(domain).as_deref(), list.as_bytes(), task_type, 0.0)
     }
     fn auto_config_enabled(&self, domain: &GoString, list: &GoString, task_type: i32) -> bool { self.dynamic_boolean("matching.enableClientAutoConfig", domain, list, task_type, false) }
-    fn observer(&self, domain: &GoString, list: &GoString, task_type: i32) -> Option<Arc<dyn NativePollObserver>> { self.observer.as_ref().and_then(|factory| factory(domain, list, task_type)) }
+    fn observer_with_context(&self, domain: &GoString, list: &GoString, task_type: i32, task_list_kind: i32, isolation_group: &GoString) -> Option<Arc<dyn NativePollObserver>> { self.observer.as_ref().and_then(|factory| factory(domain, list, task_type, task_list_kind, isolation_group)) }
 }
 
 impl NativeQueryContext for NativeMatchingEngineContext {
@@ -165,6 +183,22 @@ impl NativeQueryContext for NativeMatchingEngineContext {
 #[cfg(test)]
 mod tests {
     use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
+    use super::*;
+
+    #[test]
+    fn poll_observers_keep_normal_and_sticky_tags_distinct() {
+        use crate::matching_metrics::{MatchingMetrics, RecordingMetricSink, POLL_SUCCESS};
+        let sink = Arc::new(RecordingMetricSink::default());
+        let factory = metrics_poll_observer_factory_with_names(MatchingMetrics::new(sink.clone()), Arc::new(|_| Some("domain-a".into())));
+        let domain = GoString::from(uuid::Uuid::nil().to_string());
+        for (list, kind, group) in [("normal-list", 0, "group-a"), ("sticky-list", 1, "group-b")] {
+            factory(&domain, &GoString::from(list), 0, kind, &GoString::from(group)).unwrap().poll_success(false);
+        }
+        let events = sink.events();
+        for list in ["normal-list", "__sticky__"] {
+            assert!(events.iter().any(|e| e.name == POLL_SUCCESS && e.tags.get("tasklist").is_some_and(|v| v == list) && e.tags.get("domain").is_some_and(|v| v == "domain-a")));
+        }
+    }
 
     #[test]
     fn task_list_config_filter_keeps_invalid_utf8_distinct() {
