@@ -435,6 +435,7 @@ pub struct DescribedPartition {
 }
 pub type DescribePartition = Arc<
     dyn Fn(
+            NativeQueueRegistry,
             TaskListKeyBytes,
             i32,
             NativeScalerConfig,
@@ -501,8 +502,19 @@ async fn describe(
     remote: &DescribePartition,
 ) -> Result<DescribedPartition, Status> {
     if id != 0 && registry.has_membership() {
-        return remote(root.clone(), id, config.clone()).await;
+        return remote(registry.clone(), root.clone(), id, config.clone()).await;
     }
+    describe_local(registry, root, id, config, time).await
+}
+
+/// Snapshot a partition owned by this process without retaining the registry in a callback.
+pub async fn describe_local(
+    registry: &NativeQueueRegistry,
+    root: &TaskListKeyBytes,
+    id: i32,
+    config: &NativeScalerConfig,
+    time: i64,
+) -> Result<DescribedPartition, Status> {
     let name = TaskListNameBytes::parse(root.name.as_bytes()).map_err(|error| {
         crate::matching_native_status::raw_status(
             tonic::Code::InvalidArgument,

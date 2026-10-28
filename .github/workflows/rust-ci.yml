@@ -241,6 +241,7 @@ jobs:
             crates/cadence-matching/src/matching_engine_control_native.rs
             crates/cadence-matching/src/matching_transport_native.rs
             crates/cadence-matching/src/matching_runtime_native.rs
+            crates/cadence-matching/src/matching_scaler_runtime_native.rs
             crates/cadence-matching/src/matching_service_native.rs
             crates/cadence-matching/src/matching_control_context_native.rs
             crates/cadence-matching/src/matching_engine_context_native.rs

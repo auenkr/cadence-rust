@@ -99,6 +99,8 @@ pub mod matching_service_native;
 pub mod matching_scaler;
 #[allow(clippy::result_large_err)]
 pub mod matching_scaler_native;
+#[allow(clippy::result_large_err)]
+pub mod matching_scaler_runtime_native;
 pub mod matching_semaphore;
 pub mod matching_semaphore_native;
 #[allow(clippy::result_large_err)]

@@ -157,9 +157,10 @@ pub fn native_queue_registry(
     let isolation = {
         let cache = cache.clone();
         let overlay = overlay.clone();
-        Arc::new(move |domain: &GoString, task: &GoString, _task_type: i32, kind: i16,
-                       _pollers: Arc<crate::matching_registry_native::NativePollerManager>,
-                       _partitions: Arc<crate::matching_partition_native::NativePartitionCache>| {
+        let domains = state.domains.clone();
+        Arc::new(move |domain: &GoString, task: &GoString, task_type: i32, kind: i16,
+                       pollers: Arc<crate::matching_dispatch_native::NativePollerManager>,
+                       partitions: Arc<crate::matching_partition_native::NativePartitionCache>| {
             let name = cached_domain_name(&cache, domain);
             let config = overlay.lock().expect("admin lock");
             let enabled = cadence_persistence::dynamic_config::boolean(
@@ -172,6 +173,10 @@ pub fn native_queue_registry(
             let known = groups.clone();
             let reload_name = name.clone();
             let reload_overlay = overlay.clone();
+            let selector_overlay = overlay.clone();
+            let selector_domains = domains.clone();
+            let selector_task = task.clone();
+            let selector_name = name.clone();
             NativeIsolationConfig {
                 groups,
                 should_reload: Arc::new(move || {
@@ -180,11 +185,27 @@ pub fn native_queue_registry(
                 }),
                 select: Arc::new(move |data| {
                     let requested = data.partition_config.as_ref().and_then(|map| map.get(b"isolation-group".as_slice())).cloned().unwrap_or_default();
-                    if enabled && known.contains(&requested) {
-                        (requested, 0, None)
-                    } else {
-                        (GoString::default(), 0, None)
-                    }
+                    let now = crate::grpc_matching::matching_now();
+                    let (window, total_duration) = {
+                        let config = selector_overlay.lock().expect("admin lock");
+                        let duration = |key, default| cadence_persistence::dynamic_config::task_list_duration_bytes(
+                            config.property_values(key), selector_name.as_deref(), selector_task.as_bytes(), task_type, default,
+                        );
+                        (duration("matching.taskIsolationPollerWindow", 2_000_000_000),
+                         duration("matching.taskIsolationDuration", 200_000_000))
+                    };
+                    let drained = selector_name.as_deref().ok_or(()).and_then(|name| selector_domains.domain_isolation_groups(name).map_err(|_| ())).map(|domain_config| {
+                        domain_config.into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
+                        || selector_domains.global_isolation_groups().into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
+                    });
+                    let partition_id = cadence_common::task_list::TaskListNameBytes::parse(task.as_bytes()).map(|n| n.partition() as i32).unwrap_or_default();
+                    let partition_groups = partitions.get().and_then(|c| c.read_partitions.get(&partition_id).cloned());
+                    let recent = pollers.lock().expect("poller history lock").has_group_after(requested.as_bytes(), now.saturating_sub(window));
+                    let (group, duration, cause) = select_isolation_bytes(
+                        enabled, kind == 1, &requested, known.iter().any(|g| g == &requested), drained, recent,
+                        partition_groups.as_deref(), total_duration, now.saturating_sub(data.created_nanos),
+                    );
+                    (group, duration, cause)
                 }),
             }
         }) as crate::matching_registry_native::NativeIsolationProvider
@@ -209,6 +230,28 @@ pub fn native_queue_registry(
         .with_writer_live(writer_live)
         .with_isolation(isolation)
         .with_fatal_sinks(fatal)
+}
+
+/// Byte-preserving port of `TaskIsolation::select_with_cause`; configured
+/// metadata names are UTF-8 bytes, while task group names stay arbitrary Go bytes.
+fn select_isolation_bytes(
+    enabled: bool, sticky: bool, group: &GoString, known: bool,
+    drained: Result<bool, ()>, recent_poller: bool, partition_groups: Option<&[GoString]>,
+    total_duration: i64, task_latency: i64,
+) -> (GoString, i64, Option<&'static str>) {
+    if !enabled || sticky || group.is_empty() { return (GoString::default(), 0, None); }
+    if drained.is_err() { return (GoString::default(), 0, Some("error")); }
+    if drained == Ok(true) { return (GoString::default(), 0, Some("group_drained")); }
+    if !known { return (GoString::default(), 0, Some("group_unknown")); }
+    if !recent_poller { return (GoString::default(), 0, Some("no_recent_pollers")); }
+    if !partition_groups.is_some_and(|groups| groups.is_empty() || groups.iter().any(|g| g == group)) {
+        return (GoString::default(), 0, Some("partition_change"));
+    }
+    if total_duration == 0 { return (group.clone(), 0, None); }
+    let remaining = total_duration.saturating_sub(task_latency);
+    if remaining > cadence_common::task_isolation::MINIMUM_ISOLATION_NANOS {
+        (group.clone(), remaining, None)
+    } else { (GoString::default(), 0, Some("expired")) }
 }
 
 fn task_list_boolean(
@@ -312,13 +355,32 @@ mod tests {
     }
 
     #[test]
-    fn native_isolation_names_preserve_distinct_invalid_bytes() {
-        let replacement = GoString::from("\u{fffd}");
-        let invalid = GoString::from(&b"\xff"[..]);
-        assert_ne!(replacement, invalid);
-        let groups = [replacement, invalid];
-        assert_eq!(groups[0].as_bytes(), "\u{fffd}".as_bytes());
-        assert_eq!(groups[1].as_bytes(), &[0xff]);
+    fn byte_isolation_selector_uses_live_poller_and_partition_fixtures() {
+        use cadence_common::poller_bytes::{Info, Manager};
+        use crate::matching_partition_native::{NativePartitionCache, NativeStoredPartitionConfig};
+        let task_group = GoString::from("zone-\u{fffd}");
+        let invalid_group = GoString::from(&b"zone-\xff"[..]);
+        let configured_value = DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob { encoding_type: None, data: br#"["zone-\uFFFD"]"#.to_vec() }),
+            filters: Vec::new(),
+        };
+        let mut dynamic = DynamicConfigOverlay::default();
+        dynamic.update(false, "system.allIsolationGroups", vec![configured_value]);
+        let configured = cadence_persistence::dynamic_config::string_list(dynamic.property_values("system.allIsolationGroups"));
+        let known = configured.iter().map(GoString::from).collect::<Vec<_>>();
+        let mut poller_manager = Manager::default();
+        poller_manager.start(b"poll", Info { identity: "worker".into(), rate_per_second: 1.0, isolation_group: task_group.clone() }, 10);
+        let pollers = Arc::new(Mutex::new(poller_manager));
+        let config = NativeStoredPartitionConfig { read_partitions: std::collections::HashMap::from([(0, vec![task_group.clone()])]), ..Default::default() };
+        let cache = NativePartitionCache::default();
+        cache.push(&config);
+        let actual_groups = cache.get().unwrap().read_partitions[&0].clone();
+        let recent = pollers.lock().unwrap().has_group_after(task_group.as_bytes(), 9);
+        assert_eq!(select_isolation_bytes(true, false, &task_group, known.iter().any(|g| g == &task_group), Ok(false), recent, Some(&actual_groups), 0, 0), (task_group.clone(), 0, None));
+        assert_eq!(select_isolation_bytes(true, false, &invalid_group, known.iter().any(|g| g == &invalid_group), Ok(false), recent, Some(&actual_groups), 0, 0).2, Some("group_unknown"));
+        assert_eq!(select_isolation_bytes(true, false, &task_group, known.iter().any(|g| g == &task_group), Ok(true), recent, Some(&actual_groups), 0, 0).2, Some("group_drained"));
+        assert!(select_isolation_bytes(true, true, &task_group, true, Ok(false), recent, Some(&actual_groups), 0, 0).0.is_empty());
+        assert_eq!(select_isolation_bytes(true, false, &task_group, true, Ok(false), recent, Some(&actual_groups), 200_000_000, 160_000_000).2, Some("expired"));
     }
 
     #[test]

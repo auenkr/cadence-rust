@@ -34,6 +34,22 @@ type ShardProcessLookup = Arc<
         + Sync,
 >;
 
+fn native_noop_shard_policy(
+    percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
+    exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> crate::matching_registry_native::NativeQueueOwnershipPolicy {
+    crate::matching_registry_native::NativeQueueOwnershipPolicy {
+        is_shard_distributor_eligible: Arc::new(move |name| {
+            !crate::matching_shard_routing::task_list_excluded_from_shard_distributor_bytes(
+                name.as_bytes(),
+                percentage_onboarded() as u64,
+                exclude_short_lived(),
+            )
+        }),
+        has_local_processor: Arc::new(|_| false),
+    }
+}
+
 fn shard_task_list_ownership_check(
     membership: crate::matching_membership::Membership,
     percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
@@ -365,7 +381,11 @@ impl MatchingRuntime {
         exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> anyhow::Result<Self> {
         if config.namespaces.is_empty() {
-            return Ok(self);
+            return Ok(self.with_noop_shard_distributor(
+                membership,
+                percentage_onboarded,
+                exclude_short_lived,
+            ));
         }
         let registry = self.registry.clone().ok_or_else(|| {
             anyhow::anyhow!("shard-distributor Matching requires the durable queue registry")
@@ -483,6 +503,12 @@ impl MatchingRuntime {
         percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
         exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
+        if let Some(registry) = &self.native_registry {
+            registry.set_ownership_policy(native_noop_shard_policy(
+                percentage_onboarded.clone(),
+                exclude_short_lived.clone(),
+            ));
+        }
         let executor = crate::matching_shard_distributor::NoopShardExecutor;
         let (drain_tx, _) = tokio::sync::watch::channel(false);
         let lookup: ShardProcessLookup = Arc::new(move |name| {
@@ -1170,6 +1196,39 @@ mod tests {
         assert!(ensure_queue_registry_unowned(true, false).is_err());
         assert!(ensure_queue_registry_unowned(false, true).is_err());
         assert!(ensure_queue_registry_unowned(true, true).is_err());
+    }
+
+    #[tokio::test]
+    async fn native_noop_policy_refuses_raw_eligible_names_and_reads_live_config() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(
+            directory.path().join("noop-native.db"),
+            BlobEncoding::ThriftRW,
+        ).unwrap());
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            32 * 1024 * 1024,
+        );
+        let membership = empty_membership();
+        let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+            store, history, NonZeroU32::new(100).unwrap(),
+        ).with_membership(membership.native_membership());
+        let percent = Arc::new(AtomicI64::new(100));
+        registry.set_ownership_policy(native_noop_shard_policy(
+            Arc::new({ let percent = percent.clone(); move || percent.load(Ordering::SeqCst) }),
+            Arc::new(|| false),
+        ));
+        let raw = cadence_common::go_string::GoString::from(&b"queue-\xff"[..]);
+        let expected = membership.task_list_not_owned_by_bytes(&raw, "not known");
+        let actual = registry.check_task_list_ownership(&raw, true).unwrap_err();
+        assert_eq!(actual.code(), expected.code());
+        assert_eq!(actual.details(), expected.details());
+        percent.store(0, Ordering::SeqCst);
+        assert!(registry.check_task_list_ownership(&raw, true).is_ok());
+        assert!(registry.check_task_list_ownership(&raw, false).is_err());
     }
 
     #[tokio::test]
