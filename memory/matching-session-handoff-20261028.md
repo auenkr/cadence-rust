@@ -41,3 +41,7 @@ T3 orchestrator_capabilities and t3_thread_read returned `Authentication require
 ## Constraints
 
 All Cargo including formatting and all Go validation stays on GitHub Actions. Use only standard Ubuntu public-repo Actions, timeout <=90min, small artifacts retained 3 days. Check host load/RAM before workers. Shared checkout: avoid overlapping file ownership. Save findings in memory and push master, as authorized. Do not call Matching complete until full service requirements have direct reproducible evidence.
+
+## Superseding CI for saved WIP
+
+After the checkpoint push, requested cancellation of older in-progress run 40723629453 and dispatched a fresh clean-target six-crate clippy/test/format gate for checkpoint a929a63e9: https://github.com/auenkr/cadence-rust/actions/runs/40724071697 . This is the run to inspect first in the new session. It includes saved metric, registry-routing and raw-executor WIP. Conclusion is pending; no completion claim. The prior fix-only run was superseded before its conclusion was available.
