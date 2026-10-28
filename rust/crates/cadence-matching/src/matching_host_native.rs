@@ -36,7 +36,18 @@ impl NativePollObserver for NativeMetricsPollObserver {
     fn poller_count(&self, count: usize) { self.metrics.poller_count(&self.context, count); }
     fn poll_success(&self, sync: bool) { self.metrics.poll_success(&self.context, sync); }
     fn poll_match_latency(&self, elapsed: Duration, forwarded: bool, failed: bool) { self.metrics.poll_match_latency(&self.context, elapsed, forwarded, failed); }
-    fn poll_match(&self, task_forwarded: bool, poll_forwarded: bool) { self.metrics.poll_match(&self.context, task_forwarded, poll_forwarded, None); }
+    fn poll_match(&self, task_forwarded: bool, poll_forwarded: bool, partition: Option<&std::collections::BTreeMap<GoString, GoString>>) {
+        // Resolve the literal Go map keys before converting diagnostic labels.
+        // Queue and task data remain byte-valued through delivery.
+        let labels = partition.map(|partition| {
+            ["isolation-group", "original-isolation-group"].into_iter()
+                .filter_map(|key| partition.get(key.as_bytes()).map(|value| (
+                    key.to_owned(), String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                )))
+                .collect()
+        });
+        self.metrics.poll_match(&self.context, task_forwarded, poll_forwarded, labels.as_ref());
+    }
     fn async_match_latency(&self, elapsed: Duration) { self.metrics.async_match_latency(&self.context, elapsed); }
     fn poll_already_started(&self) { self.metrics.poll_already_started(&self.context); }
     fn poll_timeout(&self) { self.metrics.poll_timeout(&self.context); }
@@ -179,6 +190,35 @@ impl NativeControlContext for NativeMatchingHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_poll_emits_original_isolation_group_and_success() {
+        use crate::matching_metrics::{MatchingMetrics, PollMetricContext, RecordingMetricSink, ISOLATION_TASK_MATCH, ISOLATION_SUCCESS, ISOLATION_GROUP_TAG, POLLER_ISOLATION_GROUP_TAG};
+        use std::collections::BTreeMap;
+        for (original, expected_group, success) in [(Some("blue"), "blue", false), (None, "red", true)] {
+            let sink = Arc::new(RecordingMetricSink::default());
+            let observer = NativeMetricsPollObserver::new(MatchingMetrics::new(sink.clone()), PollMetricContext {
+                domain: "domain".into(), task_list: "queue".into(), task_list_kind: 0,
+                task_type: "decision_task", poller_isolation_group: "red".into(),
+            });
+            let mut partition = BTreeMap::from([(GoString::from("isolation-group"), GoString::from("red"))]);
+            if let Some(original) = original {
+                partition.insert("original-isolation-group".into(), original.into());
+            }
+            observer.poll_match(false, false, Some(&partition));
+            let events = sink.events();
+            let matched = events.iter().find(|event| event.name == ISOLATION_TASK_MATCH).unwrap();
+            assert_eq!(matched.tags[ISOLATION_GROUP_TAG], expected_group);
+            assert_eq!(matched.tags[POLLER_ISOLATION_GROUP_TAG], "red");
+            assert_eq!(events.iter().any(|event| event.name == ISOLATION_SUCCESS), success);
+        }
+        let sink = Arc::new(RecordingMetricSink::default());
+        let observer = NativeMetricsPollObserver::new(MatchingMetrics::new(sink.clone()), PollMetricContext {
+            domain: "domain".into(), task_list: "queue".into(), task_list_kind: 0,
+            task_type: "decision_task", poller_isolation_group: "red".into(),
+        });
+        observer.poll_match(false, false, None);
+        assert!(!sink.events().iter().any(|event| event.name == ISOLATION_TASK_MATCH));
+    }
     #[tokio::test]
     async fn poll_guard_preserves_raw_keys_and_go_collision_cleanup() {
         let polls: PollMap = Arc::default();

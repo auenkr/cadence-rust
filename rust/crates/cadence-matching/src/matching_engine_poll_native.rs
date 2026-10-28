@@ -219,7 +219,7 @@ impl NativeMatchingEngine {
             biased;
             query = queue.queries.next() => {
                 let _wait = query_lifecycle.begin();
-                if let Some(observer) = &query_lifecycle.observer { observer.poll_success(true); observer.poll_match(false, false); }
+                if let Some(observer) = &query_lifecycle.observer { observer.poll_success(true); observer.poll_match(false, false, None); }
                 if !query.shape.is_valid() { return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE)); }
                 let execution = query.request.workflow_execution.clone().unwrap_or_default();
                 // Go finishes the synchronous query handoff before looking up
