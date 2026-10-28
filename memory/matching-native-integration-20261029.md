@@ -50,3 +50,29 @@ using `matching-acceptance-evidence-readiness-20261027.md`, preserving exact
 source identities, binary SHA256, original Go peer/no Go Matching topology,
 SDK assertions, failure/restart/recovery results and cleanup evidence. Earlier
 mixed results predate native production activation and cannot close acceptance.
+
+## Continuation audit and CI outcome
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40749194152 at
+`583c10e237368ec607ec7fd04e2e8f0392e07859` concluded failure. Clippy reached
+Matching and reported only `select_isolation_bytes` having nine arguments.
+Tests did not run. Applied its runner formatting artifact to 26 files; resolved
+three overlaps with subsequent cache corrections. Added a narrowly scoped
+argument-count allowance consistent with the native assembly helpers.
+
+Source audit found that native control, semaphore domain resolution and
+standby cache adapters mapped all cache failures to NotFound. Extracted the
+existing legacy handler classification into `DomainCacheError::into_status`
+and shared it with these native call sites. Genuine NotFound retains Cadence
+EntityNotExistsError details; BadRequest remains InvalidArgument and backend,
+stopped-cache and exists-but-not-loaded errors remain Internal. New regression
+calls native control name/ID resolution through real cache lookups against
+four explicitly classified source failures. This is pending CI execution.
+
+The native registry also omitted the legacy builder's live
+`matching.recordTaskStartedTimeout` provider. Installed a byte-aware provider
+on its History client before registry construction, resolving domain-filtered
+configuration through the shared metadata cache. It retains the one-second
+default, reads updates on every attempt and passes zero through for the
+existing unbounded-operation behavior. Regression checks default, live update,
+zero and global fallback with invalid domain bytes. Pending CI execution.

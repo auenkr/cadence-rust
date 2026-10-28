@@ -382,6 +382,7 @@ pub fn attach_live_native_registry(
 
 /// Byte-preserving port of `TaskIsolation::select_with_cause`; configured
 /// metadata names are UTF-8 bytes, while task group names stay arbitrary Go bytes.
+#[allow(clippy::too_many_arguments)]
 fn select_isolation_bytes(
     enabled: bool,
     sticky: bool,
