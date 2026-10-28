@@ -20,8 +20,30 @@ use crate::{
 use crate::matching_quota::{MatchingRpc, MatchingRpcQuota};
 
 pub type NativeSemaphore = Arc<dyn Fn(Request<n::matching::AcquireSemaphoreRequest>) -> NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>> + Send + Sync>;
-pub type NativeRequestMetric = Arc<dyn Fn(&'static str) + Send + Sync>;
-pub type NativeFailureMetric = Arc<dyn Fn(&'static str, &Status) + Send + Sync>;
+
+/// Adapts native poll lifecycle observations to the shared Matching metric sink.
+/// Its context is diagnostic only and must never be used as a native queue key.
+pub struct NativeMetricsPollObserver {
+    metrics: crate::matching_metrics::MatchingMetrics,
+    context: crate::matching_metrics::PollMetricContext,
+}
+impl NativeMetricsPollObserver {
+    pub fn new(metrics: crate::matching_metrics::MatchingMetrics, context: crate::matching_metrics::PollMetricContext) -> Self {
+        Self { metrics, context }
+    }
+}
+impl NativePollObserver for NativeMetricsPollObserver {
+    fn poller_count(&self, count: usize) { self.metrics.poller_count(&self.context, count); }
+    fn poll_success(&self, sync: bool) { self.metrics.poll_success(&self.context, sync); }
+    fn poll_match_latency(&self, elapsed: Duration, forwarded: bool, failed: bool) { self.metrics.poll_match_latency(&self.context, elapsed, forwarded, failed); }
+    fn poll_match(&self, task_forwarded: bool, poll_forwarded: bool) { self.metrics.poll_match(&self.context, task_forwarded, poll_forwarded, None); }
+    fn async_match_latency(&self, elapsed: Duration) { self.metrics.async_match_latency(&self.context, elapsed); }
+    fn poll_already_started(&self) { self.metrics.poll_already_started(&self.context); }
+    fn poll_timeout(&self) { self.metrics.poll_timeout(&self.context); }
+    fn forward_poll_latency(&self, elapsed: Duration) { self.metrics.forward_poll_latency(&self.context, elapsed); }
+    fn forward_task_latency(&self, elapsed: Duration) { self.metrics.forward_task_latency(&self.context, elapsed); }
+    fn invalid_isolation_group(&self) { self.metrics.invalid_isolation_group(&self.context); }
+}
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct PollKey { domain: GoString, list: GoString, task_type: i32, poller: GoString }
@@ -47,19 +69,18 @@ pub struct NativeMatchingHost {
     quota: Arc<MatchingRpcQuota>,
     domain_parse: DomainIdParse,
     semaphore: NativeSemaphore,
-    request_metric: NativeRequestMetric,
-    failure_metric: NativeFailureMetric,
+    metrics: crate::matching_metrics::MatchingMetrics,
 }
 
 impl NativeMatchingHost {
     #[allow(clippy::too_many_arguments)]
-    pub fn assemble(state: AppState, cache: Arc<MatchingDomainCache>, registry: NativeQueueRegistry, membership: Membership, shard_router: Option<Arc<MatchingShardRouter>>, quota: Arc<MatchingRpcQuota>, domain_parse: DomainIdParse, semaphore: NativeSemaphore, request_metric: NativeRequestMetric, failure_metric: NativeFailureMetric, observer: Option<PollObserverFactory>) -> NativeMatchingService<Self> {
+    pub fn assemble(state: AppState, cache: Arc<MatchingDomainCache>, registry: NativeQueueRegistry, membership: Membership, shard_router: Option<Arc<MatchingShardRouter>>, quota: Arc<MatchingRpcQuota>, domain_parse: DomainIdParse, semaphore: NativeSemaphore, metrics: crate::matching_metrics::MatchingMetrics, observer: Option<PollObserverFactory>) -> NativeMatchingService<Self> {
         let control = Arc::new(NativeMatchingControlContext::new(state.clone(), cache.clone(), registry.clone(), membership.clone(), shard_router.clone()));
         let polls: PollMap = Arc::default();
         let register: PollRegistrar = Arc::new(move |domain, list, kind, poller| register(&polls, domain, list, kind, poller));
         let engine_context = NativeMatchingEngineContext::with_control(state, cache, control.clone(), membership, shard_router, register, observer);
         let started = tokio::sync::watch::channel(0).0;
-        NativeMatchingService::new(NativeMatchingEngine::new(registry.clone()), Self { engine: engine_context, control, registry, started, quota, domain_parse, semaphore, request_metric, failure_metric })
+        NativeMatchingService::new(NativeMatchingEngine::new(registry.clone()), Self { engine: engine_context, control, registry, started, quota, domain_parse, semaphore, metrics })
     }
     /// Open admission after engine and membership startup has completed.
     pub fn mark_started(&self) { self.started.send_if_modified(|state| { if *state == 0 { *state = 1; true } else { false } }); }
@@ -95,8 +116,8 @@ impl NativeMatchingIntegration for NativeMatchingHost {
         let name = if direct { domain.cloned() } else { domain.map(|id| NativeControlContext::domain_name(self.control.as_ref(), id).unwrap_or_default()) };
         if self.quota.allow_go_string(method, name.as_ref()) { Ok(()) } else { Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "Matching host rps exceeded", "ServiceBusyError", cadence_proto::api::ServiceBusyError { reason: String::new() })) }
     }
-    fn record_request(&self, method: &'static str) { (self.request_metric)(method); }
-    fn record_failure(&self, method: &'static str, status: &Status) { (self.failure_metric)(method, status); }
+    fn metrics(&self) -> &crate::matching_metrics::MatchingMetrics { &self.metrics }
+    fn metric_domain_name(&self, id: &GoString) -> Option<GoString> { NativeControlContext::domain_name(self.control.as_ref(), id).ok() }
     fn check_owned(&self, key: &TaskListKeyBytes) -> Result<(), Status> { self.registry.check_task_list_ownership(&key.name, true) }
     fn domain_for_name(&self, name: &GoString) -> Result<uuid::Uuid, Status> { self.control.domain_id(name) }
     fn check_domain(&self, id: &GoString, method: &'static str) -> Result<(), Status> {

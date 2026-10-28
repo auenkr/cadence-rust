@@ -14,7 +14,7 @@ use crate::{
     matching_domain_cache::MatchingDomainCache,
     matching_domain_uuid::DomainIdParse,
     matching_engine_context_native::PollObserverFactory,
-    matching_host_native::{NativeFailureMetric, NativeMatchingHost, NativeRequestMetric},
+    matching_host_native::NativeMatchingHost,
     matching_membership::Membership,
     matching_quota::MatchingRpcQuota,
     matching_registry_native::NativeQueueRegistry,
@@ -37,8 +37,7 @@ pub async fn assemble(
     quota: Arc<MatchingRpcQuota>,
     domain_parse: DomainIdParse,
     drain: DrainDuration,
-    request_metric: NativeRequestMetric,
-    failure_metric: NativeFailureMetric,
+    metrics: crate::matching_metrics::MatchingMetrics,
     timeout_metric: ContextTimeoutMetric,
     observer: Option<PollObserverFactory>,
 ) -> anyhow::Result<MatchingRuntime> {
@@ -78,7 +77,7 @@ pub async fn assemble(
     );
     let host = Arc::new(NativeMatchingHost::assemble(
         state, cache, registry.clone(), membership.clone(), shard_router, quota,
-        domain_parse, semaphore.callback(), request_metric, failure_metric, observer,
+        domain_parse, semaphore.callback(), metrics, observer,
     ));
     runtime.with_native_host(registry, host, semaphore, membership)
 }

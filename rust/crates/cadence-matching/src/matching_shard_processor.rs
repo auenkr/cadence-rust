@@ -123,6 +123,59 @@ impl ShardProcessor for QueueRegistryShardProcessor {
     }
 }
 
+/// Byte-preserving processor over the same native registry used by Matching.
+pub struct NativeQueueRegistryShardProcessorFactory {
+    registry: crate::matching_registry_native::NativeQueueRegistry,
+    report_ttl_nanos: i64,
+}
+
+impl NativeQueueRegistryShardProcessorFactory {
+    pub fn new(registry: crate::matching_registry_native::NativeQueueRegistry, report_ttl_nanos: i64) -> Self {
+        Self { registry, report_ttl_nanos }
+    }
+}
+
+impl ShardProcessorFactory for NativeQueueRegistryShardProcessorFactory {
+    fn create(&self, shard_key: String) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
+        self.create_raw(shard_key.into_bytes())
+    }
+    fn create_raw(&self, shard_key: Vec<u8>) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
+        if shard_key.is_empty() { return Box::pin(async { Err("ShardID must be specified".into()) }); }
+        let processor: Arc<dyn ShardProcessor> = Arc::new(NativeQueueRegistryShardProcessor {
+            registry: self.registry.clone(), shard_key: shard_key.into(), report_ttl_nanos: self.report_ttl_nanos,
+            created_at: Instant::now(), report: Mutex::new(ShardReport { status: sd::ShardStatus::Ready, load: 0.0 }),
+        });
+        Box::pin(async move { Ok(processor) })
+    }
+}
+
+struct NativeQueueRegistryShardProcessor {
+    registry: crate::matching_registry_native::NativeQueueRegistry,
+    shard_key: cadence_common::go_string::GoString,
+    report_ttl_nanos: i64,
+    created_at: Instant,
+    report: Mutex<ShardReport>,
+}
+impl ShardProcessor for NativeQueueRegistryShardProcessor {
+    fn start(&self) -> BoxFuture<Result<(), String>> { Box::pin(async { Ok(()) }) }
+    fn stop(&self) -> BoxFuture<()> {
+        let registry = self.registry.clone();
+        let shard_key = self.shard_key.clone();
+        Box::pin(async move {
+            if let Err(error) = registry.stop_task_list_name(&shard_key).await {
+                eprintln!("Matching shard processor cleanup failed for {:?}: {error}", shard_key.as_bytes());
+            }
+        })
+    }
+    fn report(&self) -> ShardReport {
+        let mut report = self.report.lock().expect("Matching shard report lock");
+        let elapsed = self.created_at.elapsed().as_nanos().min(i64::MAX as u128) as i64;
+        if elapsed > self.report_ttl_nanos { report.load = self.registry.qps_for_task_list_name(&self.shard_key); }
+        *report
+    }
+    fn set_status(&self, status: sd::ShardStatus) { self.report.lock().expect("Matching shard report lock").status = status; }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

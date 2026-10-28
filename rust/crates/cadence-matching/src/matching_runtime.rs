@@ -387,9 +387,8 @@ impl MatchingRuntime {
                 exclude_short_lived,
             ));
         }
-        let registry = self.registry.clone().ok_or_else(|| {
-            anyhow::anyhow!("shard-distributor Matching requires the durable queue registry")
-        })?;
+        anyhow::ensure!(self.registry.is_some() || self.native_registry.is_some(),
+            "shard-distributor Matching requires the durable queue registry");
         let enabled = {
             let percentage = percentage_onboarded.clone();
             Arc::new(move || {
@@ -399,12 +398,12 @@ impl MatchingRuntime {
         let rpc = Arc::new(
             crate::matching_shard_distributor::TonicExecutorRpc::from_channel(channel.clone()),
         );
-        let factory = Arc::new(
-            crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(
-                registry.clone(),
-                config.report_ttl_nanos(),
-            ),
-        );
+        let factory: Arc<dyn crate::matching_shard_distributor::ShardProcessorFactory> =
+            if let Some(registry) = &self.native_registry {
+                Arc::new(crate::matching_shard_processor::NativeQueueRegistryShardProcessorFactory::new(registry.clone(), config.report_ttl_nanos()))
+            } else {
+                Arc::new(crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(self.registry.clone().expect("registry checked"), config.report_ttl_nanos()))
+            };
         let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
         let executor = crate::matching_shard_distributor::ShardDistributorExecutor::new(
             config,
@@ -459,6 +458,15 @@ impl MatchingRuntime {
                     >,
                 >
         });
+        if let Some(registry) = &self.native_registry {
+            let percentage = percentage_onboarded.clone();
+            let exclude = exclude_short_lived.clone();
+            let native_executor = executor.clone();
+            registry.set_ownership_policy(crate::matching_registry_native::NativeQueueOwnershipPolicy {
+                is_shard_distributor_eligible: Arc::new(move |name| !crate::matching_shard_routing::task_list_excluded_from_shard_distributor_bytes(name.as_bytes(), percentage() as u64, exclude())),
+                has_local_processor: Arc::new(move |name| native_executor.has_local_shard_process_raw(name.as_bytes())),
+            });
+        }
         let ownership_check = shard_task_list_ownership_check(
             membership.clone(),
             percentage_onboarded.clone(),
@@ -491,6 +499,11 @@ impl MatchingRuntime {
         self.shard_distributor_drain = Some(drain_tx);
         self.shard_distributor_peer_cleanup = Some(peer_cleanup);
         Ok(self)
+    }
+
+    /// Shared executor used by native admission to refresh an uncached assignment.
+    pub fn shard_distributor_executor(&self) -> Option<crate::matching_shard_distributor::ShardDistributorExecutor> {
+        self.shard_distributor_executor.clone()
     }
 
     /// Go `setupExecutor` with no namespaces: install the no-op executor, which

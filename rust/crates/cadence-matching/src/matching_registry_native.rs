@@ -155,6 +155,25 @@ pub type NativeParentRouter = Arc<
 >;
 /// In-process service for local parents (legacy `LocalPollFactory`).
 pub type NativeLocalPollFactory =
+    Arc<dyn Fn(NativeLocalPollHost) -> Option<Arc<dyn NativeMatchingApi>> + Send + Sync>;
+
+/// Weak registry capability passed only for the duration of local-parent
+/// service construction. The callback must not retain this registry in an
+/// owner resolver; its result is the per-call service adapter.
+#[derive(Clone)]
+pub struct NativeLocalPollHost {
+    detached: NativeQueueRegistry,
+    state: Weak<Mutex<State>>,
+}
+impl NativeLocalPollHost {
+    #[must_use]
+    pub fn registry(&self) -> Option<NativeQueueRegistry> {
+        let mut registry = self.detached.clone();
+        registry.state = self.state.upgrade()?;
+        Some(registry)
+    }
+}
+pub type NativeLocalPollServiceBuilder =
     Arc<dyn Fn(NativeQueueRegistry) -> Arc<dyn NativeMatchingApi> + Send + Sync>;
 
 /// One `RefreshTaskListPartitionConfig` notification to a non-root read
@@ -650,6 +669,48 @@ impl NativeQueueRegistry {
     pub fn with_local_poll_service(mut self, factory: NativeLocalPollFactory) -> Self {
         self.local_poll_service = Some(factory);
         self
+    }
+    /// Attach the current ring/router and a local poll-service constructor
+    /// without making registry owners retain the service (and its registry).
+    /// `build_local` is called per forwarded RPC after weak state upgrade.
+    pub fn with_live_routing(
+        self,
+        membership: crate::matching_membership::Membership,
+        router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
+        build_local: NativeLocalPollServiceBuilder,
+        refresh: NativePartitionRefresher,
+    ) -> Self {
+        let parent_membership = membership.clone();
+        let parent_router = router.clone();
+        let parent: NativeParentRouter = Arc::new(move |name| {
+            let membership = parent_membership.clone();
+            let router = parent_router.clone();
+            Box::pin(async move {
+                let channel = if let Some(router) = router {
+                    router.remote_channel_bytes(name.as_bytes()).await
+                        .map_err(|error| Status::unavailable(error.to_string()))?.0
+                } else {
+                    membership.remote_channel_bytes(name.as_bytes())?
+                };
+                Ok(channel.map(|channel| Arc::new(crate::matching_forward_native::RemoteNativeMatching(channel)) as Arc<dyn NativeMatchingApi>))
+            })
+        });
+        let local_membership = membership.native_membership();
+        let local_host = NativeLocalPollHost {
+            detached: {
+                let mut detached = self.clone();
+                detached.state = Arc::new(Mutex::new(State::default()));
+                detached
+            },
+            state,
+        };
+        let weak_factory: NativeLocalPollFactory = Arc::new(move |_| {
+            local_host.registry().map(|registry| build_local(registry))
+        });
+        self.with_membership(local_membership)
+            .with_parent_router(parent)
+            .with_local_poll_service(weak_factory)
+            .with_partition_refresher(refresh)
     }
     pub fn with_parent_router(mut self, router: NativeParentRouter) -> Self {
         self.parent_router = Some(router);
@@ -2174,7 +2235,15 @@ async fn resolve_parent_dispatcher(
         }
     }
     if let Some(factory) = registry.local_poll_service.clone() {
-        return Some(NativeParent::Service(factory(registry)));
+        let host = NativeLocalPollHost {
+            detached: {
+                let mut detached = registry.clone();
+                detached.state = Arc::new(Mutex::new(State::default()));
+                detached
+            },
+            state: Arc::downgrade(&registry.state),
+        };
+        return factory(host).map(NativeParent::Service);
     }
     let handle = registry.get(key, kind, registry_now()).await.ok()?;
     if handle.stop_if_isolation_changed() {

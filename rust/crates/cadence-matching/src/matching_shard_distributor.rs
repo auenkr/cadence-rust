@@ -80,6 +80,12 @@ pub trait ShardProcessor: Send + Sync + 'static {
 
 pub trait ShardProcessorFactory: Send + Sync + 'static {
     fn create(&self, shard_key: String) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>>;
+    fn create_raw(&self, shard_key: Vec<u8>) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
+        match String::from_utf8(shard_key) {
+            Ok(key) => self.create(key),
+            Err(_) => Box::pin(async { Err("non-UTF-8 shard key unsupported by legacy factory".into()) }),
+        }
+    }
 }
 
 pub trait ExecutorRpc: Send + Sync + 'static {
@@ -88,6 +94,23 @@ pub trait ExecutorRpc: Send + Sync + 'static {
         request: sd::HeartbeatRequest,
         timeout: Duration,
     ) -> BoxFuture<Result<sd::HeartbeatResponse, String>>;
+    fn heartbeat_raw(&self, request: RawHeartbeatRequest, timeout: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+        let reports = request.reports.into_iter().map(|entry| {
+            String::from_utf8(entry.key).map(|key| (key, entry.value.unwrap_or_default()))
+        }).collect::<Result<HashMap<_, _>, _>>();
+        let reports = match reports {
+            Ok(reports) => reports,
+            Err(_) => return Box::pin(async { Err("non-UTF-8 shard key unsupported by legacy RPC".into()) }),
+        };
+        let future = self.heartbeat(sd::HeartbeatRequest {
+            namespace: request.namespace, executor_id: request.executor_id, status: request.status,
+            shard_status_reports: reports, metadata: request.metadata,
+        }, timeout);
+        Box::pin(async move {
+            let response = future.await?;
+            Ok(RawHeartbeatResponse { assignments: response.shard_assignments.into_iter().map(|(key, value)| RawAssignmentEntry { key: key.into_bytes(), value: Some(value) }).collect(), migration_mode: response.migration_mode })
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +149,33 @@ struct RawExecutor {
 struct RawShard {
     #[prost(bytes = "vec", tag = "1")]
     shard_key: Vec<u8>,
+}
+
+// Repeated map-entry messages retain Go string bytes while using protobuf's
+// identical length-delimited representation. Repeated keys have map semantics
+// (last entry wins) when assignments are applied.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RawHeartbeatRequest {
+    #[prost(string, tag="1")] pub namespace: String,
+    #[prost(string, tag="2")] pub executor_id: String,
+    #[prost(int32, tag="3")] pub status: i32,
+    #[prost(message, repeated, tag="4")] pub reports: Vec<RawReportEntry>,
+    #[prost(map="string, string", tag="5")] pub metadata: HashMap<String, String>,
+}
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RawReportEntry {
+    #[prost(bytes="vec", tag="1")] pub key: Vec<u8>,
+    #[prost(message, optional, tag="2")] pub value: Option<sd::ShardStatusReport>,
+}
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RawHeartbeatResponse {
+    #[prost(message, repeated, tag="1")] pub assignments: Vec<RawAssignmentEntry>,
+    #[prost(int32, tag="2")] pub migration_mode: i32,
+}
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RawAssignmentEntry {
+    #[prost(bytes="vec", tag="1")] pub key: Vec<u8>,
+    #[prost(message, optional, tag="2")] pub value: Option<sd::ShardAssignment>,
 }
 
 type RawOwnerCache = Arc<RwLock<Option<HashMap<Vec<u8>, ShardOwner>>>>;
@@ -478,6 +528,7 @@ impl Drop for TonicSpectator {
 
 #[derive(Clone)]
 pub struct TonicExecutorRpc {
+    channel: tonic::transport::Channel,
     client: Arc<
         tokio::sync::Mutex<
             sd::shard_distributor_executor_api_client::ShardDistributorExecutorApiClient<
@@ -490,6 +541,7 @@ pub struct TonicExecutorRpc {
 impl TonicExecutorRpc {
     pub fn from_channel(channel: tonic::transport::Channel) -> Self {
         Self {
+            channel: channel.clone(),
             client: Arc::new(tokio::sync::Mutex::new(
                 sd::shard_distributor_executor_api_client::ShardDistributorExecutorApiClient::new(
                     channel,
@@ -533,6 +585,21 @@ impl ExecutorRpc for TonicExecutorRpc {
             .map_err(|_| format!("shard-distributor heartbeat timed out after {timeout:?}"))?
         })
     }
+    fn heartbeat_raw(&self, request: RawHeartbeatRequest, timeout: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+        let channel = self.channel.clone();
+        Box::pin(async move {
+            tokio::time::timeout(timeout, async move {
+                let mut client = tonic::client::Grpc::new(channel);
+                client.ready().await.map_err(|error| format!("service not ready: {error}"))?;
+                let mut request = yarpc_grpc_request(request);
+                request.set_timeout(timeout);
+                client.unary::<_, RawHeartbeatResponse, _>(request,
+                    tonic::codegen::http::uri::PathAndQuery::from_static("/uber.cadence.sharddistributor.v1.ShardDistributorExecutorAPI/Heartbeat"),
+                    tonic::codec::ProstCodec::default()).await.map(tonic::Response::into_inner).map_err(|error| error.to_string())
+            }).await.map_err(|_| format!("shard-distributor heartbeat timed out after {timeout:?}"))?
+        })
+    }
+
 }
 
 /// Go `executorclient.NewNoopExecutor`: owns no shards, so every lookup reports
@@ -606,8 +673,8 @@ struct ManagedProcessor {
 }
 
 struct ExecutorState {
-    processors: Mutex<HashMap<String, Arc<ManagedProcessor>>>,
-    last_use: Mutex<HashMap<String, Instant>>,
+    processors: Mutex<HashMap<Vec<u8>, Arc<ManagedProcessor>>>,
+    last_use: Mutex<HashMap<Vec<u8>, Instant>>,
     stopping: Mutex<Vec<JoinHandle<()>>>,
     assignment_lock: tokio::sync::Mutex<()>,
 }
@@ -813,32 +880,30 @@ impl ShardDistributorExecutor {
         &self,
         shard_key: &str,
     ) -> Result<Arc<dyn ShardProcessor>, GetShardProcessError> {
-        self.state
-            .last_use
-            .lock()
-            .expect("SD last-use lock")
-            .insert(shard_key.to_string(), Instant::now());
-        if let Some(processor) = self.processor(shard_key) {
-            return Ok(processor);
-        }
-        if !(self.enabled)() {
-            return Err(GetShardProcessError::NotFound(shard_key.to_string()));
-        }
-        self.heartbeat_and_update()
-            .await
-            .map_err(GetShardProcessError::Heartbeat)?;
-        self.processor(shard_key)
-            .ok_or_else(|| GetShardProcessError::NotFound(shard_key.to_string()))
+        self.get_shard_process_raw(shard_key.as_bytes()).await
+    }
+
+    pub async fn get_shard_process_raw(&self, shard_key: &[u8]) -> Result<Arc<dyn ShardProcessor>, GetShardProcessError> {
+        self.state.last_use.lock().expect("SD last-use lock").insert(shard_key.to_vec(), Instant::now());
+        if let Some(processor) = self.processor(shard_key) { return Ok(processor); }
+        let not_found = || GetShardProcessError::NotFound(format!("{shard_key:?}"));
+        if !(self.enabled)() { return Err(not_found()); }
+        self.heartbeat_and_update().await.map_err(GetShardProcessError::Heartbeat)?;
+        self.processor(shard_key).ok_or_else(not_found)
     }
 
     /// Return the current local processor snapshot without heartbeat I/O.
     /// QueueRegistry uses this only to recheck assignment while publishing or
     /// unloading managers after the async RPC path already refreshed it.
     pub(crate) fn has_local_shard_process(&self, shard_key: &str) -> bool {
+        self.processor(shard_key.as_bytes()).is_some()
+    }
+
+    pub fn has_local_shard_process_raw(&self, shard_key: &[u8]) -> bool {
         self.processor(shard_key).is_some()
     }
 
-    fn processor(&self, shard_key: &str) -> Option<Arc<dyn ShardProcessor>> {
+    fn processor(&self, shard_key: &[u8]) -> Option<Arc<dyn ShardProcessor>> {
         self.state
             .processors
             .lock()
@@ -848,7 +913,7 @@ impl ShardDistributorExecutor {
             .map(|managed| managed.processor.clone())
     }
 
-    fn heartbeat_request(&self, status: sd::ExecutorStatus) -> sd::HeartbeatRequest {
+    fn heartbeat_request(&self, status: sd::ExecutorStatus) -> RawHeartbeatRequest {
         let reports = self
             .state
             .processors
@@ -858,20 +923,17 @@ impl ShardDistributorExecutor {
             .filter(|&(_, managed)| managed.state.load(Ordering::Acquire) == PROCESSOR_STARTED)
             .map(|(key, managed)| {
                 let report = managed.processor.report();
-                (
-                    key.clone(),
-                    sd::ShardStatusReport {
-                        status: report.status as i32,
-                        shard_load: report.load,
-                    },
-                )
+                RawReportEntry {
+                    key: key.clone(),
+                    value: Some(sd::ShardStatusReport { status: report.status as i32, shard_load: report.load }),
+                }
             })
             .collect();
-        sd::HeartbeatRequest {
+        RawHeartbeatRequest {
             namespace: self.namespace.to_string(),
             executor_id: self.executor_id.to_string(),
             status: status as i32,
-            shard_status_reports: reports,
+            reports,
             metadata: self.metadata(),
         }
     }
@@ -880,9 +942,9 @@ impl ShardDistributorExecutor {
         &self,
         status: sd::ExecutorStatus,
         timeout: Duration,
-    ) -> Result<sd::HeartbeatResponse, String> {
+    ) -> Result<RawHeartbeatResponse, String> {
         self.rpc
-            .heartbeat(self.heartbeat_request(status), timeout)
+            .heartbeat_raw(self.heartbeat_request(status), timeout)
             .await
     }
 
@@ -895,11 +957,11 @@ impl ShardDistributorExecutor {
         let response = self
             .send_heartbeat(sd::ExecutorStatus::Active, RPC_TIMEOUT)
             .await?;
-        self.update_assignments(response.shard_assignments).await;
+        self.update_assignments(response.assignments.into_iter().map(|entry| (entry.key, entry.value.unwrap_or_default())).collect()).await;
         Ok(())
     }
 
-    async fn update_assignments(&self, assignments: HashMap<String, sd::ShardAssignment>) {
+    async fn update_assignments(&self, assignments: HashMap<Vec<u8>, sd::ShardAssignment>) {
         let to_stop: Vec<_> = self
             .state
             .processors
@@ -923,7 +985,7 @@ impl ShardDistributorExecutor {
         }
     }
 
-    async fn start_processor(&self, shard_key: String) {
+    async fn start_processor(&self, shard_key: Vec<u8>) {
         if self
             .state
             .processors
@@ -933,7 +995,7 @@ impl ShardDistributorExecutor {
         {
             return;
         }
-        let processor = match self.factory.create(shard_key.clone()).await {
+        let processor = match self.factory.create_raw(shard_key.clone()).await {
             Ok(processor) => processor,
             Err(_) => return,
         };
@@ -981,7 +1043,7 @@ impl ShardDistributorExecutor {
         });
     }
 
-    fn stop_processor(&self, shard_key: &str) {
+    fn stop_processor(&self, shard_key: &[u8]) {
         let managed = self
             .state
             .processors
