@@ -30,3 +30,9 @@ Both existing Codex GPT-6.1 Terra workers completed: query rendezvous (`8abc84a7
 4. Run mixed Go/Rust SDK and service gates with Rust Matching replacing Go Matching, including forwarding, cancellation, persistence backends, failure, restart and recovery. Complete the service parity audit before moving to History.
 
 Detailed source seams: `matching-native-production-seams-20261028.md`, `matching-native-engine-control-20261028.md`, `matching-native-engine-poll-20261028.md`, `matching-native-engine-query-20261028.md`, and the query rendezvous note. Older notes describe intermediate state and must be reconciled with the later commits and CI evidence.
+
+## Continuation validation pin
+
+Run 40685362770 concluded failure: native QueryWorkflow responses require `native::api::TaskListPartitionConfig`, while their helper returned `native::matching::TaskListPartitionConfig`. Corrected the helper and nested partition type in pushed commit `4afe149908fa9247889a128353aaee7b5bc75693`. No local build ran.
+
+Fresh five-crate CI: https://github.com/auenkr/cadence-rust/actions/runs/40686904783, verified head `4afe149908fa9247889a128353aaee7b5bc75693`, pending at dispatch; clean target and runner formatting requested. Superseded run 40686824289 at e2f3199db was cancelled explicitly because it lacked this known compile correction. This new run must be observed before claiming a pass. User continuation authorizes three continuous Luna workers at normal speed; this supersedes the checkpoint's earlier worker preference for the continuation.
