@@ -73,7 +73,16 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
         let now: DateTime<Utc> = Utc::now();
         let res = self.session.query_unpaged(META_INSERT, (did, raw(name), size, bs, now)).await.map_err(|e| SemaphoreError::Internal(e.to_string()))?;
         let rows = res.into_rows_result().map_err(|e| SemaphoreError::Internal(e.to_string()))?;
-        let applied = rows.maybe_first_row::<(bool, Option<Uuid>, Option<Vec<u8>>, Option<i32>, Option<i32>, Option<DateTime<Utc>>)>().map_err(|e| SemaphoreError::Internal(e.to_string()))?.map(|r| r.0).unwrap_or(false);
+        // Cassandra's successful INSERT IF NOT EXISTS response contains only
+        // `[applied]`. On a conflict it appends the existing row columns. Do
+        // not decode the success shape as though nullable existing-row columns
+        // were always present: Scylla checks tuple arity against result
+        // metadata before decoding values.
+        let applied = match rows.column_specs().len() {
+            1 => rows.maybe_first_row::<(bool,)>().map_err(|e| SemaphoreError::Internal(e.to_string()))?.map(|r| r.0).unwrap_or(false),
+            6 => rows.maybe_first_row::<(bool, Option<Uuid>, Option<String>, Option<i32>, Option<i32>, Option<DateTime<Utc>>)>().map_err(|e| SemaphoreError::Internal(e.to_string()))?.map(|r| r.0).unwrap_or(false),
+            columns => return Err(SemaphoreError::Internal(format!("unexpected semaphore metadata LWT result shape: {columns} columns"))),
+        };
         if !applied { return Err(SemaphoreError::Exists(format!("semaphore {} already exists", name.go_quoted_string()))); }
         Ok(SemaphoreMetadata { size, bucket_size: bs })
     }
@@ -88,7 +97,7 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
         let mut st = Statement::new(BUCKET_GET); st.set_page_size(page_size);
         let state = next.map(|b| PagingState::new_from_raw_bytes(b.to_vec())).unwrap_or_else(PagingState::start);
         let (res, paging) = self.session.query_single_page(st, (did, raw(name), bucket), state).await.map_err(internal)?;
-        let next_page_token = match paging.into_paging_control_flow() { ControlFlow::Continue(s) => s.as_bytes_slice().map(ToOwned::to_owned), ControlFlow::Break(()) => None };
+        let next_page_token = match paging.into_paging_control_flow() { ControlFlow::Continue(s) => s.as_bytes_slice().map(|bytes| bytes.to_vec()), ControlFlow::Break(()) => None };
         let rows = res.into_rows_result().map_err(internal)?;
         let mut out = Vec::new();
         for row in rows.rows::<(i32,i32,Option<String>,Option<String>,Option<i32>)>().map_err(internal)? {
@@ -106,7 +115,14 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
         let now:DateTime<Utc>=Utc::now();
         let result=self.session.batch(&batch, ((raw(o),now,did,raw(n),b,TOKEN,t,RawText(OWNER_NONE.as_bytes().to_vec()),RawText(FREE.as_bytes().to_vec())),(did,raw(n),b,OWNER,OWNER_TOKEN,raw(o),Option::<String>::None,t,now))).await.map_err(internal)?;
         let rows=result.into_rows_result().map_err(internal)?;
-        let applied=rows.maybe_first_row::<(bool,Option<Uuid>,Option<Vec<u8>>,Option<i32>,Option<i32>,Option<i32>,Option<Vec<u8>>,Option<String>,Option<i32>,Option<DateTime<Utc>>)>().map_err(internal)?.map(|r|r.0).unwrap_or(false);
+        // A successful conditional batch may report only `[applied]`; a
+        // failed batch reports the conditional row. The latter metadata shape
+        // is that of the first (UPDATE ... IF holder ...) statement.
+        let applied=match rows.column_specs().len() {
+            1 => rows.maybe_first_row::<(bool,)>().map_err(internal)?.map(|r|r.0).unwrap_or(false),
+            8 => rows.maybe_first_row::<(bool,Option<Uuid>,Option<String>,Option<i32>,Option<i32>,Option<i32>,Option<String>,Option<String>)>().map_err(internal)?.map(|r|r.0).unwrap_or(false),
+            columns => return Err(AcquireError::Internal(format!("unexpected semaphore grant LWT result shape: {columns} columns"))),
+        };
         if applied { return Ok(GrantOutcome::Applied); }
         match self.owner_token_bytes(did,n,b,o).await { Ok(held) => Ok(GrantOutcome::AlreadyHeld(held)), Err(AcquireError::NotFound(_))=>Ok(GrantOutcome::SlotTaken),Err(e)=>Err(e) }
     }
@@ -114,7 +130,11 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
         let did=domain(d)?; if self.holder_bytes(did,n,b,t).await?.as_bytes()!=o.as_bytes(){return Ok(false)}
         let mut batch=scylla::statement::batch::Batch::new(scylla::statement::batch::BatchType::Logged); batch.append_statement(RELEASE); batch.append_statement(DELETE_OWNER); let now:DateTime<Utc>=Utc::now();
         let result=self.session.batch(&batch,((RawText(FREE.as_bytes().to_vec()),now,did,raw(n),b,TOKEN,t,RawText(OWNER_NONE.as_bytes().to_vec()),raw(o)),(did,raw(n),b,OWNER,OWNER_TOKEN,raw(o)))).await.map_err(internal)?;
-        let rows=result.into_rows_result().map_err(internal)?; let applied=rows.maybe_first_row::<(bool,Option<Uuid>,Option<Vec<u8>>,Option<i32>,Option<i32>,Option<i32>,Option<Vec<u8>>,Option<String>,Option<i32>,Option<DateTime<Utc>>)>().map_err(internal)?.map(|r|r.0).unwrap_or(false); Ok(applied)
+        let rows=result.into_rows_result().map_err(internal)?; let applied=match rows.column_specs().len() {
+            1 => rows.maybe_first_row::<(bool,)>().map_err(internal)?.map(|r|r.0).unwrap_or(false),
+            8 => rows.maybe_first_row::<(bool,Option<Uuid>,Option<String>,Option<i32>,Option<i32>,Option<i32>,Option<String>,Option<String>)>().map_err(internal)?.map(|r|r.0).unwrap_or(false),
+            columns => return Err(AcquireError::Internal(format!("unexpected semaphore release LWT result shape: {columns} columns"))),
+        }; Ok(applied)
     }
 }
 
