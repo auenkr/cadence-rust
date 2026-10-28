@@ -273,3 +273,13 @@ Extended the regression with a distinct U+FFFD filtered rate to prove invalid
 bytes do not alias the replacement string. No local Cargo/Go validation ran.
 Run40757715608 remains live and predates this correction; its result cannot
 validate the fix. Final immutable candidate and all mixed acceptance remain open.
+
+Quota correction pushed at `17523bb3b141e9c5ffea1f23d5ca6c186d19184d`.
+Fresh whole-workspace validation dispatched and exact head verified:
+https://github.com/auenkr/cadence-rust/actions/runs/40758347908 .
+It uses fresh uncached target, sequential Clippy/workspace tests, parity
+formatting and the Go UUID oracle. Status in progress; no outcome claimed.
+Existing candidate-ref run40757715608 remains preserved. PR1 linking again
+returned "The calling provider no longer owns an active thread run."
+Next: retain both terminal runs and formatting artifacts; validate final
+formatting/fixes before freezing the same source for ten serial mixed lanes.

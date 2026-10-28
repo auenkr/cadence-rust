@@ -10,6 +10,13 @@ proved.
 
 ## Source identity
 
+Latest quota-corrected whole-workspace run:
+https://github.com/auenkr/cadence-rust/actions/runs/40758347908 at
+`17523bb3b141e9c5ffea1f23d5ca6c186d19184d`, in progress at dispatch review.
+Fresh target, Clippy then workspace tests, runner parity formatting and
+original-Go UUID oracle enabled. Run40757715608 predates the quota correction
+and remains useful diagnostic evidence only. No final pin or mixed pass.
+
 No final immutable candidate is frozen. Current fresh whole-workspace run
 https://github.com/auenkr/cadence-rust/actions/runs/40757715608 targets
 `a85e585b9a2e396e247459750398dcf09b612cc5` on the saved validation ref
