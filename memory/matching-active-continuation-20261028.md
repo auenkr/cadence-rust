@@ -51,3 +51,39 @@ requested flags or a green job alone are insufficient.
 
 No local Cargo, rustfmt, Go validation or mixed runtime was executed in this
 continuation. Parent work so far is source/evidence review and orchestration.
+
+## Integrated first wave and authoritative CI results (16:45 UTC)
+
+Master `47743a1f0` includes first-wave source and notes: raw asynchronous
+executor admission callback and shutdown serialization; weak native service
+slot and registry attachment; configured assembly seam with fatal/metrics
+providers. Production activation is still outstanding. A second set of three
+Terra tasks owns actual registry/runtime callback installation; launcher,
+host and handler activation/parity; and scaler/poll metric context completion.
+
+All first-wave CI runs have now completed with **failure during Clippy**;
+tests did not execute:
+
+| Run | Exact head | Conclusion |
+| --- | --- | --- |
+| https://github.com/auenkr/cadence-rust/actions/runs/40727183000 | `9e21e168aacf504f4895853820877748708fc2b6` | failure |
+| https://github.com/auenkr/cadence-rust/actions/runs/40727760373 | `0accdfe326bf83cf74d79ee76b3c904a86703ac3` | failure |
+| https://github.com/auenkr/cadence-rust/actions/runs/40727775173 | `a4ea402a71efa42c9a2cbad932b0a08890d3f9c1` | failure |
+| https://github.com/auenkr/cadence-rust/actions/runs/40727844840 | `d3c4d7197df988ebfd58005dab6c2d7fd6561eb0` | failure |
+
+Each failed on the same existing parent-routing future lifetime: the
+`NativeParentRouter` closure accepts a borrowed `GoString` and captures it in
+the returned boxed future without owning it. Runner-formatted location is
+`matching_registry_native.rs:728` on the routing branch and line714 on the
+other heads. The diagnostic says the input reference lifetime must outlive
+the boxed future lifetime. Logs are `/tmp/matching-<run>-failure.log` on this
+host. The active registry owner received the diagnostic and owns the fix;
+no passing result is inferred before replacement CI.
+
+The first wave initially wrote its disjoint files to the shared checkout
+because the parent brief included its absolute path. Workers were redirected
+to their provisioned T3 worktrees. The shared-root versions were preserved
+reversibly in git stash named `preserve shared-root worker edits before
+isolated branch integration 20261028`; their completed isolated commits were
+then integrated. Parent master is clean. Do not blindly apply that stash over
+the integrated versions or discard it without checking for unique work.
