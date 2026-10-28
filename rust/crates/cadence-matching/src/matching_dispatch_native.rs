@@ -488,8 +488,11 @@ impl NativeForwardState {
                     "matching-add-activity-task"
                 };
                 crate::matching_fault_injection::inject_client_call(operation, async {
-                    dispatcher.accept_forwarded_backlog(task, source_domain, &parent_name, task_type).await
-                }).await
+                    dispatcher
+                        .accept_forwarded_backlog(task, source_domain, &parent_name, task_type)
+                        .await
+                })
+                .await
             }
         };
         result.map_err(ForwardError::classify)
@@ -1723,7 +1726,11 @@ mod tests {
         }
     }
 
-    fn forward_state(api: Arc<ScriptedApi>, source: &[u8], parent: &'static [u8]) -> NativeForwardState {
+    fn forward_state(
+        api: Arc<ScriptedApi>,
+        source: &[u8],
+        parent: &'static [u8],
+    ) -> NativeForwardState {
         NativeForwardState::new(
             move || {
                 let api = api.clone();
@@ -1769,8 +1776,16 @@ mod tests {
             let d = api.decisions.lock().unwrap();
             let a = api.activities.lock().unwrap();
             for (exec, list, from) in [
-                (&d[0].workflow_execution, &d[0].task_list, &d[0].forwarded_from),
-                (&a[0].workflow_execution, &a[0].task_list, &a[0].forwarded_from),
+                (
+                    &d[0].workflow_execution,
+                    &d[0].task_list,
+                    &d[0].forwarded_from,
+                ),
+                (
+                    &a[0].workflow_execution,
+                    &a[0].task_list,
+                    &a[0].forwarded_from,
+                ),
             ] {
                 let exec = exec.as_ref().unwrap();
                 assert_eq!(exec.run_id.as_bytes(), run, "RunID must not be quoted");
@@ -1817,22 +1832,23 @@ mod tests {
         };
         let group = gs(b"g\xff");
         let source_domain = gs(b"src");
-        let offered = matcher
-            .offer(
-                raw_task(b"\xff\xfe"),
-                &group,
-                &source_domain,
-                false,
-                Duration::from_millis(500),
-                tokio::time::Instant::now() + Duration::from_secs(2),
-            );
+        let offered = matcher.offer(
+            raw_task(b"\xff\xfe"),
+            &group,
+            &source_domain,
+            false,
+            Duration::from_millis(500),
+            tokio::time::Instant::now() + Duration::from_secs(2),
+        );
         let (accepted, ()) = tokio::time::timeout(Duration::from_secs(3), async {
             tokio::join!(offered, async {
                 let task = poller.await.unwrap().expect("poller gets task");
                 assert_eq!(task.task.data.run_id_bytes(), b"\xff\xfe");
                 task.finish(Ok(()));
             })
-        }).await.expect("sync matcher handoff timed out");
+        })
+        .await
+        .expect("sync matcher handoff timed out");
         assert!(accepted);
         // A task bound to another group is not handed to a g\xff poller.
         let refused = matcher

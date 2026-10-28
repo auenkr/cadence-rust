@@ -25,7 +25,11 @@ struct Failing;
 
 fn failure(identity: &[u8]) -> Status {
     match identity {
-        b"invalid" => raw_status(Code::NotFound, &GoString::from(&b"a\xffb\xe2\x82 %\n"[..]), Bytes::new()),
+        b"invalid" => raw_status(
+            Code::NotFound,
+            &GoString::from(&b"a\xffb\xe2\x82 %\n"[..]),
+            Bytes::new(),
+        ),
         b"typed" => raw_detailed_status(
             Code::NotFound,
             &GoString::from("valid \u{e9}%"),
@@ -86,7 +90,8 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -143,7 +148,10 @@ async fn served_raw_status_normalizes_message_details_and_marker() {
         });
 
         for identity in [&b"invalid"[..], b"typed", b"invalid-outer"] {
-            let status = client.poll_for_decision_task(poll(identity)).await.unwrap_err();
+            let status = client
+                .poll_for_decision_task(poll(identity))
+                .await
+                .unwrap_err();
             assert_eq!(status.code(), Code::NotFound);
         }
         let headers = seen.lock().unwrap().clone();

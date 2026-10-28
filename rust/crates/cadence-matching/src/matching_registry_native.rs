@@ -120,12 +120,15 @@ const QPS_TRACKER_EXP: f64 = 0.5;
 
 /// Typed ring-membership seam (Go ringpop `Lookup`/`WhoAmI`). The legacy
 /// `Membership` hashes `&str`; a raw-byte ring must hash the `GoString` bytes.
+pub type NativeOwnershipLookup<T> = Arc<dyn Fn(&GoString) -> Result<T, Status> + Send + Sync>;
+pub type NativeOwnershipError = Arc<dyn Fn(&GoString, &str) -> Status + Send + Sync>;
+pub type NativeDomainName = Arc<dyn Fn(&GoString) -> Option<String> + Send + Sync>;
 #[derive(Clone)]
 pub struct NativeMembership {
-    pub check_task_list: Arc<dyn Fn(&GoString) -> Result<(), Status> + Send + Sync>,
-    pub owns: Arc<dyn Fn(&GoString) -> Result<bool, Status> + Send + Sync>,
+    pub check_task_list: NativeOwnershipLookup<()>,
+    pub owns: NativeOwnershipLookup<bool>,
     /// Go `TaskListNotOwnedByHostError` for a shard-distributor miss; `&str` is the reason.
-    pub task_list_not_owned_by: Arc<dyn Fn(&GoString, &str) -> Status + Send + Sync>,
+    pub task_list_not_owned_by: NativeOwnershipError,
 }
 
 /// Synchronous snapshot policy used while the registry lock is held.
@@ -141,7 +144,7 @@ pub struct NativeDomainHooks {
     /// Go `IsActiveIn(cluster)` by raw domain id; unknown domains must answer true.
     pub is_active: Arc<dyn Fn(&GoString) -> bool + Send + Sync>,
     /// Metric tag only.
-    pub domain_name: Arc<dyn Fn(&GoString) -> Option<String> + Send + Sync>,
+    pub domain_name: NativeDomainName,
     pub standby_domains: DomainResolverNative,
 }
 

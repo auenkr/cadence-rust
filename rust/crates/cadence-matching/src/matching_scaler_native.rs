@@ -1,13 +1,26 @@
 //! Byte-preserving adaptive scaler for native Matching managers.
-use std::{collections::HashMap, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use crate::{
+    matching_dispatch_native::NativeFuture,
+    matching_partition_native::NativeStoredPartitionConfig,
+    matching_registry_native::{NativeQueueRegistry, NativeScalerHost, NativeScalerStarter},
+    matching_scaler::{number_of_partitions, write_partition_count, ScalerConfig, Sustain},
+};
 use cadence_common::{go_string::GoString, task_list::TaskListNameBytes};
 use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tonic::Status;
-use crate::{matching_dispatch_native::NativeFuture, matching_partition_native::NativeStoredPartitionConfig, matching_registry_native::{NativeQueueRegistry, NativeScalerHost, NativeScalerStarter}, matching_scaler::{number_of_partitions, write_partition_count, ScalerConfig, Sustain}};
 
 pub type PartitionMap = HashMap<i32, Vec<GoString>>;
 #[derive(Clone, Default)]
-pub struct PartitionMetrics { pub qps: f64, pub read_only: bool, pub empty: bool }
+pub struct PartitionMetrics {
+    pub qps: f64,
+    pub read_only: bool,
+    pub empty: bool,
+}
 #[derive(Default)]
 pub struct AggregateMetrics {
     pub total_qps: f64,
@@ -83,7 +96,9 @@ impl IsolationBalancer {
         if assignable == 0 {
             return 0;
         }
-        ((write_count * self.min_groups_per_partition(config, assignable)) as f64 / assignable as f64).ceil() as i64
+        ((write_count * self.min_groups_per_partition(config, assignable)) as f64
+            / assignable as f64)
+            .ceil() as i64
     }
     /// Go `adjustWritePartitions` on the balancer. Record sustain inputs even
     /// with a single partition so a later upscale reacts immediately.
@@ -116,11 +131,19 @@ impl IsolationBalancer {
     ) -> HashMap<GoString, i64> {
         let mut assignable = 0;
         for (group, state) in self.groups.iter_mut() {
-            let has = metrics.has_pollers_by_group.get(group).copied().unwrap_or(false);
+            let has = metrics
+                .has_pollers_by_group
+                .get(group)
+                .copied()
+                .unwrap_or(false);
             let sustained_pollers =
-                state.has_pollers.check_and_reset(now, has, config.group_has_pollers_sustain_nanos);
+                state
+                    .has_pollers
+                    .check_and_reset(now, has, config.group_has_pollers_sustain_nanos);
             let sustained_no =
-                state.no_pollers.check_and_reset(now, !has, config.group_no_pollers_sustain_nanos);
+                state
+                    .no_pollers
+                    .check_and_reset(now, !has, config.group_no_pollers_sustain_nanos);
             if state.assignable {
                 if sustained_no {
                     state.assignable = false;
@@ -148,8 +171,16 @@ impl IsolationBalancer {
             let upscale_threshold = current.max(1) as f64 * upscale_rps;
             let downscale_threshold =
                 (current - 1).max(0) as f64 * upscale_rps * config.downscale_factor;
-            let sustained_over = state.over_load.check(now, group_qps > upscale_threshold, config.group_upscale_sustain_nanos);
-            let sustained_under = state.under_load.check(now, group_qps < downscale_threshold, config.group_downscale_sustain_nanos);
+            let sustained_over = state.over_load.check(
+                now,
+                group_qps > upscale_threshold,
+                config.group_upscale_sustain_nanos,
+            );
+            let sustained_under = state.under_load.check(
+                now,
+                group_qps < downscale_threshold,
+                config.group_downscale_sustain_nanos,
+            );
             let ideal = number_of_partitions(group_qps, upscale_rps, 1);
             let target = ideal.max(min_partitions).min(write_count);
             if (sustained_over || sustained_under || current == 0) && target != current {
@@ -178,12 +209,14 @@ impl IsolationBalancer {
             if state.assignable {
                 assignable += 1;
             }
-            let change = goal.get(group).copied().unwrap_or(0) - counts.get(group).copied().unwrap_or(0);
+            let change =
+                goal.get(group).copied().unwrap_or(0) - counts.get(group).copied().unwrap_or(0);
             let goal_partitions = goal.get(group).copied().unwrap_or(0);
             if goal_partitions > 0 {
                 sizes.insert(
                     group.clone(),
-                    metrics.qps_by_group.get(group).copied().unwrap_or(0.0) / goal_partitions as f64,
+                    metrics.qps_by_group.get(group).copied().unwrap_or(0.0)
+                        / goal_partitions as f64,
                 );
             }
             for _ in 0..change {
@@ -217,8 +250,13 @@ impl IsolationBalancer {
     }
 }
 
-fn partition_size(sizes: &HashMap<GoString, f64>, set: &std::collections::HashSet<GoString>) -> f64 {
-    set.iter().map(|group| sizes.get(group).copied().unwrap_or(0.0)).sum()
+fn partition_size(
+    sizes: &HashMap<GoString, f64>,
+    set: &std::collections::HashSet<GoString>,
+) -> f64 {
+    set.iter()
+        .map(|group| sizes.get(group).copied().unwrap_or(0.0))
+        .sum()
 }
 fn find_max_with(
     group: &GoString,
@@ -274,7 +312,9 @@ fn remove_groups(
     });
     for group in to_remove.drain(..) {
         if let Some(id) = find_max_with(&group, sizes, by_partition) {
-            if let Some(set) = by_partition.get_mut(&id) { set.remove(&group); }
+            if let Some(set) = by_partition.get_mut(&id) {
+                set.remove(&group);
+            }
         }
     }
 }
@@ -293,7 +333,9 @@ fn add_groups(
     });
     for group in to_add.drain(..) {
         if let Some(id) = find_min_without(&group, sizes, by_partition) {
-            if let Some(set) = by_partition.get_mut(&id) { set.insert(group); }
+            if let Some(set) = by_partition.get_mut(&id) {
+                set.insert(group);
+            }
         }
     }
 }
@@ -366,16 +408,23 @@ fn move_groups(
             }
         }
         let Some((_, group)) = best else { return };
-        if let Some(set) = by_partition.get_mut(&from) { set.remove(&group); }
-        if let Some(set) = by_partition.get_mut(&to) { set.insert(group); }
+        if let Some(set) = by_partition.get_mut(&from) {
+            set.remove(&group);
+        }
+        if let Some(set) = by_partition.get_mut(&to) {
+            set.insert(group);
+        }
     }
 }
 
-
 /// Live settings and isolation group names; group bytes are never decoded.
 #[derive(Clone)]
-pub struct NativeScalerConfig { pub settings: ScalerConfig, pub isolation_groups: Vec<GoString> }
-pub type ConfigProvider = Arc<dyn Fn(&GoString, &GoString, i32) -> NativeScalerConfig + Send + Sync>;
+pub struct NativeScalerConfig {
+    pub settings: ScalerConfig,
+    pub isolation_groups: Vec<GoString>,
+}
+pub type ConfigProvider =
+    Arc<dyn Fn(&GoString, &GoString, i32) -> NativeScalerConfig + Send + Sync>;
 /// Remote describe must route to the partition owner and return its raw group metrics.
 #[derive(Default)]
 pub struct DescribedPartition {
@@ -384,24 +433,48 @@ pub struct DescribedPartition {
     pub has_write: bool,
     pub groups: HashMap<GoString, (f64, bool)>,
 }
-pub type DescribePartition = Arc<dyn Fn(TaskListKeyBytes, i32, NativeScalerConfig) -> NativeFuture<Result<DescribedPartition, Status>> + Send + Sync>;
+pub type DescribePartition = Arc<
+    dyn Fn(
+            TaskListKeyBytes,
+            i32,
+            NativeScalerConfig,
+        ) -> NativeFuture<Result<DescribedPartition, Status>>
+        + Send
+        + Sync,
+>;
 
 /// The callback is used for non-root partitions whenever membership is enabled.
-pub fn starter(provider: ConfigProvider, describe_remote: DescribePartition) -> NativeScalerStarter {
+pub fn starter(
+    provider: ConfigProvider,
+    describe_remote: DescribePartition,
+) -> NativeScalerStarter {
     starter_with_metrics(provider, describe_remote, Arc::new(|_| {}))
 }
 
 /// Observations for wiring the scaler to the native metrics implementation.
 #[derive(Clone, Debug)]
 pub enum ScalerObservation {
-    Calculation { qps: f64, upscale_threshold: f64, downscale_threshold: f64, read_count: usize, write_count: usize, read_changed: bool, write_changed: bool, isolation_changed: bool },
+    Calculation {
+        qps: f64,
+        upscale_threshold: f64,
+        downscale_threshold: f64,
+        read_count: usize,
+        write_count: usize,
+        read_changed: bool,
+        write_changed: bool,
+        isolation_changed: bool,
+    },
     PartitionDrained,
     UpdateRequested,
     UpdateFailed,
 }
 pub type ScalerMetrics = Arc<dyn Fn(ScalerObservation) + Send + Sync>;
 
-pub fn starter_with_metrics(provider: ConfigProvider, describe_remote: DescribePartition, metrics: ScalerMetrics) -> NativeScalerStarter {
+pub fn starter_with_metrics(
+    provider: ConfigProvider,
+    describe_remote: DescribePartition,
+    metrics: ScalerMetrics,
+) -> NativeScalerStarter {
     Arc::new(move |host| {
         let provider = provider.clone();
         let describe_remote = describe_remote.clone();
@@ -410,24 +483,77 @@ pub fn starter_with_metrics(provider: ConfigProvider, describe_remote: DescribeP
     })
 }
 fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().min(i64::MAX as u128) as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .min(i64::MAX as u128) as i64
 }
 fn has_write_partition(config: Option<&NativeStoredPartitionConfig>, id: i32) -> bool {
     config.is_none_or(|config| config.write_partitions.contains_key(&id))
 }
-async fn describe(registry: &NativeQueueRegistry, root: &TaskListKeyBytes, id: i32, config: &NativeScalerConfig, time: i64, remote: &DescribePartition) -> Result<DescribedPartition, Status> {
+async fn describe(
+    registry: &NativeQueueRegistry,
+    root: &TaskListKeyBytes,
+    id: i32,
+    config: &NativeScalerConfig,
+    time: i64,
+    remote: &DescribePartition,
+) -> Result<DescribedPartition, Status> {
     if id != 0 && registry.has_membership() {
         return remote(root.clone(), id, config.clone()).await;
     }
-    let name = TaskListNameBytes::parse(root.name.as_bytes()).map_err(|error| crate::matching_native_status::raw_status(tonic::Code::InvalidArgument, &error, tonic::codegen::Bytes::new()))?;
-    let key = TaskListKeyBytes { name: name.partition_name(id as i64), ..root.clone() };
+    let name = TaskListNameBytes::parse(root.name.as_bytes()).map_err(|error| {
+        crate::matching_native_status::raw_status(
+            tonic::Code::InvalidArgument,
+            &error,
+            tonic::codegen::Bytes::new(),
+        )
+    })?;
+    let key = TaskListKeyBytes {
+        name: name.partition_name(id as i64),
+        ..root.clone()
+    };
     let handle = registry.get(key, 0, time).await?;
     let (_, _, backlog, _, _, empty) = handle.queue.status();
-    let counts = handle.pollers.lock().expect("poller history lock").count_by_group(time, time.saturating_sub(config.settings.poller_window_nanos));
-    let groups = config.isolation_groups.iter().map(|group| (group.clone(), (handle.qps.group_qps(group.as_bytes()), counts.get(group).copied().unwrap_or(0) > 0))).collect();
-    Ok(DescribedPartition { qps: handle.qps.qps(), empty: if config.settings.empty_check { empty } else { backlog == 0 }, has_write: has_write_partition(handle.partitions.get().as_ref(), id), groups })
+    let counts = handle
+        .pollers
+        .lock()
+        .expect("poller history lock")
+        .count_by_group(
+            time,
+            time.saturating_sub(config.settings.poller_window_nanos),
+        );
+    let groups = config
+        .isolation_groups
+        .iter()
+        .map(|group| {
+            (
+                group.clone(),
+                (
+                    handle.qps.group_qps(group.as_bytes()),
+                    counts.get(group).copied().unwrap_or(0) > 0,
+                ),
+            )
+        })
+        .collect();
+    Ok(DescribedPartition {
+        qps: handle.qps.qps(),
+        empty: if config.settings.empty_check {
+            empty
+        } else {
+            backlog == 0
+        },
+        has_write: has_write_partition(handle.partitions.get().as_ref(), id),
+        groups,
+    })
 }
-async fn run(host: NativeScalerHost, provider: ConfigProvider, remote: DescribePartition, observe: ScalerMetrics) {
+async fn run(
+    host: NativeScalerHost,
+    provider: ConfigProvider,
+    remote: DescribePartition,
+    observe: ScalerMetrics,
+) {
     let root = host.root.clone();
     let domain = GoString::from(root.domain_id.to_string());
     let mut over = Sustain::default();
@@ -435,18 +561,36 @@ async fn run(host: NativeScalerHost, provider: ConfigProvider, remote: DescribeP
     let mut balancer = IsolationBalancer::default();
     loop {
         let config = provider(&domain, &root.name, root.task_type);
-        tokio::time::sleep(Duration::from_nanos(config.settings.update_interval_nanos.max(0) as u64)).await;
+        tokio::time::sleep(Duration::from_nanos(
+            config.settings.update_interval_nanos.max(0) as u64,
+        ))
+        .await;
         let config = provider(&domain, &root.name, root.task_type);
-        let Some(registry) = host.registry() else { return };
+        let Some(registry) = host.registry() else {
+            return;
+        };
         // Do not recreate an owner removed while this loop was asleep.
-        if !registry.contains_cached(&root) { return; }
+        if !registry.contains_cached(&root) {
+            return;
+        }
         let time = now();
-        let Ok(handle) = registry.get(root.clone(), 0, time).await else { return };
-        if handle.queue.is_stopped() { return; }
-        if !config.settings.enabled || !config.settings.cache_enabled { continue; }
-        let current = handle.partitions.get().unwrap_or_else(|| NativeStoredPartitionConfig {
-            version: 0, read_partitions: HashMap::from([(0, Vec::new())]), write_partitions: HashMap::from([(0, Vec::new())]),
-        });
+        let Ok(handle) = registry.get(root.clone(), 0, time).await else {
+            return;
+        };
+        if handle.queue.is_stopped() {
+            return;
+        }
+        if !config.settings.enabled || !config.settings.cache_enabled {
+            continue;
+        }
+        let current = handle
+            .partitions
+            .get()
+            .unwrap_or_else(|| NativeStoredPartitionConfig {
+                version: 0,
+                read_partitions: HashMap::from([(0, Vec::new())]),
+                write_partitions: HashMap::from([(0, Vec::new())]),
+            });
         let mut metrics = AggregateMetrics::default();
         if config.settings.isolation_assignment {
             metrics.isolation_enabled = true;
@@ -454,41 +598,137 @@ async fn run(host: NativeScalerHost, provider: ConfigProvider, remote: DescribeP
             ids.sort();
             let mut failed = false;
             for id in ids {
-                let result = crate::matching_panic::capture("describe_partition", describe(&registry, &root, id, &config, time, &remote)).await;
-                let partition = match result { Ok(Ok(partition)) => partition, _ => { failed = true; break; } };
+                let result = crate::matching_panic::capture(
+                    "describe_partition",
+                    describe(&registry, &root, id, &config, time, &remote),
+                )
+                .await;
+                let partition = match result {
+                    Ok(Ok(partition)) => partition,
+                    _ => {
+                        failed = true;
+                        break;
+                    }
+                };
                 metrics.total_qps += partition.qps;
-                metrics.by_partition.insert(id, PartitionMetrics { qps: partition.qps, read_only: !partition.has_write, empty: partition.empty });
+                metrics.by_partition.insert(
+                    id,
+                    PartitionMetrics {
+                        qps: partition.qps,
+                        read_only: !partition.has_write,
+                        empty: partition.empty,
+                    },
+                );
                 for (group, (qps, pollers)) in partition.groups {
                     *metrics.qps_by_group.entry(group.clone()).or_insert(0.0) += qps;
                     *metrics.has_pollers_by_group.entry(group).or_insert(false) |= pollers;
                 }
             }
-            if failed { over.reset(); under.reset(); balancer.reset(); continue; }
+            if failed {
+                over.reset();
+                under.reset();
+                balancer.reset();
+                continue;
+            }
         } else {
             metrics.total_qps = handle.qps.qps() * current.write_partitions.len() as f64;
         }
-        let target = write_partition_count(metrics.total_qps, current.write_partitions.len() as i64, &config.settings, &mut over, &mut under, time).max(0) as usize;
+        let target = write_partition_count(
+            metrics.total_qps,
+            current.write_partitions.len() as i64,
+            &config.settings,
+            &mut over,
+            &mut under,
+            time,
+        )
+        .max(0) as usize;
         let write_changed = target != current.write_partitions.len();
-        let mut write = if write_changed { (0..target as i32).map(|id| (id, current.write_partitions.get(&id).cloned().unwrap_or_default())).collect() } else { current.write_partitions.clone() };
+        let mut write = if write_changed {
+            (0..target as i32)
+                .map(|id| {
+                    (
+                        id,
+                        current
+                            .write_partitions
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        } else {
+            current.write_partitions.clone()
+        };
         let isolation_changed = if metrics.isolation_enabled {
-            let (next, changed) = balancer.adjust_write_partitions(&config.settings, time, &metrics, &write);
-            write = next; changed
-        } else { balancer.reset(); false };
+            let (next, changed) =
+                balancer.adjust_write_partitions(&config.settings, time, &metrics, &write);
+            write = next;
+            changed
+        } else {
+            balancer.reset();
+            false
+        };
         let mut read = current.read_partitions.clone();
         let mut read_changed = false;
-        for (id, groups) in &write { if !read.contains_key(id) { read_changed = true; } read.insert(*id, groups.clone()); }
+        for (id, groups) in &write {
+            if !read.contains_key(id) {
+                read_changed = true;
+            }
+            read.insert(*id, groups.clone());
+        }
         let mut id = read.len() as i32 - 1;
         while id >= write.len() as i32 {
-            let entry = if let Some(entry) = metrics.by_partition.get(&id) { Some(entry.clone()) } else {
-                describe(&registry, &root, id, &config, time, &remote).await.ok().map(|p| PartitionMetrics { qps: p.qps, read_only: !p.has_write, empty: p.empty })
+            let entry = if let Some(entry) = metrics.by_partition.get(&id) {
+                Some(entry.clone())
+            } else {
+                describe(&registry, &root, id, &config, time, &remote)
+                    .await
+                    .ok()
+                    .map(|p| PartitionMetrics {
+                        qps: p.qps,
+                        read_only: !p.has_write,
+                        empty: p.empty,
+                    })
             };
-            if entry.is_some_and(|p| p.read_only && p.empty) { read.remove(&id); read_changed = true; observe(ScalerObservation::PartitionDrained); } else { break; }
+            if entry.is_some_and(|p| p.read_only && p.empty) {
+                read.remove(&id);
+                read_changed = true;
+                observe(ScalerObservation::PartitionDrained);
+            } else {
+                break;
+            }
             id -= 1;
         }
-        observe(ScalerObservation::Calculation { qps: metrics.total_qps, upscale_threshold: current.write_partitions.len() as f64 * config.settings.upscale_rps, downscale_threshold: (current.write_partitions.len() as f64 - 1.0) * config.settings.upscale_rps * config.settings.downscale_factor, read_count: read.len(), write_count: write.len(), read_changed, write_changed, isolation_changed });
+        observe(ScalerObservation::Calculation {
+            qps: metrics.total_qps,
+            upscale_threshold: current.write_partitions.len() as f64 * config.settings.upscale_rps,
+            downscale_threshold: (current.write_partitions.len() as f64 - 1.0)
+                * config.settings.upscale_rps
+                * config.settings.downscale_factor,
+            read_count: read.len(),
+            write_count: write.len(),
+            read_changed,
+            write_changed,
+            isolation_changed,
+        });
         if write_changed || isolation_changed || read_changed {
             observe(ScalerObservation::UpdateRequested);
-            if let Err(error) = registry.update_partition_config_as_scaler(root.clone(), handle, NativeStoredPartitionConfig { version: 0, read_partitions: read, write_partitions: write }, time).await { observe(ScalerObservation::UpdateFailed); eprintln!("Matching adaptive scaler failed: {error}"); }
+            if let Err(error) = registry
+                .update_partition_config_as_scaler(
+                    root.clone(),
+                    handle,
+                    NativeStoredPartitionConfig {
+                        version: 0,
+                        read_partitions: read,
+                        write_partitions: write,
+                    },
+                    time,
+                )
+                .await
+            {
+                observe(ScalerObservation::UpdateFailed);
+                eprintln!("Matching adaptive scaler failed: {error}");
+            }
         }
     }
 }
@@ -520,25 +760,50 @@ mod tests {
         assert!(ensure_minimum_groups(1, &HashMap::new(), &mut partitions));
         assert_eq!(partitions[&0].len(), 1);
         assert_eq!(partitions[&1].len(), 1);
-        assert_eq!(partitions.values().flatten().cloned().collect::<std::collections::HashSet<_>>(), std::collections::HashSet::from([a, b]));
+        assert_eq!(
+            partitions
+                .values()
+                .flatten()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>(),
+            std::collections::HashSet::from([a, b])
+        );
     }
     #[test]
     fn sustained_load_scales_write_partitions() {
-        let config = ScalerConfig { upscale_sustain_nanos: 10, ..ScalerConfig::default() };
+        let config = ScalerConfig {
+            upscale_sustain_nanos: 10,
+            ..ScalerConfig::default()
+        };
         let (mut over, mut under) = (Sustain::default(), Sustain::default());
-        assert_eq!(write_partition_count(500.0, 1, &config, &mut over, &mut under, 0), 1);
-        assert_eq!(write_partition_count(500.0, 1, &config, &mut over, &mut under, 10), 3);
+        assert_eq!(
+            write_partition_count(500.0, 1, &config, &mut over, &mut under, 0),
+            1
+        );
+        assert_eq!(
+            write_partition_count(500.0, 1, &config, &mut over, &mut under, 10),
+            3
+        );
     }
     #[test]
     fn balancer_keeps_invalid_byte_groups_distinct() {
-        let config = ScalerConfig { group_has_pollers_sustain_nanos: 0, groups_per_partition: 1, ..ScalerConfig::default() };
+        let config = ScalerConfig {
+            group_has_pollers_sustain_nanos: 0,
+            groups_per_partition: 1,
+            ..ScalerConfig::default()
+        };
         let a = GoString::from(&b"\xff"[..]);
         let b = GoString::from(&b"\xfe"[..]);
         let mut metrics = AggregateMetrics::default();
         metrics.has_pollers_by_group.insert(a.clone(), true);
         metrics.has_pollers_by_group.insert(b.clone(), true);
         let mut balancer = IsolationBalancer::default();
-        let (write, changed) = balancer.adjust_write_partitions(&config, 0, &metrics, &HashMap::from([(0, vec![]), (1, vec![])]));
+        let (write, changed) = balancer.adjust_write_partitions(
+            &config,
+            0,
+            &metrics,
+            &HashMap::from([(0, vec![]), (1, vec![])]),
+        );
         assert!(changed);
         let groups: std::collections::HashSet<_> = write.values().flatten().cloned().collect();
         assert_eq!(groups, std::collections::HashSet::from([a, b]));

@@ -1244,10 +1244,11 @@ pub async fn run(
                     stores.task_store,
                     persistence_error_rate,
                 );
-                stores.native_task_store = crate::matching_fault_injection::inject_task_store_bytes_errors(
-                    stores.native_task_store,
-                    persistence_error_rate,
-                );
+                stores.native_task_store =
+                    crate::matching_fault_injection::inject_task_store_bytes_errors(
+                        stores.native_task_store,
+                        persistence_error_rate,
+                    );
                 if let Some(limiter) = matching_persistence_limiter.as_ref() {
                     stores.task_store = crate::matching_persistence::limit_task_store(
                         stores.task_store,

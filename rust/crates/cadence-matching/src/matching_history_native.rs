@@ -848,7 +848,9 @@ mod tests {
         mutable,
         n::history::GetMutableStateResponse {
             next_event_id: 42,
-            workflow_type: Some(n::api::WorkflowType { name: raw(b"mutable-\xff") }),
+            workflow_type: Some(n::api::WorkflowType {
+                name: raw(b"mutable-\xff")
+            }),
             ..Default::default()
         }
     );
@@ -859,7 +861,9 @@ mod tests {
         describe,
         n::history::DescribeWorkflowExecutionResponse {
             workflow_execution_info: Some(n::api::WorkflowExecutionInfo {
-                r#type: Some(n::api::WorkflowType { name: raw(b"describe-\xfe") }),
+                r#type: Some(n::api::WorkflowType {
+                    name: raw(b"describe-\xfe")
+                }),
                 ..Default::default()
             }),
             ..Default::default()
@@ -894,8 +898,10 @@ mod tests {
             Box::pin(async move {
                 macro_rules! serve {
                     ($svc:ident, $req:ty, $resp:ty) => {{
-                        let mut grpc =
-                            tonic::server::Grpc::new(tonic::codec::ProstCodec::<$resp, $req>::default());
+                        let mut grpc = tonic::server::Grpc::new(tonic::codec::ProstCodec::<
+                            $resp,
+                            $req,
+                        >::default());
                         Ok(grpc.unary($svc(captured), request).await)
                     }};
                 }
@@ -991,36 +997,54 @@ mod tests {
             let task = task();
             let execution = execution(&task).unwrap();
 
-            let mutable = client.mutable_state_native(&domain, &execution).await.unwrap();
+            let mutable = client
+                .mutable_state_native(&domain, &execution)
+                .await
+                .unwrap();
             assert_eq!(mutable.next_event_id, 42);
-            assert_eq!(mutable.workflow_type.unwrap().name.as_bytes(), b"mutable-\xff");
+            assert_eq!(
+                mutable.workflow_type.unwrap().name.as_bytes(),
+                b"mutable-\xff"
+            );
             let described = client
                 .describe_execution_native(&domain, &name, &task)
                 .await
                 .unwrap();
-            assert_eq!(described.workflow_execution_info.unwrap().r#type.unwrap().name.as_bytes(), b"describe-\xfe");
-            client.refresh_workflow_tasks_native(&domain, &task).await.unwrap();
+            assert_eq!(
+                described
+                    .workflow_execution_info
+                    .unwrap()
+                    .r#type
+                    .unwrap()
+                    .name
+                    .as_bytes(),
+                b"describe-\xfe"
+            );
+            client
+                .refresh_workflow_tasks_native(&domain, &task)
+                .await
+                .unwrap();
 
             {
-            let seen = captured.lock().unwrap();
-            assert_eq!(seen.mutable.len(), 1);
-            assert_eq!(seen.describe.len(), 1);
-            assert_eq!(seen.refresh.len(), 1, "refresh must be one attempt");
-            assert_eq!(seen.mutable[0].domain_id, domain);
-            let e = seen.mutable[0].workflow_execution.as_ref().unwrap();
-            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
-            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
-            assert_eq!(seen.describe[0].domain_id, domain);
-            let d = seen.describe[0].request.as_ref().unwrap();
-            assert_eq!(d.domain, name);
-            let e = d.workflow_execution.as_ref().unwrap();
-            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
-            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
-            assert_eq!(seen.refresh[0].domain_id, domain);
-            assert!(seen.refresh[0].domain.as_bytes().is_empty());
-            let e = seen.refresh[0].workflow_execution.as_ref().unwrap();
-            assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
-            assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+                let seen = captured.lock().unwrap();
+                assert_eq!(seen.mutable.len(), 1);
+                assert_eq!(seen.describe.len(), 1);
+                assert_eq!(seen.refresh.len(), 1, "refresh must be one attempt");
+                assert_eq!(seen.mutable[0].domain_id, domain);
+                let e = seen.mutable[0].workflow_execution.as_ref().unwrap();
+                assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+                assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+                assert_eq!(seen.describe[0].domain_id, domain);
+                let d = seen.describe[0].request.as_ref().unwrap();
+                assert_eq!(d.domain, name);
+                let e = d.workflow_execution.as_ref().unwrap();
+                assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+                assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
+                assert_eq!(seen.refresh[0].domain_id, domain);
+                assert!(seen.refresh[0].domain.as_bytes().is_empty());
+                let e = seen.refresh[0].workflow_execution.as_ref().unwrap();
+                assert_eq!(e.workflow_id.as_bytes(), b"wf-\xff\xfe");
+                assert_eq!(e.run_id.as_bytes(), b"run-\xfe\xff");
             }
 
             // Empty RefreshWorkflowTasksResponse is a zero-length wire message.

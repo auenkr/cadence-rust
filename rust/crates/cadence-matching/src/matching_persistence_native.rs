@@ -2,8 +2,10 @@
 use super::{MatchingPersistenceLimiter, REJECTED};
 use cadence_persistence::{
     matching_blob::TaskListDataBytes,
-    matching_native_task_store::{AllocatedTaskBytes, MatchingTaskStoreBytes,
-        MatchingTaskStoreBytesError, Result as NativeResult, TaskListKeyBytes, TaskListRecordBytes},
+    matching_native_task_store::{
+        AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError,
+        Result as NativeResult, TaskListKeyBytes, TaskListRecordBytes,
+    },
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -16,13 +18,18 @@ pub fn limit_task_store_bytes(
 }
 
 fn get_tasks_byte_size_bytes(tasks: &[AllocatedTaskBytes]) -> u64 {
-    24 + tasks.iter().map(|task| {
-        let partition = task.data.partition_config.as_ref().map_or(0, |map| {
-            map.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum()
-        });
-        128 + 36 + task.data.workflow_id.len() as u64
-            + task.data.run_id_bytes().len() as u64 + partition
-    }).sum::<u64>()
+    24 + tasks
+        .iter()
+        .map(|task| {
+            let partition = task.data.partition_config.as_ref().map_or(0, |map| {
+                map.iter().map(|(k, v)| (k.len() + v.len()) as u64).sum()
+            });
+            128 + 36
+                + task.data.workflow_id.len() as u64
+                + task.data.run_id_bytes().len() as u64
+                + partition
+        })
+        .sum::<u64>()
 }
 
 struct RateLimitedTaskStoreBytes {
@@ -45,7 +52,10 @@ impl RateLimitedTaskStoreBytes {
 }
 
 impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
-    fn fetch_latest_config(&self, row_type: i32) -> Result<Option<cadence_persistence::config_store::ConfigStoreRow>, String> {
+    fn fetch_latest_config(
+        &self,
+        row_type: i32,
+    ) -> Result<Option<cadence_persistence::config_store::ConfigStoreRow>, String> {
         self.store.fetch_latest_config(row_type)
     }
 
@@ -125,8 +135,12 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
         let result = self
             .store
             .get_tasks(key, read_level, max_read_level, batch_size);
-        self.limiter
-            .record_native_task_call("GetTasks", Some(key.domain_id), started.elapsed(), &result);
+        self.limiter.record_native_task_call(
+            "GetTasks",
+            Some(key.domain_id),
+            started.elapsed(),
+            &result,
+        );
         if let Ok(tasks) = &result {
             self.limiter.record_list_response(
                 "GetTasks",
@@ -193,19 +207,22 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_common::go_string::GoString;
-    use cadence_persistence::{matching_blob::{BlobEncoding, TaskDataBytes}, matching_sqlite::SqliteTaskStore};
     use crate::{admin::DynamicConfigOverlay, matching_metrics::RecordingMetricSink};
+    use cadence_common::go_string::GoString;
+    use cadence_persistence::{
+        matching_blob::{BlobEncoding, TaskDataBytes},
+        matching_sqlite::SqliteTaskStore,
+    };
     use std::sync::{atomic::AtomicUsize, Mutex};
 
     #[test]
     fn native_metering_preserves_raw_rows_and_lease_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap();
         let limiter = MatchingPersistenceLimiter::new(
             Arc::new(Mutex::new(DynamicConfigOverlay::default())),
             Arc::new(AtomicUsize::new(1)),
@@ -213,14 +230,23 @@ mod tests {
         let sink = Arc::new(RecordingMetricSink::default());
         limiter.with_metric_sink(sink.clone());
         let store = limit_task_store_bytes(Arc::new(store), limiter);
-        let key = TaskListKeyBytes { domain_id: Uuid::from_u128(1), name: GoString::from(&b"q\xff"[..]), task_type: 0 };
+        let key = TaskListKeyBytes {
+            domain_id: Uuid::from_u128(1),
+            name: GoString::from(&b"q\xff"[..]),
+            task_type: 0,
+        };
         let lease = store.lease(&key, 0, 0, 1).unwrap();
-        let task = AllocatedTaskBytes { task_id: 1, data: TaskDataBytes {
-            workflow_id: GoString::from(&b"wf\xfe"[..]),
-            run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
-            ..Default::default()
-        }};
-        store.create_tasks_with_domains(&key, lease.range_id, 2, &[(key.domain_id, &task)]).unwrap();
+        let task = AllocatedTaskBytes {
+            task_id: 1,
+            data: TaskDataBytes {
+                workflow_id: GoString::from(&b"wf\xfe"[..]),
+                run_id: Some(Uuid::from_u128(2).as_bytes().to_vec()),
+                ..Default::default()
+            },
+        };
+        store
+            .create_tasks_with_domains(&key, lease.range_id, 2, &[(key.domain_id, &task)])
+            .unwrap();
         let rows = store.get_tasks(&key, 0, 10, 10).unwrap();
         assert_eq!(rows, vec![task]);
         let error = store.lease(&key, 0, lease.range_id + 1, 3).unwrap_err();
@@ -230,7 +256,10 @@ mod tests {
             }
             other => panic!("expected native condition error, got {other:?}"),
         }
-        assert!(sink.events().iter().any(|event| event.name == "persistence_errors_condition_failed_per_domain"));
+        assert!(sink
+            .events()
+            .iter()
+            .any(|event| event.name == "persistence_errors_condition_failed_per_domain"));
         assert_eq!(get_tasks_byte_size_bytes(&rows), 24 + 128 + 36 + 3 + 36);
     }
 }

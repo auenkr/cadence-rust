@@ -2,7 +2,7 @@
 //! This is a private child of `matching_fault_injection` so its random draw,
 //! grace period and fake-error mapping stay exactly shared with that wrapper.
 
-use super::{draw, should_forward_call, FakeError, STARTUP_GRACE};
+use super::{draw, FakeError, STARTUP_GRACE};
 use cadence_persistence::matching_native_task_store::{
     AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError,
     Result as TaskBytesResult, TaskListKeyBytes, TaskListRecordBytes,

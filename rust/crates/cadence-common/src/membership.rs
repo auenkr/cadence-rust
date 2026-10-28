@@ -257,7 +257,11 @@ mod golden_tests {
                 .map(|h| h.address.clone())
                 .collect();
             assert_eq!(got, want, "LookupN({key:?}, 3)");
-            assert_eq!(ring.lookup(key).unwrap().address, want[0], "Lookup({key:?})");
+            assert_eq!(
+                ring.lookup(key).unwrap().address,
+                want[0],
+                "Lookup({key:?})"
+            );
         }
     }
 

@@ -20,9 +20,8 @@ use crate::{
 /// Parse an identifier without losing the bytes embedded in Go's error.
 /// Requires `RawStatusService` on the native transport.
 pub fn task_list_name(name: &GoString) -> Result<TaskListNameBytes, Status> {
-    TaskListNameBytes::parse(name.as_bytes()).map_err(|message| {
-        raw_status(Code::Internal, &message, tonic::codegen::Bytes::new())
-    })
+    TaskListNameBytes::parse(name.as_bytes())
+        .map_err(|message| raw_status(Code::Internal, &message, tonic::codegen::Bytes::new()))
 }
 
 /// Go's proto mapper reads a missing or unknown task-list kind as normal.
@@ -54,7 +53,11 @@ pub fn partition_config(config: api::TaskListPartitionConfig) -> NativeStoredPar
 pub fn validate_query_completion_mapper(
     request: &matching::RespondQueryTaskCompletedRequest,
 ) -> Result<(), Status> {
-    if request.request.as_ref().is_some_and(|nested| nested.result.is_none()) {
+    if request
+        .request
+        .as_ref()
+        .is_some_and(|nested| nested.result.is_none())
+    {
         return Err(Status::unknown(
             "panic: runtime error: invalid memory address or nil pointer dereference",
         ));
@@ -82,7 +85,11 @@ pub fn deliver_query_completion(
 /// Cancel by raw poller ID on an already ownership-checked and loaded queue.
 /// A missing poller is a successful cancellation, as in Go.
 pub fn cancel_outstanding_poll(queue: &NativeQueueHandle, poller_id: &GoString) {
-    queue.pollers.lock().expect("poller history lock").cancel(poller_id.as_bytes());
+    queue
+        .pollers
+        .lock()
+        .expect("poller history lock")
+        .cancel(poller_id.as_bytes());
 }
 
 /// Validate the engine's manual-update checks after the scaler check and
@@ -118,7 +125,9 @@ pub fn validate_partition_refresh(
         ));
     }
     if task_list_name(&task_list.name)?.is_root() && config.is_some() {
-        return Err(Status::invalid_argument("PartitionConfig must be nil for root partition."));
+        return Err(Status::invalid_argument(
+            "PartitionConfig must be nil for root partition.",
+        ));
     }
     Ok(config.map(partition_config))
 }

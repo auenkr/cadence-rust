@@ -42,7 +42,9 @@ impl DispatchApi for InProcessNativeMatching {
         let service = self.0.clone();
         Box::pin(async move {
             crate::matching_fault_injection::inject_client_call(POLL_DECISION, async move {
-                service.poll_for_decision_task(timed(request, deadline)).await
+                service
+                    .poll_for_decision_task(timed(request, deadline))
+                    .await
             })
             .await
             .map(tonic::Response::into_inner)
@@ -56,7 +58,9 @@ impl DispatchApi for InProcessNativeMatching {
         let service = self.0.clone();
         Box::pin(async move {
             crate::matching_fault_injection::inject_client_call(POLL_ACTIVITY, async move {
-                service.poll_for_activity_task(timed(request, deadline)).await
+                service
+                    .poll_for_activity_task(timed(request, deadline))
+                    .await
             })
             .await
             .map(tonic::Response::into_inner)
@@ -242,7 +246,10 @@ mod tests {
     }
 
     fn header<'a>(headers: &'a [(String, Vec<u8>)], name: &str) -> Option<&'a [u8]> {
-        headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_slice())
+        headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_slice())
     }
 
     #[tokio::test]
@@ -284,7 +291,10 @@ mod tests {
                 partition_config: [(vec![0xff].into(), vec![0xfe].into())].into(),
                 ..Default::default()
             };
-            adapter.add_decision_task(add.clone(), deadline()).await.unwrap();
+            adapter
+                .add_decision_task(add.clone(), deadline())
+                .await
+                .unwrap();
             assert_eq!(peer.added.lock().unwrap().as_ref(), Some(&add));
 
             let poll = m::PollForDecisionTaskRequest {
@@ -297,16 +307,28 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            let reply = adapter.poll_for_decision_task(poll.clone(), deadline()).await.unwrap();
+            let reply = adapter
+                .poll_for_decision_task(poll.clone(), deadline())
+                .await
+                .unwrap();
             assert_eq!(peer.polled.lock().unwrap().as_ref(), Some(&poll));
-            assert_eq!(reply.workflow_type.unwrap().name.as_bytes(), &[0xe1, 0x80, 0xff]);
+            assert_eq!(
+                reply.workflow_type.unwrap().name.as_bytes(),
+                &[0xe1, 0x80, 0xff]
+            );
 
             {
                 let seen = peer.headers.lock().unwrap();
                 assert_eq!(seen.len(), 2);
                 for (_, headers) in seen.iter() {
-                    assert_eq!(header(headers, "rpc-service"), Some(&b"cadence-matching"[..]));
-                    assert_eq!(header(headers, "rpc-caller"), Some(&b"cadence-matching"[..]));
+                    assert_eq!(
+                        header(headers, "rpc-service"),
+                        Some(&b"cadence-matching"[..])
+                    );
+                    assert_eq!(
+                        header(headers, "rpc-caller"),
+                        Some(&b"cadence-matching"[..])
+                    );
                     assert_eq!(header(headers, "rpc-encoding"), Some(&b"proto"[..]));
                     assert!(header(headers, "grpc-timeout").is_some());
                 }

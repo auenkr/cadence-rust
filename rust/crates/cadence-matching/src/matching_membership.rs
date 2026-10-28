@@ -179,7 +179,10 @@ impl Membership {
     pub fn owns_bytes(&self, key: &[u8]) -> Result<bool, Status> {
         Ok(self.owner_bytes(key)?.identity() == self.identity.as_ref())
     }
-    pub fn remote_channel_bytes(&self, key: &[u8]) -> Result<Option<tonic::transport::Channel>, Status> {
+    pub fn remote_channel_bytes(
+        &self,
+        key: &[u8],
+    ) -> Result<Option<tonic::transport::Channel>, Status> {
         let owner = self.owner_bytes(key)?;
         self.remote_channel_for_owner(owner.identity(), &owner.grpc_address)
     }
@@ -192,7 +195,9 @@ impl Membership {
         crate::matching_registry_native::NativeMembership {
             check_task_list: Arc::new(move |name| check.check_task_list_bytes(name)),
             owns: Arc::new(move |name| owns.owns_bytes(name.as_bytes())),
-            task_list_not_owned_by: Arc::new(move |name, owner| not_owned.task_list_not_owned_by_bytes(name, owner)),
+            task_list_not_owned_by: Arc::new(move |name, owner| {
+                not_owned.task_list_not_owned_by_bytes(name, owner)
+            }),
         }
     }
     pub fn remote_channel(&self, key: &str) -> Result<Option<tonic::transport::Channel>, Status> {
@@ -269,28 +274,43 @@ impl Membership {
         }
         Err(self.task_list_not_owned_by(name, owner.identity()))
     }
-    pub fn check_task_list_bytes(&self, name: &cadence_common::go_string::GoString) -> Result<(), Status> {
+    pub fn check_task_list_bytes(
+        &self,
+        name: &cadence_common::go_string::GoString,
+    ) -> Result<(), Status> {
         let owner = self.owner_bytes(name.as_bytes()).map_err(|error| {
-            Status::internal(format!("failed to lookup task list owner: {}", error.message()))
+            Status::internal(format!(
+                "failed to lookup task list owner: {}",
+                error.message()
+            ))
         })?;
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
         Err(self.task_list_not_owned_by_bytes(name, owner.identity()))
     }
-    pub fn task_list_not_owned_by_bytes(&self, name: &cadence_common::go_string::GoString, owner: &str) -> Status {
+    pub fn task_list_not_owned_by_bytes(
+        &self,
+        name: &cadence_common::go_string::GoString,
+        owner: &str,
+    ) -> Status {
         let mut message = format!(
             "task list is not owned by this host: OwnedBy: {}, Me: {}, Tasklist: ",
             owner, self.identity,
-        ).into_bytes();
+        )
+        .into_bytes();
         message.extend_from_slice(name.as_bytes());
         // Go omits the protobuf status details when its outer message has
         // invalid UTF-8. For valid names retain the existing shared.v1 URL.
-        let details = name.as_utf8().ok()
+        let details = name
+            .as_utf8()
+            .ok()
             .map(|name| self.task_list_not_owned_by(name, owner).details().to_vec())
             .unwrap_or_default();
         crate::matching_native_status::raw_status(
-            tonic::Code::Aborted, &message.into(), details.into(),
+            tonic::Code::Aborted,
+            &message.into(),
+            details.into(),
         )
     }
     pub(crate) fn task_list_not_owned_by(&self, name: &str, owner: &str) -> Status {
@@ -323,7 +343,11 @@ impl Membership {
         if owner.identity() == self.identity.as_ref() {
             return Ok(());
         }
-        Err(semaphore_not_owned_status(owner.identity(), self.identity.as_ref(), bucket_id))
+        Err(semaphore_not_owned_status(
+            owner.identity(),
+            self.identity.as_ref(),
+            bucket_id,
+        ))
     }
     pub(crate) fn identity(&self) -> &str {
         self.identity.as_ref()
@@ -332,7 +356,11 @@ impl Membership {
 
 /// Go `SemaphoreNotOwnedByHostError` for one bucket. Go's engine names the owner
 /// "not known" while it shuts down, because the next owner is not settled yet.
-pub(crate) fn semaphore_not_owned_status(owner: &str, my_identity: &str, bucket_id: String) -> Status {
+pub(crate) fn semaphore_not_owned_status(
+    owner: &str,
+    my_identity: &str,
+    bucket_id: String,
+) -> Status {
     crate::grpc::detailed_status_type(
         tonic::Code::Aborted,
         format!("semaphore bucket is not owned by this host: OwnedBy: {owner}, Me: {my_identity}, BucketID: {bucket_id}"),
@@ -351,22 +379,38 @@ mod tests {
     use prost::Message;
     #[test]
     fn native_ownership_error_keeps_raw_name_and_live_ring() {
-        use cadence_common::go_string::GoString;
         use crate::matching_native_status::RAW_MESSAGE_MARKER;
-        let remote = Host { address: "remote:7935".into(), identity: "remote".into(), grpc_address: "remote:7835".into() };
+        use cadence_common::go_string::GoString;
+        let remote = Host {
+            address: "remote:7935".into(),
+            identity: "remote".into(),
+            grpc_address: "remote:7835".into(),
+        };
         let membership = Membership::new("self", vec![remote]);
         let adapter = membership.native_membership();
         let raw = GoString::from(&b"q\xff\xfe"[..]);
         assert!(!(adapter.owns)(&raw).unwrap());
         let error = (adapter.check_task_list)(&raw).unwrap_err();
         assert_eq!(error.code(), tonic::Code::Aborted);
-        let bytes = error.metadata().get_bin(RAW_MESSAGE_MARKER).unwrap().to_bytes().unwrap();
+        let bytes = error
+            .metadata()
+            .get_bin(RAW_MESSAGE_MARKER)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
         assert!(bytes.ends_with(raw.as_bytes()));
         assert!(error.details().is_empty());
         let valid = GoString::from("queue");
         let valid_error = (adapter.check_task_list)(&valid).unwrap_err();
-        assert_eq!(valid_error.details(), membership.check_task_list("queue").unwrap_err().details());
-        membership.replace(vec![Host { address: "self:7935".into(), identity: "self".into(), grpc_address: "self:7835".into() }]);
+        assert_eq!(
+            valid_error.details(),
+            membership.check_task_list("queue").unwrap_err().details()
+        );
+        membership.replace(vec![Host {
+            address: "self:7935".into(),
+            identity: "self".into(),
+            grpc_address: "self:7835".into(),
+        }]);
         assert!((adapter.owns)(&raw).unwrap());
         (adapter.check_task_list)(&raw).unwrap();
     }
@@ -545,8 +589,18 @@ mod go_membership_port_tests {
             ("empty and one added", vec![], vec!["a"], true),
             ("non-empty and added", vec!["a"], vec!["a", "b"], true),
             ("empty and nothing has changed", vec![], vec![], false),
-            ("multiple hosts, but no change", vec!["a", "b", "c"], vec!["c", "b", "a"], false),
-            ("multiple hosts, add/delete", vec!["a", "b", "c"], vec!["b", "e", "f"], true),
+            (
+                "multiple hosts, but no change",
+                vec!["a", "b", "c"],
+                vec!["c", "b", "a"],
+                false,
+            ),
+            (
+                "multiple hosts, add/delete",
+                vec!["a", "b", "c"],
+                vec!["b", "e", "f"],
+                true,
+            ),
         ];
         for (name, current, next, changed) in cases {
             let membership = Membership::new("local", current.into_iter().map(host).collect());
@@ -613,7 +667,11 @@ mod go_membership_port_tests {
         });
         let refresh_thread = std::thread::spawn(move || {
             for index in 0..50 {
-                let next = if index % 2 == 0 { refreshed.clone() } else { base.clone() };
+                let next = if index % 2 == 0 {
+                    refreshed.clone()
+                } else {
+                    base.clone()
+                };
                 refresher.replace(next);
             }
         });
@@ -639,8 +697,14 @@ mod go_membership_port_tests {
             }
         }
 
-        assert_eq!(identifier(&["10.0.0.1:1234", "10.0.0.2:1234", "10.0.0.3:1234"]), 835.0);
-        assert_eq!(identifier(&["10.0.0.3:1234", "10.0.0.1:1234", "10.0.0.2:1234"]), 835.0);
+        assert_eq!(
+            identifier(&["10.0.0.1:1234", "10.0.0.2:1234", "10.0.0.3:1234"]),
+            835.0
+        );
+        assert_eq!(
+            identifier(&["10.0.0.3:1234", "10.0.0.1:1234", "10.0.0.2:1234"]),
+            835.0
+        );
         assert_eq!(identifier(&[]), 242.0);
     }
 }
