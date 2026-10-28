@@ -14,7 +14,7 @@
 
 use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::liveness::Liveness;
-use cadence_common::{go_string::GoString, semaphore_bytes::{OwnerBytes, parse_owner_bytes}};
+use cadence_common::go_string::GoString;
 use cadence_persistence::{AcquireError, GrantOutcome, semaphores_native::{SemaphorePersistenceBytes, SemaphoreRowBytes}};
 use crate::matching_semaphore_native::{IdentifierBytes, IdentifierError};
 pub type Identifier = IdentifierBytes;
@@ -651,6 +651,62 @@ impl Registry {
                 manager.stop();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadence_persistence::semaphores_native::{InMemorySemaphorePersistenceBytes, SemaphorePersistenceBytes};
+
+    fn bytes(value: &[u8]) -> GoString { GoString::from(value.to_vec()) }
+
+    #[tokio::test]
+    async fn native_acquire_reacquires_exact_owner_bytes_and_respects_fencing() {
+        let store = Arc::new(InMemorySemaphorePersistenceBytes::default());
+        let domain = bytes(b"dom\xff");
+        let name = bytes(b"sem\xfe\xef\xbf\xbd");
+        store.create_semaphore(&domain, &name, 2, 2).await.unwrap();
+        // Includes malformed UTF-8 bytes, a distinct U+FFFD spelling, and separator bytes.
+        let owner = bytes(b"1:\xff:\xfe\xef\xbf\xbd:1");
+        let registry = Registry::new(store.clone());
+        let manager = registry.get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap()).await.unwrap();
+        let first = manager.acquire(&owner, None).await.unwrap();
+        assert_eq!(first.outcome, SemaphoreAcquireOutcome::Acquired);
+        assert_eq!(manager.acquire(&owner, None).await.unwrap(), first);
+        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id).await.unwrap(), owner);
+
+        let replacement = bytes("1:�:�:1".as_bytes());
+        assert!(!store.release_semaphore_token(&domain, &name, 0, first.token_id, &replacement).await.unwrap());
+        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id).await.unwrap(), owner);
+        assert!(store.release_semaphore_token(&domain, &name, 0, first.token_id, &owner).await.unwrap());
+        manager.stop();
+        let restarted = registry.get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap()).await.unwrap();
+        let again = restarted.acquire(&owner, None).await.unwrap();
+        assert_eq!(again.outcome, SemaphoreAcquireOutcome::Acquired);
+        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, again.token_id).await.unwrap(), owner);
+    }
+
+    #[tokio::test]
+    async fn startup_scans_pages_and_stopped_manager_is_replaced() {
+        let store = Arc::new(InMemorySemaphorePersistenceBytes::default());
+        let domain = bytes(b"d");
+        let name = bytes(b"s");
+        store.create_semaphore(&domain, &name, 3, 3).await.unwrap();
+        // Seed a hold that startup must discover; the page size is intentionally tiny here
+        // through a direct manager load fixture in the persistence scan contract.
+        let held_owner = bytes(b"1:w:r:9");
+        store.grant_semaphore_token(&domain, &name, 0, 2, &held_owner).await.unwrap();
+        let registry = Registry::new(store);
+        let id = Identifier::new(domain, name, 0).unwrap();
+        let old = registry.get_or_create(id.clone()).await.unwrap();
+        assert_eq!(old.free_count(), 2);
+        old.stop();
+        assert!(matches!(old.acquire(&bytes(b"1:x:r:1"), None).await, Err(ManagerError::NotReady)));
+        let replacement = registry.get_or_create(id).await.unwrap();
+        assert!(!Arc::ptr_eq(&old, &replacement));
+        assert_eq!(replacement.free_count(), 2);
+        assert!(registry.by_identifier(replacement.identifier()).is_some());
     }
 }
 

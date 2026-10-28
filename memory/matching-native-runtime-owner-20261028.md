@@ -1,0 +1,7 @@
+# Native Matching runtime ownership — 2026-10-28
+
+Added MatchingRuntime::with_native_queues(registry, service). It accepts an existing in-memory/runtime metadata owner before listeners start, rejects duplicate or mixed legacy/native durable ownership, attaches the native service to the shared transport handle, starts registry maintenance, and retains the native registry for fallback shutdown and writer actor joins. Existing normal shutdown awaits maintenance (which performs final registry shutdown) and then joins native writers before the launcher samples fatal errors. Drop retains the existing maintenance abort guard.
+
+This is runtime lifecycle plumbing, not launcher adoption. Native domain-cache callback and membership cleanup wiring still need integration; native lifecycle/quota state must share the runtime drain transition; no claim of production completeness. No local Cargo, formatter, Go or tests ran. A following worker will complete lifecycle callbacks and bounded tests.
+
+CI https://github.com/auenkr/cadence-rust/actions/runs/40717334361 at fd738ddc4555c048a47df1dbbebe8ba251942a27 failed clippy because the delivery regression's MutexGuard remained in lexical scope across shutdown awaits despite explicit drop. Scoped assertions in a block. Registered completed native semaphore manager and Cassandra adapter formatter entries for the next CI gate. Cassandra source/runtime semantics still require review and real Cassandra evidence.

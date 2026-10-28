@@ -116,6 +116,7 @@ where
 pub struct MatchingRuntime {
     matching: Matching,
     registry: Option<crate::matching_registry::QueueRegistry>,
+    native_registry: Option<crate::matching_registry_native::NativeQueueRegistry>,
     maintenance_stop: Option<oneshot::Sender<()>>,
     maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     membership_maintenance_stop: Option<oneshot::Sender<()>>,
@@ -157,6 +158,7 @@ impl MatchingRuntime {
         Self {
             matching: Matching::new(state),
             registry: None,
+            native_registry: None,
             maintenance_stop: None,
             maintenance: None,
             membership_maintenance_stop: None,
@@ -197,6 +199,7 @@ impl MatchingRuntime {
         Self {
             matching,
             registry: Some(registry),
+            native_registry: None,
             maintenance_stop: Some(stop),
             maintenance: Some(maintenance),
             membership_maintenance_stop: None,
@@ -215,6 +218,30 @@ impl MatchingRuntime {
 
     pub fn matching(&self) -> &Matching {
         &self.matching
+    }
+
+    /// Attach the native service and own its maintenance and final writer joins.
+    /// Call before listeners start, on a runtime without legacy durable queues.
+    pub fn with_native_queues(
+        mut self,
+        registry: crate::matching_registry_native::NativeQueueRegistry,
+        service: Arc<dyn cadence_proto::native::NativeMatchingApi>,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            self.registry.is_none() && self.native_registry.is_none(),
+            "Matching runtime already owns durable queues"
+        );
+        self.matching = self.matching.clone().with_native_service(service);
+        let (stop, stopped) = oneshot::channel();
+        let maintenance_registry = registry.clone();
+        self.maintenance = Some(tokio::spawn(async move {
+            maintenance_registry.maintain_until(Duration::from_secs(10), async {
+                let _ = stopped.await;
+            }).await
+        }));
+        self.maintenance_stop = Some(stop);
+        self.native_registry = Some(registry);
+        Ok(self)
     }
 
     /// Go `matchingEngineImpl.isShuttingDown`: false until the drain completes.
@@ -724,6 +751,11 @@ impl MatchingRuntime {
                 .shutdown(crate::grpc_matching::matching_now())
                 .await
                 .map_err(|error| anyhow::anyhow!("stopping Matching registry: {error}"))
+        } else if let Some(registry) = &self.native_registry {
+            registry
+                .shutdown(crate::grpc_matching::matching_now())
+                .await
+                .map_err(|error| anyhow::anyhow!("stopping native Matching registry: {error}"))
         } else {
             Ok(())
         };
@@ -732,6 +764,9 @@ impl MatchingRuntime {
         // launcher samples its fatal-writer channel, so shutdown cannot race
         // a late typed SQL failure notification.
         if let Some(registry) = &self.registry {
+            registry.wait_for_writers().await;
+        }
+        if let Some(registry) = &self.native_registry {
             registry.wait_for_writers().await;
         }
         // Go Stop also stops every semaphore bucket, not only the ones the ring moved away.

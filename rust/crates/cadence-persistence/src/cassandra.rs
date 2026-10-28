@@ -160,6 +160,9 @@ pub struct CassandraSemaphorePersistence {
     session: Arc<Session>,
 }
 
+#[path = "semaphores_cassandra_native.rs"]
+mod semaphores_cassandra_native;
+
 impl fmt::Debug for CassandraSemaphorePersistence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CassandraSemaphorePersistence")

@@ -295,6 +295,7 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
     })
     .await
     .unwrap();
+    {
     let seen = captured.lock().unwrap();
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0].task_id, 0);
@@ -326,7 +327,7 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
             .as_bytes(),
         b"backlog-\xfe"
     );
-    drop(seen);
+    }
     reader.stop();
     writer.stop();
     tokio::time::timeout(LIMIT, reader.wait_stopped())
