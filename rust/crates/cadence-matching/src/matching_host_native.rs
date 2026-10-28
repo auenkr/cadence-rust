@@ -155,6 +155,7 @@ impl NativePollContext for NativeMatchingHost {
     fn override_rate(&self, domain: &GoString, list: &GoString, kind: i32) -> f64 { self.engine.override_rate(domain, list, kind) }
     fn auto_config_enabled(&self, domain: &GoString, list: &GoString, kind: i32) -> bool { self.engine.auto_config_enabled(domain, list, kind) }
     fn observer(&self, domain: &GoString, list: &GoString, kind: i32) -> Option<Arc<dyn NativePollObserver>> { self.engine.observer(domain, list, kind) }
+    fn observer_with_context(&self, domain: &GoString, list: &GoString, task_type: i32, task_list_kind: i32, isolation_group: &GoString) -> Option<Arc<dyn NativePollObserver>> { self.engine.observer_with_context(domain, list, task_type, task_list_kind, isolation_group) }
 }
 impl NativeQueryContext for NativeMatchingHost {
     fn domain_name(&self, id: &GoString) -> Result<GoString, Status> { NativeQueryContext::domain_name(&self.engine, id) }
