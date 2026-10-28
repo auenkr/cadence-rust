@@ -34,6 +34,47 @@ type ShardProcessLookup = Arc<
         + Sync,
 >;
 
+/// Async admission hook for the native host. Install before opening listeners;
+/// registry publication still performs its synchronous assignment recheck.
+pub type NativeShardOwnershipCheck = Arc<dyn Fn(
+    cadence_common::go_string::GoString, bool,
+) -> Pin<Box<dyn Future<Output = Result<(), tonic::Status>> + Send>> + Send + Sync>;
+
+type NativeShardLookup = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), crate::matching_shard_distributor::GetShardProcessError>> + Send>> + Send + Sync>;
+
+fn native_shard_ownership_check(
+    membership: crate::matching_membership::Membership,
+    percentage: Arc<dyn Fn() -> i64 + Send + Sync>,
+    exclude: Arc<dyn Fn() -> bool + Send + Sync>,
+    draining: tokio::sync::watch::Receiver<bool>,
+    lookup: NativeShardLookup,
+) -> NativeShardOwnershipCheck {
+    Arc::new(move |name, cached| {
+        let membership = membership.clone();
+        let percentage = percentage.clone();
+        let exclude = exclude.clone();
+        let draining = draining.clone();
+        let lookup = lookup.clone();
+        Box::pin(async move {
+            if *draining.borrow() {
+                return Err(membership.task_list_not_owned_by_bytes(&name, "not known"));
+            }
+            if crate::matching_shard_routing::task_list_excluded_from_shard_distributor_bytes(
+                name.as_bytes(), percentage() as u64, exclude(),
+            ) {
+                return if cached { Ok(()) } else { membership.check_task_list_bytes(&name) };
+            }
+            match lookup(name.as_bytes().to_vec()).await {
+                Ok(()) => Ok(()),
+                Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) =>
+                    Err(membership.task_list_not_owned_by_bytes(&name, "not known")),
+                Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(error)) =>
+                    Err(tonic::Status::internal(format!("failed to lookup ownership in SD: {error}"))),
+            }
+        })
+    })
+}
+
 fn native_noop_shard_policy(
     percentage_onboarded: Arc<dyn Fn() -> i64 + Send + Sync>,
     exclude_short_lived: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -154,6 +195,7 @@ pub struct MatchingRuntime {
     native_membership_maintenance: Option<NativeMembershipTask>,
     membership: Option<crate::matching_membership::Membership>,
     dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
+    native_shard_ownership: Option<NativeShardOwnershipCheck>,
     shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
     shard_distributor_spectator: Option<crate::matching_shard_distributor::TonicSpectator>,
     shard_distributor_drain: Option<tokio::sync::watch::Sender<bool>>,
@@ -202,6 +244,7 @@ impl MatchingRuntime {
             native_membership_maintenance: None,
             membership: None,
             dynamic_config_watch: None,
+            native_shard_ownership: None,
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
             shard_distributor_drain: None,
@@ -249,6 +292,7 @@ impl MatchingRuntime {
             native_membership_maintenance: None,
             membership: None,
             dynamic_config_watch: None,
+            native_shard_ownership: None,
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
             shard_distributor_drain: None,
@@ -468,6 +512,15 @@ impl MatchingRuntime {
                 has_local_processor: Arc::new(move |name| native_executor.has_local_shard_process_raw(name.as_bytes())),
             });
         }
+        let raw_executor = executor.clone();
+        let raw_lookup: NativeShardLookup = Arc::new(move |name| {
+            let executor = raw_executor.clone();
+            Box::pin(async move { executor.get_shard_process_raw(&name).await.map(|_| ()) })
+        });
+        self.native_shard_ownership = Some(native_shard_ownership_check(
+            membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
+            drain_tx.subscribe(), raw_lookup,
+        ));
         let ownership_check = shard_task_list_ownership_check(
             membership.clone(),
             percentage_onboarded.clone(),
@@ -500,6 +553,12 @@ impl MatchingRuntime {
         self.shard_distributor_drain = Some(drain_tx);
         self.shard_distributor_peer_cleanup = Some(peer_cleanup);
         Ok(self)
+    }
+
+    /// Install this callback on native admission after distributor setup and before
+    /// listeners start. It performs heartbeat-on-miss without losing Go strings.
+    pub fn native_shard_ownership_check(&self) -> Option<NativeShardOwnershipCheck> {
+        self.native_shard_ownership.clone()
     }
 
     /// Shared executor used by native admission to refresh an uncached assignment.
@@ -539,6 +598,15 @@ impl MatchingRuntime {
                     >,
                 >
         });
+        let raw_lookup: NativeShardLookup = Arc::new(|name| Box::pin(async move {
+            Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(
+                String::from_utf8_lossy(&name).into_owned(),
+            ))
+        }));
+        self.native_shard_ownership = Some(native_shard_ownership_check(
+            membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
+            drain_tx.subscribe(), raw_lookup,
+        ));
         let ownership_check = shard_task_list_ownership_check(
             membership,
             percentage_onboarded.clone(),
@@ -1469,6 +1537,43 @@ mod tests {
         let negative = installed_ownership_check(-1, false, calls.clone(), Ok(()));
         assert!(negative("negative-percentage".into(), false).await.is_ok());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn native_admission_preserves_raw_names_errors_and_drain() {
+        use crate::matching_shard_distributor::GetShardProcessError;
+        use cadence_common::go_string::GoString;
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let calls = seen.clone();
+        let (drain, receiver) = tokio::sync::watch::channel(false);
+        let lookup: NativeShardLookup = Arc::new(move |name| {
+            calls.lock().unwrap().push(name.clone());
+            Box::pin(async move {
+                if name == b"bad-\xff" { Err(GetShardProcessError::NotFound("missing".into())) }
+                else { Err(GetShardProcessError::Heartbeat("offline".into())) }
+            })
+        });
+        let check = native_shard_ownership_check(empty_membership(), Arc::new(|| 100), Arc::new(|| false), receiver, lookup);
+        let raw = GoString::from(&b"bad-\xff"[..]);
+        assert_eq!(check(raw.clone(), false).await.unwrap_err().code(), tonic::Code::Aborted);
+        assert_eq!(seen.lock().unwrap().as_slice(), &[b"bad-\xff".to_vec()]);
+        let error = check(GoString::from("other"), false).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("offline"));
+        drain.send(true).unwrap();
+        assert_eq!(check(raw, false).await.unwrap_err().code(), tonic::Code::Aborted);
+        assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn native_admission_excluded_cached_and_noop() {
+        use cadence_common::go_string::GoString;
+        let (_drain, receiver) = tokio::sync::watch::channel(false);
+        let lookup: NativeShardLookup = Arc::new(|_| Box::pin(async { panic!("excluded names skip executor") }));
+        let check = native_shard_ownership_check(empty_membership(), Arc::new(|| 0), Arc::new(|| false), receiver, lookup);
+        let raw = GoString::from(&b"raw-\xff"[..]);
+        assert!(check(raw.clone(), true).await.is_ok());
+        assert_eq!(check(raw, false).await.unwrap_err().code(), tonic::Code::Internal);
     }
 
     #[test]
