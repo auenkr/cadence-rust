@@ -819,7 +819,15 @@ pub async fn dispatch_with_context(
     context: crate::matching_metrics::InboundMetricContext,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
     if let Some(native) = matching.native_service() {
-        return dispatch_native_with_context(matching, native.as_ref(), procedure, args, deadline, context).await;
+        return dispatch_native_with_context(
+            matching,
+            native.as_ref(),
+            procedure,
+            args,
+            deadline,
+            context,
+        )
+        .await;
     }
     matching
         .inbound_metrics()

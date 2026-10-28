@@ -15,6 +15,7 @@ pub mod go_string;
 pub mod jitter;
 pub mod retry;
 pub mod semaphore;
+pub mod semaphore_bytes;
 
 pub use backoff::{ExponentialRetryPolicy, Retrier};
 

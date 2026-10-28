@@ -78,7 +78,9 @@ mod tests {
 
     struct AbortOnDrop(tokio::task::AbortHandle);
     impl Drop for AbortOnDrop {
-        fn drop(&mut self) { self.0.abort(); }
+        fn drop(&mut self) {
+            self.0.abort();
+        }
     }
 
     #[tokio::test]
@@ -87,25 +89,51 @@ mod tests {
             let peer = Arc::new(NativePeer::default());
             let matching = crate::grpc_matching::Matching::new(Default::default())
                 .with_native_service(peer.clone());
-            let args = Struct { fields: vec![(1, Value::Struct(Struct { fields: vec![
-                (20, Value::Struct(Struct { fields: vec![(10, Value::Bytes(vec![0xff]))] })),
-            ] }))] };
-            let (result, summary) = crate::thrift_matching::dispatch(&matching,
-                "MatchingService::QueryWorkflow", &args,
-                std::time::Instant::now() + Duration::from_secs(5)).await.unwrap();
+            let args = Struct {
+                fields: vec![(
+                    1,
+                    Value::Struct(Struct {
+                        fields: vec![(
+                            20,
+                            Value::Struct(Struct {
+                                fields: vec![(10, Value::Bytes(vec![0xff]))],
+                            }),
+                        )],
+                    }),
+                )],
+            };
+            let (result, summary) = crate::thrift_matching::dispatch(
+                &matching,
+                "MatchingService::QueryWorkflow",
+                &args,
+                std::time::Instant::now() + Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
             assert_eq!(summary.unwrap().0, "QueryFailedError");
-            let Value::Struct(error) = &result.fields[0].1 else { panic!("exception struct") };
+            let Value::Struct(error) = &result.fields[0].1 else {
+                panic!("exception struct")
+            };
             assert_eq!(error.fields, vec![(1, Value::Bytes(b"bad\xff".to_vec()))]);
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
-            let server = tokio::spawn(crate::grpc_matching::serve_with_listener(listener, matching));
+            let server = tokio::spawn(crate::grpc_matching::serve_with_listener(
+                listener, matching,
+            ));
             let _cleanup = AbortOnDrop(server.abort_handle());
             let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
-                .unwrap().connect().await.unwrap();
-            let mut client = cadence_proto::native_service::matching_api_client::MatchingApiClient::new(channel);
+                .unwrap()
+                .connect()
+                .await
+                .unwrap();
+            let mut client =
+                cadence_proto::native_service::matching_api_client::MatchingApiClient::new(channel);
             let mut request = Request::new(m::QueryWorkflowRequest {
-                task_list: Some(cadence_proto::native::api::TaskList { name: GoString::from(vec![0xfe]), ..Default::default() }),
+                task_list: Some(cadence_proto::native::api::TaskList {
+                    name: GoString::from(vec![0xfe]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             });
             request.set_timeout(Duration::from_secs(5));
@@ -113,11 +141,19 @@ mod tests {
             assert_eq!(error.code(), tonic::Code::InvalidArgument);
             assert_eq!(error.message(), "bad�");
             assert!(error.details().is_empty());
-            assert!(error.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).is_none());
-            assert!(error.metadata().get_bin(crate::matching_native_status::RAW_ERROR_DETAILS_MARKER).is_none());
+            assert!(error
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+                .is_none());
+            assert!(error
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_ERROR_DETAILS_MARKER)
+                .is_none());
             assert_eq!(*peer.0.lock().unwrap(), vec![vec![0xff], vec![0xfe]]);
             server.abort();
             let _ = tokio::time::timeout(Duration::from_secs(2), server).await;
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

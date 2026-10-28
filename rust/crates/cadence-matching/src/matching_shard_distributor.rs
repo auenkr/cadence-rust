@@ -272,7 +272,8 @@ impl TonicSpectator {
         shard_key: &str,
         deadline: tokio::time::Instant,
     ) -> Result<ShardOwner, String> {
-        self.get_shard_owner_bytes(shard_key.as_bytes(), deadline).await
+        self.get_shard_owner_bytes(shard_key.as_bytes(), deadline)
+            .await
     }
 
     pub async fn get_shard_owner_bytes(
@@ -325,16 +326,19 @@ impl TonicSpectator {
                 namespace: self.namespace.to_string(),
             });
             request.set_timeout(call_timeout);
-            let call = tokio::time::timeout(call_timeout, async {
-                client.ready().await.map_err(|error| tonic::Status::unknown(format!("service not ready: {error}")))?;
-                client.unary::<_, sd::GetShardOwnerResponse, _>(
+            let call =
+                tokio::time::timeout(call_timeout, async {
+                    client.ready().await.map_err(|error| {
+                        tonic::Status::unknown(format!("service not ready: {error}"))
+                    })?;
+                    client.unary::<_, sd::GetShardOwnerResponse, _>(
                     request,
                     tonic::codegen::http::uri::PathAndQuery::from_static(
                         "/uber.cadence.sharddistributor.v1.ShardDistributorAPI/GetShardOwner",
                     ),
                     tonic::codec::ProstCodec::default(),
                 ).await
-            });
+                });
             let response = tokio::select! {
                 response = call => response,
                 _ = tokio::time::sleep_until(deadline) => return Err("GetShardOwner caller deadline exceeded".into()),
@@ -1536,31 +1540,50 @@ mod tests {
             struct Get(RawOwnerRequests);
             impl tonic::server::UnaryService<RawOwnerRequest> for Get {
                 type Response = sd::GetShardOwnerResponse;
-                type Future = tonic::codegen::BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                type Future =
+                    tonic::codegen::BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                 fn call(&mut self, request: tonic::Request<RawOwnerRequest>) -> Self::Future {
                     let headers = yarpc_headers(&request);
-                    self.0.lock().unwrap().push((request.into_inner().shard_key, headers));
-                    Box::pin(async { Ok(tonic::Response::new(sd::GetShardOwnerResponse {
-                        owner: "rpc-owner".into(), namespace: "matching".into(), metadata: HashMap::new(),
-                    })) })
+                    self.0
+                        .lock()
+                        .unwrap()
+                        .push((request.into_inner().shard_key, headers));
+                    Box::pin(async {
+                        Ok(tonic::Response::new(sd::GetShardOwnerResponse {
+                            owner: "rpc-owner".into(),
+                            namespace: "matching".into(),
+                            metadata: HashMap::new(),
+                        }))
+                    })
                 }
             }
             struct Watch;
             impl tonic::server::ServerStreamingService<sd::WatchNamespaceStateRequest> for Watch {
                 type Response = RawSnapshot;
                 type ResponseStream = tonic::codegen::BoxStream<Self::Response>;
-                type Future = tonic::codegen::BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
-                fn call(&mut self, _request: tonic::Request<sd::WatchNamespaceStateRequest>) -> Self::Future {
-                    let snapshot = RawSnapshot { executors: [
-                        (vec![0xff], "owner-ff"),
-                        (vec![0xfe], "owner-fe"),
-                        ("�".as_bytes().to_vec(), "owner-replacement"),
-                    ].into_iter().map(|(shard_key, owner)| RawExecutor {
-                        executor_id: owner.into(), metadata: HashMap::new(),
-                        shards: vec![RawShard { shard_key }],
-                    }).collect() };
+                type Future =
+                    tonic::codegen::BoxFuture<tonic::Response<Self::ResponseStream>, tonic::Status>;
+                fn call(
+                    &mut self,
+                    _request: tonic::Request<sd::WatchNamespaceStateRequest>,
+                ) -> Self::Future {
+                    let snapshot = RawSnapshot {
+                        executors: [
+                            (vec![0xff], "owner-ff"),
+                            (vec![0xfe], "owner-fe"),
+                            ("�".as_bytes().to_vec(), "owner-replacement"),
+                        ]
+                        .into_iter()
+                        .map(|(shard_key, owner)| RawExecutor {
+                            executor_id: owner.into(),
+                            metadata: HashMap::new(),
+                            shards: vec![RawShard { shard_key }],
+                        })
+                        .collect(),
+                    };
                     Box::pin(async move {
-                        let stream: tonic::codegen::BoxStream<RawSnapshot> = Box::pin(tokio_stream::iter(vec![Ok(snapshot)]));
+                        let stream: tonic::codegen::BoxStream<RawSnapshot> =
+                            Box::pin(tokio_stream::iter(vec![Ok(snapshot)]));
                         Ok(tonic::Response::new(stream))
                     })
                 }
@@ -1570,10 +1593,12 @@ mod tests {
             Box::pin(async move {
                 let response = if path.ends_with("/GetShardOwner") {
                     tonic::server::Grpc::new(tonic::codec::ProstCodec::default())
-                        .unary(Get(requests), request).await
+                        .unary(Get(requests), request)
+                        .await
                 } else {
                     tonic::server::Grpc::new(tonic::codec::ProstCodec::default())
-                        .server_streaming(Watch, request).await
+                        .server_streaming(Watch, request)
+                        .await
                 };
                 Ok(response)
             })
@@ -1585,13 +1610,19 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let service = RawSpectatorService { requests: requests.clone() };
+        let service = RawSpectatorService {
+            requests: requests.clone(),
+        };
         let server = tokio::spawn(async move {
-            tonic::transport::Server::builder().add_service(service)
-                .serve_with_incoming(TcpListenerStream::new(listener)).await.unwrap();
+            tonic::transport::Server::builder()
+                .add_service(service)
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
         });
         let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
-            .unwrap().connect_lazy();
+            .unwrap()
+            .connect_lazy();
         let spectator = TonicSpectator::new(channel, "matching", Arc::new(|| true));
         tokio::time::timeout(Duration::from_secs(2), spectator.start())
             .await
@@ -1603,19 +1634,40 @@ mod tests {
             (&[0xfe][..], "owner-fe"),
             ("�".as_bytes(), "owner-replacement"),
         ] {
-            let cached = tokio::time::timeout(Duration::from_secs(2), spectator.get_shard_owner_bytes(key, deadline)).await.unwrap().unwrap();
+            let cached = tokio::time::timeout(
+                Duration::from_secs(2),
+                spectator.get_shard_owner_bytes(key, deadline),
+            )
+            .await
+            .unwrap()
+            .unwrap();
             assert_eq!(cached.executor_id, expected_owner);
         }
         assert!(requests.lock().unwrap().is_empty());
         let missing = [0xfd, 0, b'b'];
-        let owner = tokio::time::timeout(Duration::from_secs(2), spectator.get_shard_owner_bytes(&missing, deadline)).await.unwrap().unwrap();
+        let owner = tokio::time::timeout(
+            Duration::from_secs(2),
+            spectator.get_shard_owner_bytes(&missing, deadline),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(owner.executor_id, "rpc-owner");
         {
             let observed = requests.lock().unwrap();
             assert_eq!(observed.len(), 1, "cache hits must not issue owner RPCs");
-            assert_eq!(observed[0].0, missing, "GetShardOwner must preserve raw key bytes");
-            assert_eq!(&observed[0].1[..3], &["shard-manager", "cadence-matching", "proto"]);
-            assert!(!observed[0].1[3].is_empty(), "GetShardOwner carries its deadline");
+            assert_eq!(
+                observed[0].0, missing,
+                "GetShardOwner must preserve raw key bytes"
+            );
+            assert_eq!(
+                &observed[0].1[..3],
+                &["shard-manager", "cadence-matching", "proto"]
+            );
+            assert!(
+                !observed[0].1[3].is_empty(),
+                "GetShardOwner carries its deadline"
+            );
         }
         tokio::time::timeout(Duration::from_secs(2), spectator.shutdown())
             .await

@@ -99,6 +99,36 @@ impl DispatchApi for InProcessNativeMatching {
 /// Parent reached over a tonic channel (native raw-byte codec client).
 pub struct RemoteNativeMatching(pub Channel);
 
+impl crate::matching_engine_native::NativeQueryParent for InProcessNativeMatching {
+    fn query_workflow(
+        &self,
+        request: n::matching::QueryWorkflowRequest,
+        deadline: tokio::time::Instant,
+    ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+        let service = self.0.clone();
+        Box::pin(async move {
+            service.query_workflow(timed(request, deadline)).await
+                .map(tonic::Response::into_inner)
+                .map_err(crate::matching_query_native::NativeQueryError::Status)
+        })
+    }
+}
+
+impl crate::matching_engine_native::NativeQueryParent for RemoteNativeMatching {
+    fn query_workflow(
+        &self,
+        request: n::matching::QueryWorkflowRequest,
+        deadline: tokio::time::Instant,
+    ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+        let channel = self.0.clone();
+        Box::pin(async move {
+            MatchingApiClient::new(channel).query_workflow(remote(request, deadline)).await
+                .map(tonic::Response::into_inner)
+                .map_err(crate::matching_query_native::NativeQueryError::Status)
+        })
+    }
+}
+
 fn remote<T>(message: T, deadline: tokio::time::Instant) -> Request<T> {
     let mut request = timed(message, deadline);
     crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
@@ -184,6 +214,7 @@ mod tests {
         headers: CapturedHeaders,
         added: Arc<Mutex<Option<m::AddDecisionTaskRequest>>>,
         polled: Arc<Mutex<Option<m::PollForDecisionTaskRequest>>>,
+        queried: Arc<Mutex<Option<m::QueryWorkflowRequest>>>,
     }
     impl Peer {
         fn note<T>(&self, op: &str, request: &Request<T>) {
@@ -226,6 +257,20 @@ mod tests {
                     *self.added.lock().unwrap() = Some(request.into_inner());
                     Ok(tonic::Response::new(Default::default()))
                 }
+                async fn query_workflow(&self, request: Request<m::QueryWorkflowRequest>) -> Result<tonic::Response<m::QueryWorkflowResponse>, Status> {
+                    self.note("query", &request);
+                    let request = request.into_inner();
+                    let forwarded_from = request.forwarded_from.clone();
+                    *self.queried.lock().unwrap() = Some(request);
+                    if forwarded_from.as_bytes() == b"busy" {
+                        return Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted,
+                            "busy", "ServiceBusyError", cadence_proto::api::ServiceBusyError::default()));
+                    }
+                    Ok(tonic::Response::new(m::QueryWorkflowResponse {
+                        query_result: Some(api::Payload { data: vec![0xff, 0xfe] }),
+                        ..Default::default()
+                    }))
+                }
                 $(async fn $method(&self, _request: Request<m::$request>) -> Result<tonic::Response<m::$response>, Status> {
                     Ok(tonic::Response::new(Default::default()))
                 })*
@@ -234,7 +279,6 @@ mod tests {
     }
     peer_service! {
         add_activity_task: AddActivityTaskRequest => AddActivityTaskResponse,
-        query_workflow: QueryWorkflowRequest => QueryWorkflowResponse,
         respond_query_task_completed: RespondQueryTaskCompletedRequest => RespondQueryTaskCompletedResponse,
         cancel_outstanding_poll: CancelOutstandingPollRequest => CancelOutstandingPollResponse,
         describe_task_list: DescribeTaskListRequest => DescribeTaskListResponse,
@@ -317,9 +361,32 @@ mod tests {
                 &[0xe1, 0x80, 0xff]
             );
 
+            let query = m::QueryWorkflowRequest {
+                domain_id: vec![0xff].into(),
+                task_list: Some(api::TaskList { name: vec![0xfe].into(), ..Default::default() }),
+                forwarded_from: vec![0xfd, 0].into(),
+                request: Some(api::QueryWorkflowRequest {
+                    workflow_execution: Some(api::WorkflowExecution {
+                        workflow_id: vec![0xff, 0].into(), run_id: vec![0xfe].into(),
+                    }),
+                    ..Default::default()
+                }),
+            };
+            let reply = crate::matching_engine_native::NativeQueryParent::query_workflow(
+                &adapter, query.clone(), deadline()).await.unwrap();
+            assert_eq!(peer.queried.lock().unwrap().as_ref(), Some(&query));
+            assert_eq!(reply.query_result.unwrap().data, vec![0xff, 0xfe]);
+            let busy = crate::matching_engine_native::NativeQueryParent::query_workflow(
+                &adapter, m::QueryWorkflowRequest { forwarded_from: "busy".into(), ..Default::default() },
+                deadline()).await.unwrap_err();
+            let crate::matching_query_native::NativeQueryError::Status(busy) = busy else {
+                panic!("remote typed status must remain a status")
+            };
+            assert!(crate::matching_query::query_forward_slow_down(&busy));
+
             {
                 let seen = peer.headers.lock().unwrap();
-                assert_eq!(seen.len(), 2);
+                assert_eq!(seen.len(), 4);
                 for (_, headers) in seen.iter() {
                     assert_eq!(
                         header(headers, "rpc-service"),

@@ -341,25 +341,27 @@ impl QueryChannel {
                     let changed = self.notify.notified();
                     tokio::pin!(changed);
                     changed.as_mut().enable();
-                    let mut pending = self.pending.lock().expect("matching query lock");
-                    if pending.pollers > 0 {
-                        drop(pending);
-                        tokio::select! {
+                    let forward_now = {
+                        let mut pending = self.pending.lock().expect("matching query lock");
+                        if pending.pollers > 0 {
+                            None
+                        } else if let Some(pos) = pending.offers.iter().position(|(offer_id, _, _)| *offer_id == id) {
+                            // Removal and acceptance are serialized by this lock.
+                            pending.offers.remove(pos);
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    };
+                    match forward_now {
+                        None => tokio::select! {
                             biased;
                             _ = &mut accepted => return OfferResult::Matched,
                             _ = &mut changed => continue,
-                        }
+                        },
+                        Some(true) => { drop(guard); return OfferResult::Forward(permit); }
+                        Some(false) => return OfferResult::Matched,
                     }
-                    // Removal and acceptance are serialized by this lock. If
-                    // next already took the offer, its completion must win.
-                    if let Some(pos) = pending.offers.iter().position(|(offer_id, _, _)| *offer_id == id) {
-                        pending.offers.remove(pos);
-                        drop(pending);
-                        drop(guard);
-                        return OfferResult::Forward(permit);
-                    }
-                    drop(pending);
-                    return OfferResult::Matched;
                 }
             }
         }

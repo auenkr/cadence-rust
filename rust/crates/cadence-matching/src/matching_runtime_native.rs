@@ -95,7 +95,7 @@ pub fn native_queue_registry(
     let writer_live = {
         let cache = cache.clone();
         let overlay = overlay.clone();
-        Arc::new(move |domain, task, task_type| {
+        Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
             let config = overlay.lock().expect("admin lock");
             let name = cached_domain_name(&cache, domain);
             let batch = cadence_persistence::dynamic_config::task_list_integer_bytes(

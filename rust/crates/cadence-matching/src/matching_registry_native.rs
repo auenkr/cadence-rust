@@ -950,7 +950,7 @@ impl NativeQueueRegistry {
         response
     }
 
-    fn check_task_list_ownership(&self, name: &GoString, cached: bool) -> Result<(), Status> {
+    pub(crate) fn check_task_list_ownership(&self, name: &GoString, cached: bool) -> Result<(), Status> {
         let policy = self
             .ownership_policy
             .read()

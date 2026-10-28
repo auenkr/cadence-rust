@@ -4,6 +4,9 @@
 use std::borrow::Borrow;
 use std::str::Utf8Error;
 
+#[path = "go_isprint_tables.rs"]
+mod go_isprint_tables;
+
 /// Lossless representation for Go `string` values on Matching's Thrift path.
 ///
 /// Equality, ordering and hashing operate on the original bytes. In particular,
@@ -37,6 +40,27 @@ impl GoString {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Go `strconv.Quote` / fmt `%q`: invalid bytes are escaped individually
+    /// as `\xNN`, while printable valid Unicode remains literal.
+    pub fn go_quoted_string(&self) -> String {
+        let mut out = String::from("\"");
+        let mut rest = self.as_bytes();
+        while !rest.is_empty() {
+            match std::str::from_utf8(rest) {
+                Ok(text) => { push_quoted_text(&mut out, text); break; }
+                Err(error) => {
+                    let (valid, tail) = rest.split_at(error.valid_up_to());
+                    push_quoted_text(&mut out, std::str::from_utf8(valid).unwrap());
+                    let invalid = error.error_len().unwrap_or(tail.len());
+                    for byte in &tail[..invalid] { out.push_str(&format!("\\x{byte:02x}")); }
+                    rest = &tail[invalid..];
+                }
+            }
+        }
+        out.push('"');
+        out
     }
 
     /// Quote these bytes as a Go `encoding/json` string value.
@@ -75,6 +99,47 @@ impl GoString {
         out.push('"');
         out
     }
+}
+
+fn push_quoted_text(out: &mut String, text: &str) {
+    for ch in text.chars() {
+        match ch {
+            '\u{0007}' => out.push_str("\\a"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{000b}' => out.push_str("\\v"),
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if !go_is_print(c) => {
+                let value = c as u32;
+                if value < 0x20 || value == 0x7f { out.push_str(&format!("\\x{value:02x}")); }
+                else if value < 0x10000 { out.push_str(&format!("\\u{value:04x}")); }
+                else { out.push_str(&format!("\\U{value:08x}")); }
+            }
+            c => out.push(c),
+        }
+    }
+}
+
+fn go_is_print(ch: char) -> bool {
+    use go_isprint_tables::*;
+    let value = ch as u32;
+    if value <= 0xff {
+        return (0x20..=0x7e).contains(&value) || ((0xa1..=0xff).contains(&value) && value != 0xad);
+    }
+    if value < 0x10000 {
+        in_ranges(PRINT16, value) && NOT_PRINT16.binary_search(&(value as u16)).is_err()
+    } else {
+        in_ranges(PRINT32, value) && (value >= 0x20000 || NOT_PRINT32.binary_search(&((value - 0x10000) as u16)).is_err())
+    }
+}
+
+fn in_ranges<T: Copy + Ord + Into<u32>>(ranges: &[T], value: u32) -> bool {
+    let i = ranges.partition_point(|range| (*range).into() < value);
+    i < ranges.len() && (i % 2 == 1 || value == ranges[i].into())
 }
 
 fn push_go_json_char(out: &mut String, ch: char) {
@@ -142,6 +207,14 @@ impl Borrow<[u8]> for GoString {
 mod tests {
     use super::GoString;
     use std::collections::{BTreeSet, HashMap};
+
+    #[test]
+    fn go_quotes_preserve_invalid_bytes_and_go_printable_ranges() {
+        assert_eq!(GoString::from(&b"\xff\xe2\x82\0\n\"\\"[..]).go_quoted_string(),
+            "\"\\xff\\xe2\\x82\\x00\\n\\\"\\\\\"");
+        assert_eq!(GoString::from("�\u{037a}\u{09d7}").go_quoted_string(), "\"�\u{037a}\u{09d7}\"");
+        assert_eq!(GoString::from("\u{0085}\u{0378}").go_quoted_string(), "\"\\u0085\\u0378\"");
+    }
 
     fn check_json(bytes: &[u8], expected: &str) {
         assert_eq!(GoString::from(bytes).go_json_string(), expected);

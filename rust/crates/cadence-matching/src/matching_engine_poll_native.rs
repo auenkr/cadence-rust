@@ -342,7 +342,8 @@ mod tests {
                 tokio::time::Instant::now() + std::time::Duration::from_secs(5),
                 &task_cancel,
                 lookup,
-            ).await
+            )
+            .await
         });
         started_rx.await.unwrap();
         // The poll has committed the query and entered its state lookup.

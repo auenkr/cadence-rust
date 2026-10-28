@@ -240,6 +240,9 @@ jobs:
             crates/cadence-matching/src/matching_transport_native.rs
             crates/cadence-matching/src/matching_runtime_native.rs
             crates/cadence-matching/src/matching_service_native.rs
+            crates/cadence-matching/src/matching_control_context_native.rs
+            crates/cadence-matching/src/matching_semaphore_native.rs
+            crates/cadence-common/src/semaphore_bytes.rs
             crates/cadence-matching/src/matching_shard_routing.rs
             crates/cadence-matching/src/matching_shard_distributor.rs
             crates/cadence-matching/src/matching_persistence_native.rs

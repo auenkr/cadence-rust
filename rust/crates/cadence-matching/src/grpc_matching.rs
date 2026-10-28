@@ -437,7 +437,9 @@ impl Matching {
         self
     }
 
-    pub(crate) fn native_service(&self) -> Option<&Arc<dyn cadence_proto::native::NativeMatchingApi>> {
+    pub(crate) fn native_service(
+        &self,
+    ) -> Option<&Arc<dyn cadence_proto::native::NativeMatchingApi>> {
         self.native_service.as_ref()
     }
     /// Test-only: returns the injected engine error for `rpc`, mirroring a Go engine
@@ -4169,7 +4171,8 @@ async fn serve_with_listener_tls_inner(
         server.add_service(crate::matching_native_status::RawStatusService::new(
             cadence_proto::native_service::matching_api_server::MatchingApiServer::new(
                 crate::matching_transport_native::SharedNativeMatching(native),
-            ).max_decoding_message_size(limit),
+            )
+            .max_decoding_message_size(limit),
         ))
     } else {
         server.add_service(
