@@ -76,6 +76,19 @@ pub trait ShardOwnerLookup: Send + Sync + 'static {
         shard_key: String,
         deadline: Instant,
     ) -> BoxFuture<Result<ShardOwner, String>>;
+
+    /// Existing implementations remain source-compatible; raw-capable lookups
+    /// override this method instead of converting keys through UTF-8.
+    fn get_shard_owner_bytes(
+        &self,
+        shard_key: Vec<u8>,
+        deadline: Instant,
+    ) -> BoxFuture<Result<ShardOwner, String>> {
+        match String::from_utf8(shard_key) {
+            Ok(key) => self.get_shard_owner(key, deadline),
+            Err(_) => Box::pin(async { Err("lookup does not support raw shard keys".into()) }),
+        }
+    }
 }
 
 impl ShardOwnerLookup for TonicSpectator {
@@ -86,6 +99,15 @@ impl ShardOwnerLookup for TonicSpectator {
     ) -> BoxFuture<Result<ShardOwner, String>> {
         let spectator = self.clone();
         Box::pin(async move { spectator.get_shard_owner(&shard_key, deadline).await })
+    }
+
+    fn get_shard_owner_bytes(
+        &self,
+        shard_key: Vec<u8>,
+        deadline: Instant,
+    ) -> BoxFuture<Result<ShardOwner, String>> {
+        let spectator = self.clone();
+        Box::pin(async move { spectator.get_shard_owner_bytes(&shard_key, deadline).await })
     }
 }
 
@@ -176,10 +198,17 @@ impl MatchingShardRouter {
         &self,
         task_list_name: &str,
     ) -> Result<(ResolvedHost, RoutingPath), RoutingError> {
+        self.resolve_bytes(task_list_name.as_bytes()).await
+    }
+
+    pub async fn resolve_bytes(
+        &self,
+        task_list_name: &[u8],
+    ) -> Result<(ResolvedHost, RoutingPath), RoutingError> {
         let percentage = (self.percentage_onboarded)();
         self.ring.record_onboarding(percentage);
         let percentage = percentage as u64;
-        let excluded = task_list_excluded_from_shard_distributor(
+        let excluded = task_list_excluded_from_shard_distributor_bytes(
             task_list_name,
             percentage,
             (self.exclude_short_lived_task_lists)(),
@@ -191,7 +220,7 @@ impl MatchingShardRouter {
         self.ring.record_routing_path("shard_distributor");
         let deadline = Instant::now() + SHARD_DISTRIBUTOR_LOOKUP_TIMEOUT;
         let owner = spectator
-            .get_shard_owner(task_list_name.to_owned(), deadline)
+            .get_shard_owner_bytes(task_list_name.to_vec(), deadline)
             .await
             .map_err(RoutingError::ShardDistributor)?;
         Ok((
@@ -215,6 +244,26 @@ impl MatchingShardRouter {
         }
         Ok((
             hosts.into_iter().map(resolved_from_ring_host).collect(),
+            RoutingPath::HashRing,
+        ))
+    }
+
+    /// Ring-only lookup for arbitrary Go string bytes. Membership currently
+    /// exposes no multi-owner byte method, so rebuild from its atomic snapshot.
+    pub fn resolve_n_bytes(
+        &self,
+        task_list_name: &[u8],
+        count: usize,
+    ) -> Result<(Vec<ResolvedHost>, RoutingPath), RoutingError> {
+        let ring = cadence_common::membership::Ring::new(self.ring.hosts());
+        let hosts = ring.lookup_n_bytes(task_list_name, count);
+        if hosts.is_empty() {
+            return Err(RoutingError::RingUnavailable(
+                "Not enough hosts to serve the request".into(),
+            ));
+        }
+        Ok((
+            hosts.into_iter().cloned().map(resolved_from_ring_host).collect(),
             RoutingPath::HashRing,
         ))
     }
@@ -248,7 +297,14 @@ impl MatchingShardRouter {
         &self,
         task_list_name: &str,
     ) -> Result<(Option<tonic::transport::Channel>, RoutingPath), RoutingError> {
-        let (owner, path) = self.resolve(task_list_name).await?;
+        self.remote_channel_bytes(task_list_name.as_bytes()).await
+    }
+
+    pub async fn remote_channel_bytes(
+        &self,
+        task_list_name: &[u8],
+    ) -> Result<(Option<tonic::transport::Channel>, RoutingPath), RoutingError> {
+        let (owner, path) = self.resolve_bytes(task_list_name).await?;
         let channel = match path {
             RoutingPath::HashRing => self
                 .ring
@@ -289,12 +345,12 @@ impl MatchingShardRouter {
 
     fn resolve_from_ring(
         &self,
-        task_list_name: &str,
+        task_list_name: &[u8],
     ) -> Result<(ResolvedHost, RoutingPath), RoutingError> {
         self.ring.record_routing_path("hash_ring");
         let host = self
             .ring
-            .owner(task_list_name)
+            .owner_bytes(task_list_name)
             .map_err(|error| RoutingError::RingUnavailable(error.message().to_owned()))?;
         Ok((resolved_from_ring_host(host), RoutingPath::HashRing))
     }
@@ -316,13 +372,23 @@ pub fn task_list_excluded_from_shard_distributor(
     percentage_onboarded: u64,
     exclude_short_lived_task_lists: bool,
 ) -> bool {
+    task_list_excluded_from_shard_distributor_bytes(
+        task_list_name.as_bytes(), percentage_onboarded, exclude_short_lived_task_lists,
+    )
+}
+
+#[must_use]
+pub fn task_list_excluded_from_shard_distributor_bytes(
+    task_list_name: &[u8],
+    percentage_onboarded: u64,
+    exclude_short_lived_task_lists: bool,
+) -> bool {
     (exclude_short_lived_task_lists && contains_uuid(task_list_name))
-        || cadence_common::membership::fingerprint64(task_list_name.as_bytes()) % 100
+        || cadence_common::membership::fingerprint64(task_list_name) % 100
             >= percentage_onboarded
 }
 
-fn contains_uuid(value: &str) -> bool {
-    let bytes = value.as_bytes();
+fn contains_uuid(bytes: &[u8]) -> bool {
     bytes.windows(36).any(|candidate| {
         [8, 13, 18, 23]
             .iter()
@@ -512,6 +578,30 @@ mod tests {
             100,
             false
         ));
+    }
+
+    #[tokio::test]
+    async fn raw_keys_follow_policy_and_reach_the_spectator_unchanged() {
+        struct RawLookup(Arc<Mutex<Vec<Vec<u8>>>>);
+        impl ShardOwnerLookup for RawLookup {
+            fn get_shard_owner(&self, key: String, deadline: Instant) -> BoxFuture<Result<ShardOwner, String>> {
+                self.get_shard_owner_bytes(key.into_bytes(), deadline)
+            }
+            fn get_shard_owner_bytes(&self, key: Vec<u8>, _deadline: Instant) -> BoxFuture<Result<ShardOwner, String>> {
+                self.0.lock().unwrap().push(key);
+                Box::pin(async { Ok(shard_owner(&[(HOST_IP, "127.0.0.1")])) })
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let router = MatchingShardRouter::new(ring(), Some(Arc::new(RawLookup(seen.clone()))),
+            Arc::new(|| 100), Arc::new(|| true));
+        let raw = b"\xffqueue\0";
+        assert_eq!(router.resolve_bytes(raw).await.unwrap().1, RoutingPath::ShardDistributor);
+        assert_eq!(router.resolve("utf8").await.unwrap().1, RoutingPath::ShardDistributor);
+        assert_eq!(*seen.lock().unwrap(), vec![raw.to_vec(), b"utf8".to_vec()]);
+        assert_eq!(router.resolve_bytes(b"\xff550e8400-e29b-41d4-a716-446655440000").await.unwrap().1, RoutingPath::HashRing);
+        assert_eq!(router.resolve_n_bytes(raw, 1).unwrap().0[0].identity, "ring-owner");
+        assert_eq!(router.resolve_n("utf8", 1).unwrap(), router.resolve_n_bytes(b"utf8", 1).unwrap());
     }
 
     #[tokio::test]

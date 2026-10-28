@@ -32,10 +32,7 @@ use crate::{
     matching_sync_native::NativeSyncMatcher,
     matching_writer_native::{NativeFatalSink, NativeTaskWriter},
 };
-use cadence_common::{
-    go_string::GoString,
-    task_list::TaskListNameBytes,
-};
+use cadence_common::{go_string::GoString, task_list::TaskListNameBytes};
 use cadence_persistence::{
     matching_blob::TaskDataBytes,
     matching_native_queue::{DurableTaskQueueBytes, NativeQueueError, PendingTaskBytes},
@@ -267,9 +264,7 @@ impl Owner {
 }
 /// Go's task list Stop logs and ignores a final-update failure. Losing the
 /// lease to a peer (ConditionFailed) during shutdown is expected, not fatal.
-fn tolerate_lost_ownership(
-    result: Result<(), NativeQueueError>,
-) -> Result<(), NativeQueueError> {
+fn tolerate_lost_ownership(result: Result<(), NativeQueueError>) -> Result<(), NativeQueueError> {
     match result {
         Err(NativeQueueError::Storage(StoreError::ConditionFailed { message })) => {
             eprintln!(
@@ -1155,9 +1150,7 @@ impl NativeQueueRegistry {
                         }
                     }
                 }
-            } else if let Some(root) = state
-                .owners
-                .get(&(lookup.0, name.root().clone(), lookup.2))
+            } else if let Some(root) = state.owners.get(&(lookup.0, name.root().clone(), lookup.2))
             {
                 if let Some(config) = root.partitions.get() {
                     owner.partitions.push(&config);
@@ -1176,8 +1169,7 @@ impl NativeQueueRegistry {
                     let notifier = registry.clone();
                     let root_name = parsed.root().clone();
                     let read_partitions = config.read_partitions.keys().copied().collect();
-                    let deadline =
-                        tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+                    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
                     let domain_id = key.domain_id;
                     let task_type = key.task_type;
                     tokio::spawn(async move {
@@ -1289,17 +1281,19 @@ impl NativeQueueRegistry {
             let name = lookup.1.clone();
             let task_type = lookup.2;
             queue.set_gc_batch_size_provider(Arc::new(move || {
-                provider.as_ref().map_or(100, |p| p(&domain, &name, task_type))
+                provider
+                    .as_ref()
+                    .map_or(100, |p| p(&domain, &name, task_type))
             }));
         }
-        let partitions = match NativePartitionCache::load(registry.store.as_ref(), &queue, key, kind)
-        {
-            Ok(cache) => Arc::new(cache),
-            Err(error) => {
-                queue.stop();
-                return Err(error.to_native_status());
-            }
-        };
+        let partitions =
+            match NativePartitionCache::load(registry.store.as_ref(), &queue, key, kind) {
+                Ok(cache) => Arc::new(cache),
+                Err(error) => {
+                    queue.stop();
+                    return Err(error.to_native_status());
+                }
+            };
         let count_partitions: crate::matching_limiter::PartitionCount = {
             let provider = registry.partition_count.clone();
             let enabled = registry.cache_enabled.clone();
@@ -1308,8 +1302,8 @@ impl NativeQueueRegistry {
             let task_list = key.name.clone();
             let task_type = key.task_type;
             Arc::new(move || {
-                let root = TaskListNameBytes::parse(task_list.as_bytes())
-                    .expect("validated queue name");
+                let root =
+                    TaskListNameBytes::parse(task_list.as_bytes()).expect("validated queue name");
                 if enabled
                     .as_ref()
                     .is_some_and(|enabled| enabled(&domain, root.root(), task_type))
@@ -1483,7 +1477,13 @@ impl NativeQueueRegistry {
                     let domain = forward_domain.clone();
                     Box::pin(async move {
                         forward_state
-                            .forward_backlog_task(task, &domain, &domain, forward_task_type, forward_kind)
+                            .forward_backlog_task(
+                                task,
+                                &domain,
+                                &domain,
+                                forward_task_type,
+                                forward_kind,
+                            )
                             .await
                     })
                 }),
@@ -1510,7 +1510,10 @@ impl NativeQueueRegistry {
             limiter.clone(),
             isolation,
             dispatch_check,
-            Some((registry.metrics.clone(), registry.metric_context(lookup, kind))),
+            Some((
+                registry.metrics.clone(),
+                registry.metric_context(lookup, kind),
+            )),
             backlog_forward,
             reader_fatal,
         );
@@ -1582,7 +1585,13 @@ impl NativeQueueRegistry {
         let child = lookup.1.clone();
         let task_type = lookup.2;
         let domain_id = lookup.0;
-        let degree = Self::scoped_count(&self.forward_degree, domain.clone(), child.clone(), task_type, 20);
+        let degree = Self::scoped_count(
+            &self.forward_degree,
+            domain.clone(),
+            child.clone(),
+            task_type,
+            20,
+        );
         // Owners live in registry.state; retaining that same Arc here would
         // form an owner/registry cycle.
         let (detached, weak) = self.detached();
@@ -1595,7 +1604,9 @@ impl NativeQueueRegistry {
                 let degree = degree();
                 Box::pin(async move {
                     resolve_registry.state = live?;
-                    let parent = TaskListNameBytes::parse(child.as_bytes()).ok()?.parent(degree);
+                    let parent = TaskListNameBytes::parse(child.as_bytes())
+                        .ok()?
+                        .parent(degree);
                     if parent.is_empty() {
                         return None;
                     }
@@ -1609,7 +1620,10 @@ impl NativeQueueRegistry {
                         .map(|dispatcher| (dispatcher, parent))
                 })
                     as std::pin::Pin<
-                        Box<dyn std::future::Future<Output = Option<(NativeParent, GoString)>> + Send>,
+                        Box<
+                            dyn std::future::Future<Output = Option<(NativeParent, GoString)>>
+                                + Send,
+                        >,
                     >
             },
             max_outstanding,
@@ -2168,14 +2182,13 @@ async fn resolve_parent_dispatcher(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_persistence::{
-        matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore,
-    };
+    use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
 
     fn fixture() -> (tempfile::TempDir, NativeQueueRegistry) {
         let dir = tempfile::tempdir().unwrap();
-        let store =
-            Arc::new(SqliteTaskStore::create(dir.path().join("t.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(dir.path().join("t.db"), BlobEncoding::ThriftRW).unwrap(),
+        );
         let history = MatchingHistoryClient::new(
             tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
             Duration::from_secs(1),

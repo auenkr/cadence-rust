@@ -36,7 +36,9 @@ pub type MatchingFatalSender = tokio::sync::mpsc::UnboundedSender<MatchingFatal>
 /// Route both native actor fatal causes through the launcher's single host
 /// shutdown channel. Sending happens in the actor's callback before it releases
 /// its completion guard or replies to the failed write.
-pub fn native_fatal_sinks(sender: MatchingFatalSender) -> crate::matching_registry_native::NativeFatalSinks {
+pub fn native_fatal_sinks(
+    sender: MatchingFatalSender,
+) -> crate::matching_registry_native::NativeFatalSinks {
     let writer = sender.clone();
     crate::matching_registry_native::NativeFatalSinks {
         writer: Some(std::sync::Arc::new(move |cause| {
@@ -57,13 +59,18 @@ mod native_tests {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let sinks = native_fatal_sinks(sender);
         let raw = cadence_common::go_string::GoString::from(&b"\xff\x00\xfe"[..]);
-        sinks.writer.unwrap()(SqlRunIdBytesError { raw: raw.clone(), message: "bad UUID".into() });
+        sinks.writer.unwrap()(SqlRunIdBytesError {
+            raw: raw.clone(),
+            message: "bad UUID".into(),
+        });
         match receiver.try_recv().unwrap() {
             MatchingFatal::SqlRunIdBytes(cause) => assert_eq!(cause.raw, raw),
             cause => panic!("unexpected fatal cause: {cause:?}"),
         }
         sinks.reader.unwrap()("duplicate task ID".into());
-        assert!(matches!(receiver.try_recv().unwrap(), MatchingFatal::ReaderInvariant(detail) if detail == "duplicate task ID"));
+        assert!(
+            matches!(receiver.try_recv().unwrap(), MatchingFatal::ReaderInvariant(detail) if detail == "duplicate task ID")
+        );
     }
 }
 

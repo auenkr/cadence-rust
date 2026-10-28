@@ -19,6 +19,9 @@ use crate::matching_registry_native::NativeQueueRegistry;
 #[path = "matching_engine_poll_native.rs"]
 mod poll;
 pub use poll::{NativePollContext, NativePollRegistration};
+#[path = "matching_engine_query_native.rs"]
+mod query;
+pub use query::{NativeQueryContext, NativeQueryParent};
 
 /// Shared state for the native engine. Domain, admission, ownership and
 /// configuration boundaries still need to be supplied before RPCs can run.
@@ -64,8 +67,8 @@ fn response_config(handle: &NativeQueueHandle) -> Option<matching::TaskListParti
 
 // The two RPCs share the queue algorithm but retain their distinct wire fields.
 enum AddRequest {
-    Decision(matching::AddDecisionTaskRequest),
-    Activity(matching::AddActivityTaskRequest),
+    Decision(Box<matching::AddDecisionTaskRequest>),
+    Activity(Box<matching::AddActivityTaskRequest>),
 }
 
 impl NativeMatchingEngine {
@@ -76,7 +79,7 @@ impl NativeMatchingEngine {
         request_deadline: Option<tokio::time::Instant>,
         context: &dyn DecisionAddContext,
     ) -> Result<matching::AddDecisionTaskResponse, Status> {
-        let partition_config = self.add_task(AddRequest::Decision(request), request_deadline, context).await?;
+        let partition_config = self.add_task(AddRequest::Decision(Box::new(request)), request_deadline, context).await?;
         Ok(matching::AddDecisionTaskResponse { partition_config })
     }
 
@@ -87,7 +90,7 @@ impl NativeMatchingEngine {
         request_deadline: Option<tokio::time::Instant>,
         context: &dyn DecisionAddContext,
     ) -> Result<matching::AddActivityTaskResponse, Status> {
-        let partition_config = self.add_task(AddRequest::Activity(request), request_deadline, context).await?;
+        let partition_config = self.add_task(AddRequest::Activity(Box::new(request)), request_deadline, context).await?;
         Ok(matching::AddActivityTaskResponse { partition_config })
     }
 
@@ -180,14 +183,14 @@ impl NativeMatchingEngine {
                 if let Some(remote) = context.remote_parent(parent.clone()).await? {
                     let result = match &request {
                         AddRequest::Decision(r) => {
-                            let mut next = r.clone();
+                            let mut next = r.as_ref().clone();
                             next.domain_id = source.clone();
                             next.task_list = Some(current.clone());
                             next.forwarded_from = previous;
                             remote.add_decision_task(next, deadline).await
                         }
                         AddRequest::Activity(r) => {
-                            let mut next = r.clone();
+                            let mut next = r.as_ref().clone();
                             next.source_domain_id = source.clone();
                             next.task_list = Some(current.clone());
                             next.forwarded_from = previous;
@@ -325,8 +328,8 @@ mod tests {
         engine.add_activity_task(request, None, &InactiveSource(source)).await.unwrap();
         let target_key = TaskListKeyBytes { domain_id: target, name, task_type: 1 };
         let source_key = TaskListKeyBytes { domain_id: source, ..target_key.clone() };
-        assert!(store.get_tasks(&target_key, 0, i64::MAX, 10).unwrap().is_empty());
-        let rows = store.get_tasks(&source_key, 0, i64::MAX, 10).unwrap();
+        assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &target_key, 0, i64::MAX, 10).unwrap().is_empty());
+        let rows = MatchingTaskStoreBytes::get_tasks(store.as_ref(), &source_key, 0, i64::MAX, 10).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].data.workflow_id.as_bytes(), &[0xff, 0]);
         assert_eq!(rows[0].data.run_id_bytes(), run.to_string().as_bytes());
@@ -354,7 +357,7 @@ mod tests {
         assert_eq!(error.code(), tonic::Code::Unavailable);
         for domain_id in [target, source] {
             let key = TaskListKeyBytes { domain_id, name: name.clone(), task_type: 1 };
-            assert!(store.get_tasks(&key, 0, i64::MAX, 10).unwrap().is_empty());
+            assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
         }
         engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
     }
@@ -413,7 +416,7 @@ mod tests {
         assert_eq!(execution.run_id.as_bytes(), &[0xfe]);
         assert_eq!(sent.partition_config.get(&GoString::from(&b"\xff"[..])).unwrap().as_bytes(), &[0xfe]);
         let key = TaskListKeyBytes { domain_id: target, name, task_type: 1 };
-        assert!(store.get_tasks(&key, 0, i64::MAX, 10).unwrap().is_empty());
+        assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
         engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
     }
 
@@ -441,7 +444,7 @@ mod tests {
         let error = engine.add_decision_task(request, None, &RoutingFailure).await.unwrap_err();
         assert_eq!(error.message(), "routing failed");
         let key = TaskListKeyBytes { domain_id: domain, name, task_type: 0 };
-        assert!(store.get_tasks(&key, 0, i64::MAX, 10).unwrap().is_empty());
+        assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
         engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
     }
 
