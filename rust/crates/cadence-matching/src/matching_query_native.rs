@@ -140,7 +140,9 @@ struct PendingState {
     pollers: usize,
 }
 
-/// Result of racing a local handoff with a forwarding permit.
+/// Result of racing a local handoff with a forwarding permit. `offer_or_forward`
+/// holds a ready permit while a decision poll's `next()` remains registered,
+/// letting the poll's biased outer select commit the local handoff first.
 pub enum OfferResult<T> {
     Matched,
     Forward(T),
@@ -331,17 +333,33 @@ impl QueryChannel {
             biased;
             _ = &mut accepted => OfferResult::Matched,
             permit = &mut forward => {
-                // Removal and acceptance are serialized by the same lock. If
-                // next already took the offer, its completion must win.
-                let mut pending = self.pending.lock().expect("matching query lock");
-                if let Some(pos) = pending.offers.iter().position(|(offer_id, _, _)| *offer_id == id) {
-                    pending.offers.remove(pos);
+                // Go first attempts a nonblocking local send. A `next()`
+                // already parked in the decision poll's outer select is the
+                // equivalent of a ready local send, so hold a ready token
+                // until that select commits the query or withdraws the poll.
+                loop {
+                    let changed = self.notify.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    let mut pending = self.pending.lock().expect("matching query lock");
+                    if pending.pollers > 0 {
+                        drop(pending);
+                        tokio::select! {
+                            biased;
+                            _ = &mut accepted => return OfferResult::Matched,
+                            _ = &mut changed => continue,
+                        }
+                    }
+                    // Removal and acceptance are serialized by this lock. If
+                    // next already took the offer, its completion must win.
+                    if let Some(pos) = pending.offers.iter().position(|(offer_id, _, _)| *offer_id == id) {
+                        pending.offers.remove(pos);
+                        drop(pending);
+                        drop(guard);
+                        return OfferResult::Forward(permit);
+                    }
                     drop(pending);
-                    drop(guard);
-                    OfferResult::Forward(permit)
-                } else {
-                    drop(pending);
-                    OfferResult::Matched
+                    return OfferResult::Matched;
                 }
             }
         }
@@ -357,7 +375,10 @@ impl QueryChannel {
         struct Waiter<'a>(&'a QueryChannel);
         impl Drop for Waiter<'_> {
             fn drop(&mut self) {
-                self.0.pending.lock().expect("matching query lock").pollers -= 1;
+                let mut pending = self.0.pending.lock().expect("matching query lock");
+                pending.pollers -= 1;
+                drop(pending);
+                self.0.notify.notify_waiters();
             }
         }
         self.pending.lock().expect("matching query lock").pollers += 1;
@@ -588,6 +609,40 @@ mod tests {
 
     fn poll<F: std::future::Future>(f: std::pin::Pin<&mut F>) -> std::task::Poll<F::Output> {
         f.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+    }
+
+    #[test]
+    fn waiting_poll_commits_before_ready_forward_token() {
+        let channel = QueryChannel::new();
+        let mut next = Box::pin(channel.next());
+        assert!(poll(next.as_mut()).is_pending());
+        let mut offer = Box::pin(channel.offer_or_forward(
+            query(GoString::from(&b"q-\xff"[..])),
+            std::future::ready(()),
+        ));
+        assert!(poll(offer.as_mut()).is_pending());
+        let delivered = match poll(next.as_mut()) {
+            std::task::Poll::Ready(query) => query,
+            std::task::Poll::Pending => panic!("published offer must wake waiting poll"),
+        };
+        assert_eq!(delivered.task_id.as_bytes(), b"q-\xff");
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Matched)));
+    }
+
+    #[test]
+    fn cancelled_waiting_poll_releases_ready_forward_token() {
+        let channel = QueryChannel::new();
+        let mut next = Box::pin(channel.next());
+        assert!(poll(next.as_mut()).is_pending());
+        let mut offer = Box::pin(channel.offer_or_forward(
+            query(GoString::from(&b"q-\xfe"[..])),
+            std::future::ready(()),
+        ));
+        assert!(poll(offer.as_mut()).is_pending());
+        drop(next);
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Forward(()))));
+        drop(offer);
+        assert!(channel.pending.lock().unwrap().offers.is_empty());
     }
 
     #[tokio::test]
