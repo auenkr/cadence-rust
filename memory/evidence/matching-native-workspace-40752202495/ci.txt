@@ -1,0 +1,5 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40752202495
+Head: b5a98954546980095f1be1ba2ad7230af9af33fc
+Conclusion: failure
+Clippy exit101: type_complexity on metric domain-name provider; tests did not run
+Original-Go UUID oracle: exit0

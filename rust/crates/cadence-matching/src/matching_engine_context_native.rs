@@ -39,9 +39,11 @@ pub fn metrics_poll_observer_factory(
     )
 }
 
+type MetricDomainNameProvider = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 fn metrics_poll_observer_factory_with_names(
     metrics: crate::matching_metrics::MatchingMetrics,
-    names: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    names: MetricDomainNameProvider,
 ) -> PollObserverFactory {
     Arc::new(
         move |domain, list, task_type, task_list_kind, isolation_group| {

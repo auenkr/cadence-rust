@@ -196,3 +196,12 @@ The b5a run's original-Go UUID oracle passed (downloaded under
 `/mnt/storage/service/ci-evidence/matching-native-uuid-40752202495`). Its
 824-byte formatting patch wraps one assertion and is now applied. No workspace
 or new logging pass is claimed yet.
+
+
+Run40752202495 concluded **failure** at source
+`b5a98954546980095f1be1ba2ad7230af9af33fc`: Clippy type_complexity on the
+new raw metric factory's UTF8 domain-name closure type. Tests did not run;
+therefore the eight fixture fixes still await execution. Added a named
+MetricDomainNameProvider alias, without changing the lookup. Compact Clippy
+failure and passing original-Go UUID oracle evidence are retained in
+`memory/evidence/matching-native-workspace-40752202495/`.
