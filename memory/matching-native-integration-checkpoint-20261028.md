@@ -8,7 +8,7 @@ Latest CI https://github.com/auenkr/cadence-rust/actions/runs/40618333905 conclu
 
 Verified earlier evidence remains: five-crate fresh-target clippy/tests passed at ce9f4d361ffcd8439c8c0439130feb4e6c5f0a37 (run 40616227973); the five-call real Go TChannel History peer and ten PostgreSQL TLS cases passed at 858db89d566e3131071f6aaa20e481c2c7f4fd2c (run 40616972759). Those passes do not cover later changes.
 
-Latest worker preference is **Codex only**. Cancelled the prior Claude delivery-pipeline task c5966db0-2061-49a1-99a3-be45c63229be; cancellation returned interrupted. No pipeline test files were present in git status. User also requests asynchronous progress updates. No replacement workers started during this save operation.
+Latest worker preference is **Codex only: GPT 6.1 Terra for harder tasks, Luna for simple tasks** (user update during save). Verify provider model availability before delegation; do not silently substitute models. Cancelled the prior Claude delivery-pipeline task c5966db0-2061-49a1-99a3-be45c63229be; cancellation returned interrupted. No pipeline test files were present in git status. User also requests asynchronous progress updates. No replacement workers started during this save operation.
 
 Matching remains incomplete: adopt native registry callbacks/scaler, handler and Thrift dispatch, wrapped tonic launcher; verify the real reader/writer/dispatcher delivery pipeline; then run fresh workspace and mixed Go/Rust SDK, failure, restart and recovery gates at one immutable pin, retaining binary SHA256s. Leave the scheduled continuation enabled until verified completion. All Cargo, Go validation and formatting remain CI-only; none ran locally during this save.
 
