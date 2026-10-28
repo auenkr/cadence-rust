@@ -1,0 +1,7 @@
+# Native configured production assembly — 2026-10-28
+
+Configured Matching now constructs the native runtime using the already fault-injected and rate-limited byte task store, limited byte semaphore store, production cache and domain parsing mode, membership, quota with its metric sink, fatal sender, and scoped poll metrics. Registry routing/scaler/poll metrics are attached before host publication and before configured/no-op shard executor setup. Existing listener, startup, drain, and runtime shutdown sequencing remains in the launcher. Embedded development retains its previous paths. The host delegates contextual poll observations to its engine, and configured assembly uses the six-argument scoped registry attachment.
+
+A configured-assembly regression invokes the installed native service, checks startup gating, admission to the missing-domain path, and shutdown rejection. It does not exercise writer fatal delivery or a real cluster. The old test-only registry observer helper was removed; the production registry attachment installs that observer directly. The native scaler and poll metrics retain the limitations documented in matching-native-scoped-metrics-20261028.md. Parent must verify executor routing, fatal handling, deadlines, and mixed Go/Rust SDK, failure and recovery gates; this is not a service-completion claim.
+
+No Cargo, formatting, Go, or heavy validation ran locally. `git diff --check` passed. CI evidence will be recorded separately; prior runs 40729275395 and 40729369298 were still in progress at inspection.

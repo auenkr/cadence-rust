@@ -38,7 +38,6 @@ pub struct ConfiguredNativeAssembly {
     pub fatal: crate::matching_fatal::MatchingFatalSender,
     pub metrics: crate::matching_metrics::MatchingMetrics,
     pub poll_observer: PollObserverFactory,
-    pub scaler_metrics: crate::matching_scaler_native::ScalerMetrics,
 }
 
 /// Construct the production registry and host without opening a legacy queue
@@ -58,7 +57,7 @@ pub async fn assemble_configured(
     );
     let (registry, slot) = crate::matching_runtime_native::attach_live_native_registry(
         registry, &state, deps.cache.clone(), deps.membership.clone(), None,
-        deps.metrics.clone(), deps.scaler_metrics,
+        deps.metrics.clone(),
     );
     let timeout_metric = semaphore_timeout_metric(deps.cache.clone(), deps.metrics.clone());
     assemble(
@@ -82,17 +81,6 @@ fn semaphore_timeout_metric(
             name.as_deref(), &semaphore,
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(metadata, "grpc")),
         );
-    })
-}
-
-#[cfg(test)]
-fn registry_poll_observer(
-    metrics: crate::matching_metrics::MatchingMetrics,
-) -> crate::matching_registry_native::NativePollObserverProvider {
-    Arc::new(move |context| {
-        Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(
-            metrics.clone(), context.clone(),
-        ))
     })
 }
 
@@ -158,27 +146,57 @@ pub async fn assemble(
     }
     runtime.with_native_host(registry, host, semaphore, membership)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matching_metrics::{MatchingMetrics, PollMetricContext, RecordingMetricSink, POLLER_PER_TASK_LIST};
+    use std::time::Duration;
+    use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
 
-    #[test]
-    fn registry_observer_reports_on_the_supplied_sink_and_context() {
-        let sink = Arc::new(RecordingMetricSink::default());
-        let provider = registry_poll_observer(MatchingMetrics::new(sink.clone()));
-        let context = PollMetricContext {
-            domain: "example".into(),
-            task_list: "queue".into(),
-            task_list_kind: 0,
-            task_type: "decision_task",
-            poller_isolation_group: String::new(),
-        };
-        provider(&context).poller_count(3);
-        let events = sink.events();
-        assert!(events.iter().any(|event| event.name == POLLER_PER_TASK_LIST
-            && event.value == crate::matching_metrics::MetricValue::Number(3.0)
-            && event.tags.get("domain").is_some_and(|domain| domain == "example")));
+    struct EmptySource;
+    impl crate::matching_domain_cache::DomainMetadataSource for EmptySource {
+        fn metadata_version(&self, _: Duration) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> { Ok(0) }
+        fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
+            Ok(crate::matching_domain_cache::DomainMetadataPage { domains: vec![], next_page_token: None })
+        }
+        fn get_domain(&self, _: Option<&str>, _: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
+            Err(crate::matching_domain_cache::DomainMetadataSourceError::permanent("missing"))
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_service_gates_admission_and_stops() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+            directory.path().join("native.db"), cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+        ).unwrap());
+        let state = AppState::default();
+        let cache = Arc::new(MatchingDomainCache::new(Arc::new(EmptySource)));
+        let metrics = crate::matching_metrics::MatchingMetrics::default();
+        let quota = Arc::new(MatchingRpcQuota::with_metric_sink(state.admin.dynamic_config.clone(), Arc::new(|_| {})));
+        let (fatal, _fatal_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut runtime = assemble_configured(state, ConfiguredNativeAssembly {
+            task_store: store,
+            semaphore_store: Arc::new(cadence_persistence::semaphores_native::InMemorySemaphorePersistenceBytes::default()),
+            history: crate::matching_history::MatchingHistoryClient::new(
+                tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(), Duration::from_secs(1), 32 * 1024 * 1024,
+            ),
+            cache: cache.clone(),
+            membership: Membership::new("local", Vec::new()),
+            quota,
+            domain_parse: DomainIdParse::Lenient,
+            drain: Arc::new(|| Duration::ZERO),
+            fatal,
+            poll_observer: crate::matching_engine_context_native::metrics_poll_observer_factory(metrics.clone(), cache),
+            metrics,
+        }).await.unwrap();
+        let service = runtime.matching().native_service().unwrap().clone();
+        let request = || tonic::Request::new(cadence_proto::native::matching::GetTaskListsByDomainRequest::default());
+        assert!(tokio::time::timeout(Duration::from_millis(20), service.get_task_lists_by_domain(request())).await.is_err());
+        runtime.mark_started();
+        let result = tokio::time::timeout(Duration::from_secs(1), service.get_task_lists_by_domain(request())).await.unwrap();
+        assert!(result.is_err()); // Missing domain proves the request passed startup and quota admission.
+        runtime.shutdown().await.unwrap();
+        let error = service.get_task_lists_by_domain(request()).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Unavailable);
     }
 }

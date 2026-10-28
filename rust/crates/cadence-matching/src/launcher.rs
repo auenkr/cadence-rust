@@ -793,7 +793,7 @@ pub async fn run(
                 } else {
                     None
                 };
-            let mut _native_semaphore_store = None;
+            let mut native_semaphore_store = None;
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
                 // Go constructs semaphore persistence from the configured
                 // default datastore and shares that datastore's limiter with
@@ -804,7 +804,7 @@ pub async fn run(
                 state.semaphore_persistence = Some(
                     crate::matching_persistence::limit_semaphore_store(stores.legacy, limiter.clone()),
                 );
-                _native_semaphore_store = Some(
+                native_semaphore_store = Some(
                     crate::matching_persistence::limit_semaphore_store_bytes(stores.native, limiter.clone()),
                 );
             }
@@ -1314,19 +1314,41 @@ pub async fn run(
                 );
                 Some(match source {
                     crate::matching_task_store::MatchingTaskStoreSource::ConfiguredDefaultStore => {
-                        let store = configured_matching_stores.as_ref().expect("configured Matching stores are opened for production").task_store.clone();
+                        let stores = configured_matching_stores.as_ref().expect("configured Matching stores are opened for production");
                         let history = matching_history.clone().expect("Matching history client is constructed when Matching runs");
                         let cache = matching_domain_cache.clone().ok_or_else(|| {
                             anyhow::anyhow!("configured Matching persistence requires its production domain cache")
                         })?;
-                        crate::matching_runtime::MatchingRuntime::with_durable_queues_and_domain_cache(
+                        let membership = matching_membership.clone().ok_or_else(|| {
+                            anyhow::anyhow!("configured Matching requires Ringpop membership")
+                        })?;
+                        let sink = matching_metric_sink.clone().unwrap_or_else(|| {
+                            std::sync::Arc::new(crate::matching_metrics::NoopMetricSink)
+                        });
+                        let metrics = crate::matching_metrics::MatchingMetrics::new(sink);
+                        let quota_metrics = metrics.clone();
+                        let quota = std::sync::Arc::new(crate::matching_quota::MatchingRpcQuota::with_metric_sink(
+                            state.admin.dynamic_config.clone(),
+                            std::sync::Arc::new(move |rejection| quota_metrics.quota_rejection(rejection)),
+                        ));
+                        let poll_observer = crate::matching_engine_context_native::metrics_poll_observer_factory(
+                            metrics.clone(), cache.clone(),
+                        );
+                        crate::matching_launch_native::assemble_configured(
                             state.clone(),
-                            store,
-                            history,
-                            std::num::NonZeroU32::new(100000).expect("task id range"),
-                            std::time::Duration::from_secs(60),
-                            drain,
-                            cache,
+                            crate::matching_launch_native::ConfiguredNativeAssembly {
+                                task_store: stores.native_task_store.clone(),
+                                semaphore_store: native_semaphore_store.clone().ok_or_else(|| anyhow::anyhow!("configured Matching requires its native semaphore store"))?,
+                                history,
+                                cache,
+                                membership,
+                                quota,
+                                domain_parse: stores.domain_id_parse,
+                                drain,
+                                fatal: fatal_writer_tx.clone(),
+                                metrics,
+                                poll_observer,
+                            },
                         ).await?
                     }
                     crate::matching_task_store::MatchingTaskStoreSource::EmbeddedDataDir(dir) => {
