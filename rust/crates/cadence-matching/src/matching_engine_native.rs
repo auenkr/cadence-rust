@@ -22,6 +22,9 @@ pub use poll::{NativePollContext, NativePollRegistration};
 #[path = "matching_engine_query_native.rs"]
 mod query;
 pub use query::{NativeQueryContext, NativeQueryParent};
+#[path = "matching_engine_control_native.rs"]
+mod control;
+pub use control::NativeControlContext;
 
 /// Shared state for the native engine. Domain, admission, ownership and
 /// configuration boundaries still need to be supplied before RPCs can run.

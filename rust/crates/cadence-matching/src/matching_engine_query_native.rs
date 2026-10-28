@@ -2,7 +2,7 @@
 //! byte-preserving parent transport are supplied by the integration context.
 use super::NativeMatchingEngine;
 use crate::matching_dispatch_native::NativeFuture;
-use crate::matching_query_native::{query_outcome, NativeQueryError, PendingQuery, QueryShape};
+use crate::matching_query_native::{query_outcome, NativeQueryError, OfferResult, PendingQuery, QueryShape};
 use crate::matching_registry_native::NativeQueueHandle;
 use cadence_common::go_string::GoString;
 use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
@@ -97,32 +97,32 @@ impl NativeMatchingEngine {
                 shape,
             };
             let (receiver, registration) = handle.queries.register_guarded(&task_id);
-            let offered = if force_local {
-                handle.queries.offer(query);
-                true
-            } else {
-                handle.queries.try_offer(query)
-            };
-            if offered {
-                let result = receiver.await.map_err(|_| status(Status::unavailable("Matching query channel closed.")))?;
-                let mut response = query_outcome(result, strong)?;
-                response.partition_config = response_config_from_cache(&partitions);
-                return Ok(response);
-            }
-            drop(registration);
             let current = crate::matching_handler_native::task_list_name(&list.name).map_err(status)?;
-            if list.kind == 2 || current.is_root() {
-                force_local = true;
-                continue;
-            }
+            let can_forward = !force_local && list.kind != 2 && !current.is_root();
+            let forward = async {
+                if can_forward {
+                    // The queue must expose RequestTokens::acquire, so a released
+                    // token wakes this race without polling.
+                    handle.wait_forward_query().await
+                } else {
+                    std::future::pending().await
+                }
+            };
+            let permit = match handle.queries.offer_or_forward(query, forward).await {
+                OfferResult::Matched => {
+                    let result = receiver.await.map_err(|_| status(Status::unavailable("Matching query channel closed.")))?;
+                    let mut response = query_outcome(result, strong)?;
+                    response.partition_config = response_config_from_cache(&partitions);
+                    return Ok(response);
+                }
+                OfferResult::Forward(Some(permit)) => permit,
+                OfferResult::Forward(None) => return Err(status(Status::unavailable("Matching forward token channel closed."))),
+            };
+            drop(registration);
             let parent = current.parent(degree);
             if parent.is_empty() {
                 return Err(status(Status::internal("cannot find parent task list for forwarding")));
             }
-            let Some(permit) = handle.try_forward_query() else {
-                force_local = true;
-                continue;
-            };
             permits.push(permit);
             let previous = list.name.clone();
             let previous_list = list.clone();

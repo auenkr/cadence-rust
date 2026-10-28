@@ -236,6 +236,7 @@ jobs:
             crates/cadence-matching/src/matching_engine_native.rs
             crates/cadence-matching/src/matching_engine_poll_native.rs
             crates/cadence-matching/src/matching_engine_query_native.rs
+            crates/cadence-matching/src/matching_engine_control_native.rs
             crates/cadence-matching/src/matching_shard_routing.rs
             crates/cadence-matching/src/matching_shard_distributor.rs
             crates/cadence-matching/src/matching_persistence_native.rs

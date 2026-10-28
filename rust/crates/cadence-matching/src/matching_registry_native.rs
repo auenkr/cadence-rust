@@ -378,6 +378,10 @@ impl NativeQueueHandle {
     pub fn try_forward_query(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         self.forward_tasks.try_acquire()
     }
+    /// Wait for a query forwarding token without applying the add-task rate limit.
+    pub async fn wait_forward_query(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.forward_tasks.acquire().await
+    }
     pub fn stop_if_isolation_changed(&self) -> bool {
         if self.dispatcher.reader_should_reload() {
             self.queue.stop();

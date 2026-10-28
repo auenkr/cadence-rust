@@ -18,7 +18,7 @@ use cadence_proto::{
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -126,11 +126,36 @@ type Waiting = HashMap<GoString, (u64, oneshot::Sender<QueryOutcome>)>;
 /// Per-owner query rendezvous.
 #[derive(Default)]
 pub struct QueryChannel {
-    pending: Mutex<VecDeque<PendingQuery>>,
+    pending: Mutex<PendingState>,
     waiting: Mutex<Waiting>,
     index: Option<Arc<QueryIndex>>,
     notify: Notify,
-    waiters: AtomicUsize,
+    next_generation: AtomicU64,
+}
+
+#[derive(Default)]
+struct PendingState {
+    offers: VecDeque<(u64, PendingQuery, oneshot::Sender<()>)>,
+    next_offer: u64,
+    pollers: usize,
+}
+
+/// Result of racing a local handoff with a forwarding permit.
+pub enum OfferResult<T> {
+    Matched,
+    Forward(T),
+}
+
+struct OfferGuard<'a> {
+    channel: &'a QueryChannel,
+    id: u64,
+}
+
+impl Drop for OfferGuard<'_> {
+    fn drop(&mut self) {
+        self.channel.pending.lock().expect("matching query lock")
+            .offers.retain(|(id, _, _)| *id != self.id);
+    }
 }
 
 /// Go `lockableQueryTaskMap`: task ID -> the channel holding its waiter, with
@@ -224,18 +249,23 @@ impl QueryChannel {
         let (sender, receiver) = oneshot::channel();
         let generation = match &self.index {
             Some(index) => index.next_generation.fetch_add(1, Ordering::SeqCst) + 1,
-            None => 0,
+            None => self.next_generation.fetch_add(1, Ordering::SeqCst) + 1,
         };
-        self.waiting
-            .lock()
-            .expect("matching query lock")
-            .insert(task_id.clone(), (generation, sender));
+        // Serialize index publication with waiter replacement, including across
+        // channels. An older install must never publish after a newer one.
         if let Some(index) = &self.index {
-            index
-                .entries
-                .lock()
-                .expect("matching query index lock")
-                .insert(task_id.clone(), (generation, self.clone()));
+            let mut entries = index.entries.lock().expect("matching query index lock");
+            if entries.get(task_id).is_some_and(|(g, _)| *g > generation) {
+                return (generation, receiver);
+            }
+            self.waiting.lock().expect("matching query lock")
+                .insert(task_id.clone(), (generation, sender));
+            entries.insert(task_id.clone(), (generation, self.clone()));
+        } else {
+            let mut waiting = self.waiting.lock().expect("matching query lock");
+            if waiting.get(task_id).is_none_or(|(g, _)| *g < generation) {
+                waiting.insert(task_id.clone(), (generation, sender));
+            }
         }
         (generation, receiver)
     }
@@ -277,75 +307,77 @@ impl QueryChannel {
         if let Some(index) = &self.index {
             index.remove(task_id, generation);
         }
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .retain(|query| &query.task_id != task_id);
     }
 
-    /// Go `QueryWorkflow`: install the result waiter, then offer the task.
-    pub fn register(self: &Arc<Self>, query: PendingQuery) -> oneshot::Receiver<QueryOutcome> {
-        let receiver = self.register_waiter(&query.task_id);
-        self.offer(query);
-        receiver
-    }
-
-    pub fn register_waiter(
-        self: &Arc<Self>,
-        task_id: &GoString,
-    ) -> oneshot::Receiver<QueryOutcome> {
-        self.install_waiter(task_id).1
-    }
-
-    pub fn offer(&self, query: PendingQuery) {
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .push_back(query);
+    /// Wait for a poller or a forwarding token. The queued offer is removed
+    /// on cancellation and is only accepted when `next` actually takes it.
+    pub async fn offer_or_forward<T>(
+        &self,
+        query: PendingQuery,
+        forward: impl std::future::Future<Output = T>,
+    ) -> OfferResult<T> {
+        let (sender, mut accepted) = oneshot::channel();
+        let id = {
+            let mut pending = self.pending.lock().expect("matching query lock");
+            pending.next_offer = pending.next_offer.wrapping_add(1);
+            let id = pending.next_offer;
+            pending.offers.push_back((id, query, sender));
+            id
+        };
+        let guard = OfferGuard { channel: self, id };
         self.notify.notify_waiters();
-    }
-
-    /// Admit at most one offer per parked poller (unbuffered `queryTaskC`).
-    pub fn try_offer(&self, query: PendingQuery) -> bool {
-        let mut pending = self.pending.lock().expect("matching query lock");
-        if pending.len() >= self.waiters.load(Ordering::SeqCst) {
-            return false;
+        tokio::pin!(forward);
+        tokio::select! {
+            biased;
+            _ = &mut accepted => OfferResult::Matched,
+            permit = &mut forward => {
+                // Removal and acceptance are serialized by the same lock. If
+                // next already took the offer, its completion must win.
+                let mut pending = self.pending.lock().expect("matching query lock");
+                if let Some(pos) = pending.offers.iter().position(|(offer_id, _, _)| *offer_id == id) {
+                    pending.offers.remove(pos);
+                    drop(pending);
+                    drop(guard);
+                    OfferResult::Forward(permit)
+                } else {
+                    drop(pending);
+                    OfferResult::Matched
+                }
+            }
         }
-        pending.push_back(query);
-        self.notify.notify_waiters();
-        true
     }
 
     pub fn has_waiters(&self) -> bool {
-        self.waiters.load(Ordering::SeqCst) > 0
+        self.pending.lock().expect("matching query lock").pollers > 0
     }
 
-    /// Go `matcher.Poll` on `queryTaskC`: wait for a query offer.
+    /// Only a polled `next` accepts an offer. Dropping a parked poll leaves
+    /// the offer available to another poller or its forwarding race.
     pub async fn next(&self) -> PendingQuery {
-        struct Waiter<'a>(&'a AtomicUsize);
+        struct Waiter<'a>(&'a QueryChannel);
         impl Drop for Waiter<'_> {
             fn drop(&mut self) {
-                self.0.fetch_sub(1, Ordering::SeqCst);
+                self.0.pending.lock().expect("matching query lock").pollers -= 1;
             }
         }
-        self.waiters.fetch_add(1, Ordering::SeqCst);
-        let _waiter = Waiter(&self.waiters);
+        self.pending.lock().expect("matching query lock").pollers += 1;
+        let _waiter = Waiter(self);
         loop {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(query) = self.take() {
+            let query = {
+                let mut pending = self.pending.lock().expect("matching query lock");
+                pending.offers.pop_front().map(|(_, query, accepted)| {
+                    let _ = accepted.send(());
+                    query
+                })
+            };
+            if let Some(query) = query {
                 return query;
             }
             notified.await;
         }
-    }
-
-    fn take(&self) -> Option<PendingQuery> {
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .pop_front()
     }
 
     /// Go `deliverQueryResult`.
@@ -359,14 +391,7 @@ impl QueryChannel {
         }
     }
 
-    /// Withdraw an offer whose caller gave up.
-    pub fn withdraw(&self, task_id: &GoString) {
-        let _ = self.take_waiter(task_id, None);
-        self.pending
-            .lock()
-            .expect("matching query lock")
-            .retain(|query| &query.task_id != task_id);
-    }
+
 }
 
 fn supports_sticky_query(client_impl: &[u8], feature_version: &[u8]) -> bool {
@@ -565,37 +590,21 @@ mod tests {
         f.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
     }
 
-    #[test]
-    fn registration_drop_withdraws_cancelled_offer() {
-        let channel = Arc::new(QueryChannel::new());
-        let id = raw(9);
-        let (receiver, registration) = channel.register_guarded(&id);
-        channel.offer(query(id.clone()));
-        drop(registration);
-        assert!(channel.take().is_none());
-        assert!(channel
-            .complete(&id, QueryOutcome::Internal(Status::cancelled("x")))
-            .is_err());
-        assert!(receiver.blocking_recv().is_err());
-    }
-
-    #[test]
-    fn older_registration_cleanup_keeps_newer_waiter_and_offer() {
+    #[tokio::test]
+    async fn cancellation_and_generation_preserve_raw_ids() {
         let index = Arc::new(QueryIndex::default());
         let channel = Arc::new(QueryChannel::with_index(index.clone()));
-        let id = raw(9);
+        let id = GoString::from(vec![0xff]);
         let (_old, old_guard) = channel.register_guarded(&id);
-        let (new_receiver, _new_guard) = channel.register_guarded(&id);
-        channel.offer(query(id.clone()));
+        let (receiver, new_guard) = channel.register_guarded(&id);
         drop(old_guard);
-        assert!(channel.take().is_some(), "newer offer survives");
-        index
-            .deliver(&id, QueryOutcome::Internal(Status::internal("n")))
-            .unwrap();
-        assert!(new_receiver.blocking_recv().is_ok());
-        assert!(index
-            .deliver(&id, QueryOutcome::Internal(Status::internal("n")))
-            .is_err());
+        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
+        drop(offer);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next()).await.is_err());
+        index.deliver(&id, QueryOutcome::Internal(Status::internal("new"))).unwrap();
+        assert!(receiver.await.is_ok());
+        drop(new_guard);
     }
 
     #[test]
@@ -607,8 +616,8 @@ mod tests {
             GoString::from(vec![0xff]),
             GoString::from(vec![0xfe]), // both would be U+FFFD if lossy
         );
-        let ra = a.register_waiter(&ida);
-        let rb = b.register_waiter(&idb);
+        let (ra, _ga) = a.register_guarded(&ida);
+        let (rb, _gb) = b.register_guarded(&idb);
         index
             .deliver(&idb, QueryOutcome::Internal(Status::internal("b")))
             .unwrap();
@@ -623,37 +632,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_poll_removes_waiter_and_cannot_accept_offer() {
+    async fn permit_and_poller_race_with_cancelled_participants() {
+        use std::time::Duration;
         let channel = Arc::new(QueryChannel::new());
-        let mut next = Box::pin(channel.next());
-        assert!(matches!(poll(next.as_mut()), std::task::Poll::Pending));
-        assert!(channel.has_waiters());
-        drop(next);
+        let id = GoString::from(vec![0xff]);
+        let other = GoString::from(vec![0xfe]);
+        let mut parked = Box::pin(channel.next());
+        assert!(matches!(poll(parked.as_mut()), std::task::Poll::Pending));
+        drop(parked);
         assert!(!channel.has_waiters());
-        let id = raw(1);
-        let _receiver = channel.register_waiter(&id);
-        assert!(!channel.try_offer(query(id)));
+        let (permit_tx, permit_rx) = oneshot::channel();
+        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), permit_rx));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
+        permit_tx.send(()).unwrap();
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Forward(Ok(()))));
+        assert!(tokio::time::timeout(Duration::from_millis(50), channel.next()).await.is_err());
+
+        let (permit_tx, permit_rx) = oneshot::channel::<()>();
+        let mut offer = Box::pin(channel.offer_or_forward(query(other.clone()), permit_rx));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
+        let received = tokio::time::timeout(Duration::from_secs(1), channel.next()).await.unwrap();
+        assert_eq!(received.task_id, other);
+        permit_tx.send(()).unwrap();
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Matched));
     }
 
     #[tokio::test]
-    async fn one_parked_poller_accepts_exactly_one_offer() {
-        let channel = Arc::new(QueryChannel::new());
-        let id = raw(1);
-        let _receiver = channel.register_waiter(&id);
-        let mut next = Box::pin(channel.next());
-        assert!(matches!(poll(next.as_mut()), std::task::Poll::Pending));
-        assert!(channel.try_offer(query(id.clone())));
-        assert!(!channel.try_offer(query(raw(2))));
-        assert_eq!(next.await.task_id, id);
-        assert!(!channel.has_waiters());
+    async fn dropped_poll_does_not_consume_pending_offer_or_lose_completion() {
+        use std::time::Duration;
+        let channel = Arc::new(QueryChannel::with_index(Arc::new(QueryIndex::default())));
+        let id = GoString::from(vec![0xfe]);
+        let (receiver, _registration) = channel.register_guarded(&id);
+        let mut first_poll = Box::pin(channel.next());
+        assert!(matches!(poll(first_poll.as_mut()), std::task::Poll::Pending));
+        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
+        drop(first_poll);
+        let received = tokio::time::timeout(Duration::from_secs(1), channel.next()).await.unwrap();
+        assert_eq!(received.task_id, id);
+        channel.complete(&id, QueryOutcome::Internal(Status::internal("done"))).unwrap();
+        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Matched));
+        assert!(tokio::time::timeout(Duration::from_secs(1), receiver).await.unwrap().is_ok());
     }
 
     #[tokio::test]
     async fn offer_delivers_raw_token_and_answer_bytes() {
         let channel = Arc::new(QueryChannel::new());
         let id = raw(7);
-        let receiver = channel.register(query(id.clone()));
-        let offered = channel.next().await;
+        let (receiver, _registration) = channel.register_guarded(&id);
+        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
+        let offered = tokio::time::timeout(std::time::Duration::from_secs(1), channel.next()).await.unwrap();
+        assert!(matches!(offer.await, OfferResult::Matched));
         let response = query_response(offered, &state());
         let expected = JsonTaskTokenSerializer::serialize_query_token_bytes(&QueryTaskTokenBytes {
             domain_id: raw(1),
