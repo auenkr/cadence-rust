@@ -6,6 +6,9 @@
 #      against the original Go peer go/tools/cadence-rust-history-peer.
 #   2. cadence-persistence matching_postgres::tests::postgres_tls_live_oracle
 #      (--ignored) against a disposable TLS-enabled PostgreSQL container.
+#   3. cadence-persistence matching_postgres::native::tests::
+#      live_native_store_raw_bytes_fencing_and_legacy_cross_read (--ignored)
+#      against that disposable PostgreSQL on the original Go schema.
 # Not a substitute for the full mixed-cluster lanes.
 #
 # Required env: EVIDENCE_DIR (retained artifact dir), SECRET_DIR (never
@@ -17,6 +20,7 @@ PG_IMAGE="${PG_IMAGE:-postgres:16}"
 CONTAINER="cadence-dep-oracle-pg-$$"
 GO_TEST=matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls
 PG_TEST=matching_postgres::tests::postgres_tls_live_oracle
+PG_NATIVE_TEST=matching_postgres::native::tests::live_native_store_raw_bytes_fencing_and_legacy_cross_read
 OVERALL=0
 
 mkdir -p "$EVIDENCE_DIR" "$SECRET_DIR"
@@ -227,6 +231,23 @@ if [ "$ready" -eq 0 ] && build_test_exe postgres-tls cadence-persistence; then
   pg_case inline-verify-ca   127.0.0.1 verify-ca -     "$CA_INLINE"       true  "$OK"
   pg_case inline-verify-full localhost verify-full -   "$CA_INLINE"       true  "$OK"
   pg_case inline-wrongca     127.0.0.1 verify-ca -     "$WRONG_INLINE"    false "$REJ"
+
+  # The native store test uses a plain connection (the TLS cases above cover
+  # connection policy). Seed the original Go schema, without Rust-only DDL.
+  log "== Oracle 3: native PostgreSQL bytes, fencing and cross-read oracle"
+  sha256sum "$ROOT/go/schema/postgres/cadence/schema.sql" > "$EVIDENCE_DIR/postgres-schema.sha256"
+  docker exec -i "$CONTAINER" psql -U postgres -d cadence -v ON_ERROR_STOP=1 \
+    < "$ROOT/go/schema/postgres/cadence/schema.sql" \
+    > "$EVIDENCE_DIR/postgres-schema.log" 2>&1
+  rc=$?; record postgres-schema "$rc"
+  if [ "$rc" -eq 0 ]; then
+    (
+      export CADENCE_POSTGRES_ADDR="127.0.0.1:$PORT" CADENCE_POSTGRES_USER=postgres \
+        CADENCE_POSTGRES_DATABASE=cadence
+      run_exact_ignored postgres-tls cadence-persistence "$PG_NATIVE_TEST" postgres-native-test
+    )
+    rc=$?; record postgres-native-oracle "$rc"
+  fi
 fi
 
 ########################################################################

@@ -159,3 +159,17 @@ its pin):
 These are assertion additions pending execution. Exhaustive typed-error
 category mappings, Meta Health and the ten mixed acceptance lanes still need
 their own reviewed evidence. Preserve the current CI run until terminal.
+
+Supplemental oracle coverage correction: the live native PostgreSQL store
+test was ignored and no workflow invoked it. Added it to
+`tests/gates/run-matching-dependency-oracles.sh`, after the TLS cases, using
+the existing persistence test binary and the same disposable database. The
+script seeds the exact original-Go PostgreSQL schema, retains its SHA256 and
+seed exit/log, runs the exact module path
+`matching_postgres::native::tests::live_native_store_raw_bytes_fencing_and_legacy_cross_read`,
+and requires exactly one executed passing test. It retains test and aggregate
+oracle exits; failures affect the gate result. The test covers invalid-byte
+rejection, valid U+FFFD key separation, range fencing and native/legacy
+cross-read. This new gate step is unexecuted; it does not substitute for the
+mixed PostgreSQL SDK/recovery lane. Local checks: `bash -n` and
+`git diff --check` passed; no local Cargo or Go command ran.

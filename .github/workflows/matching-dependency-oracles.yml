@@ -1,6 +1,7 @@
 name: Matching dependency oracles
 
-# Supplemental focused gate for two ignored dependency tests. It does NOT
+# Supplemental focused gate for ignored History, PostgreSQL TLS and native
+# PostgreSQL persistence dependency tests. It does NOT
 # replace the full mixed-cluster Matching lanes.
 on:
   workflow_dispatch:
