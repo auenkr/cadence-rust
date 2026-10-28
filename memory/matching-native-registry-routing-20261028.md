@@ -19,3 +19,9 @@ Remaining integration and verification gaps:
 ## Parent checkpoint follow-up
 
 Registered matching_registry_routing_native in lib.rs and in the CI rustfmt file list. Source review found with_live_routing used an undefined `state` field initializer; replaced it with Arc::downgrade(&self.state), preserving weak ownership. git diff --check passed; compilation and tests remain pending. CI 40724071697 predates this correction; inspect its logs and run a new gate after integrating any additional fixes. Concrete host builder/refresher and production attachment are still required.
+
+## Native refresh transport implementation
+
+Added partition_refresher(membership) in matching_registry_routing_native.rs. It resolves raw partition bytes through the membership ring, including connecting to the advertised endpoint for a local owner, matching legacy notify_read_partitions routing. Owner lookup errors log and return success; RPC errors propagate. The native request retains raw task-list/group bytes, maps persistence kind/type offsets, carries config counts/version/maps, adds YARPC metadata, and propagates caller timeout both in the request and with local timeout_at. Added a codec regression for ff/fe/U+FFFD group distinction and raw partition name. Membership's legacy channel_for_task_list_owner now delegates to a byte entry point with identical endpoint/TLS/cache behavior.
+
+This replaces the missing generated-client refresher implementation described above. The host still must install it via with_live_routing; acyclic local service construction, shared live router propagation and production activation are unfinished. No real peer transport regression has run or been added for this callback yet. git diff --check passed; no Cargo/formatting/build/test execution locally. CI 40724071697 predates this addition and cannot validate it.

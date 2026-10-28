@@ -233,7 +233,16 @@ impl Membership {
         &self,
         key: &str,
     ) -> Result<(Host, tonic::transport::Channel), Status> {
-        let owner = self.owner(key)?;
+        self.channel_for_task_list_owner_bytes(key.as_bytes())
+    }
+
+    /// Resolve and connect to an owner without decoding the task-list key.
+    /// Local owners use their advertised endpoint, just like remote owners.
+    pub(crate) fn channel_for_task_list_owner_bytes(
+        &self,
+        key: &[u8],
+    ) -> Result<(Host, tonic::transport::Channel), Status> {
+        let owner = self.owner_bytes(key)?;
         let grpc_address = if owner.identity() == self.identity.as_ref() {
             self.ring
                 .read()
