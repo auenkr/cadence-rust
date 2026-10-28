@@ -207,6 +207,136 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
     }
 }
 
+use cadence_common::go_string::GoString;
+use cadence_persistence::{
+    semaphores::{AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata},
+    semaphores_native::{SemaphoreBucketPageBytes, SemaphorePersistenceBytes},
+};
+
+pub fn limit_semaphore_store_bytes(
+    store: Arc<dyn SemaphorePersistenceBytes>,
+    limiter: Arc<MatchingPersistenceLimiter>,
+) -> Arc<dyn SemaphorePersistenceBytes> {
+    Arc::new(RateLimitedSemaphoreStoreBytes { store, limiter })
+}
+
+struct RateLimitedSemaphoreStoreBytes {
+    store: Arc<dyn SemaphorePersistenceBytes>,
+    limiter: Arc<MatchingPersistenceLimiter>,
+}
+
+impl RateLimitedSemaphoreStoreBytes {
+    fn permit_acquire(&self, operation: &'static str, domain_id: &GoString) -> Result<(), AcquireError> {
+        if self.limiter.allow() {
+            Ok(())
+        } else {
+            self.limiter
+                .record_rejection(operation, std::str::from_utf8(domain_id.as_bytes()).ok(), None);
+            Err(AcquireError::Throttled(REJECTED.into()))
+        }
+    }
+    fn permit_create(
+        &self,
+        operation: &'static str,
+        domain_id: &GoString,
+    ) -> Result<(), SemaphoreError> {
+        if self.limiter.allow() {
+            Ok(())
+        } else {
+            self.limiter
+                .record_rejection(operation, std::str::from_utf8(domain_id.as_bytes()).ok(), None);
+            Err(SemaphoreError::Throttled(REJECTED.into()))
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SemaphorePersistenceBytes for RateLimitedSemaphoreStoreBytes {
+    async fn create_semaphore(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        size: i32,
+        bucket_size: i32,
+    ) -> Result<SemaphoreMetadata, SemaphoreError> {
+        self.permit_create("CreateSemaphore", domain_id)?;
+        self.store
+            .create_semaphore(domain_id, name, size, bucket_size)
+            .await
+    }
+    async fn get_semaphore_metadata(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+    ) -> Result<SemaphoreMetadata, AcquireError> {
+        self.permit_acquire("GetSemaphoreMetadata", domain_id)?;
+        self.store.get_semaphore_metadata(domain_id, name).await
+    }
+    async fn scan_semaphore_bucket(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        bucket: i32,
+        page_size: usize,
+        next_page_token: Option<&[u8]>,
+    ) -> Result<SemaphoreBucketPageBytes, AcquireError> {
+        self.permit_acquire("ScanSemaphoreBucket", domain_id)?;
+        self.store
+            .scan_semaphore_bucket(domain_id, name, bucket, page_size, next_page_token)
+            .await
+    }
+    async fn get_semaphore_ownership_by_token(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        bucket: i32,
+        token_id: i32,
+    ) -> Result<GoString, AcquireError> {
+        self.permit_acquire("GetSemaphoreOwnershipByToken", domain_id)?;
+        self.store
+            .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
+            .await
+    }
+    async fn get_semaphore_ownership_by_owner(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        bucket: i32,
+        owner_id: &GoString,
+    ) -> Result<i32, AcquireError> {
+        self.permit_acquire("GetSemaphoreOwnershipByOwner", domain_id)?;
+        self.store
+            .get_semaphore_ownership_by_owner(domain_id, name, bucket, owner_id)
+            .await
+    }
+    async fn grant_semaphore_token(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &GoString,
+    ) -> Result<GrantOutcome, AcquireError> {
+        self.permit_acquire("GrantSemaphoreToken", domain_id)?;
+        self.store
+            .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
+    }
+    async fn release_semaphore_token(
+        &self,
+        domain_id: &GoString,
+        name: &GoString,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &GoString,
+    ) -> Result<bool, AcquireError> {
+        self.permit_acquire("ReleaseSemaphoreToken", domain_id)?;
+        self.store
+            .release_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,13 +23,13 @@ pub trait NativeMatchingIntegration: DecisionAddContext + NativePollContext
     + NativeQueryContext + NativeControlContext + Send + Sync + 'static
 {
     fn check_started(&self) -> crate::matching_dispatch_native::NativeFuture<Result<(), Status>>;
-    fn admit(&self, method: &'static str) -> Result<(), Status>;
+    fn admit(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status>;
     fn record_request(&self, method: &'static str);
     fn record_failure(&self, method: &'static str, status: &Status);
     fn check_owned(&self, key: &TaskListKeyBytes) -> Result<(), Status>;
     fn domain_for_name(&self, name: &GoString) -> Result<uuid::Uuid, Status>;
     /// Go's domain lookup guard (including cache visibility and shutdown status).
-    fn check_domain(&self, id: &GoString) -> Result<(), Status>;
+    fn check_domain(&self, id: &GoString, method: &'static str) -> Result<(), Status>;
     /// The native semaphore runtime owns its own byte-valued semantics and
     /// returns its native response without conversion through the legacy API.
     fn acquire_semaphore(
@@ -53,13 +53,16 @@ impl<C> NativeMatchingService<C> {
         Self { engine, integration }
     }
 
-    async fn enter(&self, method: &'static str) -> Result<(), Status>
+    async fn enter(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status>
     where
         C: NativeMatchingIntegration,
     {
         self.integration.check_started().await?;
-        self.integration.admit(method)?;
         self.integration.record_request(method);
+        if let Err(status) = self.integration.admit(method, domain) {
+            self.integration.record_failure(method, &status);
+            return Err(status);
+        }
         Ok(())
     }
 
@@ -84,8 +87,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         const M: &str = "add_decision_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        self.integration.check_domain(&request.domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.domain_id, M)?;
+        self.enter(M, Some(&request.domain_id)).await?;
         let result = self.engine.add_decision_task(request, deadline, &self.integration).await;
         self.finish(M, result).map(Response::new)
     }
@@ -93,8 +96,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         const M: &str = "add_activity_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        self.integration.check_domain(&request.domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.domain_id, M)?;
+        self.enter(M, Some(&request.domain_id)).await?;
         let result = self.engine.add_activity_task(request, deadline, &self.integration).await;
         self.finish(M, result).map(Response::new)
     }
@@ -102,8 +105,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         const M: &str = "poll_for_decision_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        self.integration.check_domain(&request.domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.domain_id, M)?;
+        self.enter(M, Some(&request.domain_id)).await?;
         let result = self.engine.poll_for_decision_task(request, deadline, &self.integration).await;
         self.finish(M, result).map(Response::new)
     }
@@ -111,8 +114,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         const M: &str = "poll_for_activity_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        self.integration.check_domain(&request.domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.domain_id, M)?;
+        self.enter(M, Some(&request.domain_id)).await?;
         let result = self.engine.poll_for_activity_task(request, deadline, &self.integration).await;
         self.finish(M, result).map(Response::new)
     }
@@ -120,8 +123,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         const M: &str = "query_workflow";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        self.integration.check_domain(&request.domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.domain_id, M)?;
+        self.enter(M, Some(&request.domain_id)).await?;
         match self.engine.query_workflow(request, deadline, &self.integration).await {
             Ok(response) => Ok(Response::new(response)),
             Err(error) => { let status = error.into_status(); self.integration.record_failure(M, &status); Err(status) }
@@ -136,8 +139,8 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
     async fn refresh_task_list_partition_config(&self, request: Request<n::matching::RefreshTaskListPartitionConfigRequest>) -> Result<Response<n::matching::RefreshTaskListPartitionConfigResponse>, Status> { NativeMatchingService::refresh_task_list_partition_config(self, request).await }
     async fn acquire_semaphore(&self, request: Request<n::matching::AcquireSemaphoreRequest>) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         const M: &str = "acquire_semaphore";
-        self.integration.check_domain(&request.get_ref().domain_id)?;
-        self.enter(M).await?;
+        self.integration.check_domain(&request.get_ref().domain_id, M)?;
+        self.enter(M, Some(&request.get_ref().domain_id)).await?;
         let result = self.integration.acquire_semaphore(request).await;
         self.finish(M, result)
     }
@@ -150,8 +153,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
     ) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
         const METHOD: &str = "describe_task_list";
         let request = request.into_inner();
-        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
-        self.enter(METHOD).await?;
+        self.integration.check_domain(&request.domain_id, METHOD)?;
+        self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = async {
             // Queue ownership is checked by the engine after manager lookup.
             self.engine.describe_task_list(request, &self.integration).await
@@ -165,8 +168,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         request: Request<n::matching::GetTaskListsByDomainRequest>,
     ) -> Result<Response<n::matching::GetTaskListsByDomainResponse>, Status> {
         const METHOD: &str = "get_task_lists_by_domain";
-        self.enter(METHOD).await?;
         let request = request.into_inner();
+        self.enter(METHOD, Some(&request.domain)).await?;
         let result = async {
             self.integration.domain_for_name(&request.domain)?;
             self.engine
@@ -182,8 +185,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
     ) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
         const METHOD: &str = "cancel_outstanding_poll";
         let request = request.into_inner();
-        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
-        self.enter(METHOD).await?;
+        self.integration.check_domain(&request.domain_id, METHOD)?;
+        self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = self
             .engine
             .cancel_outstanding_poll(request, &self.integration)
@@ -200,7 +203,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         // The generated Go gRPC mapper runs before handler lifecycle, quota or
         // metrics and can fail while dereferencing the nested result.
         NativeMatchingEngine::validate_query_completion_mapper(&request)?;
-        self.enter(METHOD).await?;
+        self.integration.check_domain(&request.domain_id, METHOD)?;
+        self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = self.engine.respond_query_task_completed(request);
         self.finish(METHOD, result).map(Response::new)
     }
@@ -210,10 +214,11 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         request: Request<n::matching::ListTaskListPartitionsRequest>,
     ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
         const METHOD: &str = "list_task_list_partitions";
-        self.enter(METHOD).await?;
+        let request = request.into_inner();
+        self.enter(METHOD, Some(&request.domain)).await?;
         let result = self
             .engine
-            .list_task_list_partitions(request.into_inner(), &self.integration)
+            .list_task_list_partitions(request, &self.integration)
             .await;
         self.finish(METHOD, result).map(Response::new)
     }
@@ -225,8 +230,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         const METHOD: &str = "update_task_list_partition_config";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
-        self.enter(METHOD).await?;
+        self.integration.check_domain(&request.domain_id, METHOD)?;
+        self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = async {
             self.engine
                 .update_task_list_partition_config(request, deadline, &self.integration)
@@ -243,8 +248,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         const METHOD: &str = "refresh_task_list_partition_config";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
-        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
-        self.enter(METHOD).await?;
+        self.integration.check_domain(&request.domain_id, METHOD)?;
+        self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = async {
             self.engine
                 .refresh_task_list_partition_config(request, deadline, &self.integration)

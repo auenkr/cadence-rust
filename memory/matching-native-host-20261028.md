@@ -1,0 +1,15 @@
+# Native Matching host assembly, 2026-10-28
+
+Status: implementation is **unverified**. No local Cargo, formatting, Go, build or test commands were run. The parent must register `matching_host_native`, run CI formatting/clippy/tests, attach the assembler to the launcher and run mixed-cluster gates before claiming parity.
+
+`rust/crates/cadence-matching/src/matching_host_native.rs` assembles a native engine and the existing native control and engine contexts over the same registry, domain cache, membership, router and state. It supplies a pending watch startup gate (`mark_started` after actual startup), the existing `MatchingRpcQuota`, explicit semaphore and metrics callbacks, and raw-key poll registration with drop cleanup. `matching_service_native.rs` supplies request domain to quota and moves handler metrics before quota, including quota failures. Go handler ordering is in `go/service/matching/handler/handler.go` (Add/Poll/Query, Respond/Cancel, control handlers); startup profiling uses `startWG` there. The existing Rust reference is `grpc_matching.rs` (`domain_lookup_guard`, `wait_started`, `check_rpc_quota`, `register_poll`, and `CancelOutstandingPoll`).
+
+Poll cancellation after queue acquisition uses `NativePollLifecycle::begin` in `matching_dispatch_native.rs` and the byte-valued queue manager (`matching_handler_native.rs`); host registration covers the earlier engine wait and Go-compatible duplicate-key drop behavior. Added bounded tests for exact raw poller keys, collision cleanup, notification isolation, and mapping of all thirteen RPC quota policies. Tests have not run.
+
+Known gaps and attachment requirements:
+
+- `MatchingRpcQuota` uses UTF-8 domain keys. The host rejects non-UTF-8 direct domain names rather than losing bytes; byte-keyed domain quota and config are needed for parity. The existing native domain cache/control context also rejects non-UTF-8 names and has its own error mapping limitations.
+- Metrics callbacks currently expose method and status only; they do not supply domain, raw task-list, inbound metadata, elapsed time, or all Go scope semantics. A native byte-aware metrics scope must be wired. They are mandatory dependencies rather than silent no-ops.
+- The host startup gate must be marked after successful runtime/engine/membership bootstrap, and callers must keep the service and its registry in the same lifecycle. A native semaphore callback must be supplied; its manager/store integration remains separate work.
+- Host poll registration is not externally cancelled before queue manager registration; Go cancellation resolves a manager, so confirm race and restart behavior in mixed gates. Domain guard's malformed non-UTF-8 SQL UUID formatting needs comparison with Go for all UUID lengths and invalid urn prefixes. No end-to-end ordering test has run.
+- The ownership seam remains the existing synchronous registry check; shard distributor parity, lifecycle/shutdown, cache errors and failure metrics require further audit. Request mapper/handler ordering and cancellation under concurrent identical IDs require Go differential tests. This change does not establish Matching completion.

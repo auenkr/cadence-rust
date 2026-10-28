@@ -108,6 +108,8 @@ pub mod matching_control_context_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_engine_context_native;
 #[allow(clippy::result_large_err)]
+pub mod matching_host_native;
+#[allow(clippy::result_large_err)]
 pub mod matching_shard_distributor;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_processor;

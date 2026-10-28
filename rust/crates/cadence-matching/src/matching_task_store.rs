@@ -108,27 +108,41 @@ fn cassandra_config(
 /// Open the configured default store's semaphore adapter. SQL deliberately
 /// returns Go's unsupported implementation; Cassandra uses the same async
 /// session primitives as the task/domain adapters.
+pub struct ConfiguredSemaphoreStores {
+    pub legacy: Arc<dyn cadence_persistence::SemaphorePersistence>,
+    pub native: Arc<dyn cadence_persistence::semaphores_native::SemaphorePersistenceBytes>,
+}
+
 pub async fn open_configured_semaphore_store(
     persistence: &crate::config::PersistenceConfig,
 ) -> anyhow::Result<Arc<dyn cadence_persistence::SemaphorePersistence>> {
+    Ok(open_configured_semaphore_stores(persistence).await?.legacy)
+}
+
+/// Expose both contracts over one configured session, so frontend metadata and
+/// native Matching token operations use the same Cassandra keyspace.
+pub async fn open_configured_semaphore_stores(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<ConfiguredSemaphoreStores> {
     let name = persistence.default_store.as_str();
     let datastore = persistence.datastores.get(name).ok_or_else(|| {
         anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
     })?;
     if let Some(nosql) = datastore.nosql.as_ref() {
+        if datastore.sql.is_some() {
+            anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
+        }
         if nosql.plugin_name != "cassandra" {
             anyhow::bail!("Matching NoSQL persistence does not support plugin {:?}; supported plugin is cassandra", nosql.plugin_name);
         }
         let config = cassandra_config(nosql)?;
-        let session = std::sync::Arc::new(config.connect().await?);
-        return Ok(Arc::new(
-            cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session),
-        ));
+        let session = Arc::new(config.connect().await?);
+        let store = Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session));
+        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
     }
     if datastore.sql.is_some() {
-        return Ok(Arc::new(
-            cadence_persistence::SqlUnsupportedSemaphorePersistence,
-        ));
+        let store = Arc::new(cadence_persistence::SqlUnsupportedSemaphorePersistence);
+        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
     }
     anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
 }
