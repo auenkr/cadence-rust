@@ -435,7 +435,8 @@ mod tests {
     #[tokio::test]
     async fn disabled_by_dynamic_config_receives_raw_task_list_and_is_not_completed() {
         let (d, seen, _) = deps(resolver(false, false), 1, || Ok(state()));
-        let got: Arc<Mutex<Vec<(Vec<u8>, i32)>>> = Arc::default();
+        type SeenConfigKeys = Arc<Mutex<Vec<(Vec<u8>, i32)>>>;
+        let got: SeenConfigKeys = Arc::default();
         let g = got.clone();
         let mut d = Arc::into_inner(d).unwrap();
         d.cluster_enabled = Some(Arc::new(move |_, name, ty| {
