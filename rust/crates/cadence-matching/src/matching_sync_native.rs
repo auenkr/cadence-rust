@@ -124,7 +124,10 @@ impl NativeSyncMatcher {
         }
         let group = self.poll_group(group);
         let (id, receiver) = {
-            let mut state = self.state.lock().expect("Matching native sync matcher lock");
+            let mut state = self
+                .state
+                .lock()
+                .expect("Matching native sync matcher lock");
             if let Some(index) = state
                 .offers
                 .iter()
@@ -176,7 +179,10 @@ impl NativeSyncMatcher {
             response,
         });
         let queued = {
-            let mut state = self.state.lock().expect("Matching native sync matcher lock");
+            let mut state = self
+                .state
+                .lock()
+                .expect("Matching native sync matcher lock");
             while let Some(index) = state
                 .pollers
                 .iter()
@@ -269,10 +275,7 @@ mod tests {
                 schedule_id: 3,
                 expiry_nanos: 0,
                 created_nanos: 0,
-                partition_config: Some(BTreeMap::from([(
-                    gs(b"isolation-group"),
-                    gs(group),
-                )])),
+                partition_config: Some(BTreeMap::from([(gs(b"isolation-group"), gs(group))])),
             },
         }
     }
@@ -304,7 +307,13 @@ mod tests {
         let (_stop, matcher) = fixture(&[b"a"]);
         let workflow: &[u8] = &[b'w', 0xff, 0xc3];
         let source: &[u8] = &[0xfe, b'd'];
-        let add = spawn_offer(&matcher, task(workflow, b"a"), b"a", source, Duration::from_secs(1));
+        let add = spawn_offer(
+            &matcher,
+            task(workflow, b"a"),
+            b"a",
+            source,
+            Duration::from_secs(1),
+        );
         let received = matcher.poll(&gs(b"a")).await.unwrap();
         assert_eq!(received.task.task_id, 0);
         assert_eq!(received.task.data.workflow_id.as_bytes(), workflow);
@@ -320,14 +329,26 @@ mod tests {
     #[tokio::test]
     async fn history_failure_and_dropped_task_are_not_accepted() {
         let (_stop, matcher) = fixture(&[b"a"]);
-        let add = spawn_offer(&matcher, task(b"w", b"a"), b"a", b"d", Duration::from_secs(1));
+        let add = spawn_offer(
+            &matcher,
+            task(b"w", b"a"),
+            b"a",
+            b"d",
+            Duration::from_secs(1),
+        );
         matcher
             .poll(&gs(b"a"))
             .await
             .unwrap()
             .finish(Err(Status::unavailable("history failed")));
         assert!(!add.await.unwrap());
-        let add = spawn_offer(&matcher, task(b"w", b"a"), b"a", b"d", Duration::from_secs(1));
+        let add = spawn_offer(
+            &matcher,
+            task(b"w", b"a"),
+            b"a",
+            b"d",
+            Duration::from_secs(1),
+        );
         drop(matcher.poll(&gs(b"a")).await.unwrap());
         assert!(!add.await.unwrap());
     }
@@ -340,7 +361,8 @@ mod tests {
         for other in [FE, replacement] {
             let poller = matcher.clone();
             let other = gs(other);
-            let poll = tokio::spawn(async move { poller.poll(&other).await.map(|t| t.finish(Ok(()))) });
+            let poll =
+                tokio::spawn(async move { poller.poll(&other).await.map(|t| t.finish(Ok(()))) });
             tokio::task::yield_now().await;
             assert!(
                 !matcher
@@ -370,9 +392,8 @@ mod tests {
     async fn unknown_group_falls_back_to_default_group() {
         let (_stop, matcher) = fixture(&[b"a"]);
         let poller = matcher.clone();
-        let poll = tokio::spawn(async move {
-            poller.poll(&gs(FF)).await.map(|t| t.finish(Ok(())))
-        });
+        let poll =
+            tokio::spawn(async move { poller.poll(&gs(FF)).await.map(|t| t.finish(Ok(()))) });
         tokio::task::yield_now().await;
         assert!(
             !matcher
@@ -431,9 +452,21 @@ mod tests {
     #[tokio::test]
     async fn fifo_offers_are_delivered_in_order() {
         let (_stop, matcher) = fixture(&[]);
-        let first = spawn_offer(&matcher, task(b"one", b""), b"", b"d", Duration::from_secs(1));
+        let first = spawn_offer(
+            &matcher,
+            task(b"one", b""),
+            b"",
+            b"d",
+            Duration::from_secs(1),
+        );
         tokio::task::yield_now().await;
-        let second = spawn_offer(&matcher, task(b"two", b""), b"", b"d", Duration::from_secs(1));
+        let second = spawn_offer(
+            &matcher,
+            task(b"two", b""),
+            b"",
+            b"d",
+            Duration::from_secs(1),
+        );
         tokio::task::yield_now().await;
         for expected in [&b"one"[..], b"two"] {
             let received = matcher.poll(&gs(b"")).await.unwrap();
@@ -480,7 +513,13 @@ mod tests {
         );
         assert_eq!(matcher.state.lock().unwrap().offers.len(), 0);
         // Cancelling the offer future itself removes the queued offer.
-        let add = spawn_offer(&matcher, task(b"w", b"a"), b"a", b"d", Duration::from_secs(1));
+        let add = spawn_offer(
+            &matcher,
+            task(b"w", b"a"),
+            b"a",
+            b"d",
+            Duration::from_secs(1),
+        );
         tokio::task::yield_now().await;
         add.abort();
         let _ = add.await;

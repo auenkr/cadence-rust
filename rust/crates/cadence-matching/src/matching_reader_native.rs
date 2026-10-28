@@ -1294,8 +1294,9 @@ mod tests {
         }
     }
 
-    /// Slow sink: `wait_stopped` must not return until it finished (Go
-    /// logger.Fatal precedes shutdown completion).
+    /// A blocked fatal sink holds shutdown completion until it returns.
+    /// Like the production registry, this fixture stops all reader loops after
+    /// the host receives the invariant notification.
     async fn fatal_case(ids: Vec<i64>) {
         let queue = Arc::new(
             DurableTaskQueueBytes::open(
@@ -1312,11 +1313,19 @@ mod tests {
             .unwrap();
         let finished = Arc::new(AtomicBool::new(false));
         let details = Arc::new(Mutex::new(Vec::new()));
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let sink: ReaderFatalSink = {
-            let (finished, details) = (finished.clone(), details.clone());
+            let (finished, details, entered, release) =
+                (finished.clone(), details.clone(), entered.clone(), release.clone());
             Arc::new(move |detail| {
-                std::thread::sleep(Duration::from_millis(200));
                 details.lock().unwrap().push(detail);
+                entered.notify_one();
+                let (lock, changed) = &*release;
+                let mut open = lock.lock().unwrap();
+                while !*open {
+                    open = changed.wait(open).unwrap();
+                }
                 finished.store(true, Ordering::SeqCst);
             })
         };
@@ -1332,7 +1341,19 @@ mod tests {
             None,
             Some(sink),
         );
-        tokio::time::timeout(Duration::from_secs(10), reader.wait_stopped())
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .expect("reader reports the invariant");
+        reader.stop();
+        let returned_while_blocked =
+            tokio::time::timeout(Duration::from_millis(50), reader.wait_stopped()).await.is_ok();
+        {
+            let (lock, changed) = &*release;
+            *lock.lock().unwrap() = true;
+            changed.notify_all();
+        }
+        assert!(!returned_while_blocked, "shutdown outran the fatal callback");
+        tokio::time::timeout(Duration::from_secs(5), reader.wait_stopped())
             .await
             .expect("reader stops after fatal invariant");
         assert!(finished.load(Ordering::SeqCst), "wait_stopped outran the callback");

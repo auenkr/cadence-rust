@@ -1130,13 +1130,21 @@ mod recording_tests {
             Err(MatchingTaskStoreError::Backend { kind: BackendErrorKind::Internal, message })
                 if message == "DeleteTaskList operation failed. Error: boom"
         ));
-        recorder.exec.lock().unwrap().push_back(Err(ExecFailure::Other("boom".into())));
+        recorder
+            .exec
+            .lock()
+            .unwrap()
+            .push_back(Err(ExecFailure::Other("boom".into())));
         assert!(matches!(
             store(&recorder, false).complete_task(&key(), 35),
             Err(MatchingTaskStoreError::Backend { message, .. })
                 if message == "CompleteTask operation failed. Error: boom"
         ));
-        recorder.exec.lock().unwrap().push_back(Err(ExecFailure::Other("boom".into())));
+        recorder
+            .exec
+            .lock()
+            .unwrap()
+            .push_back(Err(ExecFailure::Other("boom".into())));
         assert!(matches!(
             store(&recorder, false).complete_tasks_less_than(&key(), 35, 10),
             Err(MatchingTaskStoreError::Backend { message, .. })

@@ -32,3 +32,5 @@ New file: `rust/crates/cadence-matching/src/matching_reader_native.rs`. No Cargo
 - Rejection of out-of-order ids depends on `AckManager::read_item`; if it only rejects duplicates, drop or adjust that case.
 - Closure borrows around `target`/`isolation_duration` are copied from the legacy code.
 - Task-ID dedupe in the scripted fake relies on the queue's `max_read_level` after `append`.
+
+First CI compiled/clippy passed, but the fatal fixtures failed to call reader.stop after the callback, unlike the legacy registry-owner fixture. Parent corrected the fixture lifecycle and replaced the sleep with a controlled condition-variable sink, checking wait_stopped cannot outrun callback completion. Production pump logic unchanged. Validation rerun pending.

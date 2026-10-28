@@ -16,3 +16,5 @@ use in tests, `SqlRunIdBytesError` import path, `MatchingTaskStoreError::Conditi
 implementing `MatchingTaskStoreBytes` via `matching_sqlite` re-export.
 
 Parent integration: registered as public matching_writer_native module and added to runner formatting list. Fixed the cross-domain test to query the source-domain key (the owner-domain key correctly has no task). Made accepted-caller cancellation deterministic by holding a second SQLite connection's IMMEDIATE transaction until the caller future is dropped, preventing an early-completion race. Existing WriterTracker methods and rusqlite dependency are available. Compilation remains pending; no production native registry adoption or host-fatal enum connection is claimed.
+
+First registered CI compiled/clippy passed. Sticky fence fixture failed because owner shutdown can beat the mapped response in append's select (also possible in Go). Parent made the mapping fixture disable the queue's owner-stop waker after writer construction, preserving the queue stopped assertion and explicitly stopping the writer afterward. Production behavior unchanged; rerun pending.

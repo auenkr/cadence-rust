@@ -286,7 +286,11 @@ fn internal(error: impl fmt::Display + 'static) -> BytesError {
 
 impl Store {
     /// Update statement values in `UPDATE_LIST*` order.
-    fn native_get_task_list_for(&self, key: &TaskListKeyBytes, operation: &str) -> Result<TaskListRecordBytes> {
+    fn native_get_task_list_for(
+        &self,
+        key: &TaskListKeyBytes,
+        operation: &str,
+    ) -> Result<TaskListRecordBytes> {
         let Some((range_id, data)) = self
             .executor
             .select_task_list(
@@ -350,9 +354,13 @@ impl Store {
                 Err(error) if error.is_unavailable() => {
                     let fallback =
                         CqlStatement::with_consistency(RANGE_DELETE_TASKS, FALLBACK_CONSISTENCY);
-                    self.executor.exec(&fallback, values()).map_err(|error| BytesError::Legacy(Store::operation_error(operation, error)))?;
+                    self.executor.exec(&fallback, values()).map_err(|error| {
+                        BytesError::Legacy(Store::operation_error(operation, error))
+                    })?;
                 }
-                Err(error) => return Err(BytesError::Legacy(Store::operation_error(operation, error))),
+                Err(error) => {
+                    return Err(BytesError::Legacy(Store::operation_error(operation, error)))
+                }
             }
         } else {
             self.executor
@@ -398,7 +406,9 @@ impl MatchingTaskStoreBytes for Store {
                 let outcome = self
                     .executor
                     .exec_lwt(&CqlStatement::new(INSERT_TASK_LIST), values)
-                    .map_err(|error| BytesError::Legacy(Store::operation_error("LeaseTaskList", error)))?;
+                    .map_err(|error| {
+                        BytesError::Legacy(Store::operation_error("LeaseTaskList", error))
+                    })?;
                 if outcome.applied {
                     return Ok(TaskListRecordBytes {
                         range_id: INITIAL_RANGE_ID,
@@ -481,14 +491,18 @@ impl MatchingTaskStoreBytes for Store {
                         Self::native_update_values(key, range, udt, now_nanos, range)?,
                     ],
                 )
-                .map_err(|error| BytesError::Legacy(Store::operation_error("UpdateTaskList", error)))?
+                .map_err(|error| {
+                    BytesError::Legacy(Store::operation_error("UpdateTaskList", error))
+                })?
         } else {
             self.executor
                 .exec_lwt(
                     &CqlStatement::new(UPDATE_LIST),
                     Self::native_update_values(key, range, udt, now_nanos, range)?,
                 )
-                .map_err(|error| BytesError::Legacy(Store::operation_error("UpdateTaskList", error)))?
+                .map_err(|error| {
+                    BytesError::Legacy(Store::operation_error("UpdateTaskList", error))
+                })?
         };
         if outcome.applied {
             Ok(())
@@ -632,8 +646,15 @@ impl MatchingTaskStoreBytes for Store {
                         &CqlStatement::with_consistency(DELETE_LIST, FALLBACK_CONSISTENCY),
                         values(),
                     )
-                    .map_err(|error| BytesError::Legacy(Store::operation_error("DeleteTaskList", error)))?,
-                Err(error) => return Err(BytesError::Legacy(Store::operation_error("DeleteTaskList", error))),
+                    .map_err(|error| {
+                        BytesError::Legacy(Store::operation_error("DeleteTaskList", error))
+                    })?,
+                Err(error) => {
+                    return Err(BytesError::Legacy(Store::operation_error(
+                        "DeleteTaskList",
+                        error,
+                    )))
+                }
             }
         };
         if outcome.applied {

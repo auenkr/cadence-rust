@@ -71,6 +71,8 @@ pub mod matching_persistence;
 pub mod matching_persistence_limiter;
 #[allow(clippy::result_large_err)]
 pub mod matching_query;
+#[allow(clippy::result_large_err)]
+pub mod matching_query_native;
 pub mod matching_reader;
 pub mod matching_reader_native;
 #[allow(clippy::result_large_err)]

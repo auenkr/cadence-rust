@@ -228,6 +228,7 @@ jobs:
             crates/cadence-proto/tests/native_wire_edges.rs
             crates/cadence-matching/src/thrift_matching_native_extra.rs
             crates/cadence-matching/src/thrift_matching_native_responses.rs
+            crates/cadence-matching/src/matching_query_native.rs
             crates/cadence-matching/src/matching_partition_native.rs
             crates/cadence-matching/src/matching_reader_native.rs
             crates/cadence-matching/src/matching_sync_native.rs

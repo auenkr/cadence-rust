@@ -288,6 +288,7 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
                     ".uber.cadence.history.v1.RecordDecisionTaskStartedResponse",
                     ".uber.cadence.history.v1.RecordActivityTaskStartedRequest",
                     ".uber.cadence.history.v1.RecordActivityTaskStartedResponse",
+                    ".uber.cadence.history.v1.GetMutableStateResponse",
                 ]
                 .contains(&name.as_str())
         })

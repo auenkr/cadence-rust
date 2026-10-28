@@ -605,6 +605,9 @@ mod tests {
         // A second owner leases a newer range and fences the first.
         let _owner = queue(&s, k, kind);
         let writer = NativeTaskWriter::new(stale.clone(), Arc::new(Notify::new()), WriterConfig::default());
+        // Isolate the mapped write response from owner shutdown, which Go
+        // permits to race that response. The queue still records the lost lease.
+        stale.set_stop_waker(Arc::new(|| {}));
         let error = writer.append(pending(b"fenced", domain)).await.unwrap_err();
         assert!(stale.is_stopped(), "lost lease must stop the owner");
         writer.stop();
