@@ -345,6 +345,7 @@ impl Drop for PollGuard {
 #[derive(Clone)]
 pub struct Matching {
     pub frontend: Frontend,
+    native_service: Option<Arc<dyn cadence_proto::native::NativeMatchingApi>>,
     polls: Polls,
     started: tokio::sync::watch::Sender<bool>,
     queues: Option<crate::matching_registry::QueueRegistry>,
@@ -403,6 +404,7 @@ impl Matching {
         );
         Self {
             frontend: Frontend { state },
+            native_service: None,
             polls: Arc::new(Mutex::new(HashMap::new())),
             started: tokio::sync::watch::channel(true).0,
             queues: None,
@@ -423,6 +425,20 @@ impl Matching {
             #[cfg(test)]
             engine_fault: Default::default(),
         }
+    }
+    /// Attach the byte-valued handler to every transport served by this handle.
+    /// The runtime must supply the handler's real lifecycle/domain/config and
+    /// ownership providers before exposing this handle to listeners.
+    pub fn with_native_service(
+        mut self,
+        service: Arc<dyn cadence_proto::native::NativeMatchingApi>,
+    ) -> Self {
+        self.native_service = Some(service);
+        self
+    }
+
+    pub(crate) fn native_service(&self) -> Option<&Arc<dyn cadence_proto::native::NativeMatchingApi>> {
+        self.native_service.as_ref()
     }
     /// Test-only: returns the injected engine error for `rpc`, mirroring a Go engine
     /// call that returns `errors.New(msg)`. Go's `handleErr` default case maps that to
@@ -4142,16 +4158,25 @@ async fn serve_with_listener_tls_inner(
         .with_service_name("uber.cadence.matching.v1.MatchingAPI")
         .with_service_name("uber.cadence.api.v1.MetaAPI")
         .build_v1()?;
+    let native = matching.native_service().cloned();
     let server = crate::grpc_tls::server_builder(tls)?
         .add_service(reflection)
         .add_service(
             p::meta_api_server::MetaApiServer::new(matching.clone())
                 .max_decoding_message_size(limit),
-        )
-        .add_service(
+        );
+    let server = if let Some(native) = native {
+        server.add_service(crate::matching_native_status::RawStatusService::new(
+            cadence_proto::native_service::matching_api_server::MatchingApiServer::new(
+                crate::matching_transport_native::SharedNativeMatching(native),
+            ).max_decoding_message_size(limit),
+        ))
+    } else {
+        server.add_service(
             m::matching_api_server::MatchingApiServer::new(matching)
                 .max_decoding_message_size(limit),
-        );
+        )
+    };
     if let Some(config) = no_identity {
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
         let incoming = no_identity_tls_incoming(listener, acceptor);

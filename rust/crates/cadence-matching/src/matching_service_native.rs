@@ -8,7 +8,7 @@
 
 use cadence_common::go_string::GoString;
 use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
-use cadence_proto::native::{self as n, NativeMatchingApi};
+use cadence_proto::native as n;
 use tonic::{Request, Response, Status};
 
 use crate::matching_engine_native::{
@@ -70,8 +70,114 @@ impl<C> NativeMatchingService<C> {
     }
 }
 
-// The concrete RPC implementation is supplied in the next integration
-// change: the generated NativeMatchingApi has a descriptor-defined method
-// set, and its inputs/outputs are generated from the repository's upstream
-// descriptor. Keeping this implementation explicit prevents trait defaults
-// from accidentally advertising RPCs which have no handler semantics.
+impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
+    pub async fn describe_task_list(
+        &self,
+        request: Request<n::matching::DescribeTaskListRequest>,
+    ) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
+        const METHOD: &str = "describe_task_list";
+        let request = request.into_inner();
+        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
+        self.enter(METHOD)?;
+        let result = async {
+            // Queue ownership is checked by the engine after manager lookup.
+            self.engine.describe_task_list(request, &self.integration).await
+        }
+        .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn get_task_lists_by_domain(
+        &self,
+        request: Request<n::matching::GetTaskListsByDomainRequest>,
+    ) -> Result<Response<n::matching::GetTaskListsByDomainResponse>, Status> {
+        const METHOD: &str = "get_task_lists_by_domain";
+        self.enter(METHOD)?;
+        let request = request.into_inner();
+        let result = async {
+            self.integration.domain_for_name(&request.domain)?;
+            self.engine
+                .get_task_lists_by_domain(request, &self.integration)
+        }
+        .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn cancel_outstanding_poll(
+        &self,
+        request: Request<n::matching::CancelOutstandingPollRequest>,
+    ) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
+        const METHOD: &str = "cancel_outstanding_poll";
+        let request = request.into_inner();
+        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
+        self.enter(METHOD)?;
+        let result = self
+            .engine
+            .cancel_outstanding_poll(request, &self.integration)
+            .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn respond_query_task_completed(
+        &self,
+        request: Request<n::matching::RespondQueryTaskCompletedRequest>,
+    ) -> Result<Response<n::matching::RespondQueryTaskCompletedResponse>, Status> {
+        const METHOD: &str = "respond_query_task_completed";
+        let request = request.into_inner();
+        // The generated Go gRPC mapper runs before handler lifecycle, quota or
+        // metrics and can fail while dereferencing the nested result.
+        NativeMatchingEngine::validate_query_completion_mapper(&request)?;
+        self.enter(METHOD)?;
+        let result = self.engine.respond_query_task_completed(request);
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn list_task_list_partitions(
+        &self,
+        request: Request<n::matching::ListTaskListPartitionsRequest>,
+    ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
+        const METHOD: &str = "list_task_list_partitions";
+        self.enter(METHOD)?;
+        let result = self
+            .engine
+            .list_task_list_partitions(request.into_inner(), &self.integration)
+            .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn update_task_list_partition_config(
+        &self,
+        request: Request<n::matching::UpdateTaskListPartitionConfigRequest>,
+    ) -> Result<Response<n::matching::UpdateTaskListPartitionConfigResponse>, Status> {
+        const METHOD: &str = "update_task_list_partition_config";
+        let deadline = Self::deadline(&request);
+        let request = request.into_inner();
+        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
+        self.enter(METHOD)?;
+        let result = async {
+            self.engine
+                .update_task_list_partition_config(request, deadline, &self.integration)
+                .await
+        }
+        .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+
+    pub async fn refresh_task_list_partition_config(
+        &self,
+        request: Request<n::matching::RefreshTaskListPartitionConfigRequest>,
+    ) -> Result<Response<n::matching::RefreshTaskListPartitionConfigResponse>, Status> {
+        const METHOD: &str = "refresh_task_list_partition_config";
+        let deadline = Self::deadline(&request);
+        let request = request.into_inner();
+        NativeControlContext::domain_name(&self.integration, &request.domain_id)?;
+        self.enter(METHOD)?;
+        let result = async {
+            self.engine
+                .refresh_task_list_partition_config(request, deadline, &self.integration)
+                .await
+        }
+        .await;
+        self.finish(METHOD, result).map(Response::new)
+    }
+}

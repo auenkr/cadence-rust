@@ -128,11 +128,13 @@ struct RawShard {
     shard_key: Vec<u8>,
 }
 
+type RawOwnerCache = Arc<RwLock<Option<HashMap<Vec<u8>, ShardOwner>>>>;
+
 pub struct TonicSpectator {
     channel: tonic::transport::Channel,
     namespace: Arc<str>,
     enabled: Arc<dyn Fn() -> bool + Send + Sync>,
-    owners: Arc<RwLock<Option<HashMap<Vec<u8>, ShardOwner>>>>,
+    owners: RawOwnerCache,
     first_state_tx: watch::Sender<bool>,
     first_state_rx: watch::Receiver<bool>,
     stop_tx: watch::Sender<bool>,
@@ -1608,12 +1610,13 @@ mod tests {
         let missing = [0xfd, 0, b'b'];
         let owner = tokio::time::timeout(Duration::from_secs(2), spectator.get_shard_owner_bytes(&missing, deadline)).await.unwrap().unwrap();
         assert_eq!(owner.executor_id, "rpc-owner");
-        let observed = requests.lock().unwrap();
-        assert_eq!(observed.len(), 1, "cache hits must not issue owner RPCs");
-        assert_eq!(observed[0].0, missing, "GetShardOwner must preserve raw key bytes");
-        assert_eq!(&observed[0].1[..3], &["shard-manager", "cadence-matching", "proto"]);
-        assert!(!observed[0].1[3].is_empty(), "GetShardOwner carries its deadline");
-        drop(observed);
+        {
+            let observed = requests.lock().unwrap();
+            assert_eq!(observed.len(), 1, "cache hits must not issue owner RPCs");
+            assert_eq!(observed[0].0, missing, "GetShardOwner must preserve raw key bytes");
+            assert_eq!(&observed[0].1[..3], &["shard-manager", "cadence-matching", "proto"]);
+            assert!(!observed[0].1[3].is_empty(), "GetShardOwner carries its deadline");
+        }
         tokio::time::timeout(Duration::from_secs(2), spectator.shutdown())
             .await
             .unwrap();

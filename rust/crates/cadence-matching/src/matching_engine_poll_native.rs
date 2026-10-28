@@ -126,6 +126,20 @@ fn hint(
     }
 }
 
+async fn query_state_until_cancelled<T>(
+    deadline: tokio::time::Instant,
+    cancel: &tokio::sync::Notify,
+    lookup: impl std::future::Future<Output = Result<T, Status>>,
+) -> Result<T, Status> {
+    tokio::select! {
+        biased;
+        _ = cancel.notified() => Err(Status::cancelled("Matching poll cancelled.")),
+        result = tokio::time::timeout_at(deadline, lookup) => {
+            result.unwrap_or_else(|_| Err(Status::deadline_exceeded("Matching poll deadline exceeded.")))
+        }
+    }
+}
+
 impl NativeMatchingEngine {
     pub async fn poll_for_decision_task(
         &self,
@@ -191,7 +205,15 @@ impl NativeMatchingEngine {
                 if let Some(observer) = &query_lifecycle.observer { observer.poll_success(true); observer.poll_match(false, false); }
                 if !query.shape.is_valid() { return Err(Status::unknown(crate::matching_panic::NIL_DEREFERENCE_MESSAGE)); }
                 let execution = query.request.workflow_execution.clone().unwrap_or_default();
-                let state = tokio::time::timeout_at(deadline, queue.dispatcher.query_mutable_state_with_deadline(&execution, Some(deadline))).await.unwrap_or_else(|_| Err(Status::deadline_exceeded("Matching poll deadline exceeded.")));
+                // Go finishes the synchronous query handoff before looking up
+                // mutable state. If this poll is cancelled during that lookup,
+                // it reports the lookup error to the query caller; it does not
+                // put the already-consumed query back on the task list.
+                let state = query_state_until_cancelled(
+                    deadline,
+                    &registration.cancel,
+                    queue.dispatcher.query_mutable_state_with_deadline(&execution, Some(deadline)),
+                ).await;
                 match state {
                     Ok(state) => crate::matching_query_native::query_response(query, &state),
                     Err(error) => { let _ = queue.queries.complete(&query.task_id, crate::matching_query_native::QueryOutcome::Internal(error)); Default::default() }
@@ -305,6 +327,31 @@ impl NativeMatchingEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn committed_query_lookup_cancellation_is_terminal_error() {
+        let cancel = std::sync::Arc::new(tokio::sync::Notify::new());
+        let task_cancel = cancel.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let lookup = async move {
+            let _ = started_tx.send(());
+            std::future::pending::<Result<(), Status>>().await
+        };
+        let lookup_task = tokio::spawn(async move {
+            query_state_until_cancelled(
+                tokio::time::Instant::now() + std::time::Duration::from_secs(5),
+                &task_cancel,
+                lookup,
+            ).await
+        });
+        started_rx.await.unwrap();
+        // The poll has committed the query and entered its state lookup.
+        // Cancellation ends that lookup and yields the error delivered to the
+        // query waiter by the decision-poll branch.
+        cancel.notify_one();
+        let error = lookup_task.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Cancelled);
+    }
 
     #[test]
     fn invalid_partition_error_keeps_raw_name_and_decision_prefix() {

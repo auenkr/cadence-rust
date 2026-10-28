@@ -630,6 +630,29 @@ mod tests {
     }
 
     #[test]
+    fn committed_query_wins_against_ready_poll_backlog() {
+        let channel = QueryChannel::new();
+        let mut offer = Box::pin(channel.offer_or_forward(
+            query(GoString::from(&b"query"[..])),
+            std::future::pending::<()>(),
+        ));
+        assert!(poll(offer.as_mut()).is_pending()); // publish offer
+        let mut poll_race = Box::pin(async {
+            tokio::select! {
+                biased;
+                query = channel.next() => Some(query),
+                _backlog = std::future::ready(()) => None,
+            }
+        });
+        let selected = match poll(poll_race.as_mut()) {
+            std::task::Poll::Ready(Some(query)) => query,
+            _ => panic!("query branch precedes simultaneously ready backlog"),
+        };
+        assert_eq!(selected.task_id.as_bytes(), b"query");
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Matched)));
+    }
+
+    #[test]
     fn cancelled_waiting_poll_releases_ready_forward_token() {
         let channel = QueryChannel::new();
         let mut next = Box::pin(channel.next());
@@ -643,6 +666,26 @@ mod tests {
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Forward(()))));
         drop(offer);
         assert!(channel.pending.lock().unwrap().offers.is_empty());
+    }
+
+    #[test]
+    fn ready_backlog_winner_releases_deferred_forward_token() {
+        let channel = QueryChannel::new();
+        let mut poll_race = Box::pin(async {
+            tokio::select! {
+                biased;
+                query = channel.next() => Some(query),
+                _backlog = std::future::ready(()) => None,
+            }
+        });
+        assert!(matches!(poll(poll_race.as_mut()), std::task::Poll::Ready(None)));
+        // Dropping the losing `next` future withdraws its waiter registration.
+        drop(poll_race);
+        let mut offer = Box::pin(channel.offer_or_forward(
+            query(GoString::from(&b"forward-after-backlog"[..])),
+            std::future::ready(()),
+        ));
+        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Forward(()))));
     }
 
     #[tokio::test]

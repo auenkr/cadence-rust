@@ -263,7 +263,11 @@ impl MatchingShardRouter {
             ));
         }
         Ok((
-            hosts.into_iter().cloned().map(resolved_from_ring_host).collect(),
+            hosts
+                .into_iter()
+                .cloned()
+                .map(resolved_from_ring_host)
+                .collect(),
             RoutingPath::HashRing,
         ))
     }
@@ -373,7 +377,9 @@ pub fn task_list_excluded_from_shard_distributor(
     exclude_short_lived_task_lists: bool,
 ) -> bool {
     task_list_excluded_from_shard_distributor_bytes(
-        task_list_name.as_bytes(), percentage_onboarded, exclude_short_lived_task_lists,
+        task_list_name.as_bytes(),
+        percentage_onboarded,
+        exclude_short_lived_task_lists,
     )
 }
 
@@ -384,8 +390,7 @@ pub fn task_list_excluded_from_shard_distributor_bytes(
     exclude_short_lived_task_lists: bool,
 ) -> bool {
     (exclude_short_lived_task_lists && contains_uuid(task_list_name))
-        || cadence_common::membership::fingerprint64(task_list_name) % 100
-            >= percentage_onboarded
+        || cadence_common::membership::fingerprint64(task_list_name) % 100 >= percentage_onboarded
 }
 
 fn contains_uuid(bytes: &[u8]) -> bool {
@@ -584,24 +589,55 @@ mod tests {
     async fn raw_keys_follow_policy_and_reach_the_spectator_unchanged() {
         struct RawLookup(Arc<Mutex<Vec<Vec<u8>>>>);
         impl ShardOwnerLookup for RawLookup {
-            fn get_shard_owner(&self, key: String, deadline: Instant) -> BoxFuture<Result<ShardOwner, String>> {
+            fn get_shard_owner(
+                &self,
+                key: String,
+                deadline: Instant,
+            ) -> BoxFuture<Result<ShardOwner, String>> {
                 self.get_shard_owner_bytes(key.into_bytes(), deadline)
             }
-            fn get_shard_owner_bytes(&self, key: Vec<u8>, _deadline: Instant) -> BoxFuture<Result<ShardOwner, String>> {
+            fn get_shard_owner_bytes(
+                &self,
+                key: Vec<u8>,
+                _deadline: Instant,
+            ) -> BoxFuture<Result<ShardOwner, String>> {
                 self.0.lock().unwrap().push(key);
                 Box::pin(async { Ok(shard_owner(&[(HOST_IP, "127.0.0.1")])) })
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let router = MatchingShardRouter::new(ring(), Some(Arc::new(RawLookup(seen.clone()))),
-            Arc::new(|| 100), Arc::new(|| true));
+        let router = MatchingShardRouter::new(
+            ring(),
+            Some(Arc::new(RawLookup(seen.clone()))),
+            Arc::new(|| 100),
+            Arc::new(|| true),
+        );
         let raw = b"\xffqueue\0";
-        assert_eq!(router.resolve_bytes(raw).await.unwrap().1, RoutingPath::ShardDistributor);
-        assert_eq!(router.resolve("utf8").await.unwrap().1, RoutingPath::ShardDistributor);
+        assert_eq!(
+            router.resolve_bytes(raw).await.unwrap().1,
+            RoutingPath::ShardDistributor
+        );
+        assert_eq!(
+            router.resolve("utf8").await.unwrap().1,
+            RoutingPath::ShardDistributor
+        );
         assert_eq!(*seen.lock().unwrap(), vec![raw.to_vec(), b"utf8".to_vec()]);
-        assert_eq!(router.resolve_bytes(b"\xff550e8400-e29b-41d4-a716-446655440000").await.unwrap().1, RoutingPath::HashRing);
-        assert_eq!(router.resolve_n_bytes(raw, 1).unwrap().0[0].identity, "ring-owner");
-        assert_eq!(router.resolve_n("utf8", 1).unwrap(), router.resolve_n_bytes(b"utf8", 1).unwrap());
+        assert_eq!(
+            router
+                .resolve_bytes(b"\xff550e8400-e29b-41d4-a716-446655440000")
+                .await
+                .unwrap()
+                .1,
+            RoutingPath::HashRing
+        );
+        assert_eq!(
+            router.resolve_n_bytes(raw, 1).unwrap().0[0].identity,
+            "ring-owner"
+        );
+        assert_eq!(
+            router.resolve_n("utf8", 1).unwrap(),
+            router.resolve_n_bytes(b"utf8", 1).unwrap()
+        );
     }
 
     #[tokio::test]

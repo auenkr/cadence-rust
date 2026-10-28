@@ -92,6 +92,10 @@ pub mod matching_registry;
 pub mod matching_registry_native;
 pub mod matching_ringpop_provider;
 pub mod matching_runtime;
+#[allow(clippy::result_large_err)]
+pub mod matching_runtime_native;
+#[allow(clippy::result_large_err)]
+pub mod matching_service_native;
 pub mod matching_scaler;
 #[allow(clippy::result_large_err)]
 pub mod matching_scaler_native;
@@ -104,6 +108,8 @@ pub mod matching_shard_processor;
 pub mod matching_shard_routing;
 pub mod matching_sync;
 pub mod matching_sync_native;
+#[allow(clippy::result_large_err)]
+mod matching_transport_native;
 pub mod matching_task_info_log;
 pub mod matching_task_store;
 pub mod matching_throttled_logger;
