@@ -7,3 +7,5 @@ Fresh five-crate CI https://github.com/auenkr/cadence-rust/actions/runs/40692116
 All thirteen native RPC trait methods exist in source, and native gRPC/Thrift attachment seams exist. The launcher still needs a complete native integration provider and runtime lifecycle assembly. Semaphore persistence/manager integration, production scaler/observers/forwarding, fresh workspace validation, and mixed Go/Rust SDK/failure/restart/recovery evidence remain outstanding. Matching is incomplete; no work on the next service is authorized by this checkpoint.
 
 The semaphore persistence and engine context delegates were still outstanding when recovering the failed manager. Their shared-checkout files must not be treated as reviewed or completed solely because they are present.
+
+Fresh five-crate CI dispatched: https://github.com/auenkr/cadence-rust/actions/runs/40700177421 at `c03ba2c9ebcf17097cac86618205689b40d5c17d`, clean target and runner formatting enabled. Initial status queued; conclusion pending. The manager draft remains unregistered and therefore is outside this compile gate.
