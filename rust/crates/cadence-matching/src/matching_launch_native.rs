@@ -17,7 +17,7 @@ use crate::{
     matching_host_native::NativeMatchingHost,
     matching_membership::Membership,
     matching_quota::MatchingRpcQuota,
-    matching_registry_native::{NativeLocalPollServiceBuilder, NativeQueueRegistry},
+    matching_registry_native::NativeQueueRegistry,
     matching_runtime::{DrainDuration, MatchingRuntime},
     matching_semaphore_manager_native::Registry,
     matching_semaphore_service_native::{ContextTimeoutMetric, NativeSemaphoreService},
@@ -39,13 +39,10 @@ pub struct ConfiguredNativeAssembly {
     pub metrics: crate::matching_metrics::MatchingMetrics,
     pub poll_observer: PollObserverFactory,
     pub scaler_metrics: crate::matching_scaler_native::ScalerMetrics,
-    pub local_service: NativeLocalPollServiceBuilder,
 }
 
 /// Construct the production registry and host without opening a legacy queue
-/// owner. This is an integration seam, not a production switch: the local
-/// service builder must be acyclic and lifecycle and ownership must be wired
-/// before the launcher exposes the resulting runtime.
+/// owner. The weak local service slot is published before admission opens.
 pub async fn assemble_configured(
     state: AppState,
     deps: ConfiguredNativeAssembly,
@@ -58,28 +55,16 @@ pub async fn assemble_configured(
         state.current_cluster_name.clone(),
         std::num::NonZeroU32::new(100_000).expect("task id range"),
         crate::matching_fatal::native_fatal_sinks(deps.fatal),
-    )
-    .with_metrics(deps.metrics.clone())
-    .with_poll_observer(registry_poll_observer(deps.metrics.clone()))
-    .with_live_routing(
-        deps.membership.clone(),
-        None,
-        deps.local_service,
-        crate::matching_registry_routing_native::partition_refresher(deps.membership.clone()),
     );
-    let registry = crate::matching_scaler_runtime_native::attach_native_scaler(
-        registry,
-        &state,
-        deps.cache.clone(),
-        deps.membership.clone(),
-        None,
-        deps.scaler_metrics,
+    let (registry, slot) = crate::matching_runtime_native::attach_live_native_registry(
+        registry, &state, deps.cache.clone(), deps.membership.clone(), None,
+        deps.metrics.clone(), deps.scaler_metrics,
     );
     let timeout_metric = semaphore_timeout_metric(deps.cache.clone(), deps.metrics.clone());
     assemble(
         state, deps.cache, registry, deps.semaphore_store, deps.membership,
         None, deps.quota, deps.domain_parse, deps.drain, deps.metrics,
-        timeout_metric, Some(deps.poll_observer),
+        timeout_metric, Some(deps.poll_observer), Some(slot),
     ).await
 }
 
@@ -100,6 +85,7 @@ fn semaphore_timeout_metric(
     })
 }
 
+#[cfg(test)]
 fn registry_poll_observer(
     metrics: crate::matching_metrics::MatchingMetrics,
 ) -> crate::matching_registry_native::NativePollObserverProvider {
@@ -126,6 +112,7 @@ pub async fn assemble(
     metrics: crate::matching_metrics::MatchingMetrics,
     timeout_metric: ContextTimeoutMetric,
     observer: Option<PollObserverFactory>,
+    slot: Option<crate::matching_registry_routing_native::NativeServiceSlot>,
 ) -> anyhow::Result<MatchingRuntime> {
     let runtime = MatchingRuntime::in_memory_with_domain_cache(state.clone(), drain, cache.clone())
         .await?
@@ -165,6 +152,10 @@ pub async fn assemble(
         state, cache, registry.clone(), membership.clone(), shard_router, quota,
         domain_parse, semaphore.callback(), metrics, observer,
     ));
+    if let Some(slot) = slot {
+        let service: Arc<dyn cadence_proto::native::NativeMatchingApi> = host.clone();
+        slot.publish(&service);
+    }
     runtime.with_native_host(registry, host, semaphore, membership)
 }
 

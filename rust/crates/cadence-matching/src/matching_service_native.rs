@@ -222,56 +222,82 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
 #[tonic::async_trait]
 impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingService<C> {
     async fn add_decision_task(&self, request: Request<n::matching::AddDecisionTaskRequest>) -> Result<Response<n::matching::AddDecisionTaskResponse>, Status> {
+        crate::matching_panic::capture("add_decision_task", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "add_decision_task")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
+        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
+            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+            "decision_task", String::new());
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
         observe(self.integration.metrics(),
             "AddDecisionTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_add_decision_task(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn add_activity_task(&self, request: Request<n::matching::AddActivityTaskRequest>) -> Result<Response<n::matching::AddActivityTaskResponse>, Status> {
+        crate::matching_panic::capture("add_activity_task", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "add_activity_task")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
+        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
+            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+            "activity_task", String::new());
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
         observe(self.integration.metrics(),
             "AddActivityTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_add_activity_task(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn poll_for_decision_task(&self, request: Request<n::matching::PollForDecisionTaskRequest>) -> Result<Response<n::matching::PollForDecisionTaskResponse>, Status> {
+        crate::matching_panic::capture("poll_for_decision_task", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "poll_for_decision_task")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
+        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
+            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+            "decision_task", metric_string(&request.get_ref().isolation_group));
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
         observe(self.integration.metrics(),
             "PollForDecisionTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_poll_for_decision_task(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn poll_for_activity_task(&self, request: Request<n::matching::PollForActivityTaskRequest>) -> Result<Response<n::matching::PollForActivityTaskResponse>, Status> {
+        crate::matching_panic::capture("poll_for_activity_task", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "poll_for_activity_task")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
+        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
+            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+            "activity_task", metric_string(&request.get_ref().isolation_group));
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
         observe(self.integration.metrics(),
             "PollForActivityTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_poll_for_activity_task(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn query_workflow(&self, request: Request<n::matching::QueryWorkflowRequest>) -> Result<Response<n::matching::QueryWorkflowResponse>, Status> {
+        crate::matching_panic::capture("query_workflow", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "query_workflow")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
+        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
+            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+            "decision_task", String::new());
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
         observe(self.integration.metrics(),
             "QueryWorkflow", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_query_workflow(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn respond_query_task_completed(&self, request: Request<n::matching::RespondQueryTaskCompletedRequest>) -> Result<Response<n::matching::RespondQueryTaskCompletedResponse>, Status> {
+        crate::matching_panic::capture("respond_query_task_completed", async move {
         NativeMatchingEngine::validate_query_completion_mapper(request.get_ref())?;
         self.integration.check_domain(&request.get_ref().domain_id, "respond_query_task_completed")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
@@ -281,8 +307,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "RespondQueryTaskCompleted", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_respond_query_task_completed(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn cancel_outstanding_poll(&self, request: Request<n::matching::CancelOutstandingPollRequest>) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
+        crate::matching_panic::capture("cancel_outstanding_poll", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
@@ -291,8 +319,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "CancelOutstandingPoll", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_cancel_outstanding_poll(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn describe_task_list(&self, request: Request<n::matching::DescribeTaskListRequest>) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
+        crate::matching_panic::capture("describe_task_list", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "describe_task_list")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
@@ -301,8 +331,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "DescribeTaskList", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_describe_task_list(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn list_task_list_partitions(&self, request: Request<n::matching::ListTaskListPartitionsRequest>) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
+        crate::matching_panic::capture("list_task_list_partitions", async move {
         let domain = Some(metric_string(&request.get_ref().domain));
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
@@ -310,8 +342,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "ListTaskListPartitions", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_list_task_list_partitions(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn get_task_lists_by_domain(&self, request: Request<n::matching::GetTaskListsByDomainRequest>) -> Result<Response<n::matching::GetTaskListsByDomainResponse>, Status> {
+        crate::matching_panic::capture("get_task_lists_by_domain", async move {
         let domain = Some(metric_string(&request.get_ref().domain));
         let list: Option<(String, Option<i32>)> = None;
         let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
@@ -319,8 +353,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "GetTaskListsByDomain", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_get_task_lists_by_domain(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn update_task_list_partition_config(&self, request: Request<n::matching::UpdateTaskListPartitionConfigRequest>) -> Result<Response<n::matching::UpdateTaskListPartitionConfigResponse>, Status> {
+        crate::matching_panic::capture("update_task_list_partition_config", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "update_task_list_partition_config")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
@@ -329,8 +365,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "UpdateTaskListPartitionConfig", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_update_task_list_partition_config(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn refresh_task_list_partition_config(&self, request: Request<n::matching::RefreshTaskListPartitionConfigRequest>) -> Result<Response<n::matching::RefreshTaskListPartitionConfigResponse>, Status> {
+        crate::matching_panic::capture("refresh_task_list_partition_config", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "refresh_task_list_partition_config")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
@@ -339,8 +377,10 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "RefreshTaskListPartitionConfig", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_refresh_task_list_partition_config(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn acquire_semaphore(&self, request: Request<n::matching::AcquireSemaphoreRequest>) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
+        crate::matching_panic::capture("acquire_semaphore", async move {
         self.integration.check_domain(&request.get_ref().domain_id, "acquire_semaphore")?;
         let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
         let list = Some((metric_string(&request.get_ref().semaphore_name), Some(0)));
@@ -349,6 +389,26 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             "AcquireSemaphore", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
             context, self.core_acquire_semaphore(request),
         ).await
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+    }
+}
+
+fn record_forwarded(
+    metrics: &crate::matching_metrics::MatchingMetrics,
+    forwarded_from: &GoString,
+    domain: Option<&str>,
+    list: Option<(&str, Option<i32>)>,
+    task_type: &'static str,
+    isolation_group: String,
+) {
+    if !forwarded_from.is_empty() {
+        metrics.forwarded_per_task_list(&crate::matching_metrics::PollMetricContext {
+            domain: domain.unwrap_or_default().to_owned(),
+            task_list: list.map_or("", |(name, _)| name).to_owned(),
+            task_list_kind: list.and_then(|(_, kind)| kind).unwrap_or_default(),
+            task_type,
+            poller_isolation_group: isolation_group,
+        });
     }
 }
 
@@ -427,6 +487,35 @@ mod tests {
         assert_eq!(events[0].tags[TASK_LIST_TAG], "__sticky__");
         assert_eq!(events[0].tags[CALLER_TAG], "worker");
         assert_eq!(events[0].tags[TRANSPORT_TAG], "grpc");
+    }
+
+    #[tokio::test]
+    async fn forwarded_bytes_are_counted_even_when_quota_rejects() {
+        use crate::matching_metrics::*;
+        use std::sync::Arc;
+        let sink = Arc::new(RecordingMetricSink::default());
+        let metrics = MatchingMetrics::new(sink.clone());
+        let forwarded = GoString::from(&b"\xff"[..]);
+        record_forwarded(&metrics, &forwarded, Some("domain"), Some(("queue", Some(0))),
+            "decision_task", String::new());
+        let result: Result<(), Status> = observe(&metrics, "AddDecisionTask", Some("domain"),
+            Some(("queue", Some(0))), MatchingMetrics::context_from_metadata(
+                &tonic::metadata::MetadataMap::new(), "grpc"),
+            async { Err(Status::resource_exhausted("quota")) }).await;
+        assert_eq!(result.unwrap_err().code(), tonic::Code::ResourceExhausted);
+        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
+        record_forwarded(&metrics, &GoString::default(), Some("domain"), None,
+            "decision_task", String::new());
+        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn outer_capture_preserves_plain_panic_status() {
+        crate::matching_panic::arm_panic_for_test("add_decision_task", 1);
+        let result: Result<(), Status> = crate::matching_panic::capture("add_decision_task", async {
+            Ok(())
+        }).await.unwrap_or_else(|message| Err(Status::unknown(message)));
+        assert!(crate::matching_panic::is_captured_panic(&result.unwrap_err()));
     }
 
     #[test]
