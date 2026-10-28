@@ -1,0 +1,2 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40758347908
+Conclusion: cancelled; superseded by source c6c8ef1bb with declared-error matrix and runner formatting

@@ -283,3 +283,22 @@ Existing candidate-ref run40757715608 remains preserved. PR1 linking again
 returned "The calling provider no longer owns an active thread run."
 Next: retain both terminal runs and formatting artifacts; validate final
 formatting/fixes before freezing the same source for ten serial mixed lanes.
+
+## Combined error-matrix candidate CI and recovered terminal evidence
+
+Run40757715608 concluded failure at a85e585b9: Clippy exit0, Matching955
+passed/2 ignored (live duration provider passed), typed metric category matrix
+passed, service-core172 passed/one failed (the known pre-correction quota bug).
+Downloaded and retained compact evidence under
+`memory/evidence/matching-native-workspace-40757715608/`.
+
+Dispatched fresh combined source validation:
+https://github.com/auenkr/cadence-rust/actions/runs/40759246848 at
+`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227`. Clean target, Clippy then workspace
+tests, parity formatting and Go UUID oracle. This source adds the declared
+Thrift error matrix and applies runner formatting. Same-branch run40758347908
+was cancelled by workflow concurrency because the source changed, not because
+observation timed out; it passed Clippy but did not finish tests. Partial logs
+are retained in `memory/evidence/matching-native-workspace-40758347908/`.
+No mixed gate runs. Final source remains unfrozen until this combined candidate
+and any final formatting are validated. No local Cargo/Go execution.
