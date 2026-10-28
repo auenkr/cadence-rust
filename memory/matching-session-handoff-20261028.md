@@ -45,3 +45,33 @@ All Cargo including formatting and all Go validation stays on GitHub Actions. Us
 ## Superseding CI for saved WIP
 
 After the checkpoint push, requested cancellation of older in-progress run 40723629453 and dispatched a fresh clean-target six-crate clippy/test/format gate for checkpoint a929a63e9: https://github.com/auenkr/cadence-rust/actions/runs/40724071697 . This is the run to inspect first in the new session. It includes saved metric, registry-routing and raw-executor WIP. Conclusion is pending; no completion claim. The prior fix-only run was superseded before its conclusion was available.
+
+## FINAL RESUME POINT (latest user-requested handoff)
+
+Read this section first; it supersedes earlier pending-CI and shared-router statements above.
+
+All source changes are committed/pushed on master through e541ba1ed. Worktree was clean at this final handoff. No production activation or completion claim.
+
+Additional committed work since the original WIP checkpoint:
+
+- de1629693: registered matching_registry_routing_native in lib.rs and CI formatting list; fixed its undefined local-host `state` initializer to Arc::downgrade(&self.state).
+- 381bc73aa: implemented matching_registry_routing_native::partition_refresher(membership). Native generated client, raw partition/group fields, config map/count/version, persistence-to-API kind/type offsets, YARPC headers, grpc-timeout and local timeout_at. Owner resolution failure logs and returns success; RPC errors propagate. Membership now exposes channel_for_task_list_owner_bytes, and the existing string method delegates to it, retaining TLS/channel cache and local advertised-endpoint semantics. Added raw codec regression, not run. Host still must install this callback.
+- e541ba1ed: shared late shard router on NativeQueueRegistry (Arc/RwLock slot), published by MatchingRuntime::with_shard_router. Control owner_host, registry parent forwarding and scaler descriptions read that shared state. Host binds its engine add/query context using with_routing_registry. Standalone context construction retains optional-router compatibility. MatchingShardRouter now derives Clone (live callbacks and peer cache remain shared). Added registry-clone attachment/replacement regression, not run. See memory/matching-native-shared-router-20261028.md.
+
+### Latest authoritative CI evidence
+
+https://github.com/auenkr/cadence-rust/actions/runs/40724071697 completed FAILURE at head a929a63e9477c671a4b0c5138070d0d1e41b138c. Failed during clippy solely on the undefined `state` initializer in matching_registry_native.rs (reported at runner-formatted line 712), for both lib and lib test. Tests did not execute. This error was already corrected by de1629693, AFTER the validated head. Logs saved locally at /tmp/matching-40724071697.log. The later partition refresh/shared router commits have NOT been compiled or run. Do not interpret this failure as evidence those later changes fail or pass.
+
+NEXT ACTION: dispatch fresh six-crate CI on current master:
+
+gh workflow run rust-ci.yml --ref master -f 'package=cadence-proto -p cadence-common -p cadence-api -p cadence-persistence -p cadence-service-core -p cadence-matching' -f clean_target=true -f format_matching_parity_files=true
+
+Record returned URL/head/conclusion. Address logs without any local Cargo/rustfmt/Go validation. No new run was dispatched after e541ba1ed before final handoff.
+
+### Concrete next implementation seam reviewed but NOT edited
+
+Native launch assemble still requires supplied registry providers and is not called by the production launcher. It constructs Arc<NativeMatchingService<NativeMatchingHost>>. Local parent forwarding currently requires a concrete acyclic service attachment. Consider installing NativeLocalPollFactory before host construction with a shared OnceLock/Mutex holding Weak<dyn cadence_proto::native::NativeMatchingApi>; after constructing the real Arc host, publish its weak trait object. Upgrade weak service per call and wrap InProcessNativeMatching. Retain NativeLocalPollHost::registry() weak-liveness check; never capture a strong host or registry inside an owner resolver and create an ownership cycle. This was only a proposed approach; no source changes implementing it exist.
+
+Existing with_live_routing requires an infallible per-call builder, so do not assume that API already accepts the optional weak-service factory. Refactor/reuse live parent routing attachment if needed, then install concrete partition_refresher. Full scaler/poll observers, async executor ownership lookup and actual production launcher activation remain unfinished, followed by workspace and mixed Go/Rust SDK/recovery validation and parity audit.
+
+Worker coordination still returned Authentication required earlier. Prior async worker execution state remains unknown; no substitute models or new delegates were launched. Their saved WIP is committed but does not prove terminal worker completion. Recover authenticated coordination before overlapping their scopes. User preference: 3 Luna normal-speed workers; earlier Terra permission exists for harder tasks.
