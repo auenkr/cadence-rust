@@ -35,6 +35,9 @@ pub fn native_queue_registry(
     fatal: NativeFatalSinks,
 ) -> NativeQueueRegistry {
     let overlay = state.admin.dynamic_config.clone();
+    let history = history.with_record_started_timeout_bytes(record_started_timeout_provider(
+        cache.clone(), overlay.clone(),
+    ));
     let domains = state.domains.clone();
     let cluster = cluster.into();
 
@@ -487,6 +490,23 @@ fn boolean_provider(
     })
 }
 
+fn record_started_timeout_provider(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_history::RecordStartedTimeoutBytes {
+    Arc::new(move |domain| {
+        // Resolve before taking the overlay lock: cold metadata lookup may block.
+        let name = cached_domain_name(&cache, &GoString::from(domain));
+        let config = overlay.lock().expect("admin lock");
+        let nanos = cadence_persistence::dynamic_config::duration(
+            config.property_values("matching.recordTaskStartedTimeout"),
+            name.as_deref(),
+            crate::matching_history::DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS,
+        );
+        std::time::Duration::from_nanos(nanos.max(0) as u64)
+    })
+}
+
 fn domain_is_active(
     domains: &cadence_persistence::InMemoryDomainStore,
     id: &GoString,
@@ -599,6 +619,23 @@ mod tests {
         );
         assert!(invalid);
         assert!(!replacement);
+    }
+
+    #[test]
+    fn record_started_provider_observes_live_config_and_zero_timeout() {
+        use std::time::Duration;
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        let provider = record_started_timeout_provider(Arc::new(empty_cache()), overlay.clone());
+        let id = b"00000000-0000-0000-0000-000000000001";
+        assert_eq!(provider(id), Duration::from_secs(1));
+        for (value, expected) in [(br#""250ms""#.as_slice(), Duration::from_millis(250)), (br#""0s""#.as_slice(), Duration::ZERO)] {
+            overlay.lock().unwrap().update(false, "matching.recordTaskStartedTimeout", vec![DynamicConfigValue {
+                value: Some(cadence_api::types::DataBlob { encoding_type: None, data: value.to_vec() }),
+                filters: vec![],
+            }]);
+            assert_eq!(provider(id), expected);
+            assert_eq!(provider(b"\xff"), expected, "invalid domain bytes use the global property");
+        }
     }
 
     #[test]
