@@ -1,0 +1,56 @@
+error[E0599]: no method named `poll_for_decision_task` found for struct `matching_service_native::NativeMatchingService<C>` in the current scope
+    --> crates/cadence-matching/src/matching_service_native.rs:1125:18
+     |
+  55 |   pub struct NativeMatchingService<C> {
+     |   ----------------------------------- method `poll_for_decision_task` not found for this struct
+...
+1124 |               let decision = service
+     |  ____________________________-
+1125 | |                 .poll_for_decision_task(Request::new(Default::default()))
+     | |_________________-^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: one of the expressions' fields has a method of the same name
+     |
+1125 |                 .engine.poll_for_decision_task(Request::new(Default::default()))
+     |                  +++++++
+help: the following traits which provide `poll_for_decision_task` are implemented but not in scope; perhaps you want to import one of them
+     |
+ 823 +     use cadence_proto::native::NativeMatchingApi;
+     |
+ 823 +     use cadence_proto::native_service::matching_api_server::MatchingApi;
+     |
+help: there is a method `core_poll_for_decision_task` with a similar name
+     |
+1125 |                 .core_poll_for_decision_task(Request::new(Default::default()))
+     |                  +++++
+
+error[E0599]: no method named `poll_for_activity_task` found for struct `matching_service_native::NativeMatchingService<C>` in the current scope
+    --> crates/cadence-matching/src/matching_service_native.rs:1129:18
+     |
+  55 |   pub struct NativeMatchingService<C> {
+     |   ----------------------------------- method `poll_for_activity_task` not found for this struct
+...
+1128 |               let activity = service
+     |  ____________________________-
+1129 | |                 .poll_for_activity_task(Request::new(Default::default()))
+     | |_________________-^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: items from traits can only be used if the trait is in scope
+help: one of the expressions' fields has a method of the same name
+     |
+1129 |                 .engine.poll_for_activity_task(Request::new(Default::default()))
+     |                  +++++++
+help: the following traits which provide `poll_for_activity_task` are implemented but not in scope; perhaps you want to import one of them
+     |
+ 823 +     use cadence_proto::native::NativeMatchingApi;
+     |
+ 823 +     use cadence_proto::native_service::matching_api_server::MatchingApi;
+     |
+help: there is a method `core_poll_for_activity_task` with a similar name
+     |
+1129 |                 .core_poll_for_activity_task(Request::new(Default::default()))
+     |                  +++++
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `cadence-matching` (lib test) due to 2 previous errors

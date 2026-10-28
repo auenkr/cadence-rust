@@ -821,6 +821,7 @@ fn metric_string(value: &GoString) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cadence_proto::native::NativeMatchingApi as _;
 
     #[tokio::test]
     async fn request_scope_counts_quota_failure_and_thrift_context() {
@@ -1085,7 +1086,6 @@ mod tests {
     #[tokio::test]
     async fn actual_handler_counts_forwarded_quota_failure_and_captures_panic() {
         use crate::matching_metrics::FORWARDED_PER_TASK_LIST;
-        use cadence_proto::native::NativeMatchingApi as _;
         let (_dir, service, sink, _) = service(true);
         let request = n::matching::AddDecisionTaskRequest {
             forwarded_from: GoString::from(&b"\xff"[..]),
@@ -1150,7 +1150,6 @@ mod tests {
 
     #[tokio::test]
     async fn actual_add_and_control_deadlines_cancel_pending_admission() {
-        use cadence_proto::native::NativeMatchingApi as _;
         let (_dir, service, _, store) = service(false);
         let released = Arc::new(tokio::sync::Notify::new());
         let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1249,6 +1248,56 @@ mod tests {
         let raw = GoString::from(&b"queue-\xff"[..]);
         assert_eq!(metric_string(&raw), "\"queue-\\xff\"");
         assert_eq!(raw.as_bytes(), b"queue-\xff");
+    }
+
+    #[tokio::test]
+    async fn refresh_rpc_returns_storage_failure_without_replacing_native_cache_or_owner() {
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
+        let (dir, service, _, store) = service(false);
+        let key = TaskListKeyBytes {
+            domain_id: uuid::Uuid::from_u128(1),
+            name: GoString::from(&b"refresh-\xff"[..]),
+            task_type: 0,
+        };
+        let queue = service.engine.registry.get(key.clone(), 0, 1).await.unwrap();
+        let cached = crate::matching_partition_native::NativeStoredPartitionConfig {
+            version: 7,
+            read_partitions: [(0, vec![GoString::from(&b"group-\xfe"[..])])].into(),
+            write_partitions: [(0, vec![])].into(),
+        };
+        queue.partitions.push(&cached);
+        // Corrupt the stored blob after startup so failure occurs in the
+        // refresh read, rather than in queue acquisition or admission.
+        let connection = rusqlite::Connection::open(dir.path().join("tasks.db")).unwrap();
+        let original: Vec<u8> = connection
+            .query_row("SELECT data FROM task_lists", [], |row| row.get(0))
+            .unwrap();
+        connection.execute("UPDATE task_lists SET data = X'ff'", []).unwrap();
+        let expected = MatchingTaskStoreBytes::get_task_list(store.as_ref(), &key)
+            .unwrap_err()
+            .to_string();
+        let mut request = Request::new(n::matching::RefreshTaskListPartitionConfigRequest {
+            domain_id: key.domain_id.to_string().into(),
+            task_list: Some(n::api::TaskList {
+                name: key.name.clone(),
+                kind: 1,
+                ..Default::default()
+            }),
+            task_list_type: 1,
+            ..Default::default()
+        });
+        request.set_timeout(Duration::from_secs(5));
+        let result = service.refresh_task_list_partition_config(request).await;
+        connection.execute("UPDATE task_lists SET data = ?1", [original]).unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(error.message(), expected);
+        assert!(error.details().is_empty());
+        assert_eq!(queue.partitions.get(), Some(cached));
+        assert!(!queue.queue.is_stopped());
+        let same_owner = service.engine.registry.get(key, 0, 2).await.unwrap();
+        assert!(Arc::ptr_eq(&queue.queue, &same_owner.queue));
+        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
     }
 
     #[test]

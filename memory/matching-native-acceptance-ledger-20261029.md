@@ -106,3 +106,22 @@ No local Cargo/Go validation ran. No replacement agents were started. T3 PR
 linking still fails with the active-thread-run ownership error; GitHub CLI is
 available. Preserve the current run until terminal and review its actual logs
 before dispatching the changed source.
+
+Run40753130527 is now terminal **failure**: Clippy exit101, two E0599 errors
+from the new poll-deadline logging test missing the generated native API trait
+import. Tests never ran. Moved that trait import into the test module scope,
+removing the narrower imports. Exact source/target, failure diagnostics and
+passing UUID oracle records are retained in
+`memory/evidence/matching-native-workspace-40753130527/`; full CI artifacts
+remain in `/mnt/storage/service/ci-evidence/matching-native-workspace-40753130527/`.
+
+Added a native public-handler refresh regression using the existing service
+fixture: lease the queue, seed a raw-byte partition cache, corrupt its real
+SQLite blob after startup, invoke RefreshTaskListPartitionConfig with a live
+deadline, restore the blob, then assert exact storage error message/Internal
+status, empty typed details, unchanged cache and identical running owner.
+This closes a specific missing assertion in source; it is **not a test pass**
+until CI executes it. It covers a nonretryable decode failure, not the complete
+throttled/timeout taxonomy or cancellation behavior. Next run should validate
+Matching first with CI formatting, then the final immutable source still needs
+fresh whole-workspace validation and all mixed lanes.
