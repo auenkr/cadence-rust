@@ -104,6 +104,8 @@ pub mod matching_semaphore_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_semaphore_manager_native;
 #[allow(clippy::result_large_err)]
+pub mod matching_semaphore_service_native;
+#[allow(clippy::result_large_err)]
 pub mod matching_control_context_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_engine_context_native;

@@ -43,7 +43,7 @@ pub struct NativeMatchingHost {
     engine: NativeMatchingEngineContext,
     control: Arc<NativeMatchingControlContext>,
     registry: NativeQueueRegistry,
-    started: tokio::sync::watch::Sender<bool>,
+    started: tokio::sync::watch::Sender<u8>,
     quota: Arc<MatchingRpcQuota>,
     domain_parse: DomainIdParse,
     semaphore: NativeSemaphore,
@@ -58,10 +58,14 @@ impl NativeMatchingHost {
         let polls: PollMap = Arc::default();
         let register: PollRegistrar = Arc::new(move |domain, list, kind, poller| register(&polls, domain, list, kind, poller));
         let engine_context = NativeMatchingEngineContext::with_control(state, cache, control.clone(), membership, shard_router, register, observer);
-        let started = tokio::sync::watch::channel(false).0;
+        let started = tokio::sync::watch::channel(0).0;
         NativeMatchingService::new(NativeMatchingEngine::new(registry.clone()), Self { engine: engine_context, control, registry, started, quota, domain_parse, semaphore, request_metric, failure_metric })
     }
-    pub fn mark_started(&self) { self.started.send_replace(true); }
+    /// Open admission after engine and membership startup has completed.
+    pub fn mark_started(&self) { self.started.send_if_modified(|state| { if *state == 0 { *state = 1; true } else { false } }); }
+    /// Close admission during drain. Existing queue ownership remains governed
+    /// by the registry's cached-owner rules; no new RPC may enter the host.
+    pub fn begin_shutdown(&self) { self.started.send_replace(2); }
 }
 
 fn rpc(method: &str) -> Option<MatchingRpc> {
@@ -75,17 +79,21 @@ fn rpc(method: &str) -> Option<MatchingRpc> {
         "acquire_semaphore" => MatchingRpc::AcquireSemaphore, _ => return None,
     })
 }
+async fn wait_for_startup(receiver: &mut tokio::sync::watch::Receiver<u8>) -> Result<(), Status> {
+    let state = receiver.wait_for(|state| *state != 0).await
+        .map_err(|_| Status::unavailable("Matching startup stopped"))?;
+    if *state == 1 { Ok(()) } else { Err(Status::unavailable("Matching host is shutting down")) }
+}
 impl NativeMatchingIntegration for NativeMatchingHost {
     fn check_started(&self) -> NativeFuture<Result<(), Status>> {
         let mut receiver = self.started.subscribe();
-        Box::pin(async move { receiver.wait_for(|ready| *ready).await.map_err(|_| Status::unavailable("Matching startup stopped"))?; Ok(()) })
+        Box::pin(async move { wait_for_startup(&mut receiver).await })
     }
     fn admit(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status> {
         let method = rpc(method).ok_or_else(|| Status::internal("unknown Matching RPC"))?;
         let direct = matches!(method, MatchingRpc::ListTaskListPartitions | MatchingRpc::GetTaskListsByDomain);
         let name = if direct { domain.cloned() } else { domain.map(|id| NativeControlContext::domain_name(self.control.as_ref(), id).unwrap_or_default()) };
-        let name = name.as_ref().map(|name| std::str::from_utf8(name.as_bytes()).map_err(|_| Status::invalid_argument("domain name is not valid UTF-8"))).transpose()?;
-        if self.quota.allow(method, name) { Ok(()) } else { Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "Matching host rps exceeded", "ServiceBusyError", cadence_proto::api::ServiceBusyError { reason: String::new() })) }
+        if self.quota.allow_go_string(method, name.as_ref()) { Ok(()) } else { Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "Matching host rps exceeded", "ServiceBusyError", cadence_proto::api::ServiceBusyError { reason: String::new() })) }
     }
     fn record_request(&self, method: &'static str) { (self.request_metric)(method); }
     fn record_failure(&self, method: &'static str, status: &Status) { (self.failure_metric)(method, status); }
@@ -165,6 +173,21 @@ mod tests {
         other.cancel.notify_one();
         tokio::time::timeout(Duration::from_millis(50), other.cancel.notified()).await.unwrap();
         assert!(tokio::time::timeout(Duration::from_millis(10), second.cancel.notified()).await.is_err());
+    }
+    #[tokio::test]
+    async fn startup_gate_opens_and_shutdown_wakes_waiters_with_unavailable() {
+        let (sender, mut receiver) = tokio::sync::watch::channel(0);
+        let waiting = tokio::spawn(async move { wait_for_startup(&mut receiver).await });
+        sender.send_replace(1);
+        assert!(waiting.await.unwrap().is_ok());
+        sender.send_replace(2);
+        let mut after_drain = sender.subscribe();
+        assert_eq!(wait_for_startup(&mut after_drain).await.unwrap_err().code(), tonic::Code::Unavailable);
+
+        let (sender, mut startup_waiter) = tokio::sync::watch::channel(0);
+        let waiting = tokio::spawn(async move { wait_for_startup(&mut startup_waiter).await });
+        sender.send_replace(2);
+        assert_eq!(waiting.await.unwrap().unwrap_err().code(), tonic::Code::Unavailable);
     }
     #[test]
     fn every_rpc_has_explicit_quota_policy() {

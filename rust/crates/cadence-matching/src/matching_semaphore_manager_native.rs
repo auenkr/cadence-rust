@@ -162,16 +162,6 @@ impl Manager {
         })
     }
 
-    /// Test hook: poison the index lock so the next `stop` panics, as a panic in another
-    /// holder of the lock would.
-    #[cfg(test)]
-    pub(crate) fn poison_for_test(&self) {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _held = self.index.lock().expect("semaphore manager lock");
-            panic!("poisoning the semaphore manager lock");
-        }));
-    }
-
     pub fn identifier(&self) -> &Identifier {
         &self.id
     }
@@ -208,8 +198,8 @@ impl Manager {
             let page = self
                 .store
                 .scan_semaphore_bucket(
-                    self.id.domain_id.clone(),
-                    self.id.semaphore_name.clone(),
+                    &self.id.domain_id,
+                    &self.id.semaphore_name,
                     self.id.bucket,
                     SCAN_PAGE_SIZE,
                     page_token.as_deref(),
@@ -226,8 +216,8 @@ impl Manager {
 
     async fn load(&self) -> Result<(), ManagerError> {
         self.store.get_semaphore_metadata(
-            self.id.domain_id.clone(),
-            self.id.semaphore_name.clone(),
+            &self.id.domain_id,
+            &self.id.semaphore_name,
         ).await?;
         let rows = self.scan_bucket().await?;
         // Go builds the free set only from rows returned by the scan. Metadata
@@ -369,8 +359,8 @@ impl Manager {
                 break;
             };
             let outcome = self.store.grant_semaphore_token(
-                self.id.domain_id.clone(),
-                self.id.semaphore_name.clone(),
+                &self.id.domain_id,
+                &self.id.semaphore_name,
                 self.id.bucket,
                 token_id,
                 owner_id,
@@ -427,8 +417,8 @@ impl Manager {
     /// Go `confirmHold`: verify the reverse-index entry against the token row.
     async fn confirm_hold(&self, owner_id: &GoString, token_id: i32) -> Result<bool, ManagerError> {
         match self.store.get_semaphore_ownership_by_token(
-            self.id.domain_id.clone(),
-            self.id.semaphore_name.clone(),
+            &self.id.domain_id,
+            &self.id.semaphore_name,
             self.id.bucket,
             token_id,
         ).await {
@@ -610,15 +600,6 @@ impl Registry {
             return Err(error);
         }
         Ok(manager)
-    }
-
-    /// Test hook: poison the registry lock so the next lookup panics.
-    #[cfg(test)]
-    pub(crate) fn poison_for_test(&self) {
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _held = self.managers.lock().expect("semaphore registry lock");
-            panic!("poisoning the semaphore registry lock");
-        }));
     }
 
     /// Go `Unregister`: only remove if the map still holds this manager.

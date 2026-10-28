@@ -8,6 +8,7 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
+use cadence_common::go_string::GoString;
 
 const USER_RPS: i64 = 1_200;
 const UNLIMITED_RPS: i64 = i32::MAX as i64;
@@ -121,7 +122,7 @@ impl DynamicBucket {
 struct State {
     user_host: DynamicBucket,
     worker_host: DynamicBucket,
-    domains: HashMap<(RpcClass, String), Arc<Mutex<DynamicBucket>>>,
+    domains: HashMap<(RpcClass, GoString), Arc<Mutex<DynamicBucket>>>,
 }
 
 #[cfg(test)]
@@ -226,17 +227,18 @@ impl MatchingRpcQuota {
     fn domain_bucket(
         &self,
         class: RpcClass,
-        domain: String,
+        domain: GoString,
         now: i64,
     ) -> Arc<Mutex<DynamicBucket>> {
         let overlay = self.overlay.clone();
         let source: RateSource = Arc::new(move || {
             let config = overlay.lock().expect("admin config lock");
-            let primary = dynamic_config::integer(
-                config.property_values(domain_key(class)),
-                Some(&domain),
-                0,
-            );
+            // Dynamic config domain filters are Go strings (UTF-8). Invalid
+            // GoString names still get isolated quota buckets and use the
+            // configured host fallback without lossy key conversion.
+            let primary = std::str::from_utf8(domain.as_bytes()).ok().map_or(0, |name| {
+                dynamic_config::integer(config.property_values(domain_key(class)), Some(name), 0)
+            });
             if primary > 0 {
                 primary as f64
             } else {
@@ -253,15 +255,22 @@ impl MatchingRpcQuota {
     /// Consume quota for a request. `reject` mirrors Go call sites: false for
     /// control RPCs that call Allow but deliberately accept over-limit calls.
     pub fn allow(&self, method: MatchingRpc, domain: Option<&str>) -> bool {
+        let raw_domain = domain.map(GoString::from);
+        self.allow_go_string(method, raw_domain.as_ref())
+    }
+
+    /// Byte-valued entry point for native Matching identifiers. Bucket keys
+    /// retain the exact Go string bytes, including invalid UTF-8.
+    pub fn allow_go_string(&self, method: MatchingRpc, domain: Option<&GoString>) -> bool {
         let (class, reject) = method.policy();
         let now = (self.clock)();
         let domain_bucket = domain.map(|name| {
-            let key = (class, name.to_owned());
+            let key = (class, name.clone());
             let mut state = self.state.lock().expect("Matching quota lock");
             state
                 .domains
                 .entry(key)
-                .or_insert_with(|| self.domain_bucket(class, name.to_owned(), now))
+                .or_insert_with(|| self.domain_bucket(class, name.clone(), now))
                 .clone()
         });
 
@@ -295,7 +304,7 @@ impl MatchingRpcQuota {
             let metric = QuotaRejection {
                 method,
                 class,
-                domain: domain.map(str::to_owned),
+                domain: domain.and_then(|name| std::str::from_utf8(name.as_bytes()).ok()).map(str::to_owned),
             };
             #[cfg(test)]
             let () = {
@@ -427,6 +436,26 @@ mod tests {
         set(&overlay, "matching.rps", vec![entry(2, &[])]);
         now.store(5_000_000_011, Ordering::SeqCst);
         assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+    }
+
+    #[test]
+    fn byte_domains_have_independent_buckets_without_utf8_aliasing() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.domainrps", vec![entry(1, &[])]);
+        let quota = MatchingRpcQuota::with_clock(overlay, Arc::new(|| 10));
+        let ff = GoString::from(&b"tenant-\xff"[..]);
+        let fe = GoString::from(&b"tenant-\xfe"[..]);
+        let replacement = GoString::from("tenant-�");
+
+        assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&ff)));
+        assert!(!quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&ff)));
+        assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&fe)));
+        assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&replacement)));
+        let state = quota.state.lock().unwrap();
+        assert_eq!(state.domains.len(), 3);
+        assert!(state.domains.contains_key(&(RpcClass::User, ff)));
+        assert!(state.domains.contains_key(&(RpcClass::User, fe)));
+        assert!(state.domains.contains_key(&(RpcClass::User, replacement)));
     }
 
     #[test]

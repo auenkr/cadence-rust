@@ -225,6 +225,14 @@ struct RateLimitedSemaphoreStoreBytes {
     limiter: Arc<MatchingPersistenceLimiter>,
 }
 
+impl std::fmt::Debug for RateLimitedSemaphoreStoreBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RateLimitedSemaphoreStoreBytes")
+            .field("store", &self.store)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RateLimitedSemaphoreStoreBytes {
     fn permit_acquire(&self, operation: &'static str, domain_id: &GoString) -> Result<(), AcquireError> {
         if self.limiter.allow() {
