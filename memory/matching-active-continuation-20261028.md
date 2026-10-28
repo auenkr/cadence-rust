@@ -87,3 +87,11 @@ reversibly in git stash named `preserve shared-root worker edits before
 isolated branch integration 20261028`; their completed isolated commits were
 then integrated. Parent master is clean. Do not blindly apply that stash over
 the integrated versions or discard it without checking for unique work.
+
+Completed first-wave cleanup: merged their original branches into master
+(ancestry-only merges; no further source changes), pushed through `703d3756c`,
+verified all three remote refs in `git branch -r --merged origin/master` and
+their completed worktrees clean, then removed those worktrees and deleted
+local/remote `t3/matching-runtime-ownership`, `t3/native-matching-live-routing`
+and `t3/native-matching-assembly`. Evidence remains in master. The current
+second-wave workers use separate provisioned worktrees and were not removed.
