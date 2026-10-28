@@ -281,7 +281,7 @@ mod tests {
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct CapturingService(Mutex<Vec<m::AddDecisionTaskRequest>>);
+    struct CapturingService(Mutex<Vec<m::AddDecisionTaskRequest>>, Option<Status>);
 
     macro_rules! service {
         ($($method:ident: $request:ident => $response:ident),* $(,)?) => {
@@ -291,11 +291,17 @@ mod tests {
                     -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
                     assert!(request.metadata().contains_key("grpc-timeout"));
                     self.0.lock().unwrap().push(request.into_inner());
-                    Ok(tonic::Response::new(Default::default()))
+                    match &self.1 {
+                        Some(error) => Err(error.clone()),
+                        None => Ok(tonic::Response::new(Default::default())),
+                    }
                 }
                 $(async fn $method(&self, _request: Request<m::$request>)
                     -> Result<tonic::Response<m::$response>, Status> {
-                    Ok(tonic::Response::new(Default::default()))
+                    match &self.1 {
+                        Some(error) => Err(error.clone()),
+                        None => Ok(tonic::Response::new(Default::default())),
+                    }
                 })*
             }
         };
@@ -370,6 +376,41 @@ mod tests {
             invoke(&service, method.method, &Struct::default(), deadline)
                 .await
                 .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn every_pinned_thrift_matching_wrapper_returns_internal_error_without_success() {
+        let service = CapturingService(Mutex::new(Vec::new()), Some(Status::internal("test")));
+        let lifecycle = Matching::new(Default::default());
+        // A present request reaches the injected native handler even for methods
+        // whose nil-request path deliberately uses the legacy panic mapper.
+        let args = Struct {
+            fields: vec![(1, Value::Struct(Struct::default()))],
+        };
+        for method in cadence_thrift::service::METHODS
+            .iter()
+            .filter(|method| method.service == "MatchingService")
+        {
+            let procedure = format!("MatchingService::{}", method.method);
+            let (result, summary) = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                dispatch_native_with_context(
+                    &lifecycle,
+                    &service,
+                    &procedure,
+                    &args,
+                    Instant::now() + std::time::Duration::from_secs(5),
+                    Default::default(),
+                ),
+            ).await.expect("bounded native wrapper call").unwrap();
+            assert_eq!(summary.as_ref().map(|(name, _)| *name), Some("InternalServiceError"), "{procedure}");
+            // The pinned Thrift schema places InternalServiceError at field2.
+            // An error reply must contain no success field0, including methods
+            // with a response struct and methods with void responses.
+            assert_eq!(result.fields, vec![(2, Value::Struct(Struct {
+                fields: vec![(1, Value::Bytes(b"test".to_vec()))],
+            }))], "{procedure}");
         }
     }
 

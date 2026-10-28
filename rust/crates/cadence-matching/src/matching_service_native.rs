@@ -901,6 +901,7 @@ mod tests {
         missing_deadlines: std::sync::Mutex<Vec<&'static str>>,
         metrics: crate::matching_metrics::MatchingMetrics,
         reject: bool,
+        query_parent: Option<Arc<dyn NativeQueryParent>>,
     }
     use crate::matching_dispatch_native::{NativeFuture, NativeMatchingApi};
     use crate::matching_engine_native::{NativePollRegistration, NativeQueryParent};
@@ -976,7 +977,8 @@ mod tests {
             &self,
             _: GoString,
         ) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> {
-            Box::pin(async { Ok(None) })
+            let parent = self.query_parent.clone();
+            Box::pin(async move { Ok(parent) })
         }
         fn default_deadline(&self) -> tokio::time::Instant {
             tokio::time::Instant::now() + Duration::from_secs(10)
@@ -1075,6 +1077,7 @@ mod tests {
             missing_deadlines: Default::default(),
             metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             reject,
+            query_parent: None,
         };
         (
             dir,
@@ -1259,7 +1262,12 @@ mod tests {
             name: GoString::from(&b"refresh-\xff"[..]),
             task_type: 0,
         };
-        let queue = service.engine.registry.get(key.clone(), 0, 1).await.unwrap();
+        let queue = service
+            .engine
+            .registry
+            .get(key.clone(), 0, 1)
+            .await
+            .unwrap();
         let cached = crate::matching_partition_native::NativeStoredPartitionConfig {
             version: 7,
             read_partitions: [(0, vec![GoString::from(&b"group-\xfe"[..])])].into(),
@@ -1272,7 +1280,9 @@ mod tests {
         let original: Vec<u8> = connection
             .query_row("SELECT data FROM task_lists", [], |row| row.get(0))
             .unwrap();
-        connection.execute("UPDATE task_lists SET data = X'ff'", []).unwrap();
+        connection
+            .execute("UPDATE task_lists SET data = X'ff'", [])
+            .unwrap();
         let expected = MatchingTaskStoreBytes::get_task_list(store.as_ref(), &key)
             .unwrap_err()
             .to_string();
@@ -1288,7 +1298,9 @@ mod tests {
         });
         request.set_timeout(Duration::from_secs(5));
         let result = service.refresh_task_list_partition_config(request).await;
-        connection.execute("UPDATE task_lists SET data = ?1", [original]).unwrap();
+        connection
+            .execute("UPDATE task_lists SET data = ?1", [original])
+            .unwrap();
         let error = result.unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert_eq!(error.message(), expected);
@@ -1297,7 +1309,72 @@ mod tests {
         assert!(!queue.queue.is_stopped());
         let same_owner = service.engine.registry.get(key, 0, 2).await.unwrap();
         assert!(Arc::ptr_eq(&queue.queue, &same_owner.queue));
-        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+        service
+            .engine
+            .registry
+            .shutdown(crate::grpc_matching::matching_now())
+            .await
+            .unwrap();
+    }
+
+    struct FailingQueryParent(std::sync::Mutex<Vec<n::matching::QueryWorkflowRequest>>);
+    impl NativeQueryParent for FailingQueryParent {
+        fn query_workflow(
+            &self,
+            request: n::matching::QueryWorkflowRequest,
+            deadline: tokio::time::Instant,
+        ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+            assert!(deadline > tokio::time::Instant::now());
+            self.0.lock().unwrap().push(request);
+            Box::pin(async {
+                Err(crate::matching_query_native::NativeQueryError::Status(Status::internal("some error")))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn query_rpc_propagates_dispatch_forward_failure_and_releases_its_permit() {
+        let (_dir, mut service, _, _) = service(false);
+        let parent = Arc::new(FailingQueryParent(Default::default()));
+        service.integration.query_parent = Some(parent.clone());
+        let domain = uuid::Uuid::from_u128(1);
+        let root = GoString::from(&b"query-\xff"[..]);
+        let partition = GoString::from(&b"/__cadence_sys/query-\xff/1"[..]);
+        let mut request = Request::new(n::matching::QueryWorkflowRequest {
+            domain_id: domain.to_string().into(),
+            task_list: Some(n::api::TaskList {
+                name: partition.clone(),
+                kind: 1,
+                ..Default::default()
+            }),
+            request: Some(n::api::QueryWorkflowRequest {
+                query: Some(Default::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        request.set_timeout(Duration::from_secs(5));
+        let error = tokio::time::timeout(Duration::from_secs(2), service.query_workflow(request))
+            .await.unwrap().unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(error.message(), "some error");
+        assert!(error.details().is_empty());
+        {
+            let seen = parent.0.lock().unwrap();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].task_list.as_ref().unwrap().name, root);
+            assert_eq!(seen[0].forwarded_from, partition);
+        }
+        let key = TaskListKeyBytes { domain_id: domain, name: partition, task_type: 0 };
+        let queue = service.engine.registry.get(key, 0, 2).await.unwrap();
+        assert!(queue.try_forward_query().is_some(), "failed dispatch leaked forwarding permit");
+        assert!(tokio::time::timeout(Duration::from_millis(20), queue.queries.next()).await.is_err(), "failed dispatch left a query offer");
+        service
+            .engine
+            .registry
+            .shutdown(crate::grpc_matching::matching_now())
+            .await
+            .unwrap();
     }
 
     #[test]

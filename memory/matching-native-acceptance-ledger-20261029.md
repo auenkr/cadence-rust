@@ -10,20 +10,20 @@ proved.
 
 ## Source identity
 
-No final immutable candidate is frozen. Current workspace run
-https://github.com/auenkr/cadence-rust/actions/runs/40753130527 targets
-`54267900c3c9fee3b4fa0b421be6a38bd8d74886` and was confirmed running at the
-Go raw-string prerequisite. It includes deadline admission, cold-domain
-publication, typed cache errors, exact UUID cache keys, live History start
-timeout, raw isolation-match metrics and native diagnostic hooks. Its runner
-formatting patch must be applied and any failures resolved before freezing.
-Do not attribute an earlier result to changed source.
+No final immutable candidate is frozen. Latest selected Matching run
+https://github.com/auenkr/cadence-rust/actions/runs/40754945697 targets
+`fb049c5515d0c940adc86e038bd3b1ef31b84880` and reached Clippy. It includes
+deadline admission, cold-domain publication, typed cache errors, exact UUID
+cache keys, live History start timeout, raw isolation-match metrics, native
+diagnostic hooks, native failover callback and refresh RPC failure regressions.
+Later query/Thrift failure tests are not in that pin. Do not attribute an
+earlier result to changed source.
 
 ## Required evidence
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending run40753130527; earlier run40750262783 Clippy0 but Matching tests940 pass/8 fail/2 ignored, then cancelled; run40752202495 Clippy failure before tests. Fixes are not a test pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Pending. Run40753130527 failed at Clippy on missing API trait import (fixed afterward); selected Matching run40754945697 in progress. Earlier run40750262783 Clippy0 but Matching tests940 pass/8 fail/2 ignored, then cancelled. Fixes are not a test pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
@@ -133,3 +133,29 @@ runner parity formatting and original-Go UUID oracle enabled. Includes the
 native registered failover regression and refresh public-handler regression.
 No pass is claimed. Preserve this run until terminal; next download formatting
 and logs, review failures, then resolve any source/formatting before freezing.
+
+Additional source coverage while run40754945697 remains live (not included in
+its pin):
+
+- Native QueryWorkflow handler now has a regression injecting `some error`
+  through an actual child-partition dispatch's `NativeQueryParent`. It asserts
+  exact public Internal message, parent/raw forwarding fields, one forwarding
+  call, returned forwarding permit, and no abandoned local query offer. Go
+  `tasklist/matcher.go::OfferQuery` returns a forwarding failure to the handler;
+  this exercises that concrete dispatch failure rather than pretending a
+  no-poller timeout proves Go's mocked `DispatchQueryTask` failure case.
+- Native Thrift dispatcher regression injects InternalServiceError("test")
+  through every pinned MatchingService method with a present request. It
+  asserts declared error summary, field2 exception/message and absence of
+  success field0 for both struct and void methods. Go source is
+  `go/service/matching/wrappers/thrift/thrift_handler_test.go::TestThriftHandler`.
+  Go's in-process response-plus-error tuple is not a Rust API; its zero response
+  is discarded by the Thrift error reply. This test covers that observable
+  wire result, not Go object identity or Meta Health.
+- Applied run40754945697's formatting artifact to the native failover fixture,
+  native TCP transport fixture and refresh RPC test. New query/Thrift test code
+  still needs runner formatting on the next validation run.
+
+These are assertion additions pending execution. Exhaustive typed-error
+category mappings, Meta Health and the ten mixed acceptance lanes still need
+their own reviewed evidence. Preserve the current CI run until terminal.

@@ -210,8 +210,11 @@ async fn registered_failover_callback_reaches_native_registry_attached_after_cat
 
     let directory = tempfile::tempdir().unwrap();
     let store = Arc::new(
-        SqliteTaskStore::create(directory.path().join("native-callback.db"), BlobEncoding::ThriftRW)
-            .unwrap(),
+        SqliteTaskStore::create(
+            directory.path().join("native-callback.db"),
+            BlobEncoding::ThriftRW,
+        )
+        .unwrap(),
     );
     let history = crate::matching_history::MatchingHistoryClient::new(
         tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
@@ -243,7 +246,10 @@ async fn registered_failover_callback_reaches_native_registry_attached_after_cat
         .is_err());
     let source = Arc::new(Source(Mutex::new(domain())));
     let clock = Arc::new(Clock(AtomicU64::new(0)));
-    let cache = Arc::new(MatchingDomainCache::with_clock(source.clone(), clock.clone()));
+    let cache = Arc::new(MatchingDomainCache::with_clock(
+        source.clone(),
+        clock.clone(),
+    ));
     let slot = Arc::new(Mutex::new(None));
     MatchingRuntime::start_domain_cache(
         crate::handlers::AppState::default().domains,
@@ -277,9 +283,12 @@ async fn registered_failover_callback_reaches_native_registry_attached_after_cat
         }
         clock.0.fetch_add(1, Ordering::SeqCst);
         cache.refresh_domains().unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll)
-            .await
-            .is_err(), "filtered change released native poll");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut poll)
+                .await
+                .is_err(),
+            "filtered change released native poll"
+        );
     }
     {
         let mut record = source.0.lock().unwrap();
@@ -297,5 +306,8 @@ async fn registered_failover_callback_reaches_native_registry_attached_after_cat
     let same_owner = registry.get(key, 0, 2).await.unwrap();
     assert!(Arc::ptr_eq(&same_owner.queue, &owner.queue));
     cache.stop();
-    registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+    registry
+        .shutdown(crate::grpc_matching::matching_now())
+        .await
+        .unwrap();
 }
