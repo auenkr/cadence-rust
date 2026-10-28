@@ -125,3 +125,11 @@ until CI executes it. It covers a nonretryable decode failure, not the complete
 throttled/timeout taxonomy or cancellation behavior. Next run should validate
 Matching first with CI formatting, then the final immutable source still needs
 fresh whole-workspace validation and all mixed lanes.
+
+Fresh selected Matching Clippy-then-tests run:
+https://github.com/auenkr/cadence-rust/actions/runs/40754945697
+at `fb049c551` (verify the full Actions head SHA on review), with clean target,
+runner parity formatting and original-Go UUID oracle enabled. Includes the
+native registered failover regression and refresh public-handler regression.
+No pass is claimed. Preserve this run until terminal; next download formatting
+and logs, review failures, then resolve any source/formatting before freezing.
