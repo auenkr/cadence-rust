@@ -198,7 +198,7 @@ pub fn native_queue_registry(
                         domain_config.into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
                         || selector_domains.global_isolation_groups().into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
                     });
-                    let partition_id = cadence_common::task_list::TaskListNameBytes::parse(task.as_bytes()).map(|n| n.partition() as i32).unwrap_or_default();
+                    let partition_id = cadence_common::task_list::TaskListNameBytes::parse(selector_task.as_bytes()).map(|n| n.partition() as i32).unwrap_or_default();
                     let partition_groups = partitions.get().and_then(|c| c.read_partitions.get(&partition_id).cloned());
                     let recent = pollers.lock().expect("poller history lock").has_group_after(requested.as_bytes(), now.saturating_sub(window));
                     let (group, duration, cause) = select_isolation_bytes(
@@ -367,7 +367,7 @@ mod tests {
         let mut dynamic = DynamicConfigOverlay::default();
         dynamic.update(false, "system.allIsolationGroups", vec![configured_value]);
         let configured = cadence_persistence::dynamic_config::string_list(dynamic.property_values("system.allIsolationGroups"));
-        let known = configured.iter().map(GoString::from).collect::<Vec<_>>();
+        let known = configured.iter().map(|group| GoString::from(group.as_str())).collect::<Vec<_>>();
         let mut poller_manager = Manager::default();
         poller_manager.start(b"poll", Info { identity: "worker".into(), rate_per_second: 1.0, isolation_group: task_group.clone() }, 10);
         let pollers = Arc::new(Mutex::new(poller_manager));
