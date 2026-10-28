@@ -1120,7 +1120,22 @@ impl NativeQueueRegistry {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<NativeQueueHandle, Status>> + Send + '_>,
     > {
+        self.get_with_deadline(key, kind, now, None)
+    }
+
+    /// Bound caller admission and the wait for startup without cancelling an
+    /// already dispatched manager startup, which uses a detached Go context.
+    pub fn get_with_deadline(
+        &self,
+        key: TaskListKeyBytes,
+        kind: i16,
+        now: i64,
+        deadline: Option<tokio::time::Instant>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<NativeQueueHandle, Status>> + Send + '_>,
+    > {
         Box::pin(async move {
+            let lookup = async move {
             if !(0..=1).contains(&key.task_type) {
                 return Err(Status::invalid_argument("Unknown persistence task type."));
             }
@@ -1129,8 +1144,18 @@ impl NativeQueueRegistry {
                 let cached = self.contains_cached(&key);
                 check(key.name.clone(), cached).await?;
             }
+            // Do not dispatch startup if admission completed after expiry.
+            if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+                return Err(Status::internal("context deadline exceeded"));
+            }
             let registry = self.clone();
             owner_work(move |readers| registry.get_blocking(key, kind, now, readers)).await
+            };
+            match deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, lookup).await
+                    .unwrap_or_else(|_| Err(Status::internal("context deadline exceeded"))),
+                None => lookup.await,
+            }
         })
     }
 

@@ -119,13 +119,13 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         request: Request<n::matching::DescribeTaskListRequest>,
     ) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
         const METHOD: &str = "describe_task_list";
+        let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(METHOD, Some(&request.domain_id)).await?;
-        let result = async {
+        let result = control_with_deadline(deadline, async {
             // Queue ownership is checked by the engine after manager lookup.
             self.engine.describe_task_list(request, &self.integration).await
-        }
-        .await;
+        }).await;
         result.map(Response::new)
     }
 
@@ -150,12 +150,11 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         request: Request<n::matching::CancelOutstandingPollRequest>,
     ) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
         const METHOD: &str = "cancel_outstanding_poll";
+        let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(METHOD, Some(&request.domain_id)).await?;
-        let result = self
-            .engine
-            .cancel_outstanding_poll(request, &self.integration)
-            .await;
+        let result = control_with_deadline(deadline, self.engine
+            .cancel_outstanding_poll(request, &self.integration)).await;
         result.map(Response::new)
     }
 
@@ -192,12 +191,11 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(METHOD, Some(&request.domain_id)).await?;
-        let result = async {
+        let result = control_with_deadline(deadline, async {
             self.engine
                 .update_task_list_partition_config(request, deadline, &self.integration)
                 .await
-        }
-        .await;
+        }).await;
         result.map(Response::new)
     }
 
@@ -209,12 +207,11 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(METHOD, Some(&request.domain_id)).await?;
-        let result = async {
+        let result = control_with_deadline(deadline, async {
             self.engine
                 .refresh_task_list_partition_config(request, deadline, &self.integration)
                 .await
-        }
-        .await;
+        }).await;
         result.map(Response::new)
     }
 }
@@ -412,6 +409,21 @@ fn record_forwarded(
     }
 }
 
+// Control methods do not currently pass deadlines to their queue lookup. Bound
+// their asynchronous work here; dropping the lookup leaves dispatched startup
+// detached while cancelling a still-pending ownership admission.
+async fn control_with_deadline<F, T>(deadline: Option<tokio::time::Instant>, future: F) -> Result<T, Status>
+where
+    F: std::future::Future<Output = Result<T, Status>>,
+{
+    match deadline {
+        Some(deadline) if tokio::time::Instant::now() >= deadline => Err(Status::internal("context deadline exceeded")),
+        Some(deadline) => tokio::time::timeout_at(deadline, future).await
+            .unwrap_or_else(|_| Err(Status::internal("context deadline exceeded"))),
+        None => future.await,
+    }
+}
+
 async fn observe<F, T>(
     metrics: &crate::matching_metrics::MatchingMetrics,
     method: &'static str,
@@ -489,33 +501,119 @@ mod tests {
         assert_eq!(events[0].tags[TRANSPORT_TAG], "grpc");
     }
 
-    #[tokio::test]
-    async fn forwarded_bytes_are_counted_even_when_quota_rejects() {
-        use crate::matching_metrics::*;
-        use std::sync::Arc;
-        let sink = Arc::new(RecordingMetricSink::default());
-        let metrics = MatchingMetrics::new(sink.clone());
-        let forwarded = GoString::from(&b"\xff"[..]);
-        record_forwarded(&metrics, &forwarded, Some("domain"), Some(("queue", Some(0))),
-            "decision_task", String::new());
-        let result: Result<(), Status> = observe(&metrics, "AddDecisionTask", Some("domain"),
-            Some(("queue", Some(0))), MatchingMetrics::context_from_metadata(
-                &tonic::metadata::MetadataMap::new(), "grpc"),
-            async { Err(Status::resource_exhausted("quota")) }).await;
-        assert_eq!(result.unwrap_err().code(), tonic::Code::ResourceExhausted);
-        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
-        record_forwarded(&metrics, &GoString::default(), Some("domain"), None,
-            "decision_task", String::new());
-        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
+    struct Integration {
+        metrics: crate::matching_metrics::MatchingMetrics,
+        reject: bool,
     }
-
+    use crate::matching_dispatch_native::{NativeFuture, NativeMatchingApi};
+    use crate::matching_engine_native::{NativePollRegistration, NativeQueryParent};
+    use crate::matching_registry_native::NativeQueueHandle;
+    use std::{sync::Arc, time::Duration};
+    impl DecisionAddContext for Integration {
+        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> { Ok(true) }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 { 1 }
+        fn check_write_partition(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
+        fn remote_parent(&self, _: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> { Box::pin(async { Ok(None) }) }
+    }
+    impl NativePollContext for Integration {
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
+        fn domain_active(&self, _: &GoString) -> Result<bool, Status> { Ok(true) }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
+        fn register_poll(&self, _: &GoString, _: &GoString, _: i32, _: &GoString) -> NativePollRegistration {
+            NativePollRegistration { cancel: Arc::new(tokio::sync::Notify::new()), guard: Box::new(()) }
+        }
+        fn failover(&self, _: &GoString) -> NativeFuture<()> { Box::pin(std::future::pending()) }
+        fn expiration(&self, _: &GoString, _: &GoString, _: i32) -> Duration { Duration::from_secs(10) }
+        fn override_rate(&self, _: &GoString, _: &GoString, _: i32) -> f64 { 0.0 }
+        fn auto_config_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool { false }
+    }
+    impl NativeQueryContext for Integration {
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString) -> i64 { 1 }
+        fn remote_parent(&self, _: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> { Box::pin(async { Ok(None) }) }
+        fn default_deadline(&self) -> tokio::time::Instant { tokio::time::Instant::now() + Duration::from_secs(10) }
+    }
+    impl NativeControlContext for Integration {
+        fn domain_id(&self, _: &GoString) -> Result<uuid::Uuid, Status> { Ok(uuid::Uuid::from_u128(1)) }
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
+        fn return_all_kinds(&self) -> bool { true }
+        fn scaler_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool { false }
+        fn isolation_groups(&self) -> Vec<GoString> { vec![] }
+        fn poller_window_nanos(&self, _: &GoString, _: &GoString, _: i32) -> i64 { 0 }
+        fn write_partition_count(&self, _: &GoString, _: &GoString, _: i32) -> i64 { 1 }
+        fn owner_host(&self, _: GoString) -> NativeFuture<Result<GoString, Status>> { Box::pin(async { Ok(GoString::default()) }) }
+    }
+    impl NativeMatchingIntegration for Integration {
+        fn check_started(&self) -> NativeFuture<Result<(), Status>> { Box::pin(async { Ok(()) }) }
+        fn admit(&self, _: &'static str, _: Option<&GoString>) -> Result<(), Status> {
+            if self.reject { Err(Status::resource_exhausted("quota")) } else { Ok(()) }
+        }
+        fn metrics(&self) -> &crate::matching_metrics::MatchingMetrics { &self.metrics }
+        fn metric_domain_name(&self, _: &GoString) -> Option<GoString> { Some("domain".into()) }
+        fn check_owned(&self, _: &TaskListKeyBytes) -> Result<(), Status> { Ok(()) }
+        fn domain_for_name(&self, _: &GoString) -> Result<uuid::Uuid, Status> { Ok(uuid::Uuid::from_u128(1)) }
+        fn check_domain(&self, _: &GoString, _: &'static str) -> Result<(), Status> { Ok(()) }
+        fn acquire_semaphore(&self, _: Request<n::matching::AcquireSemaphoreRequest>) -> NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>> { Box::pin(async { Err(Status::unimplemented("test")) }) }
+    }
+    fn service(reject: bool) -> (tempfile::TempDir, NativeMatchingService<Integration>, Arc<crate::matching_metrics::RecordingMetricSink>) {
+        use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(), Duration::from_secs(1), 32 * 1024 * 1024);
+        let registry = crate::matching_registry_native::NativeQueueRegistry::new(store, history, std::num::NonZeroU32::new(100).unwrap());
+        let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+        let integration = Integration { metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()), reject };
+        (dir, NativeMatchingService::new(NativeMatchingEngine::new(registry), integration), sink)
+    }
     #[tokio::test]
-    async fn outer_capture_preserves_plain_panic_status() {
+    async fn actual_handler_counts_forwarded_quota_failure_and_captures_panic() {
+        use cadence_proto::native::NativeMatchingApi as _;
+        use crate::matching_metrics::FORWARDED_PER_TASK_LIST;
+        let (_dir, service, sink) = service(true);
+        let request = n::matching::AddDecisionTaskRequest {
+            forwarded_from: GoString::from(&b"\xff"[..]),
+            task_list: Some(n::api::TaskList { name: "queue".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        assert_eq!(service.add_decision_task(Request::new(request)).await.unwrap_err().code(), tonic::Code::ResourceExhausted);
+        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
         crate::matching_panic::arm_panic_for_test("add_decision_task", 1);
-        let result: Result<(), Status> = crate::matching_panic::capture("add_decision_task", async {
-            Ok(())
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)));
-        assert!(crate::matching_panic::is_captured_panic(&result.unwrap_err()));
+        let error = service.add_decision_task(Request::new(Default::default())).await.unwrap_err();
+        assert!(crate::matching_panic::is_captured_panic(&error));
+    }
+    #[tokio::test]
+    async fn actual_add_and_control_deadlines_cancel_pending_admission() {
+        use cadence_proto::native::NativeMatchingApi as _;
+        let (_dir, service, _) = service(false);
+        let released = Arc::new(tokio::sync::Notify::new());
+        let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let release = released.clone();
+        let completion = completed.clone();
+        let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls = entered.clone();
+        service.engine.registry.set_shard_admission(Arc::new(move |_, _| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let release = release.clone(); let completion = completion.clone();
+            Box::pin(async move { release.notified().await; completion.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok(()) })
+        }));
+        let domain: GoString = uuid::Uuid::from_u128(1).to_string().into();
+        let list = n::api::TaskList { name: "queue".into(), ..Default::default() };
+        let mut add = Request::new(n::matching::AddDecisionTaskRequest { domain_id: domain.clone(), task_list: Some(list.clone()), ..Default::default() });
+        add.set_timeout(Duration::from_millis(50));
+        let err = tokio::time::timeout(Duration::from_secs(2), service.add_decision_task(add)).await.unwrap().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        let mut describe = Request::new(n::matching::DescribeTaskListRequest { domain_id: domain, request: Some(n::api::DescribeTaskListRequest { task_list: Some(list), ..Default::default() }) });
+        describe.set_timeout(Duration::from_millis(50));
+        let err = tokio::time::timeout(Duration::from_secs(2), service.describe_task_list(describe)).await.unwrap().unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert_eq!(entered.load(std::sync::atomic::Ordering::SeqCst), 2);
+        released.notify_waiters();
+        tokio::task::yield_now().await;
+        assert_eq!(completed.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(service.engine.registry.loaded_owner_count(), 0);
     }
 
     #[test]
