@@ -342,7 +342,7 @@ fn domain_by_raw_id(cache: &MatchingDomainCache, id: &GoString) -> Result<Matchi
     let raw = std::str::from_utf8(id.as_bytes())
         .map_err(|_| Status::new(Code::InvalidArgument, "invalid domain UUID"))?;
     let uuid = uuid::Uuid::parse_str(raw).map_err(|error| Status::new(Code::InvalidArgument, error.to_string()))?;
-    cache.get_domain_by_id(&uuid.to_string()).map_err(|error| Status::not_found(error.to_string()))
+    cache.get_domain_by_id(&uuid.to_string()).map_err(crate::matching_domain_cache::DomainCacheError::into_status)
 }
 
 #[cfg(test)]

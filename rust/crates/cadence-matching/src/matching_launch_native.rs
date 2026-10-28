@@ -114,7 +114,7 @@ pub async fn assemble(
             let id = uuid::Uuid::parse_str(raw)
                 .map_err(|error| Status::invalid_argument(error.to_string()))?;
             let domain = cache.get_domain_by_id(&id.to_string())
-                .map_err(|error| Status::not_found(error.to_string()))?;
+                .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
             Ok(GoString::from(domain.info.name))
         })
     };

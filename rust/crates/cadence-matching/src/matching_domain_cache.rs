@@ -364,6 +364,21 @@ impl std::fmt::Display for DomainCacheError {
 
 impl std::error::Error for DomainCacheError {}
 
+impl DomainCacheError {
+    /// Preserve Go's typed cache failures at both Matching transport paths.
+    pub(crate) fn into_status(self) -> tonic::Status {
+        match self {
+            Self::EmptyName => tonic::Status::invalid_argument("Domain name is empty"),
+            Self::EmptyId => tonic::Status::invalid_argument("DomainID is empty."),
+            Self::SourceClassified { message, class: DomainErrorClass::NotFound } => crate::grpc::domain_not_found(message),
+            Self::SourceClassified { message, class: DomainErrorClass::BadRequest } => tonic::Status::invalid_argument(message),
+            Self::SourceClassified { message, .. } | Self::Source(message) => tonic::Status::internal(message),
+            Self::ExistsButNotLoaded(_) => tonic::Status::internal("DefaultDomainCache encounter case where domain exists but cannot be loaded"),
+            Self::Stopped => tonic::Status::internal("domain cache is stopped"),
+        }
+    }
+}
+
 impl From<MatchingDomainMetadataError> for DomainCacheError {
     fn from(error: MatchingDomainMetadataError) -> Self {
         Self::Source(error.to_string())

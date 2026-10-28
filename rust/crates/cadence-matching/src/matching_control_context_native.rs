@@ -79,7 +79,7 @@ impl NativeControlContextApi for NativeMatchingControlContext {
             return Err(Status::invalid_argument("Domain name is not valid."));
         }
         let id = self.cache.get_domain_id(name)
-            .map_err(|error| Status::not_found(error.to_string()))?;
+            .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
         uuid::Uuid::parse_str(&id)
             .map_err(|_| Status::internal("Domain cache contains an invalid domain UUID."))
     }
@@ -90,7 +90,7 @@ impl NativeControlContextApi for NativeMatchingControlContext {
         let uuid = uuid::Uuid::parse_str(raw)
             .map_err(|error| Status::new(Code::InvalidArgument, error.to_string()))?;
         let domain = self.cache.get_domain_by_id(&uuid.to_string())
-            .map_err(|error| Status::not_found(error.to_string()))?;
+            .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
         Ok(GoString::from(domain.info.name))
     }
 
@@ -196,20 +196,46 @@ mod tests {
         ), 17);
     }
 
-    #[test]
-    fn absent_domain_is_reported_by_real_cache_lookup() {
-        struct EmptySource;
+    #[tokio::test]
+    async fn cache_lookup_preserves_typed_failures() {
+        use crate::matching_domain_cache::DomainErrorClass;
+        struct EmptySource(DomainErrorClass);
         impl crate::matching_domain_cache::DomainMetadataSource for EmptySource {
             fn metadata_version(&self, _: std::time::Duration) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> { Ok(0) }
             fn list_domains(&self, _: usize, _: Option<&[u8]>, _: std::time::Duration) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
                 Ok(crate::matching_domain_cache::DomainMetadataPage { domains: vec![], next_page_token: None })
             }
             fn get_domain(&self, _: Option<&str>, _: Option<&str>, _: std::time::Duration) -> Result<cadence_persistence::matching_domain_metadata::MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
-                Err(crate::matching_domain_cache::DomainMetadataSourceError::permanent("missing"))
+                Err(crate::matching_domain_cache::DomainMetadataSourceError::permanent("lookup failure").with_class(self.0))
             }
         }
-        let cache = MatchingDomainCache::new(Arc::new(EmptySource));
-        assert!(cache.get_domain_id("absent").is_err());
-        assert!(cache.get_domain_by_id("00000000-0000-0000-0000-000000000001").is_err());
+        for (class, expected) in [
+            (DomainErrorClass::NotFound, tonic::Code::NotFound),
+            (DomainErrorClass::Internal, tonic::Code::Internal),
+            (DomainErrorClass::BadRequest, tonic::Code::InvalidArgument),
+            (DomainErrorClass::DbUnavailable, tonic::Code::Internal),
+        ] {
+            let cache = Arc::new(MatchingDomainCache::new(Arc::new(EmptySource(class))));
+            let directory = tempfile::tempdir().unwrap();
+            let store = Arc::new(cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                directory.path().join("cache.db"), cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+            ).unwrap());
+            let history = crate::matching_history::MatchingHistoryClient::new(
+                tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+                std::time::Duration::from_secs(1), 1024,
+            );
+            let registry = NativeQueueRegistry::new(store, history, std::num::NonZeroU32::new(100).unwrap());
+            let context = NativeMatchingControlContext::new(AppState::default(), cache, registry, Membership::new("local", vec![]), None);
+            for status in [
+                context.domain_id(&GoString::from("absent")).unwrap_err(),
+                context.domain_name(&GoString::from("00000000-0000-0000-0000-000000000001")).unwrap_err(),
+            ] {
+                assert_eq!(status.code(), expected);
+                assert_eq!(status.message(), "lookup failure");
+                if class == DomainErrorClass::NotFound {
+                    assert!(!status.details().is_empty(), "missing Cadence EntityNotExistsError details");
+                }
+            }
+        }
     }
 }
