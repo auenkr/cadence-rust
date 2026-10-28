@@ -693,6 +693,21 @@ impl NativeQueueRegistry {
         build_local: NativeLocalPollServiceBuilder,
         refresh: NativePartitionRefresher,
     ) -> Self {
+        let factory: NativeLocalPollFactory = Arc::new(move |host| {
+            host.registry().map(|registry| build_local(registry))
+        });
+        self.with_live_routing_factory(membership, router, factory, refresh)
+    }
+
+    /// Install routing with a fallible local factory, for services published
+    /// after host construction. The factory receives a weak registry capability.
+    pub fn with_live_routing_factory(
+        self,
+        membership: crate::matching_membership::Membership,
+        router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
+        factory: NativeLocalPollFactory,
+        refresh: NativePartitionRefresher,
+    ) -> Self {
         if let Some(router) = router { self.set_shard_router(router); }
         let parent_membership = membership.clone();
         let parent_router = self.shard_router.clone();
@@ -710,20 +725,9 @@ impl NativeQueueRegistry {
             })
         });
         let local_membership = membership.native_membership();
-        let local_host = NativeLocalPollHost {
-            detached: {
-                let mut detached = self.clone();
-                detached.state = Arc::new(Mutex::new(State::default()));
-                detached
-            },
-            state: Arc::downgrade(&self.state),
-        };
-        let weak_factory: NativeLocalPollFactory = Arc::new(move |_| {
-            local_host.registry().map(|registry| build_local(registry))
-        });
         self.with_membership(local_membership)
             .with_parent_router(parent)
-            .with_local_poll_service(weak_factory)
+            .with_local_poll_service(factory)
             .with_partition_refresher(refresh)
     }
     pub fn with_parent_router(mut self, router: NativeParentRouter) -> Self {
@@ -2270,6 +2274,67 @@ async fn resolve_parent_dispatcher(
 mod tests {
     use super::*;
     use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
+
+    #[derive(Default)]
+    struct SlotPeer(std::sync::Mutex<Vec<u8>>);
+    macro_rules! slot_peer {
+        ($($method:ident: $request:ident => $response:ident),* $(,)?) => {
+            #[tonic::async_trait]
+            impl cadence_proto::native::NativeMatchingApi for SlotPeer {
+                async fn add_decision_task(&self, request: tonic::Request<cadence_proto::native::matching::AddDecisionTaskRequest>) -> Result<tonic::Response<cadence_proto::native::matching::AddDecisionTaskResponse>, Status> {
+                    *self.0.lock().unwrap() = request.into_inner().task_list.unwrap().name.as_bytes().to_vec();
+                    Ok(tonic::Response::new(Default::default()))
+                }
+                $(async fn $method(&self, _: tonic::Request<cadence_proto::native::matching::$request>) -> Result<tonic::Response<cadence_proto::native::matching::$response>, Status> {
+                    Ok(tonic::Response::new(Default::default()))
+                })*
+            }
+        };
+    }
+    slot_peer! {
+        poll_for_decision_task: PollForDecisionTaskRequest => PollForDecisionTaskResponse,
+        poll_for_activity_task: PollForActivityTaskRequest => PollForActivityTaskResponse,
+        add_activity_task: AddActivityTaskRequest => AddActivityTaskResponse,
+        query_workflow: QueryWorkflowRequest => QueryWorkflowResponse,
+        respond_query_task_completed: RespondQueryTaskCompletedRequest => RespondQueryTaskCompletedResponse,
+        cancel_outstanding_poll: CancelOutstandingPollRequest => CancelOutstandingPollResponse,
+        describe_task_list: DescribeTaskListRequest => DescribeTaskListResponse,
+        list_task_list_partitions: ListTaskListPartitionsRequest => ListTaskListPartitionsResponse,
+        get_task_lists_by_domain: GetTaskListsByDomainRequest => GetTaskListsByDomainResponse,
+        update_task_list_partition_config: UpdateTaskListPartitionConfigRequest => UpdateTaskListPartitionConfigResponse,
+        refresh_task_list_partition_config: RefreshTaskListPartitionConfigRequest => RefreshTaskListPartitionConfigResponse,
+        acquire_semaphore: AcquireSemaphoreRequest => AcquireSemaphoreResponse,
+    }
+
+    #[tokio::test]
+    async fn weak_service_slot_forwards_raw_local_parent_and_expires() {
+        let (_dir, registry) = fixture();
+        let slot = crate::matching_registry_routing_native::NativeServiceSlot::default();
+        let factory = slot.factory();
+        let host = NativeLocalPollHost {
+            detached: { let mut detached = registry.clone(); detached.state = Arc::new(Mutex::new(State::default())); detached },
+            state: Arc::downgrade(&registry.state),
+        };
+        assert!(factory(host.clone()).is_none());
+        let peer = Arc::new(SlotPeer::default());
+        let service: Arc<dyn cadence_proto::native::NativeMatchingApi> = peer.clone();
+        slot.publish(&service);
+        let api = factory(host.clone()).unwrap();
+        let raw = b"parent-\xff";
+        api.add_decision_task(cadence_proto::native::matching::AddDecisionTaskRequest {
+            task_list: Some(cadence_proto::native::api::TaskList { name: GoString::from(&raw[..]), ..Default::default() }),
+            ..Default::default()
+        }, tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
+        assert_eq!(&*peer.0.lock().unwrap(), raw);
+        drop(api);
+        drop(service);
+        drop(peer);
+        assert!(factory(host.clone()).is_none());
+        let service: Arc<dyn cadence_proto::native::NativeMatchingApi> = Arc::new(SlotPeer::default());
+        slot.publish(&service);
+        drop(registry);
+        assert!(factory(host).is_none());
+    }
 
     fn fixture() -> (tempfile::TempDir, NativeQueueRegistry) {
         let dir = tempfile::tempdir().unwrap();

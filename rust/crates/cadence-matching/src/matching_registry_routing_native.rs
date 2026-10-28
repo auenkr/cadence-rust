@@ -21,6 +21,30 @@ pub use crate::matching_registry_native::{
 };
 
 
+/// A publish-after-construction service slot. Only weak references are stored:
+/// a registry owner cannot keep its host (and consequently itself) alive.
+#[derive(Clone, Default)]
+pub struct NativeServiceSlot {
+    service: std::sync::Arc<std::sync::RwLock<Option<std::sync::Weak<dyn cadence_proto::native::NativeMatchingApi>>>>,
+}
+
+impl NativeServiceSlot {
+    /// Publish the same service retained by the launcher/runtime before admission.
+    pub fn publish(&self, service: &std::sync::Arc<dyn cadence_proto::native::NativeMatchingApi>) {
+        *self.service.write().expect("native service slot lock") = Some(std::sync::Arc::downgrade(service));
+    }
+
+    /// Local forwarding fails closed until publication and after host teardown.
+    pub fn factory(&self) -> crate::matching_registry_native::NativeLocalPollFactory {
+        let slot = self.clone();
+        std::sync::Arc::new(move |host| {
+            let _registry = host.registry()?;
+            let service = slot.service.read().expect("native service slot lock").as_ref()?.upgrade()?;
+            Some(std::sync::Arc::new(crate::matching_forward_native::InProcessNativeMatching(service)))
+        })
+    }
+}
+
 /// Go partition notifications use the membership ring even when task dispatch
 /// uses the shard distributor. Resolve local owners through their advertised
 /// endpoint too, so an unloaded local partition follows ordinary RPC creation.
