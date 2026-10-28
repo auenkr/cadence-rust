@@ -131,8 +131,20 @@ impl NativeSemaphoreService {
         deadline: Option<tokio::time::Instant>,
         cancelled: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
-        parse_owner_bytes(r.owner_id.as_bytes())
+        let owner = parse_owner_bytes(r.owner_id.as_bytes())
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
+        if let Ok(domain) = r.domain_id.as_utf8() {
+            crate::matching_task_info_log::emit(
+                domain,
+                "Received AcquireSemaphore",
+                &[
+                    ("wf-id", owner.workflow_id.go_json_string()),
+                    ("wf-run-id", owner.run_id.go_json_string()),
+                    ("wf-domain-id", r.domain_id.go_json_string()),
+                    ("wf-schedule-id", owner.hold_id.to_string()),
+                ],
+            );
+        }
         let id = IdentifierBytes::new(r.domain_id.clone(), r.semaphore_name.clone(), r.bucket)
             .map_err(identifier_status)?;
         // Go gives only Manager.Start its independent background timeout. Domain

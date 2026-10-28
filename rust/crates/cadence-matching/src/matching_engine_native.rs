@@ -1,8 +1,7 @@
 //! Native Matching engine foundations and task add flows.
 //!
-//! This module is deliberately not wired into the service: `get` by itself is
-//! not the handler ownership check, and bypassing the forwarding chain can lose
-//! tasks. See memory/matching-native-engine-20261028.md.
+//! Configured production uses this engine through the native service and host,
+//! which supply admission, domain, ownership and lifecycle checks.
 use std::collections::BTreeMap;
 
 use crate::matching_dispatch_native::{NativeFuture, NativeMatchingApi};
@@ -162,6 +161,34 @@ impl NativeMatchingEngine {
             ),
         };
         let list = list.unwrap_or_default();
+        if let Ok(domain) = domain_id.as_utf8() {
+            crate::matching_task_info_log::emit(
+                domain,
+                if task_type == 0 {
+                    "Received AddDecisionTask"
+                } else {
+                    "Received AddActivityTask"
+                },
+                &[
+                    ("wf-task-list-name", list.name.go_json_string()),
+                    (
+                        "wf-id",
+                        execution.map(|e| e.workflow_id.go_json_string()).unwrap_or_default(),
+                    ),
+                    (
+                        "wf-run-id",
+                        execution.map(|e| e.run_id.go_json_string()).unwrap_or_default(),
+                    ),
+                    ("wf-domain-id", domain_id.go_json_string()),
+                    ("wf-task-list-type", task_type.to_string()),
+                    ("wf-schedule-id", schedule_id.to_string()),
+                    (
+                        "wf-task-list-kind",
+                        crate::matching_handler_native::persistence_kind(list.kind).to_string(),
+                    ),
+                ],
+            );
+        }
         let parsed = crate::matching_handler_native::task_list_name(&list.name)?;
         let domain = domain_id
             .as_utf8()

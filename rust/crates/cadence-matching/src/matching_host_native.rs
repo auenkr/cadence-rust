@@ -185,6 +185,7 @@ pub struct NativeMatchingHost {
     registry: NativeQueueRegistry,
     started: tokio::sync::watch::Sender<u8>,
     quota: Arc<MatchingRpcQuota>,
+    throttled_logger: Arc<crate::matching_throttled_logger::MatchingThrottledLogger>,
     domain_parse: DomainIdParse,
     semaphore: NativeSemaphore,
     metrics: crate::matching_metrics::MatchingMetrics,
@@ -204,6 +205,11 @@ impl NativeMatchingHost {
         metrics: crate::matching_metrics::MatchingMetrics,
         observer: Option<PollObserverFactory>,
     ) -> NativeMatchingService<Self> {
+        let throttled_logger = Arc::new(
+            crate::matching_throttled_logger::MatchingThrottledLogger::new(
+                state.admin.dynamic_config.clone(),
+            ),
+        );
         let control = Arc::new(NativeMatchingControlContext::new(
             state.clone(),
             cache.clone(),
@@ -234,6 +240,7 @@ impl NativeMatchingHost {
                 registry,
                 started,
                 quota,
+                throttled_logger,
                 domain_parse,
                 semaphore,
                 metrics,
@@ -288,6 +295,10 @@ async fn wait_for_startup(receiver: &mut tokio::sync::watch::Receiver<u8>) -> Re
     }
 }
 impl NativeMatchingIntegration for NativeMatchingHost {
+    fn missing_poll_deadline(&self, method: &'static str) {
+        self.throttled_logger
+            .error(method, "Context timeout not set for long poll API.");
+    }
     fn check_started(&self) -> NativeFuture<Result<(), Status>> {
         let mut receiver = self.started.subscribe();
         Box::pin(async move { wait_for_startup(&mut receiver).await })

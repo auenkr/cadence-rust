@@ -427,7 +427,8 @@ mod tests {
         assert_eq!(summary.unwrap().0, "TaskListNotOwnedByHostError");
         assert_eq!(
             result.fields[0].0,
-            cadence_thrift::service::exception_field(method, "TaskListNotOwnedByHostError").unwrap()
+            cadence_thrift::service::exception_field(method, "TaskListNotOwnedByHostError")
+                .unwrap()
         );
         let Value::Struct(error) = &result.fields[0].1 else {
             panic!("exception struct")

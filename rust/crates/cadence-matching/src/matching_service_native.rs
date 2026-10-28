@@ -30,6 +30,7 @@ pub trait NativeMatchingIntegration:
 {
     fn check_started(&self) -> crate::matching_dispatch_native::NativeFuture<Result<(), Status>>;
     fn admit(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status>;
+    fn missing_poll_deadline(&self, method: &'static str);
     fn metrics(&self) -> &crate::matching_metrics::MatchingMetrics;
     fn metric_domain_name(&self, id: &GoString) -> Option<GoString>;
     fn check_owned(&self, key: &TaskListKeyBytes) -> Result<(), Status>;
@@ -114,6 +115,9 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
+        if deadline.is_none() {
+            self.integration.missing_poll_deadline("PollForDecisionTask");
+        }
         let result = self
             .engine
             .poll_for_decision_task(request, deadline, &self.integration)
@@ -128,6 +132,9 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
+        if deadline.is_none() {
+            self.integration.missing_poll_deadline("PollForActivityTask");
+        }
         let result = self
             .engine
             .poll_for_activity_task(request, deadline, &self.integration)
@@ -888,6 +895,7 @@ mod tests {
     }
 
     struct Integration {
+        missing_deadlines: std::sync::Mutex<Vec<&'static str>>,
         metrics: crate::matching_metrics::MatchingMetrics,
         reject: bool,
     }
@@ -1001,6 +1009,9 @@ mod tests {
         }
     }
     impl NativeMatchingIntegration for Integration {
+        fn missing_poll_deadline(&self, method: &'static str) {
+            self.missing_deadlines.lock().unwrap().push(method);
+        }
         fn check_started(&self) -> NativeFuture<Result<(), Status>> {
             Box::pin(async { Ok(()) })
         }
@@ -1058,6 +1069,7 @@ mod tests {
         );
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
         let integration = Integration {
+            missing_deadlines: Default::default(),
             metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             reject,
         };
@@ -1103,6 +1115,37 @@ mod tests {
             .unwrap_err();
         assert!(crate::matching_panic::is_captured_panic(&error));
     }
+    #[tokio::test]
+    async fn poll_deadline_logging_runs_after_quota_admission_for_both_methods() {
+        for reject in [false, true] {
+            let (_dir, service, _sink, _store) = service(reject);
+            let decision = service
+                .poll_for_decision_task(Request::new(Default::default()))
+                .await
+                .unwrap_err();
+            let activity = service
+                .poll_for_activity_task(Request::new(Default::default()))
+                .await
+                .unwrap_err();
+            let expected = if reject {
+                tonic::Code::ResourceExhausted
+            } else {
+                tonic::Code::InvalidArgument
+            };
+            assert_eq!(decision.code(), expected);
+            assert_eq!(activity.code(), expected);
+            let methods = service.integration.missing_deadlines.lock().unwrap();
+            if reject {
+                assert!(methods.is_empty());
+            } else {
+                assert_eq!(
+                    methods.as_slice(),
+                    ["PollForDecisionTask", "PollForActivityTask"]
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn actual_add_and_control_deadlines_cancel_pending_admission() {
         use cadence_proto::native::NativeMatchingApi as _;

@@ -173,3 +173,26 @@ and cancellation requested. No mixed gate has been dispatched for this source.
 Next: inspect current CI, retain its exact identity/logs and apply any formatting
 patch if nonempty, address actual failures, then freeze a successful immutable
 source for serial mixed gates. PR linking still reports the ownership error.
+
+
+Native configuration-consumer follow-up found missing diagnostic hooks:
+Go engine.go:414/522/605 emits semaphore/add receipt events through the
+per-domain info/debug logger, and Go handler/legacy Rust emits a shared
+rate-limited log when a poll has no deadline. Native dispatch already emits
+delivery events, but native add/semaphore and poll validation omitted these.
+Restored add receipt events before identifier validation, semaphore receipt
+after owner parsing and before identifier validation, and one host-owned
+shared throttled logger for both poll methods. The service logs only after
+startup/quota admission, preserving error ordering. Native fields render through
+Go-string diagnostic escaping; neither persistence nor routing converts bytes.
+As with the existing native delivery log, non-UTF8 domain IDs cannot match the
+UTF8 metadata/config logging API and are skipped. Added a handler regression
+for both missing-deadline callbacks and their suppression on quota rejection.
+Existing TaskInfoLog and MatchingThrottledLogger tests cover configuration and
+rate limits. This source is unvalidated; allow the earlier b5a run to finish
+and retain its results, then validate the final combined source before gates.
+
+The b5a run's original-Go UUID oracle passed (downloaded under
+`/mnt/storage/service/ci-evidence/matching-native-uuid-40752202495`). Its
+824-byte formatting patch wraps one assertion and is now applied. No workspace
+or new logging pass is claimed yet.
