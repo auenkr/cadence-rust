@@ -236,18 +236,14 @@ impl MatchingRpcQuota {
         let overlay = self.overlay.clone();
         let source: RateSource = Arc::new(move || {
             let config = overlay.lock().expect("admin config lock");
-            // Dynamic config domain filters are Go strings (UTF-8). Invalid
-            // GoString names still get isolated quota buckets and use the
-            // configured host fallback without lossy key conversion.
-            let primary = std::str::from_utf8(domain.as_bytes())
-                .ok()
-                .map_or(0, |name| {
-                    dynamic_config::integer(
-                        config.property_values(domain_key(class)),
-                        Some(name),
-                        0,
-                    )
-                });
+            // An invalid-byte name cannot match a UTF-8 domain filter, but
+            // the unfiltered domain quota still applies. Keep its bucket key
+            // raw and only fall back to the host rate when that quota is zero.
+            let primary = dynamic_config::integer(
+                config.property_values(domain_key(class)),
+                std::str::from_utf8(domain.as_bytes()).ok(),
+                0,
+            );
             if primary > 0 {
                 primary as f64
             } else {
@@ -455,7 +451,14 @@ mod tests {
     #[test]
     fn byte_domains_have_independent_buckets_without_utf8_aliasing() {
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
-        set(&overlay, "matching.domainrps", vec![entry(1, &[])]);
+        set(
+            &overlay,
+            "matching.domainrps",
+            vec![
+                entry(1, &[]),
+                entry(2, &[("domainName", json!("tenant-�"))]),
+            ],
+        );
         let quota = MatchingRpcQuota::with_clock(overlay, Arc::new(|| 10));
         let ff = GoString::from(&b"tenant-\xff"[..]);
         let fe = GoString::from(&b"tenant-\xfe"[..]);
@@ -465,6 +468,8 @@ mod tests {
         assert!(!quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&ff)));
         assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&fe)));
         assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&replacement)));
+        assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&replacement)));
+        assert!(!quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&replacement)));
         let state = quota.state.lock().unwrap();
         assert_eq!(state.domains.len(), 3);
         assert!(state.domains.contains_key(&(RpcClass::User, ff)));

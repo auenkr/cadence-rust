@@ -257,3 +257,19 @@ no mixed gate or local build is running. Download both terminal results and
 the newer formatting patch before freezing the final source. The validation
 ref must be removed after the integration merges, subject to branch-cleanup
 rules. No new PR was opened for it. T3 PR ownership linking still fails.
+
+## Workspace quota failure and correction
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40756335405 at
+`58d2887a4a47ec038699ec2c68b317cf7ee6987e` concluded failure: Clippy exit0,
+Matching library 954 passed/2 ignored, then service-core 171 passed/one failed.
+The raw-byte quota regression exposed invalid UTF8 names bypassing unfiltered
+domain quota and falling back directly to host rate. Retained compact evidence
+in `memory/evidence/matching-native-workspace-40756335405/`.
+
+Corrected lookup to pass an absent UTF8 filter to the existing dynamic config
+selector, retaining its unfiltered domain fallback and raw bucket identity.
+Extended the regression with a distinct U+FFFD filtered rate to prove invalid
+bytes do not alias the replacement string. No local Cargo/Go validation ran.
+Run40757715608 remains live and predates this correction; its result cannot
+validate the fix. Final immutable candidate and all mixed acceptance remain open.

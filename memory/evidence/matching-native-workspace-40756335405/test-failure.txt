@@ -1,0 +1,17 @@
+
+failures:
+
+---- matching_quota::tests::byte_domains_have_independent_buckets_without_utf8_aliasing stdout ----
+dynamic config integer read failed (value was missing or had the wrong type); using default
+
+thread 'matching_quota::tests::byte_domains_have_independent_buckets_without_utf8_aliasing' (25125) panicked at crates/cadence-service-core/src/matching_quota.rs:465:9:
+assertion failed: !quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&ff))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    matching_quota::tests::byte_domains_have_independent_buckets_without_utf8_aliasing
+
+test result: FAILED. 171 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.40s
+
+error: test failed, to rerun pass `-p cadence-service-core --lib`

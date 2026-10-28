@@ -1,0 +1,4 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40756335405
+headSha: 58d2887a4a47ec038699ec2c68b317cf7ee6987e
+conclusion: failure
+Scope: workspace; Clippy exit0 then test exit101. Matching tests passed; service-core byte-domain quota regression failed (171 passed, 1 failed). No workspace pass.

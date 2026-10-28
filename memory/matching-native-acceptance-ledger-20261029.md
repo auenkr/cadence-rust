@@ -19,8 +19,9 @@ and the native PostgreSQL oracle invocation. Clean target, runner parity
 formatting and original-Go UUID oracle enabled. No outcome yet.
 
 Earlier workspace run40756335405 at
-`58d2887a4a47ec038699ec2c68b317cf7ee6987e` passed Clippy and remains live in
-tests at inspection. The separate ref preserves that run and its evidence;
+`58d2887a4a47ec038699ec2c68b317cf7ee6987e` passed Clippy and Matching tests, then failed service-core
+quota regression (171 passed, one failed). Evidence retained under
+`memory/evidence/matching-native-workspace-40756335405/`. The separate ref preserves that run and its evidence;
 neither was restarted because of a timeout. No mixed gate runs concurrently.
 Selected Matching run40754945697 passed at
 `fb049c5515d0c940adc86e038bd3b1ef31b84880`; do not attribute an earlier result
@@ -31,7 +32,7 @@ immutable source and same-pin successful workspace validation.
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending run40757715608; earlier run40756335405 remains live. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Pending run40757715608; earlier run40756335405 failed the raw-byte domain quota regression. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
