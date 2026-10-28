@@ -18,6 +18,10 @@ use cadence_persistence::{
 use std::sync::Arc;
 use uuid::Uuid;
 
+#[path = "matching_persistence_native.rs"]
+mod native;
+pub use native::limit_task_store_bytes;
+
 const REJECTED: &str = "Persistence Max QPS Reached.";
 
 pub fn limit_task_store(

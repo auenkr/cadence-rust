@@ -63,6 +63,8 @@ pub mod matching_fatal;
 #[allow(clippy::result_large_err)]
 pub mod matching_fault_injection;
 pub mod matching_handler;
+#[allow(clippy::result_large_err)]
+pub mod matching_handler_native;
 pub mod matching_host_limiter;
 pub mod matching_limiter;
 #[allow(clippy::result_large_err)]
@@ -84,6 +86,8 @@ pub mod matching_reader;
 pub mod matching_reader_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_registry;
+#[allow(clippy::result_large_err)]
+pub mod matching_registry_native;
 pub mod matching_ringpop_provider;
 pub mod matching_runtime;
 pub mod matching_scaler;

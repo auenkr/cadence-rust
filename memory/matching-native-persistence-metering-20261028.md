@@ -1,0 +1,5 @@
+# Native Matching persistence metering — 2026-10-28
+
+Added `matching_persistence::limit_task_store_bytes` over `MatchingTaskStoreBytes`. Operations mirror the legacy rate-limited task store: same permit ordering, operation names, domain labels, latency/error recording, and list row/payload accounting. The wrapper delegates config fetching and all native store operations without converting keys, tasks, or returned errors to legacy types. Metrics classify native and legacy-wrapped errors without changing the caller's original error.
+
+Added a SQLite regression that writes and reads raw queue/workflow identifiers through the wrapper, checks that a raw lease-fence error survives, and checks condition-failure metrics and list size accounting. Added new native modules/tests to the runner formatting list. Source inspection and `git diff --check` only; no local Cargo, Go validation or formatting. New tests and newly registered registry/handler helpers require CI. This wrapper is an integration dependency; production does not yet select it.

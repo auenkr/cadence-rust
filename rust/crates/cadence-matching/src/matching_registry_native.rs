@@ -76,7 +76,11 @@ fn gs(domain: Uuid) -> GoString {
 }
 
 fn invalid_name(message: GoString) -> Status {
-    Status::invalid_argument(diag(message.as_bytes()))
+    crate::matching_native_status::raw_status(
+        tonic::Code::InvalidArgument,
+        &message,
+        tonic::codegen::Bytes::new(),
+    )
 }
 
 type Key = (Uuid, GoString, i32);
@@ -629,6 +633,7 @@ impl NativeQueueRegistry {
             metrics: matching_metrics::MatchingMetrics::default(),
         }
     }
+    #[allow(dead_code)] // Used when the native registry is wired into the service.
     pub(crate) fn with_metrics(mut self, metrics: matching_metrics::MatchingMetrics) -> Self {
         self.metrics = metrics;
         self
@@ -719,11 +724,6 @@ impl NativeQueueRegistry {
     }
     pub fn with_qps_interval(mut self, provider: NativeProvider<i64>) -> Self {
         self.qps_interval = Some(provider);
-        self
-    }
-    #[cfg(test)]
-    pub(crate) fn with_qps_clock(mut self, clock: cadence_common::qps::Clock) -> Self {
-        self.qps_clock = clock;
         self
     }
     pub fn with_isolation(mut self, provider: NativeIsolationProvider) -> Self {
@@ -2198,6 +2198,24 @@ mod tests {
             created_nanos: 0,
             partition_config: None,
         }
+    }
+
+    #[test]
+    fn invalid_partition_name_status_preserves_all_message_bytes() {
+        let mut name = b"/__cadence_sys/".to_vec();
+        name.extend_from_slice(&[b'x'; 300]);
+        name.extend_from_slice(b"\xff/invalid");
+        let message = TaskListNameBytes::parse(&name).unwrap_err();
+        let status = invalid_name(message.clone());
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.details().is_empty());
+        let raw = status
+            .metadata()
+            .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        assert_eq!(raw.as_ref(), message.as_bytes());
     }
 
     #[tokio::test]

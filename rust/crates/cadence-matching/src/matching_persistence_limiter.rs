@@ -268,6 +268,44 @@ impl MatchingPersistenceLimiter {
         self.record_call(operation, domain, elapsed, class);
     }
 
+    pub(crate) fn record_native_task_call<T>(
+        &self,
+        operation: &'static str,
+        domain_id: Option<uuid::Uuid>,
+        elapsed: std::time::Duration,
+        result: &cadence_persistence::matching_native_task_store::Result<T>,
+    ) {
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytesError as NativeError;
+        use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+        // Only classify for metrics. The caller retains the original error and bytes.
+        let class = match result.as_ref().err() {
+            None => None,
+            Some(NativeError::ConditionFailed { .. })
+            | Some(NativeError::Legacy(MatchingTaskStoreError::ConditionFailed(_))) => {
+                Some(PersistenceErrorClass::ConditionFailed)
+            }
+            Some(NativeError::Legacy(MatchingTaskStoreError::NotFound)) => {
+                Some(PersistenceErrorClass::NotFound)
+            }
+            Some(NativeError::Backend { kind, .. })
+            | Some(NativeError::Legacy(MatchingTaskStoreError::Backend { kind, .. })) => {
+                Some(match kind {
+                    BackendErrorKind::Timeout => PersistenceErrorClass::Timeout,
+                    BackendErrorKind::Throttled => PersistenceErrorClass::Busy,
+                    BackendErrorKind::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+                    BackendErrorKind::BadRequest => PersistenceErrorClass::BadRequest,
+                    _ => PersistenceErrorClass::Internal,
+                })
+            }
+            Some(_) => Some(PersistenceErrorClass::Internal),
+        };
+        let domain = domain_id.map(|id| {
+            (self.domain_name.read().expect("Matching metric domain resolver lock"))(id)
+                .unwrap_or_else(|| "_unknown_".into())
+        });
+        self.record_call(operation, domain, elapsed, class);
+    }
+
     /// Go `metered.base.call` for the domain manager (no domain tag on its
     /// requests, so the overall family with `task_category=none`).
     pub(crate) fn record_domain_call(
