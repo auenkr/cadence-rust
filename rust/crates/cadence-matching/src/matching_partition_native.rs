@@ -89,8 +89,9 @@ impl PartitionError {
 
 fn backend_kind(error: &StoreError) -> Option<BackendErrorKind> {
     match error {
-        StoreError::Backend { kind, .. }
-        | StoreError::Legacy(Legacy::Backend { kind, .. }) => Some(*kind),
+        StoreError::Backend { kind, .. } | StoreError::Legacy(Legacy::Backend { kind, .. }) => {
+            Some(*kind)
+        }
         _ => None,
     }
 }
@@ -360,11 +361,13 @@ mod tests {
         }
     }
     fn sqlite(dir: &tempfile::TempDir) -> Arc<SqliteTaskStore> {
-        Arc::new(
-            SqliteTaskStore::create(dir.path().join("q.db"), BlobEncoding::ThriftRW).unwrap(),
-        )
+        Arc::new(SqliteTaskStore::create(dir.path().join("q.db"), BlobEncoding::ThriftRW).unwrap())
     }
-    fn open(store: &Arc<SqliteTaskStore>, k: &TaskListKeyBytes, lease: i64) -> DurableTaskQueueBytes {
+    fn open(
+        store: &Arc<SqliteTaskStore>,
+        k: &TaskListKeyBytes,
+        lease: i64,
+    ) -> DurableTaskQueueBytes {
         DurableTaskQueueBytes::open(store.clone(), k.clone(), 0, n100(), lease).unwrap()
     }
     fn parts(count: i32) -> HashMap<i32, Vec<GoString>> {
@@ -435,7 +438,9 @@ mod tests {
         let queue = open(&store, &k, 1);
         let cache = NativePartitionCache::load(store.as_ref(), &queue, &k, 0).unwrap();
         let mut config = request(2, 2);
-        config.read_partitions.insert(1, vec!["a".into(), "é".into()]);
+        config
+            .read_partitions
+            .insert(1, vec!["a".into(), "é".into()]);
         cache.update(&queue, config, 2).unwrap();
         let legacy_key = TaskListKey {
             domain_id: k.domain_id,
@@ -474,7 +479,10 @@ mod tests {
         assert_eq!(config.version, 4);
         assert_eq!(config.read_partitions, parts(3));
         // Count agrees with the map, so the map's groups are kept.
-        assert_eq!(config.write_partitions[&0], vec![GoString::from(vec![0xff])]);
+        assert_eq!(
+            config.write_partitions[&0],
+            vec![GoString::from(vec![0xff])]
+        );
         let absent = from_storage(PartitionConfigBytes {
             num_read_partitions: 2,
             ..Default::default()
@@ -521,13 +529,22 @@ mod tests {
         let failures = AtomicUsize::new(0);
         for (config, message) in cases {
             let error = cache
-                .update_until(&queue, config, 2, || false, || {
-                    failures.fetch_add(1, Ordering::SeqCst);
-                })
+                .update_until(
+                    &queue,
+                    config,
+                    2,
+                    || false,
+                    || {
+                        failures.fetch_add(1, Ordering::SeqCst);
+                    },
+                )
                 .unwrap_err();
             assert_eq!(error.kind, PartitionErrorKind::InvalidArgument);
             assert_eq!(error.message.as_bytes(), message.as_bytes());
-            assert_eq!(error.to_diagnostic_status().code(), tonic::Code::InvalidArgument);
+            assert_eq!(
+                error.to_diagnostic_status().code(),
+                tonic::Code::InvalidArgument
+            );
         }
         assert_eq!(failures.load(Ordering::SeqCst), 0);
         assert!(!queue.is_stopped());
@@ -568,9 +585,15 @@ mod tests {
         let failures = AtomicUsize::new(0);
         // Cancelled caller: first attempt still runs; ConditionFailed is not retried.
         let error = cache
-            .update_until(&queue, request(3, 1), 4, || true, || {
-                failures.fetch_add(1, Ordering::SeqCst);
-            })
+            .update_until(
+                &queue,
+                request(3, 1),
+                4,
+                || true,
+                || {
+                    failures.fetch_add(1, Ordering::SeqCst);
+                },
+            )
             .unwrap_err();
         assert_eq!(error.kind, PartitionErrorKind::Internal);
         assert_eq!(error.to_diagnostic_status().code(), tonic::Code::Internal);
@@ -604,35 +627,103 @@ mod tests {
         script: Mutex<VecDeque<StoreError>>,
     }
     impl MatchingTaskStoreBytes for Faulty {
-        fn get_task_list(&self, key: &TaskListKeyBytes) -> cadence_persistence::matching_native_task_store::Result<TaskListRecordBytes> {
+        fn get_task_list(
+            &self,
+            key: &TaskListKeyBytes,
+        ) -> cadence_persistence::matching_native_task_store::Result<TaskListRecordBytes> {
             self.gets.fetch_add(1, Ordering::SeqCst);
             if let Some(error) = self.script.lock().unwrap().pop_front() {
                 return Err(error);
             }
             MatchingTaskStoreBytes::get_task_list(self.inner.as_ref(), key)
         }
-        fn lease(&self, key: &TaskListKeyBytes, kind: i16, previous_range: i64, now_nanos: i64) -> cadence_persistence::matching_native_task_store::Result<TaskListRecordBytes> {
+        fn lease(
+            &self,
+            key: &TaskListKeyBytes,
+            kind: i16,
+            previous_range: i64,
+            now_nanos: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<TaskListRecordBytes> {
             MatchingTaskStoreBytes::lease(self.inner.as_ref(), key, kind, previous_range, now_nanos)
         }
-        fn update_task_list(&self, key: &TaskListKeyBytes, range: i64, data: TaskListDataBytes, now_nanos: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
-            MatchingTaskStoreBytes::update_task_list(self.inner.as_ref(), key, range, data, now_nanos)
+        fn update_task_list(
+            &self,
+            key: &TaskListKeyBytes,
+            range: i64,
+            data: TaskListDataBytes,
+            now_nanos: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::update_task_list(
+                self.inner.as_ref(),
+                key,
+                range,
+                data,
+                now_nanos,
+            )
         }
-        fn create_tasks_with_domains(&self, key: &TaskListKeyBytes, range: i64, now_nanos: i64, tasks: &[(Uuid, &AllocatedTaskBytes)]) -> cadence_persistence::matching_native_task_store::Result<()> {
-            MatchingTaskStoreBytes::create_tasks_with_domains(self.inner.as_ref(), key, range, now_nanos, tasks)
+        fn create_tasks_with_domains(
+            &self,
+            key: &TaskListKeyBytes,
+            range: i64,
+            now_nanos: i64,
+            tasks: &[(Uuid, &AllocatedTaskBytes)],
+        ) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::create_tasks_with_domains(
+                self.inner.as_ref(),
+                key,
+                range,
+                now_nanos,
+                tasks,
+            )
         }
-        fn get_tasks(&self, key: &TaskListKeyBytes, read_level: i64, max_read_level: i64, batch_size: i64) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>> {
-            MatchingTaskStoreBytes::get_tasks(self.inner.as_ref(), key, read_level, max_read_level, batch_size)
+        fn get_tasks(
+            &self,
+            key: &TaskListKeyBytes,
+            read_level: i64,
+            max_read_level: i64,
+            batch_size: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>>
+        {
+            MatchingTaskStoreBytes::get_tasks(
+                self.inner.as_ref(),
+                key,
+                read_level,
+                max_read_level,
+                batch_size,
+            )
         }
-        fn task_list_size(&self, key: &TaskListKeyBytes, ack_level: i64) -> cadence_persistence::matching_native_task_store::Result<i64> {
+        fn task_list_size(
+            &self,
+            key: &TaskListKeyBytes,
+            ack_level: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<i64> {
             MatchingTaskStoreBytes::task_list_size(self.inner.as_ref(), key, ack_level)
         }
-        fn complete_task(&self, key: &TaskListKeyBytes, task_id: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+        fn complete_task(
+            &self,
+            key: &TaskListKeyBytes,
+            task_id: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<()> {
             MatchingTaskStoreBytes::complete_task(self.inner.as_ref(), key, task_id)
         }
-        fn complete_tasks_less_than(&self, key: &TaskListKeyBytes, inclusive_task_id: i64, limit: i64) -> cadence_persistence::matching_native_task_store::Result<usize> {
-            MatchingTaskStoreBytes::complete_tasks_less_than(self.inner.as_ref(), key, inclusive_task_id, limit)
+        fn complete_tasks_less_than(
+            &self,
+            key: &TaskListKeyBytes,
+            inclusive_task_id: i64,
+            limit: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<usize> {
+            MatchingTaskStoreBytes::complete_tasks_less_than(
+                self.inner.as_ref(),
+                key,
+                inclusive_task_id,
+                limit,
+            )
         }
-        fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+        fn delete_task_list(
+            &self,
+            key: &TaskListKeyBytes,
+            range: i64,
+        ) -> cadence_persistence::matching_native_task_store::Result<()> {
             MatchingTaskStoreBytes::delete_task_list(self.inner.as_ref(), key, range)
         }
     }
@@ -672,7 +763,10 @@ mod tests {
         // cancelled context so the first failure is final.
         for (kind, expected) in [
             (BackendErrorKind::Throttled, PartitionErrorKind::ServiceBusy),
-            (BackendErrorKind::BadRequest, PartitionErrorKind::InvalidArgument),
+            (
+                BackendErrorKind::BadRequest,
+                PartitionErrorKind::InvalidArgument,
+            ),
             (BackendErrorKind::Timeout, PartitionErrorKind::Internal),
         ] {
             let before = faulty.gets.load(Ordering::SeqCst);
@@ -686,7 +780,8 @@ mod tests {
             assert_eq!(faulty.gets.load(Ordering::SeqCst) - before, 1);
             assert!(cache.get().is_some());
         }
-        let status = PartitionError::new(PartitionErrorKind::ServiceBusy, "busy").to_diagnostic_status();
+        let status =
+            PartitionError::new(PartitionErrorKind::ServiceBusy, "busy").to_diagnostic_status();
         assert_eq!(status.code(), tonic::Code::ResourceExhausted);
         assert!(!status.details().is_empty());
     }

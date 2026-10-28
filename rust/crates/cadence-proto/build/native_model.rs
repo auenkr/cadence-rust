@@ -288,7 +288,12 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
                     ".uber.cadence.history.v1.RecordDecisionTaskStartedResponse",
                     ".uber.cadence.history.v1.RecordActivityTaskStartedRequest",
                     ".uber.cadence.history.v1.RecordActivityTaskStartedResponse",
+                    ".uber.cadence.history.v1.GetMutableStateRequest",
                     ".uber.cadence.history.v1.GetMutableStateResponse",
+                    ".uber.cadence.history.v1.DescribeWorkflowExecutionRequest",
+                    ".uber.cadence.history.v1.DescribeWorkflowExecutionResponse",
+                    ".uber.cadence.history.v1.RefreshWorkflowTasksRequest",
+                    ".uber.cadence.history.v1.RefreshWorkflowTasksResponse",
                 ]
                 .contains(&name.as_str())
         })
@@ -501,7 +506,7 @@ pub fn generate(descriptor: &Path, output: &Path) -> Result<(), Box<dyn std::err
             generated.push_str("];\n");
         }
     }
-    generated.push_str("pub use uber::cadence::{api::v1 as api, matching::v1 as matching, history::v1 as history, shared::v1 as shared};\n");
+    generated.push_str("pub use uber::cadence::{api::v1 as api, matching::v1 as matching, history::v1 as history, shared::v1 as shared, admin::v1 as admin};\n");
     std::fs::write(output, generated)?;
     Ok(())
 }

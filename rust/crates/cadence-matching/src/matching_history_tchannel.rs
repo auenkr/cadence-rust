@@ -2633,6 +2633,41 @@ mod typed_codec_tests {
             workflow_id: raw(b"workflow-\xfe"), run_id: raw(b"run-\xfd"),
         };
         let task_list = n::api::TaskList { name: raw(b"queue-\xfa"), ..Default::default() };
+        client.refresh_workflow_tasks_native(
+            &n::history::RefreshWorkflowTasksRequest {
+                domain: raw(b"domain-name-\xf8"), domain_id: raw(b"domain-\xff"),
+                workflow_execution: Some(execution.clone()),
+            }, Duration::from_secs(3),
+        ).await.unwrap();
+        let described = client.describe_workflow_execution_native(
+            &n::history::DescribeWorkflowExecutionRequest {
+                domain_id: raw(b"domain-\xff"),
+                request: Some(n::api::DescribeWorkflowExecutionRequest {
+                    domain: raw(b"domain-name-\xf8"), workflow_execution: Some(execution.clone()),
+                    ..Default::default()
+                }),
+            }, Duration::from_secs(3),
+        ).await.unwrap();
+        assert_eq!(described.pending_decision.unwrap().schedule_id, 41);
+        let info = described.workflow_execution_info.unwrap();
+        assert_eq!(info.workflow_execution.unwrap().workflow_id.as_bytes(), b"workflow-\xfe");
+        assert_eq!(info.r#type.unwrap().name.as_bytes(), b"type-\xf7");
+        let mutable = client.get_mutable_state_native(
+            &n::history::GetMutableStateRequest {
+                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution.clone()),
+                expected_next_event_id: 9, current_branch_token: b"input-branch".to_vec(),
+                ..Default::default()
+            }, Duration::from_secs(3),
+        ).await.unwrap();
+        assert_eq!(mutable.workflow_execution.unwrap().run_id.as_bytes(), b"run-\xfd");
+        assert_eq!(mutable.workflow_type.unwrap().name.as_bytes(), b"type-\xf7");
+        assert_eq!(mutable.task_list.unwrap().name.as_bytes(), b"queue-\xfa");
+        assert_eq!(mutable.sticky_task_list.unwrap().name.as_bytes(), b"sticky-\xf6");
+        assert_eq!(mutable.client_library_version.as_bytes(), b"library-\xf5");
+        assert_eq!(mutable.client_feature_version.as_bytes(), b"feature-\xf4");
+        assert_eq!(mutable.client_impl.as_bytes(), b"impl-\xf3");
+        assert_eq!(mutable.current_branch_token, [0xf2, 0]);
+        assert_eq!(mutable.history_size, 42);
         let decision = client.record_decision_task_started_native(
             &n::history::RecordDecisionTaskStartedRequest {
                 domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution.clone()),
@@ -2667,7 +2702,7 @@ mod typed_codec_tests {
         assert_eq!(retry.expiration_interval, retry.initial_interval);
         assert_eq!(attributes.header.unwrap().fields[&b"header-\xfa"[..]].data, [0xf9, 0x00]);
         let calls = peer.stop_and_read();
-        assert_eq!(calls.lines().filter(|line| !line.is_empty()).count(), 2);
+        assert_eq!(calls.lines().filter(|line| !line.is_empty()).count(), 5);
 
     }
 

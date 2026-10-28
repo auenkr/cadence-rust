@@ -337,6 +337,478 @@ pub(crate) fn record_activity_task_started_response_native(
     })
 }
 
+// ---- GetMutableState / DescribeWorkflowExecution / RefreshWorkflowTasks ----
+// Native (GoString) ports of the legacy encoders/decoders in the parent module.
+// Same Thrift field ids, enum offsets, units and optional presence; no UTF-8
+// validation of any string field.
+
+pub(crate) fn get_mutable_state_request_native(
+    value: &n::history::GetMutableStateRequest,
+) -> TypedStruct {
+    let mut fields = vec![
+        field(10, gs(&value.domain_id)),
+        field(30, i64_value(value.expected_next_event_id)),
+    ];
+    if let Some(execution) = &value.workflow_execution {
+        fields.push(field(20, workflow_execution_n(execution)));
+    }
+    if !value.current_branch_token.is_empty() {
+        fields.push(field(40, binary(&value.current_branch_token)));
+    }
+    if let Some(item) = &value.version_history_item {
+        // Go's FromVersionHistoryItem always sets both pointers.
+        fields.push(field(
+            50,
+            struct_value(vec![
+                field(10, i64_value(item.event_id)),
+                field(20, i64_value(item.version)),
+            ]),
+        ));
+    }
+    finish(fields)
+}
+
+pub(crate) fn refresh_workflow_tasks_request_native(
+    value: &n::history::RefreshWorkflowTasksRequest,
+) -> TypedStruct {
+    let mut inner = vec![field(10, gs(&value.domain))];
+    if let Some(execution) = &value.workflow_execution {
+        inner.push(field(20, workflow_execution_n(execution)));
+    }
+    // The outer IDL misspells domainUUID; ids are what matter on the wire.
+    finish(vec![
+        field(10, gs(&value.domain_id)),
+        field(20, TypedValue::Struct(finish(inner))),
+    ])
+}
+
+pub(crate) fn describe_workflow_execution_request_native(
+    value: &n::history::DescribeWorkflowExecutionRequest,
+) -> TypedStruct {
+    let mut fields = vec![field(10, gs(&value.domain_id))];
+    let Some(request) = value.request.as_ref() else {
+        return finish(fields);
+    };
+    let mut nested = vec![field(10, gs(&request.domain))];
+    if let Some(execution) = request.workflow_execution.as_ref() {
+        nested.push(field(20, workflow_execution_n(execution)));
+    }
+    let level = request.query_consistency_level;
+    if (1..=2).contains(&level) {
+        // Thrift QueryConsistencyLevel is zero based; proto reserves INVALID.
+        nested.push(field(30, TypedValue::I32(level - 1)));
+    }
+    fields.push(field(20, TypedValue::Struct(finish(nested))));
+    finish(fields)
+}
+
+fn workflow_execution_from_thrift_n(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::api::WorkflowExecution> {
+    Ok(n::api::WorkflowExecution {
+        workflow_id: field_gs(s, 10)?,
+        run_id: field_gs(s, 20)?,
+    })
+}
+
+fn version_histories_from_thrift_n(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::shared::VersionHistories> {
+    let histories = field_list_struct(s, 20)
+        .map_err(|_| thrift_invalid("VersionHistories.histories: expected list<struct>"))?
+        .into_iter()
+        .map(|history| {
+            let items = field_list_struct(history, 20)
+                .map_err(|_| thrift_invalid("VersionHistory.items: expected list<struct>"))?
+                .into_iter()
+                .map(|item| {
+                    Ok(n::admin::VersionHistoryItem {
+                        event_id: field_i64(item, 10)?,
+                        version: field_i64(item, 20)?,
+                    })
+                })
+                .collect::<cadence_thrift::Result<Vec<_>>>()?;
+            Ok(n::admin::VersionHistory {
+                branch_token: field_bytes(history, 10)?,
+                items,
+            })
+        })
+        .collect::<cadence_thrift::Result<Vec<_>>>()?;
+    Ok(n::shared::VersionHistories {
+        current_version_history_index: field_i32(s, 10)?,
+        histories,
+    })
+}
+
+/// Raw-byte `GetMutableStateResponse`; mirrors the legacy decoder.
+pub(crate) fn get_mutable_state_response_native(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::history::GetMutableStateResponse> {
+    let timeout = typed_field(s, 110)
+        .map(|v| as_i32(v, 110))
+        .transpose()?
+        .map(|seconds| prost_types::Duration {
+            seconds: i64::from(seconds),
+            nanos: 0,
+        });
+    Ok(n::history::GetMutableStateResponse {
+        workflow_execution: field_struct(s, 10)?
+            .map(workflow_execution_from_thrift_n)
+            .transpose()?,
+        workflow_type: field_struct(s, 20)?
+            .map(workflow_type_n)
+            .transpose()?,
+        next_event_id: field_i64(s, 30)?,
+        previous_started_event_id: typed_field(s, 35).map(|v| as_i64(v, 35)).transpose()?,
+        last_first_event_id: field_i64(s, 40)?,
+        task_list: field_struct(s, 50)?
+            .map(task_list_from_thrift_n)
+            .transpose()?,
+        sticky_task_list: field_struct(s, 60)?
+            .map(task_list_from_thrift_n)
+            .transpose()?,
+        client_library_version: field_gs(s, 70)?,
+        client_feature_version: field_gs(s, 80)?,
+        client_impl: field_gs(s, 90)?,
+        sticky_task_list_schedule_to_start_timeout: timeout,
+        event_store_version: field_i32(s, 120)?,
+        current_branch_token: field_bytes(s, 130)?,
+        workflow_state: workflow_state_from_thrift(field_i32(s, 150)?),
+        workflow_close_state: close_state_from_thrift(field_i32(s, 160)?),
+        version_histories: field_struct(s, 170)?
+            .map(version_histories_from_thrift_n)
+            .transpose()?,
+        is_sticky_task_list_enabled: field_bool(s, 180)?,
+        history_size: field_i64(s, 190)?,
+    })
+}
+
+fn gs_value_n(value: &TypedValue, id: i16) -> cadence_thrift::Result<GoString> {
+    bytes_value(value, id).map(from_gs)
+}
+
+fn payload_map_n(
+    s: &TypedStruct,
+    id: i16,
+) -> cadence_thrift::Result<std::collections::HashMap<GoString, n::api::Payload>> {
+    let mut result = std::collections::HashMap::new();
+    if let Some(fields) = field_struct(s, id)? {
+        for (key, value) in typed_map_entries(fields, 10)? {
+            result.insert(
+                gs_value_n(key, id)?,
+                n::api::Payload {
+                    data: bytes_value(value, id)?,
+                },
+            );
+        }
+    }
+    Ok(result)
+}
+
+fn string_map_n(
+    s: &TypedStruct,
+    id: i16,
+) -> cadence_thrift::Result<std::collections::HashMap<GoString, GoString>> {
+    let mut result = std::collections::HashMap::new();
+    for (key, value) in typed_map_entries(s, id)? {
+        result.insert(gs_value_n(key, id)?, gs_value_n(value, id)?);
+    }
+    Ok(result)
+}
+
+fn reset_points_n(s: &TypedStruct) -> cadence_thrift::Result<n::api::ResetPoints> {
+    let points = field_list_struct(s, 10)?
+        .into_iter()
+        .map(|point| {
+            Ok(n::api::ResetPointInfo {
+                binary_checksum: field_gs(point, 10)?,
+                run_id: field_gs(point, 20)?,
+                first_decision_completed_id: field_i64(point, 30)?,
+                created_time: timestamp_from_nanos(
+                    typed_field(point, 40).map(|v| as_i64(v, 40)).transpose()?,
+                ),
+                expiring_time: timestamp_from_nanos(
+                    typed_field(point, 50).map(|v| as_i64(v, 50)).transpose()?,
+                ),
+                resettable: field_bool(point, 60)?,
+            })
+        })
+        .collect::<cadence_thrift::Result<Vec<_>>>()?;
+    Ok(n::api::ResetPoints { points })
+}
+
+fn active_cluster_selection_policy_n(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::api::ActiveClusterSelectionPolicy> {
+    let cluster_attribute = field_struct(s, 1)?
+        .map(|attribute| -> cadence_thrift::Result<_> {
+            Ok(n::api::ClusterAttribute {
+                scope: field_gs(attribute, 1)?,
+                name: field_gs(attribute, 2)?,
+            })
+        })
+        .transpose()?;
+    Ok(n::api::ActiveClusterSelectionPolicy { cluster_attribute })
+}
+
+fn workflow_execution_info_n(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::api::WorkflowExecutionInfo> {
+    let workflow_execution = field_struct(s, 10)?
+        .map(workflow_execution_from_thrift_n)
+        .transpose()?;
+    let parent_execution = field_struct(s, 80)?
+        .map(workflow_execution_from_thrift_n)
+        .transpose()?;
+    let parent_execution_info = if [70, 71, 72].iter().any(|id| typed_field(s, *id).is_some())
+        || parent_execution.is_some()
+    {
+        Some(n::api::ParentExecutionInfo {
+            domain_id: field_gs(s, 70)?,
+            domain_name: field_gs(s, 71)?,
+            workflow_execution: parent_execution,
+            initiated_id: field_i64(s, 72)?,
+        })
+    } else {
+        None
+    };
+    let mut task_list_info = field_struct(s, 121)?
+        .map(task_list_from_thrift_n)
+        .transpose()?;
+    let task_list = match typed_field(s, 120) {
+        Some(value) => gs_value_n(value, 120)?,
+        None => task_list_info
+            .as_ref()
+            .map(|task| task.name.clone())
+            .unwrap_or_default(),
+    };
+    // Go's MigrateTaskList synthesizes a NORMAL TaskList from the legacy name.
+    if task_list_info.is_none() && !task_list.is_empty() {
+        task_list_info = Some(n::api::TaskList {
+            name: task_list.clone(),
+            kind: 1,
+            ..Default::default()
+        });
+    }
+    let time = |id: i16| -> cadence_thrift::Result<_> {
+        Ok(timestamp_from_nanos(
+            typed_field(s, id).map(|v| as_i64(v, id)).transpose()?,
+        ))
+    };
+    Ok(n::api::WorkflowExecutionInfo {
+        workflow_execution,
+        r#type: field_struct(s, 20)?.map(workflow_type_n).transpose()?,
+        start_time: time(30)?,
+        close_time: time(40)?,
+        close_status: enum_field_value(s, 50, 6)?,
+        history_length: field_i64(s, 60)?,
+        parent_execution_info,
+        execution_time: time(90)?,
+        memo: field_struct(s, 100)?
+            .map(|_| payload_map_n(s, 100).map(|fields| n::api::Memo { fields }))
+            .transpose()?,
+        search_attributes: field_struct(s, 101)?
+            .map(|_| {
+                payload_map_n(s, 101).map(|indexed_fields| n::api::SearchAttributes {
+                    indexed_fields,
+                })
+            })
+            .transpose()?,
+        auto_reset_points: field_struct(s, 110)?
+            .map(reset_points_n)
+            .transpose()?,
+        task_list,
+        task_list_info,
+        is_cron: field_bool(s, 130)?,
+        update_time: time(140)?,
+        partition_config: string_map_n(s, 150)?,
+        cron_overlap_policy: enum_field_value(s, 160, 2)?,
+        active_cluster_selection_policy: field_struct(s, 170)?
+            .map(active_cluster_selection_policy_n)
+            .transpose()?,
+        cron_schedule: field_gs(s, 180)?,
+        execution_status: enum_field_value(s, 190, 8)?,
+        scheduled_execution_time: time(200)?,
+    })
+}
+
+fn workflow_execution_configuration_n(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::api::WorkflowExecutionConfiguration> {
+    let duration = |id| -> cadence_thrift::Result<Option<prost_types::Duration>> {
+        Ok(duration_from_seconds(
+            typed_field(s, id).map(|v| as_i32(v, id)).transpose()?,
+        ))
+    };
+    Ok(n::api::WorkflowExecutionConfiguration {
+        task_list: field_struct(s, 10)?
+            .map(task_list_from_thrift_n)
+            .transpose()?,
+        execution_start_to_close_timeout: duration(20)?,
+        task_start_to_close_timeout: duration(30)?,
+    })
+}
+
+fn pending_activity_n(s: &TypedStruct) -> cadence_thrift::Result<n::api::PendingActivityInfo> {
+    let activity_type = field_struct(s, 20)?
+        .map(|value| -> cadence_thrift::Result<_> {
+            Ok(n::api::ActivityType {
+                name: field_gs(value, 10)?,
+            })
+        })
+        .transpose()?;
+    let reason = typed_field(s, 110)
+        .map(|value| gs_value_n(value, 110))
+        .transpose()?;
+    let details = field_bytes(s, 130)?;
+    let options = field_struct(s, 135)?
+        .map(|options| -> cadence_thrift::Result<_> {
+            Ok(n::api::FailureOptions {
+                failure_category: enum_field_value(options, 10, 3)?,
+                next_retry_interval: duration_from_seconds(
+                    typed_field(options, 20).map(|v| as_i32(v, 20)).transpose()?,
+                ),
+            })
+        })
+        .transpose()?;
+    let last_failure = if reason.is_some() || !details.is_empty() || options.is_some() {
+        Some(n::api::Failure {
+            reason: reason.unwrap_or_default(),
+            details,
+            options,
+        })
+    } else {
+        None
+    };
+    let heartbeat = field_bytes(s, 40)?;
+    let time = |id: i16| -> cadence_thrift::Result<_> {
+        Ok(timestamp_from_nanos(
+            typed_field(s, id).map(|v| as_i64(v, id)).transpose()?,
+        ))
+    };
+    Ok(n::api::PendingActivityInfo {
+        activity_id: field_gs(s, 10)?,
+        activity_type,
+        state: enum_field_value(s, 30, 3)?,
+        heartbeat_details: (!heartbeat.is_empty()).then_some(n::api::Payload { data: heartbeat }),
+        last_heartbeat_time: time(50)?,
+        last_started_time: time(60)?,
+        attempt: field_i32(s, 70)?,
+        maximum_attempts: field_i32(s, 80)?,
+        scheduled_time: time(90)?,
+        expiration_time: time(100)?,
+        last_failure,
+        last_worker_identity: field_gs(s, 120)?,
+        started_worker_identity: field_gs(s, 140)?,
+        schedule_id: field_i64(s, 150)?,
+    })
+}
+
+fn pending_child_n(s: &TypedStruct) -> cadence_thrift::Result<n::api::PendingChildExecutionInfo> {
+    Ok(n::api::PendingChildExecutionInfo {
+        workflow_execution: Some(n::api::WorkflowExecution {
+            workflow_id: field_gs(s, 10)?,
+            run_id: field_gs(s, 20)?,
+        }),
+        workflow_type_name: field_gs(s, 30)?,
+        initiated_id: field_i64(s, 40)?,
+        parent_close_policy: enum_field_value(s, 50, 3)?,
+        domain: field_gs(s, 1)?,
+    })
+}
+
+fn pending_decision_n(s: &TypedStruct) -> cadence_thrift::Result<n::api::PendingDecisionInfo> {
+    let time = |id: i16| -> cadence_thrift::Result<_> {
+        Ok(timestamp_from_nanos(
+            typed_field(s, id).map(|v| as_i64(v, id)).transpose()?,
+        ))
+    };
+    Ok(n::api::PendingDecisionInfo {
+        state: enum_field_value(s, 10, 2)?,
+        scheduled_time: time(20)?,
+        started_time: time(30)?,
+        attempt: field_i64(s, 40)? as i32,
+        original_scheduled_time: time(50)?,
+        schedule_id: field_i64(s, 60)?,
+    })
+}
+
+pub(crate) fn describe_workflow_execution_response_native(
+    s: &TypedStruct,
+) -> cadence_thrift::Result<n::history::DescribeWorkflowExecutionResponse> {
+    Ok(n::history::DescribeWorkflowExecutionResponse {
+        execution_configuration: field_struct(s, 10)?
+            .map(workflow_execution_configuration_n)
+            .transpose()?,
+        workflow_execution_info: field_struct(s, 20)?
+            .map(workflow_execution_info_n)
+            .transpose()?,
+        pending_activities: field_list_struct(s, 30)?
+            .into_iter()
+            .map(pending_activity_n)
+            .collect::<cadence_thrift::Result<Vec<_>>>()?,
+        pending_children: field_list_struct(s, 40)?
+            .into_iter()
+            .map(pending_child_n)
+            .collect::<cadence_thrift::Result<Vec<_>>>()?,
+        pending_decision: field_struct(s, 50)?
+            .map(pending_decision_n)
+            .transpose()?,
+    })
+}
+
+impl TChannelHistoryClient {
+    pub(crate) async fn get_mutable_state_native(
+        &self,
+        request: &n::history::GetMutableStateRequest,
+        timeout: Duration,
+    ) -> Result<n::history::GetMutableStateResponse, Status> {
+        let response = self
+            .call(
+                "GetMutableState",
+                &get_mutable_state_request_native(request),
+                timeout,
+            )
+            .await?;
+        get_mutable_state_response_native(&response).map_err(|error| {
+            Status::internal(format!("invalid History GetMutableState response: {error}"))
+        })
+    }
+
+    pub(crate) async fn describe_workflow_execution_native(
+        &self,
+        request: &n::history::DescribeWorkflowExecutionRequest,
+        timeout: Duration,
+    ) -> Result<n::history::DescribeWorkflowExecutionResponse, Status> {
+        let response = self
+            .call(
+                "DescribeWorkflowExecution",
+                &describe_workflow_execution_request_native(request),
+                timeout,
+            )
+            .await?;
+        describe_workflow_execution_response_native(&response).map_err(|error| {
+            Status::internal(format!(
+                "invalid History DescribeWorkflowExecution response: {error}"
+            ))
+        })
+    }
+
+    pub(crate) async fn refresh_workflow_tasks_native(
+        &self,
+        request: &n::history::RefreshWorkflowTasksRequest,
+        timeout: Duration,
+    ) -> Result<(), Status> {
+        self.call(
+            "RefreshWorkflowTasks",
+            &refresh_workflow_tasks_request_native(request),
+            timeout,
+        )
+        .await?;
+        Ok(())
+    }
+}
+
 impl TChannelHistoryClient {
     pub(crate) async fn record_decision_task_started_native(
         &self,
@@ -556,5 +1028,110 @@ mod tests {
         let mut unknown = scheduled;
         unknown.fields[1] = field(30, TypedValue::I32(1));
         assert!(history_event_n(&unknown).is_err());
+    }
+
+    #[test]
+    fn control_requests_keep_raw_bytes_and_field_ids() {
+        let execution = Some(n::api::WorkflowExecution {
+            workflow_id: GoString::from(&b"w\xfe"[..]),
+            run_id: GoString::from(&b"r\xfd"[..]),
+        });
+        let state = get_mutable_state_request_native(&n::history::GetMutableStateRequest {
+            domain_id: GoString::from(&b"d\xff"[..]),
+            workflow_execution: execution.clone(),
+            expected_next_event_id: 7,
+            current_branch_token: vec![1, 2],
+            version_history_item: Some(Default::default()),
+        });
+        assert_eq!(
+            typed_field(&state, 10),
+            Some(&TypedValue::Bytes(b"d\xff".to_vec()))
+        );
+        assert_eq!(typed_field(&state, 30), Some(&TypedValue::I64(7)));
+        assert!(typed_field(&state, 40).is_some());
+        let Some(TypedValue::Struct(item)) = typed_field(&state, 50) else {
+            panic!("item")
+        };
+        assert_eq!(typed_field(item, 10), Some(&TypedValue::I64(0)));
+        assert_eq!(typed_field(item, 20), Some(&TypedValue::I64(0)));
+
+        let refresh =
+            refresh_workflow_tasks_request_native(&n::history::RefreshWorkflowTasksRequest {
+                domain: GoString::default(),
+                domain_id: GoString::from(&b"d\xff"[..]),
+                workflow_execution: execution.clone(),
+            });
+        let Some(TypedValue::Struct(inner)) = typed_field(&refresh, 20) else {
+            panic!("inner")
+        };
+        assert_eq!(
+            typed_field(inner, 10),
+            Some(&TypedValue::Bytes(Vec::new()))
+        );
+        let Some(TypedValue::Struct(run)) = typed_field(inner, 20) else {
+            panic!("execution")
+        };
+        assert_eq!(
+            typed_field(run, 20),
+            Some(&TypedValue::Bytes(b"r\xfd".to_vec()))
+        );
+
+        let describe = describe_workflow_execution_request_native(
+            &n::history::DescribeWorkflowExecutionRequest {
+                domain_id: GoString::from(&b"d\xff"[..]),
+                request: Some(n::api::DescribeWorkflowExecutionRequest {
+                    domain: GoString::from(&b"n\xfb"[..]),
+                    workflow_execution: execution,
+                    query_consistency_level: 2,
+                }),
+            },
+        );
+        let Some(TypedValue::Struct(inner)) = typed_field(&describe, 20) else {
+            panic!("inner")
+        };
+        assert_eq!(
+            typed_field(inner, 10),
+            Some(&TypedValue::Bytes(b"n\xfb".to_vec()))
+        );
+        assert_eq!(typed_field(inner, 30), Some(&TypedValue::I32(1)));
+    }
+
+    #[test]
+    fn mutable_state_and_describe_responses_keep_raw_bytes() {
+        let task_list = struct_value(vec![field(10, TypedValue::Bytes(b"s\xff".to_vec()))]);
+        let state = finish(vec![
+            field(30, TypedValue::I64(9)),
+            field(35, TypedValue::I64(4)),
+            field(50, task_list.clone()),
+            field(60, task_list),
+            field(70, TypedValue::Bytes(b"lib\xfe".to_vec())),
+            field(110, TypedValue::I32(5)),
+            field(150, TypedValue::I32(1)),
+            field(180, TypedValue::Bool(true)),
+        ]);
+        let state = get_mutable_state_response_native(&state).unwrap();
+        assert_eq!(state.previous_started_event_id, Some(4));
+        assert_eq!(state.client_library_version.as_bytes(), b"lib\xfe");
+        assert_eq!(state.sticky_task_list.unwrap().name.as_bytes(), b"s\xff");
+        assert_eq!(
+            state.sticky_task_list_schedule_to_start_timeout.unwrap().seconds,
+            5
+        );
+        assert_eq!(state.workflow_state, 2);
+        assert!(state.is_sticky_task_list_enabled);
+
+        let info = finish(vec![
+            field(120, TypedValue::Bytes(b"tl\xfd".to_vec())),
+            field(180, TypedValue::Bytes(b"cron\xfc".to_vec())),
+        ]);
+        let describe = describe_workflow_execution_response_native(&finish(vec![field(
+            20,
+            TypedValue::Struct(info),
+        )]))
+        .unwrap();
+        let info = describe.workflow_execution_info.unwrap();
+        assert_eq!(info.task_list.as_bytes(), b"tl\xfd");
+        assert_eq!(info.task_list_info.unwrap().kind, 1);
+        assert_eq!(info.cron_schedule.as_bytes(), b"cron\xfc");
     }
 }

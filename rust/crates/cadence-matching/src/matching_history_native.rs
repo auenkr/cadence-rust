@@ -19,6 +19,10 @@ const RECORD_DECISION_TASK_STARTED: &str =
     "/uber.cadence.history.v1.HistoryAPI/RecordDecisionTaskStarted";
 const RECORD_ACTIVITY_TASK_STARTED: &str =
     "/uber.cadence.history.v1.HistoryAPI/RecordActivityTaskStarted";
+const GET_MUTABLE_STATE: &str = "/uber.cadence.history.v1.HistoryAPI/GetMutableState";
+const DESCRIBE_WORKFLOW_EXECUTION: &str =
+    "/uber.cadence.history.v1.HistoryAPI/DescribeWorkflowExecution";
+const REFRESH_WORKFLOW_TASKS: &str = "/uber.cadence.history.v1.HistoryAPI/RefreshWorkflowTasks";
 
 /// One unary call over the configured channel with the native prost codec.
 async fn native_unary<Req, Resp>(
@@ -294,6 +298,187 @@ impl MatchingHistoryClient {
             )
             .await?;
         activity_response(domain_id, task.data.schedule_id, execution, started)
+    }
+    pub async fn refresh_workflow_tasks_native(
+        &self,
+        domain_id: &GoString,
+        task: &AllocatedTaskBytes,
+    ) -> Result<(), Status> {
+        self.refresh_workflow_tasks_native_with_deadline(domain_id, task, None)
+            .await
+    }
+
+    pub async fn refresh_workflow_tasks_native_with_deadline(
+        &self,
+        domain_id: &GoString,
+        task: &AllocatedTaskBytes,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<(), Status> {
+        let execution = execution(task)?;
+        let payload = n::history::RefreshWorkflowTasksRequest {
+            domain: GoString::default(),
+            domain_id: domain_id.clone(),
+            workflow_execution: Some(execution.clone()),
+        };
+        let max = self.max_message_size;
+        let result = self
+            .instrument_history(
+                "RefreshWorkflowTasks",
+                self.retry(
+                    payload,
+                    None,
+                    caller_deadline,
+                    execution.workflow_id.as_bytes(),
+                    move |connection, request| async move {
+                        match connection {
+                            HistoryConnection::Grpc(_, channel) => {
+                                native_unary::<_, n::history::RefreshWorkflowTasksResponse>(
+                                    channel,
+                                    max,
+                                    REFRESH_WORKFLOW_TASKS,
+                                    request,
+                                )
+                                .await
+                                .map(|_| ())
+                            }
+                            HistoryConnection::Tchannel(client, timeout) => {
+                                client
+                                    .refresh_workflow_tasks_native(request.get_ref(), timeout)
+                                    .await
+                            }
+                        }
+                    },
+                ),
+            )
+            .await;
+        match result {
+            Ok(_) => Ok(()),
+            Err(error) if super::missing_execution(&error) => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Raw-byte twin of `refresh_workflow_tasks_until`.
+    pub async fn refresh_workflow_tasks_native_until(
+        &self,
+        domain_id: &GoString,
+        task: &AllocatedTaskBytes,
+        caller_deadline: Option<tokio::time::Instant>,
+        caller_gone: impl std::future::Future<Output = ()>,
+    ) -> Result<(), Status> {
+        tokio::select! {
+            biased;
+            _ = caller_gone => Err(Status::cancelled("context canceled")),
+            result = self.refresh_workflow_tasks_native_with_deadline(domain_id, task, caller_deadline) => result,
+        }
+    }
+
+    pub async fn describe_execution_native(
+        &self,
+        domain_id: &GoString,
+        domain_name: &GoString,
+        task: &AllocatedTaskBytes,
+    ) -> Result<n::history::DescribeWorkflowExecutionResponse, Status> {
+        self.describe_execution_native_with_deadline(domain_id, domain_name, task, None)
+            .await
+    }
+
+    pub async fn describe_execution_native_with_deadline(
+        &self,
+        domain_id: &GoString,
+        domain_name: &GoString,
+        task: &AllocatedTaskBytes,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<n::history::DescribeWorkflowExecutionResponse, Status> {
+        let execution = execution(task)?;
+        let payload = n::history::DescribeWorkflowExecutionRequest {
+            domain_id: domain_id.clone(),
+            request: Some(n::api::DescribeWorkflowExecutionRequest {
+                domain: domain_name.clone(),
+                workflow_execution: Some(execution.clone()),
+                ..Default::default()
+            }),
+        };
+        let max = self.max_message_size;
+        self.instrument_history(
+            "DescribeWorkflowExecution",
+            self.retry(
+                payload,
+                None,
+                caller_deadline,
+                execution.workflow_id.as_bytes(),
+                move |connection, request| async move {
+                    match connection {
+                        HistoryConnection::Grpc(_, channel) => {
+                            native_unary::<_, n::history::DescribeWorkflowExecutionResponse>(
+                                channel,
+                                max,
+                                DESCRIBE_WORKFLOW_EXECUTION,
+                                request,
+                            )
+                            .await
+                        }
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .describe_workflow_execution_native(request.get_ref(), timeout)
+                                .await
+                        }
+                    }
+                },
+            ),
+        )
+        .await
+    }
+
+    pub async fn mutable_state_native(
+        &self,
+        domain_id: &GoString,
+        execution: &n::api::WorkflowExecution,
+    ) -> Result<n::history::GetMutableStateResponse, Status> {
+        self.mutable_state_native_with_deadline(domain_id, execution, None)
+            .await
+    }
+
+    pub async fn mutable_state_native_with_deadline(
+        &self,
+        domain_id: &GoString,
+        execution: &n::api::WorkflowExecution,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<n::history::GetMutableStateResponse, Status> {
+        let payload = n::history::GetMutableStateRequest {
+            domain_id: domain_id.clone(),
+            workflow_execution: Some(execution.clone()),
+            ..Default::default()
+        };
+        let max = self.max_message_size;
+        self.instrument_history(
+            "GetMutableState",
+            self.retry(
+                payload,
+                None,
+                caller_deadline,
+                execution.workflow_id.as_bytes(),
+                move |connection, request| async move {
+                    match connection {
+                        HistoryConnection::Grpc(_, channel) => {
+                            native_unary::<_, n::history::GetMutableStateResponse>(
+                                channel,
+                                max,
+                                GET_MUTABLE_STATE,
+                                request,
+                            )
+                            .await
+                        }
+                        HistoryConnection::Tchannel(client, timeout) => {
+                            client
+                                .get_mutable_state_native(request.get_ref(), timeout)
+                                .await
+                        }
+                    }
+                },
+            ),
+        )
+        .await
     }
 }
 

@@ -35,6 +35,10 @@ func (p *peer) observe(ctx context.Context) {
 
 func (p *peer) RefreshWorkflowTasks(ctx context.Context, request *history.RefreshWorkflowTasksRequest) error {
 	p.observe(ctx)
+    if p.mode == "raw" {
+        if request.GetDomainUIID() != "domain-\xff" || request.Request == nil || request.Request.GetDomain() != "domain-name-\xf8" || request.Request.Execution == nil || request.Request.Execution.GetWorkflowId() != "workflow-\xfe" || request.Request.Execution.GetRunId() != "run-\xfd" { panic("raw refresh request bytes changed") }
+        return nil
+    }
 	if request.GetDomainUIID() != "domain-id" || request.Request == nil || request.Request.GetDomain() != "domain" || request.Request.Execution == nil || request.Request.Execution.GetWorkflowId() != "workflow-id" || request.Request.Execution.GetRunId() != "run-id" {
 		panic("RefreshWorkflowTasks request fields did not survive Rust Thrift mapping")
 	}
@@ -46,6 +50,15 @@ func (p *peer) RefreshWorkflowTasks(ctx context.Context, request *history.Refres
 
 func (p *peer) DescribeWorkflowExecution(ctx context.Context, request *history.DescribeWorkflowExecutionRequest) (*shared.DescribeWorkflowExecutionResponse, error) {
 	p.observe(ctx)
+    if p.mode == "raw" {
+        if request.GetDomainUUID() != "domain-\xff" || request.Request == nil || request.Request.GetDomain() != "domain-name-\xf8" || request.Request.Execution == nil || request.Request.Execution.GetWorkflowId() != "workflow-\xfe" || request.Request.Execution.GetRunId() != "run-\xfd" { panic("raw describe request bytes changed") }
+        return &shared.DescribeWorkflowExecutionResponse{
+            PendingDecision: &shared.PendingDecisionInfo{Attempt: int64Ptr(3), ScheduleID: int64Ptr(41)},
+            WorkflowExecutionInfo: &shared.WorkflowExecutionInfo{
+                Execution: request.Request.Execution, Type: &shared.WorkflowType{Name: stringPtr("type-\xf7")},
+            },
+        }, nil
+    }
 	if request.GetDomainUUID() != "domain-id" || request.Request == nil || request.Request.GetDomain() != "domain" || request.Request.Execution == nil || request.Request.Execution.GetWorkflowId() != "workflow-id" || request.Request.Execution.GetRunId() != "run-id" {
 		panic("DescribeWorkflowExecution request fields did not survive Rust Thrift mapping")
 	}
@@ -57,6 +70,16 @@ func (p *peer) DescribeWorkflowExecution(ctx context.Context, request *history.D
 
 func (p *peer) GetMutableState(ctx context.Context, request *history.GetMutableStateRequest) (*history.GetMutableStateResponse, error) {
 	p.observe(ctx)
+    if p.mode == "raw" {
+        if request.GetDomainUUID() != "domain-\xff" || request.Execution == nil || request.Execution.GetWorkflowId() != "workflow-\xfe" || request.Execution.GetRunId() != "run-\xfd" || request.GetExpectedNextEventId() != 9 || string(request.CurrentBranchToken) != "input-branch" { panic("raw mutable-state request bytes changed") }
+        return &history.GetMutableStateResponse{
+            Execution: request.Execution, WorkflowType: &shared.WorkflowType{Name: stringPtr("type-\xf7")},
+            NextEventId: int64Ptr(17), TaskList: &shared.TaskList{Name: stringPtr("queue-\xfa")},
+            StickyTaskList: &shared.TaskList{Name: stringPtr("sticky-\xf6")},
+            ClientLibraryVersion: stringPtr("library-\xf5"), ClientFeatureVersion: stringPtr("feature-\xf4"),
+            ClientImpl: stringPtr("impl-\xf3"), CurrentBranchToken: []byte{0xf2, 0}, HistorySize: int64Ptr(42),
+        }, nil
+    }
 	if request.GetDomainUUID() != "domain-id" || request.Execution == nil || request.Execution.GetWorkflowId() != "workflow-id" || request.Execution.GetRunId() != "run-id" || request.GetExpectedNextEventId() != 9 || string(request.CurrentBranchToken) != "input-branch" {
 		panic("GetMutableState request fields did not survive Rust Thrift mapping")
 	}

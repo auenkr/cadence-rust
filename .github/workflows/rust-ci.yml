@@ -204,6 +204,8 @@ jobs:
           set -euo pipefail
           files=(
             crates/cadence-common/src/go_string.rs
+            crates/cadence-common/src/poller_bytes.rs
+            crates/cadence-common/src/qps_bytes.rs
             crates/cadence-common/src/task_list.rs
             crates/cadence-api/src/tasktoken.rs
             crates/cadence-common/src/lib.rs

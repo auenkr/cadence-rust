@@ -90,14 +90,21 @@ impl NativeQueryError {
         match self {
             Self::Status(status) => status,
             Self::QueryFailed { message } => raw_detailed_status(
-                tonic::Code::InvalidArgument, &message, "QueryFailedError", Vec::new(),
+                tonic::Code::InvalidArgument,
+                &message,
+                "QueryFailedError",
+                Vec::new(),
             ),
             Self::ClientVersionNotSupported {
-                feature_version, client_impl, supported_versions,
+                feature_version,
+                client_impl,
+                supported_versions,
             } => {
                 let mut detail = Vec::new();
                 for (tag, value) in [
-                    (1, feature_version), (2, client_impl), (3, supported_versions),
+                    (1, feature_version),
+                    (2, client_impl),
+                    (3, supported_versions),
                 ] {
                     if !value.is_empty() {
                         cadence_proto::native::wire::encode_string(tag, &value, &mut detail);
@@ -106,7 +113,8 @@ impl NativeQueryError {
                 raw_detailed_status(
                     tonic::Code::FailedPrecondition,
                     &GoString::from("Client version not supported"),
-                    "ClientVersionNotSupportedError", detail,
+                    "ClientVersionNotSupportedError",
+                    detail,
                 )
             }
         }

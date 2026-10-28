@@ -70,12 +70,7 @@ struct RpcStatusBytes {
 
 /// Cadence typed error details with a byte-preserving google.rpc.Status
 /// message. `detail` is the already encoded api.v1 error message.
-pub fn raw_detailed_status(
-    code: Code,
-    message: &GoString,
-    name: &str,
-    detail: Vec<u8>,
-) -> Status {
+pub fn raw_detailed_status(code: Code, message: &GoString, name: &str, detail: Vec<u8>) -> Status {
     use prost::Message;
     // grpc-go converts gogo/status into google.rpc.Status, then marshals it
     // with protobuf/v2. An invalid UTF-8 Status.message fails that marshal;
@@ -194,8 +189,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonic::codegen::Bytes;
     use tonic::body::BoxBody;
+    use tonic::codegen::Bytes;
     use tower::ServiceExt;
 
     #[derive(Clone)]
@@ -226,7 +221,12 @@ mod tests {
     }
 
     async fn msg(bytes: &[u8]) -> http::Response<BoxBody> {
-        run(raw_status(Code::NotFound, &GoString::from(bytes), Bytes::new())).await
+        run(raw_status(
+            Code::NotFound,
+            &GoString::from(bytes),
+            Bytes::new(),
+        ))
+        .await
     }
 
     fn header(r: &http::Response<BoxBody>) -> &str {
@@ -245,7 +245,10 @@ mod tests {
 
     #[tokio::test]
     async fn escapes_match_go() {
-        assert_eq!(header(&msg(b"a\0b\nc%d e~\x7f").await), "a%00b%0Ac%25d e~%7F");
+        assert_eq!(
+            header(&msg(b"a\0b\nc%d e~\x7f").await),
+            "a%00b%0Ac%25d e~%7F"
+        );
         assert_eq!(header(&msg("é".as_bytes()).await), "%C3%A9");
         assert_eq!(header(&msg(b"plain \"?#<>`{}").await), "plain \"?#<>`{}");
     }
@@ -282,20 +285,25 @@ mod tests {
         // ClientVersionNotSupportedError.feature_version carries one raw byte.
         let detail = vec![0x0a, 0x01, 0xff];
         let status = raw_detailed_status(
-            Code::FailedPrecondition, &message, "ClientVersionNotSupportedError", detail.clone(),
+            Code::FailedPrecondition,
+            &message,
+            "ClientVersionNotSupportedError",
+            detail.clone(),
         );
         let envelope = RpcStatusBytes::decode(status.details()).unwrap();
         assert_eq!(envelope.code, Code::FailedPrecondition as i32);
         assert_eq!(envelope.message, message.as_bytes());
         assert_eq!(envelope.details[0].value, detail);
-        assert_eq!(envelope.details[0].type_url,
-            "type.googleapis.com/uber.cadence.api.v1.ClientVersionNotSupportedError");
+        assert_eq!(
+            envelope.details[0].type_url,
+            "type.googleapis.com/uber.cadence.api.v1.ClientVersionNotSupportedError"
+        );
         let response = run(status).await;
         assert_eq!(header(&response), "Client version not supported");
         assert!(!response.headers().contains_key(RAW_MESSAGE_MARKER));
-        let wire_details = marker_engine().decode(
-            response.headers()["grpc-status-details-bin"].as_bytes(),
-        ).unwrap();
+        let wire_details = marker_engine()
+            .decode(response.headers()["grpc-status-details-bin"].as_bytes())
+            .unwrap();
         let decoded = RpcStatusBytes::decode(wire_details.as_slice()).unwrap();
         assert_eq!(decoded, envelope);
     }
@@ -304,7 +312,10 @@ mod tests {
     async fn invalid_status_message_omits_details_like_grpc_go() {
         let message = GoString::from(&b"worker error: \xe2\x82"[..]);
         let status = raw_detailed_status(
-            Code::InvalidArgument, &message, "QueryFailedError", Vec::new(),
+            Code::InvalidArgument,
+            &message,
+            "QueryFailedError",
+            Vec::new(),
         );
         assert!(status.details().is_empty());
         let response = run(status).await;
@@ -316,23 +327,53 @@ mod tests {
     #[test]
     fn typed_query_envelopes_match_pinned_go_oracle_when_supplied() {
         use prost::Message;
-        let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else { return; };
-        let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-        let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let Ok(path) = std::env::var("MATCHING_GO_RAW_STRING_ORACLE") else {
+            return;
+        };
+        let rows: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let hex = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
         for row in rows.as_array().unwrap() {
             let raw_hex = row["hex"].as_str().unwrap().as_bytes();
-            let raw: Vec<u8> = raw_hex.as_chunks::<2>().0.iter().map(|pair| {
-                u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap()
-            }).collect();
+            let raw: Vec<u8> = raw_hex
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect();
             let raw = GoString::from(raw);
-            let query = crate::matching_query_native::NativeQueryError::QueryFailed { message: raw.clone() }.into_status();
-            assert_eq!(hex(query.details()), row["grpcQueryError"]["transportDetailsHex"].as_str().unwrap());
-            let version = crate::matching_query_native::NativeQueryError::ClientVersionNotSupported {
-                feature_version: raw.clone(), client_impl: raw,
-                supported_versions: GoString::from(">=1.5.0"),
-            }.into_status();
-            assert_eq!(hex(version.details()), row["grpcVersionError"]["transportDetailsHex"].as_str().unwrap());
-            assert_eq!(RpcStatusBytes::decode(version.details()).unwrap().code, Code::FailedPrecondition as i32);
+            let query = crate::matching_query_native::NativeQueryError::QueryFailed {
+                message: raw.clone(),
+            }
+            .into_status();
+            assert_eq!(
+                hex(query.details()),
+                row["grpcQueryError"]["transportDetailsHex"]
+                    .as_str()
+                    .unwrap()
+            );
+            let version =
+                crate::matching_query_native::NativeQueryError::ClientVersionNotSupported {
+                    feature_version: raw.clone(),
+                    client_impl: raw,
+                    supported_versions: GoString::from(">=1.5.0"),
+                }
+                .into_status();
+            assert_eq!(
+                hex(version.details()),
+                row["grpcVersionError"]["transportDetailsHex"]
+                    .as_str()
+                    .unwrap()
+            );
+            assert_eq!(
+                RpcStatusBytes::decode(version.details()).unwrap().code,
+                Code::FailedPrecondition as i32
+            );
         }
     }
 
