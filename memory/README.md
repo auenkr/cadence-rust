@@ -3,6 +3,12 @@
 Working memory for agents on the cadence-rust monorepo. Read these before
 starting a task; update `progress.md` when something substantial lands.
 
+Current Matching continuation (2026-10-28): read
+`matching-active-continuation-20261028.md` and the FINAL RESUME POINT in
+`matching-session-handoff-20261028.md` before historical resume entries.
+Matching remains incomplete; native production integration and fresh
+workspace/mixed-cluster validation are outstanding.
+
 - `project-goals.md` — what the Rust rewrite must (and must not) do.
 - `monorepo-layout.md` — where things live after the Go→`go/` move.
 - `api-compat.md` — how SDK/wire compatibility is defined and checked.
