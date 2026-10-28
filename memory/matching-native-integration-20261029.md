@@ -205,3 +205,14 @@ therefore the eight fixture fixes still await execution. Added a named
 MetricDomainNameProvider alias, without changing the lookup. Compact Clippy
 failure and passing original-Go UUID oracle evidence are retained in
 `memory/evidence/matching-native-workspace-40752202495/`.
+
+
+Current fresh uncached whole-workspace Clippy-then-tests dispatch:
+https://github.com/auenkr/cadence-rust/actions/runs/40753130527
+at `54267900c3c9fee3b4fa0b421be6a38bd8d74886`. Includes the logging hooks,
+fixture corrections, raw metric comparison, exact UUID cache lookup, live timeout,
+cache error/publication corrections and deadline worker integration. Runner
+formatting and original-Go UUID oracle enabled. Pending at dispatch. No pass
+or final candidate pin is established. Keep this run until terminal; do not
+restart just for waiting. Next inspect/apply any formatting artifact, retain
+Clippy/test results and resolve actual failures before any mixed acceptance lane.
