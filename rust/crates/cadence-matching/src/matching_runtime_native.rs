@@ -76,7 +76,7 @@ pub fn native_queue_registry(
     let local_poll_wait = duration_provider(cache.clone(), overlay.clone(), "matching.localPollWaitTime", 10_000_000);
     let forward_degree = {
         let value = integer_provider(cache.clone(), overlay.clone(), "matching.forwarderMaxChildrenPerNode", 20);
-        Arc::new(move |domain, task, task_type| value(domain, task, task_type).max(1))
+        Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| value(domain, task, task_type).max(1))
     };
     let forward_polls = integer_provider(cache.clone(), overlay.clone(), "matching.forwarderMaxOutstandingPolls", 1);
     let forward_tasks = integer_provider(cache.clone(), overlay.clone(), "matching.forwarderMaxOutstandingTasks", 1);
