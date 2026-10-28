@@ -30,7 +30,6 @@ pub struct NativeMatchingControlContext {
     cache: Arc<MatchingDomainCache>,
     registry: NativeQueueRegistry,
     membership: Membership,
-    shard_router: Option<Arc<MatchingShardRouter>>,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
 }
 
@@ -43,7 +42,8 @@ impl NativeMatchingControlContext {
         shard_router: Option<Arc<MatchingShardRouter>>,
     ) -> Self {
         let overlay = state.admin.dynamic_config.clone();
-        Self { cache, registry, membership, shard_router, overlay }
+        if let Some(router) = shard_router { registry.set_shard_router(router); }
+        Self { cache, registry, membership, overlay }
     }
 
     fn cached_domain_name(&self, id: &GoString) -> Option<String> {
@@ -139,7 +139,7 @@ impl NativeControlContextApi for NativeMatchingControlContext {
         &self,
         partition: GoString,
     ) -> crate::matching_dispatch_native::NativeFuture<Result<GoString, Status>> {
-        let router = self.shard_router.clone();
+        let router = self.registry.shard_router();
         let membership = self.membership.clone();
         Box::pin(async move { resolve_owner_host(&membership, router.as_deref(), &partition).await })
     }

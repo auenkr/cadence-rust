@@ -363,6 +363,7 @@ impl MatchingRuntime {
         mut self,
         router: crate::matching_shard_routing::MatchingShardRouter,
     ) -> Self {
+        if let Some(registry) = &self.native_registry { registry.set_shard_router(Arc::new(router.clone())); }
         self.matching = self.matching.clone().with_shard_router(router);
         self
     }

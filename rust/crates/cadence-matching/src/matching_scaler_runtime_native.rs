@@ -102,7 +102,7 @@ pub fn partition_response(id: i32, response: matching::DescribeTaskListResponse,
 pub fn describe_provider(membership: Membership, router: Option<Arc<MatchingShardRouter>>) -> DescribePartition {
     Arc::new(move |registry, root, id, config| {
         let membership = membership.clone();
-        let router = router.clone();
+        let router = registry.shard_router().or_else(|| router.clone());
         Box::pin(async move {
             let message = partition_request(&root, id)?;
             let partition = &message.request.as_ref().expect("partition request").task_list.as_ref().expect("partition task list").name;

@@ -29,6 +29,7 @@ pub struct NativeMatchingEngineContext {
     cluster: String,
     membership: Membership,
     shard_router: Option<Arc<MatchingShardRouter>>,
+    routing_registry: Option<crate::matching_registry_native::NativeQueueRegistry>,
     overlay: Arc<std::sync::Mutex<crate::admin::DynamicConfigOverlay>>,
     register: PollRegistrar,
     observer: Option<PollObserverFactory>,
@@ -46,9 +47,18 @@ impl NativeMatchingEngineContext {
         register: PollRegistrar,
         observer: Option<PollObserverFactory>,
     ) -> Self {
-        Self { control, cache, domains: state.domains.clone(), cluster: state.current_cluster_name.clone(), overlay: state.admin.dynamic_config.clone(), membership, shard_router, register, observer }
+        Self { control, cache, domains: state.domains.clone(), cluster: state.current_cluster_name.clone(), overlay: state.admin.dynamic_config.clone(), membership, shard_router, routing_registry: None, register, observer }
     }
 
+    /// Share the runtime's live router rather than freezing its startup value.
+    pub fn with_routing_registry(mut self, registry: crate::matching_registry_native::NativeQueueRegistry) -> Self {
+        if let Some(router) = self.shard_router.take() { registry.set_shard_router(router); }
+        self.routing_registry = Some(registry);
+        self
+    }
+    fn current_router(&self) -> Option<Arc<MatchingShardRouter>> {
+        self.routing_registry.as_ref().and_then(|registry| registry.shard_router()).or_else(|| self.shard_router.clone())
+    }
     fn active(&self, id: &GoString) -> bool {
         std::str::from_utf8(id.as_bytes()).ok()
             .and_then(|id| self.domains.is_active_in(id, &self.cluster).ok())
@@ -102,7 +112,7 @@ impl DecisionAddContext for NativeMatchingEngineContext {
     }
     fn check_write_partition(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> { self.control.check_queue(key, queue) }
     fn remote_parent(&self, name: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
-        let router = self.shard_router.clone();
+        let router = self.current_router();
         let membership = self.membership.clone();
         Box::pin(async move {
             let channel = if let Some(router) = router {
@@ -140,7 +150,7 @@ impl NativeQueryContext for NativeMatchingEngineContext {
     fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> { self.control.check_queue(key, queue) }
     fn forward_degree(&self, domain: uuid::Uuid, root: &GoString) -> i64 { self.dynamic_integer("matching.forwarderMaxChildrenPerNode", &GoString::from(domain.to_string()), root, 0, 20).max(1) }
     fn remote_parent(&self, name: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> {
-        let router = self.shard_router.clone();
+        let router = self.current_router();
         let membership = self.membership.clone();
         Box::pin(async move {
             let channel = if let Some(router) = router {

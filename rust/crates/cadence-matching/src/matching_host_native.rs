@@ -78,7 +78,7 @@ impl NativeMatchingHost {
         let control = Arc::new(NativeMatchingControlContext::new(state.clone(), cache.clone(), registry.clone(), membership.clone(), shard_router.clone()));
         let polls: PollMap = Arc::default();
         let register: PollRegistrar = Arc::new(move |domain, list, kind, poller| register(&polls, domain, list, kind, poller));
-        let engine_context = NativeMatchingEngineContext::with_control(state, cache, control.clone(), membership, shard_router, register, observer);
+        let engine_context = NativeMatchingEngineContext::with_control(state, cache, control.clone(), membership, shard_router, register, observer).with_routing_registry(registry.clone());
         let started = tokio::sync::watch::channel(0).0;
         NativeMatchingService::new(NativeMatchingEngine::new(registry.clone()), Self { engine: engine_context, control, registry, started, quota, domain_parse, semaphore, metrics })
     }

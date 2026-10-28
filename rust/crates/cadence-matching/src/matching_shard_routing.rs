@@ -113,6 +113,7 @@ impl ShardOwnerLookup for TonicSpectator {
 
 /// Dynamic Matching routing policy. The property closures are evaluated on
 /// every lookup, matching Go's live dynamic-config reads.
+#[derive(Clone)]
 pub struct MatchingShardRouter {
     ring: Membership,
     spectator: Option<Arc<dyn ShardOwnerLookup>>,

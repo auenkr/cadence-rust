@@ -312,6 +312,8 @@ struct State {
     stopped: bool,
 }
 
+type NativeShardRouterSlot = Arc<RwLock<Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>>>;
+
 /// Queue creation and insertion run in the same blocking worker, so cancelling
 /// an RPC while its lease is acquired cannot orphan or duplicate that lease.
 #[derive(Clone)]
@@ -325,6 +327,7 @@ pub struct NativeQueueRegistry {
     startups: Arc<Mutex<StartupGates>>,
     ownership_policy: Arc<RwLock<Option<NativeQueueOwnershipPolicy>>>,
     parent_router: Option<NativeParentRouter>,
+    shard_router: NativeShardRouterSlot,
     standby_enabled: Option<EnabledNative>,
     membership: Option<NativeMembership>,
     local_poll_service: Option<NativeLocalPollFactory>,
@@ -625,6 +628,7 @@ impl NativeQueueRegistry {
             startups: Arc::new(Mutex::new(HashMap::new())),
             ownership_policy: Arc::new(RwLock::new(None)),
             parent_router: None,
+            shard_router: Arc::default(),
             standby_enabled: None,
             membership: None,
             local_poll_service: None,
@@ -666,6 +670,15 @@ impl NativeQueueRegistry {
     pub async fn wait_for_writers(&self) {
         self.writer_tracker.wait_idle().await;
     }
+    /// Shared by all registry clones and native engine contexts. Publish the
+    /// discovered router before admitting requests; readers release the lock
+    /// before any asynchronous owner lookup.
+    pub fn set_shard_router(&self, router: Arc<crate::matching_shard_routing::MatchingShardRouter>) {
+        *self.shard_router.write().expect("native shard router lock") = Some(router);
+    }
+    pub fn shard_router(&self) -> Option<Arc<crate::matching_shard_routing::MatchingShardRouter>> {
+        self.shard_router.read().expect("native shard router lock").clone()
+    }
     pub fn with_local_poll_service(mut self, factory: NativeLocalPollFactory) -> Self {
         self.local_poll_service = Some(factory);
         self
@@ -680,11 +693,12 @@ impl NativeQueueRegistry {
         build_local: NativeLocalPollServiceBuilder,
         refresh: NativePartitionRefresher,
     ) -> Self {
+        if let Some(router) = router { self.set_shard_router(router); }
         let parent_membership = membership.clone();
-        let parent_router = router.clone();
+        let parent_router = self.shard_router.clone();
         let parent: NativeParentRouter = Arc::new(move |name| {
             let membership = parent_membership.clone();
-            let router = parent_router.clone();
+            let router = parent_router.read().expect("native shard router lock").clone();
             Box::pin(async move {
                 let channel = if let Some(router) = router {
                     router.remote_channel_bytes(name.as_bytes()).await
@@ -2305,6 +2319,25 @@ mod tests {
             .to_bytes()
             .unwrap();
         assert_eq!(raw.as_ref(), message.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn registry_clones_observe_late_router_attachment_and_replacement() {
+        let (_dir, registry) = fixture();
+        let retained = registry.clone();
+        assert!(retained.shard_router().is_none());
+        let membership = crate::matching_membership::Membership::new("local", vec![]);
+        let router = Arc::new(crate::matching_shard_routing::MatchingShardRouter::new(
+            membership.clone(), None, Arc::new(|| 0), Arc::new(|| false),
+        ));
+        registry.set_shard_router(router.clone());
+        assert!(Arc::ptr_eq(&retained.shard_router().unwrap(), &router));
+        let replacement = Arc::new(crate::matching_shard_routing::MatchingShardRouter::new(
+            membership, None, Arc::new(|| 100), Arc::new(|| false),
+        ));
+        retained.set_shard_router(replacement.clone());
+        assert!(Arc::ptr_eq(&registry.shard_router().unwrap(), &replacement));
+        registry.shutdown(registry_now()).await.unwrap();
     }
 
     #[tokio::test]
