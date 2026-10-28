@@ -154,7 +154,7 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (shutdown, stopped) = oneshot::channel::<()>();
-    let server = AbortOnDrop(tokio::spawn(
+    let mut server = AbortOnDrop(tokio::spawn(
         tonic::transport::Server::builder()
             .add_service(History(captured.clone()))
             .serve_with_incoming_shutdown(
