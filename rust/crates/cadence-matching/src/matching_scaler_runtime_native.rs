@@ -6,7 +6,7 @@ use crate::{
     matching_membership::Membership,
     matching_registry_native::NativeQueueRegistry,
     matching_scaler::ScalerConfig,
-    matching_scaler_native::{self, ConfigProvider, DescribePartition, DescribedPartition, NativeScalerConfig, ScalerMetrics},
+    matching_scaler_native::{self, ConfigProvider, DescribePartition, DescribedPartition, NativeScalerConfig, ScalerMetrics, ScalerMetricsProvider, ScalerObservation},
     matching_shard_routing::MatchingShardRouter,
 };
 use cadence_common::{go_string::GoString, task_list::TaskListNameBytes};
@@ -33,6 +33,55 @@ pub fn attach_native_scaler(
     registry.with_scaler_starter(matching_scaler_native::starter_with_metrics(
         config_provider(state.admin.dynamic_config.clone(), names),
         describe_provider(membership, router), metrics,
+    ))
+}
+
+/// Construct a per-root observer using the same domain and task-list tags as the registry.
+/// Scalers are started only for normal root managers by the registry.
+pub fn scoped_scaler_metrics(metrics: crate::matching_metrics::MatchingMetrics, cache: Arc<MatchingDomainCache>) -> ScalerMetricsProvider {
+    scoped_scaler_metrics_with_names(metrics, Arc::new(move |id| cache.get_domain_by_id(&id.to_string()).ok().map(|d| d.info.name)))
+}
+
+fn scoped_scaler_metrics_with_names(metrics: crate::matching_metrics::MatchingMetrics, names: Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>) -> ScalerMetricsProvider {
+    Arc::new(move |root| {
+        let domain = names(root.domain_id).filter(|n| !n.is_empty()).unwrap_or_else(|| "_unknown_".to_owned());
+        let context = crate::matching_metrics::PollMetricContext {
+            domain, task_list: String::from_utf8_lossy(root.name.as_bytes()).into_owned(),
+            task_list_kind: 0, task_type: if root.task_type == 1 { "activity_task" } else { "decision_task" },
+            poller_isolation_group: String::new(),
+        };
+        let metrics = metrics.clone();
+        Arc::new(move |observation| match observation {
+            ScalerObservation::Calculation { qps, current_write_count, upscale_rps, downscale_factor, .. } => metrics.scaler_tick(&context, qps, current_write_count, upscale_rps, downscale_factor),
+            ScalerObservation::ScaleChange(up) => metrics.partition_scale_change(&context, up),
+            ScalerObservation::IsolationRebalance => metrics.isolation_rebalance(&context),
+            ScalerObservation::Group { group, before_assignable, after_assignable, before_count, after_count } => {
+                let group = String::from_utf8_lossy(group.as_bytes());
+                if before_assignable != after_assignable {
+                    metrics.isolation_group_counter(if after_assignable { crate::matching_metrics::ISOLATION_GROUP_STARTED_POLLING } else { crate::matching_metrics::ISOLATION_GROUP_STOPPED_POLLING }, &context, &group);
+                }
+                if before_count != after_count {
+                    metrics.isolation_group_counter(if after_count > before_count { crate::matching_metrics::ISOLATION_GROUP_UPSCALE } else { crate::matching_metrics::ISOLATION_GROUP_DOWNSCALE }, &context, &group);
+                }
+                metrics.isolation_group_partitions(&context, &group, after_count);
+            }
+            ScalerObservation::PartitionDrained => metrics.partition_drained(&context),
+            ScalerObservation::UpdateRequested => metrics.scaler_update_counter(&context, false),
+            ScalerObservation::UpdateFailed => metrics.scaler_update_counter(&context, true),
+        })
+    })
+}
+
+pub fn attach_scoped_native_scaler(
+    registry: NativeQueueRegistry, state: &AppState, cache: Arc<MatchingDomainCache>,
+    membership: Membership, router: Option<Arc<MatchingShardRouter>>, metrics: ScalerMetricsProvider,
+) -> NativeQueueRegistry {
+    let names = Arc::new(move |id: &GoString| {
+        let uuid = id.as_utf8().ok().and_then(|s| uuid::Uuid::parse_str(s).ok())?;
+        cache.get_domain_by_id(&uuid.to_string()).ok().map(|d| d.info.name)
+    });
+    registry.with_scaler_starter(matching_scaler_native::starter_with_metrics_provider(
+        config_provider(state.admin.dynamic_config.clone(), names), describe_provider(membership, router), metrics,
     ))
 }
 
@@ -170,5 +219,28 @@ mod tests {
         assert!(metrics.empty);
         assert!(!metrics.has_write);
         assert_eq!(metrics.groups.get(&group), Some(&(3.0, true)));
+    }
+}
+
+#[cfg(test)]
+mod scoped_metric_tests {
+    use super::*;
+    use crate::matching_metrics::{MatchingMetrics, RecordingMetricSink, ESTIMATED_ADD_TASK_QPS, ISOLATION_GROUP_PARTITIONS};
+
+    #[test]
+    fn scaler_observations_keep_root_and_isolation_tags_separate() {
+        let sink = Arc::new(RecordingMetricSink::default());
+        let provider = scoped_scaler_metrics_with_names(MatchingMetrics::new(sink.clone()), Arc::new(|_| Some("domain-a".into())));
+        let root = |name: &str| TaskListKeyBytes { domain_id: uuid::Uuid::nil(), name: GoString::from(name), task_type: 0 };
+        for (name, group) in [("queue-a", "group-a"), ("queue-b", "group-b")] {
+            let observe = provider(&root(name));
+            observe(ScalerObservation::Calculation { qps: 3.0, current_write_count: 2, upscale_rps: 10.0, downscale_factor: 0.5, upscale_threshold: 20.0, downscale_threshold: 5.0, read_count: 2, write_count: 2, read_changed: false, write_changed: false, isolation_changed: false });
+            observe(ScalerObservation::Group { group: GoString::from(group), before_assignable: false, after_assignable: true, before_count: 0, after_count: 1 });
+        }
+        let events = sink.events();
+        for (name, group) in [("queue-a", "group-a"), ("queue-b", "group-b")] {
+            assert!(events.iter().any(|e| e.name == ESTIMATED_ADD_TASK_QPS && e.tags.get("tasklist").is_some_and(|v| v == name) && e.tags.get("domain").is_some_and(|v| v == "domain-a")));
+            assert!(events.iter().any(|e| e.name == ISOLATION_GROUP_PARTITIONS && e.tags.get("tasklist").is_some_and(|v| v == name) && e.tags.get("isolation_group").is_some_and(|v| v == group)));
+        }
     }
 }

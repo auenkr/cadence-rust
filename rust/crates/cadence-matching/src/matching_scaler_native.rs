@@ -457,6 +457,9 @@ pub fn starter(
 pub enum ScalerObservation {
     Calculation {
         qps: f64,
+        current_write_count: usize,
+        upscale_rps: f64,
+        downscale_factor: f64,
         upscale_threshold: f64,
         downscale_threshold: f64,
         read_count: usize,
@@ -465,22 +468,34 @@ pub enum ScalerObservation {
         write_changed: bool,
         isolation_changed: bool,
     },
+    ScaleChange(bool),
+    IsolationRebalance,
+    Group { group: GoString, before_assignable: bool, after_assignable: bool, before_count: i64, after_count: i64 },
     PartitionDrained,
     UpdateRequested,
     UpdateFailed,
 }
 pub type ScalerMetrics = Arc<dyn Fn(ScalerObservation) + Send + Sync>;
+pub type ScalerMetricsProvider = Arc<dyn Fn(&TaskListKeyBytes) -> ScalerMetrics + Send + Sync>;
 
 pub fn starter_with_metrics(
     provider: ConfigProvider,
     describe_remote: DescribePartition,
     metrics: ScalerMetrics,
 ) -> NativeScalerStarter {
-    Arc::new(move |host| {
+    starter_with_metrics_provider(provider, describe_remote, Arc::new(move |_| metrics.clone()))
+}
+
+pub fn starter_with_metrics_provider(
+    provider: ConfigProvider,
+    describe_remote: DescribePartition,
+    metrics: ScalerMetricsProvider,
+) -> NativeScalerStarter {
+    Arc::new(move |host: NativeScalerHost| {
+        let scoped_metrics = metrics(&host.root);
         let provider = provider.clone();
         let describe_remote = describe_remote.clone();
-        let metrics = metrics.clone();
-        Box::pin(async move { run(host, provider, describe_remote, metrics).await })
+        Box::pin(async move { run(host, provider, describe_remote, scoped_metrics).await })
     })
 }
 fn now() -> i64 {
@@ -655,6 +670,7 @@ async fn run(
         )
         .max(0) as usize;
         let write_changed = target != current.write_partitions.len();
+        if write_changed { observe(ScalerObservation::ScaleChange(target > current.write_partitions.len())); }
         let mut write = if write_changed {
             (0..target as i32)
                 .map(|id| {
@@ -671,6 +687,8 @@ async fn run(
         } else {
             current.write_partitions.clone()
         };
+        let before_assignable: HashMap<_, _> = balancer.groups.iter().map(|(g, s)| (g.clone(), s.assignable)).collect();
+        let before_counts = balancer.partitions_per_group(&write);
         let isolation_changed = if metrics.isolation_enabled {
             let (next, changed) =
                 balancer.adjust_write_partitions(&config.settings, time, &metrics, &write);
@@ -680,6 +698,20 @@ async fn run(
             balancer.reset();
             false
         };
+        if isolation_changed { observe(ScalerObservation::IsolationRebalance); }
+        let after_counts = balancer.partitions_per_group(&write);
+        let mut groups: Vec<_> = metrics.has_pollers_by_group.keys().chain(before_assignable.keys()).chain(balancer.groups.keys()).chain(before_counts.keys()).chain(after_counts.keys()).cloned().collect();
+        groups.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        groups.dedup();
+        for group in groups {
+            observe(ScalerObservation::Group {
+                before_assignable: before_assignable.get(&group).copied().unwrap_or(false),
+                after_assignable: balancer.groups.get(&group).is_some_and(|s| s.assignable),
+                before_count: before_counts.get(&group).copied().unwrap_or(0),
+                after_count: after_counts.get(&group).copied().unwrap_or(0),
+                group,
+            });
+        }
         let mut read = current.read_partitions.clone();
         let mut read_changed = false;
         for (id, groups) in &write {
@@ -705,14 +737,18 @@ async fn run(
             if entry.is_some_and(|p| p.read_only && p.empty) {
                 read.remove(&id);
                 read_changed = true;
-                observe(ScalerObservation::PartitionDrained);
+
             } else {
                 break;
             }
             id -= 1;
         }
+        if read_changed && read.len() < current.read_partitions.len() { observe(ScalerObservation::PartitionDrained); }
         observe(ScalerObservation::Calculation {
             qps: metrics.total_qps,
+            current_write_count: current.write_partitions.len(),
+            upscale_rps: config.settings.upscale_rps,
+            downscale_factor: config.settings.downscale_factor,
             upscale_threshold: current.write_partitions.len() as f64 * config.settings.upscale_rps,
             downscale_threshold: (current.write_partitions.len() as f64 - 1.0)
                 * config.settings.upscale_rps
