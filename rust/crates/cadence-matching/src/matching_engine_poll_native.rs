@@ -174,10 +174,11 @@ impl NativeMatchingEngine {
         };
         let queue = self
             .registry
-            .get(
+            .get_with_deadline(
                 key.clone(),
                 crate::matching_handler_native::persistence_kind(list.kind),
                 crate::grpc_matching::matching_now(),
+                Some(deadline),
             )
             .await?;
         context.check_queue(&key, &queue)?;
@@ -270,10 +271,11 @@ impl NativeMatchingEngine {
         };
         let queue = self
             .registry
-            .get(
+            .get_with_deadline(
                 key.clone(),
                 crate::matching_handler_native::persistence_kind(list.kind),
                 crate::grpc_matching::matching_now(),
+                Some(deadline),
             )
             .await?;
         context.check_queue(&key, &queue)?;
