@@ -15,3 +15,5 @@ Unverified: no Cargo, Go, rustfmt, build, test, check, or CI command was run, pe
 ## Parent integration checkpoint
 
 Registered `semaphores_native` in the persistence crate and added it to the runner formatter list. Source review found that the one-slot test attempted to grant token 2 and unwrap an AlreadyHeld result, while both native and legacy stores reject out-of-budget token IDs before owner lookup. Corrected the reacquire to token 1 and explicitly asserted token 2 is invalid. Simplified a boolean assertion and named the bucket-holds map type for clippy. No runtime or local compilation evidence exists. The failed semaphore manager worker's draft remains unregistered; this change registers only persistence. Production state sharing and raw Cassandra semaphore persistence remain open.
+
+Fresh five-crate CI dispatched at `e15774f51c2dd0990d2ed57f3bf55064f8f6f6b0`: https://github.com/auenkr/cadence-rust/actions/runs/40700543518 (clean target, runner formatting). Conclusion pending.
