@@ -216,3 +216,7 @@ formatting and original-Go UUID oracle enabled. Pending at dispatch. No pass
 or final candidate pin is established. Keep this run until terminal; do not
 restart just for waiting. Next inspect/apply any formatting artifact, retain
 Clippy/test results and resolve actual failures before any mixed acceptance lane.
+
+## Next whole-workspace validation
+
+Preserved selected Matching success40754945697 before dispatching the new source. Fresh uncached whole-workspace Clippy followed by tests: https://github.com/auenkr/cadence-rust/actions/runs/40756335405 at `58d2887a4a47ec038699ec2c68b317cf7ee6987e`, with runner parity formatting and original-Go UUID oracle. Query dispatch and all-method Thrift error regressions are included; PostgreSQL native oracle is wired but executes only in the supplemental dependency workflow. No workspace pass or mixed lane claimed. Keep this run until terminal, preserve its logs/format patch, then freeze source only after any actual fixes/formatting have been validated. No local Cargo/Go validation or replacement workers. PR linking continues to fail with the T3 active-run ownership error.

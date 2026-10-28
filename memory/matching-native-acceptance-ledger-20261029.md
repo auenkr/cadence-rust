@@ -10,20 +10,21 @@ proved.
 
 ## Source identity
 
-No final immutable candidate is frozen. Latest selected Matching run
-https://github.com/auenkr/cadence-rust/actions/runs/40754945697 targets
-`fb049c5515d0c940adc86e038bd3b1ef31b84880` and reached Clippy. It includes
-deadline admission, cold-domain publication, typed cache errors, exact UUID
-cache keys, live History start timeout, raw isolation-match metrics, native
-diagnostic hooks, native failover callback and refresh RPC failure regressions.
-Later query/Thrift failure tests are not in that pin. Do not attribute an
-earlier result to changed source.
+No final immutable candidate is frozen. Current fresh whole-workspace run
+https://github.com/auenkr/cadence-rust/actions/runs/40756335405 targets
+`58d2887a4a47ec038699ec2c68b317cf7ee6987e` (abbreviated; use Actions headSha as the authoritative full pin).
+It includes all integration code through query/Thrift regressions and the
+PostgreSQL native oracle invocation, with clean target and runner formatting
+enabled. No outcome yet. Selected Matching run40754945697 passed at
+`fb049c5515d0c940adc86e038bd3b1ef31b84880`; that older source cannot validate
+the added query/Thrift tests or oracle invocation. Do not attribute an earlier
+result to changed source.
 
 ## Required evidence
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending. Run40753130527 failed at Clippy on missing API trait import (fixed afterward); selected Matching run40754945697 in progress. Earlier run40750262783 Clippy0 but Matching tests940 pass/8 fail/2 ignored, then cancelled. Fixes are not a test pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Pending run40756335405. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
