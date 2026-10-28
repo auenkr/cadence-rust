@@ -40,9 +40,9 @@ pub type NativeShardOwnershipCheck = Arc<dyn Fn(
     cadence_common::go_string::GoString, bool,
 ) -> Pin<Box<dyn Future<Output = Result<(), tonic::Status>> + Send>> + Send + Sync>;
 
-type NativeShardLookup = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), crate::matching_shard_distributor::GetShardProcessError>> + Send>> + Send + Sync>;
+pub(crate) type NativeShardLookup = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), crate::matching_shard_distributor::GetShardProcessError>> + Send>> + Send + Sync>;
 
-fn native_shard_ownership_check(
+pub(crate) fn native_shard_ownership_check(
     membership: crate::matching_membership::Membership,
     percentage: Arc<dyn Fn() -> i64 + Send + Sync>,
     exclude: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -64,7 +64,11 @@ fn native_shard_ownership_check(
             ) {
                 return if cached { Ok(()) } else { membership.check_task_list_bytes(&name) };
             }
-            match lookup(name.as_bytes().to_vec()).await {
+            let result = lookup(name.as_bytes().to_vec()).await;
+            if *draining.borrow() {
+                return Err(membership.task_list_not_owned_by_bytes(&name, "not known"));
+            }
+            match result {
                 Ok(()) => Ok(()),
                 Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) =>
                     Err(membership.task_list_not_owned_by_bytes(&name, "not known")),
@@ -329,6 +333,9 @@ impl MatchingRuntime {
             .await
         }));
         self.maintenance_stop = Some(stop);
+        if let Some(check) = self.native_shard_ownership.clone() {
+            registry.set_shard_admission(check);
+        }
         self.native_registry = Some(registry);
         if let Some(membership) = self.membership.clone() {
             self.start_native_membership_maintenance(membership);
@@ -521,6 +528,9 @@ impl MatchingRuntime {
             membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
             drain_tx.subscribe(), raw_lookup,
         ));
+        if let Some(registry) = &self.native_registry {
+            registry.set_shard_admission(self.native_shard_ownership.clone().expect("native admission configured"));
+        }
         let ownership_check = shard_task_list_ownership_check(
             membership.clone(),
             percentage_onboarded.clone(),
@@ -607,6 +617,9 @@ impl MatchingRuntime {
             membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
             drain_tx.subscribe(), raw_lookup,
         ));
+        if let Some(registry) = &self.native_registry {
+            registry.set_shard_admission(self.native_shard_ownership.clone().expect("native admission configured"));
+        }
         let ownership_check = shard_task_list_ownership_check(
             membership,
             percentage_onboarded.clone(),
