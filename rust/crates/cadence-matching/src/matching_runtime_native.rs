@@ -232,6 +232,36 @@ pub fn native_queue_registry(
         .with_fatal_sinks(fatal)
 }
 
+/// Complete the registry's live attachments before constructing the host.
+/// Publish the resulting host as `Arc<dyn cadence_proto::native::NativeMatchingApi>`
+/// through the returned slot before opening admission. The runtime must retain
+/// the strong host; the slot and the registry retain only weak service references.
+/// `scaler_metrics` must be backed by the configured metrics sink.
+#[allow(clippy::too_many_arguments)]
+pub fn attach_live_native_registry(
+    registry: NativeQueueRegistry,
+    state: &AppState,
+    cache: Arc<MatchingDomainCache>,
+    membership: crate::matching_membership::Membership,
+    router: Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>,
+    metrics: crate::matching_metrics::MatchingMetrics,
+    scaler_metrics: crate::matching_scaler_native::ScalerMetrics,
+) -> (NativeQueueRegistry, crate::matching_registry_routing_native::NativeServiceSlot) {
+    let slot = crate::matching_registry_routing_native::NativeServiceSlot::default();
+    let poll_metrics = metrics.clone();
+    let registry = registry.with_metrics(metrics).with_poll_observer(Arc::new(move |context| {
+        Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(poll_metrics.clone(), context.clone()))
+    }));
+    let registry = registry.with_live_routing_factory(
+        membership.clone(), router.clone(), slot.factory(),
+        crate::matching_registry_routing_native::partition_refresher(membership.clone()),
+    );
+    let registry = crate::matching_scaler_runtime_native::attach_native_scaler(
+        registry, state, cache, membership, router, scaler_metrics,
+    );
+    (registry, slot)
+}
+
 /// Byte-preserving port of `TaskIsolation::select_with_cause`; configured
 /// metadata names are UTF-8 bytes, while task group names stay arbitrary Go bytes.
 fn select_isolation_bytes(
