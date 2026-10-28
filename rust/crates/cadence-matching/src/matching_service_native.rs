@@ -1323,11 +1323,18 @@ mod tests {
             &self,
             request: n::matching::QueryWorkflowRequest,
             deadline: tokio::time::Instant,
-        ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+        ) -> NativeFuture<
+            Result<
+                n::matching::QueryWorkflowResponse,
+                crate::matching_query_native::NativeQueryError,
+            >,
+        > {
             assert!(deadline > tokio::time::Instant::now());
             self.0.lock().unwrap().push(request);
             Box::pin(async {
-                Err(crate::matching_query_native::NativeQueryError::Status(Status::internal("some error")))
+                Err(crate::matching_query_native::NativeQueryError::Status(
+                    Status::internal("some error"),
+                ))
             })
         }
     }
@@ -1355,7 +1362,9 @@ mod tests {
         });
         request.set_timeout(Duration::from_secs(5));
         let error = tokio::time::timeout(Duration::from_secs(2), service.query_workflow(request))
-            .await.unwrap().unwrap_err();
+            .await
+            .unwrap()
+            .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert_eq!(error.message(), "some error");
         assert!(error.details().is_empty());
@@ -1365,10 +1374,22 @@ mod tests {
             assert_eq!(seen[0].task_list.as_ref().unwrap().name, root);
             assert_eq!(seen[0].forwarded_from, partition);
         }
-        let key = TaskListKeyBytes { domain_id: domain, name: partition, task_type: 0 };
+        let key = TaskListKeyBytes {
+            domain_id: domain,
+            name: partition,
+            task_type: 0,
+        };
         let queue = service.engine.registry.get(key, 0, 2).await.unwrap();
-        assert!(queue.try_forward_query().is_some(), "failed dispatch leaked forwarding permit");
-        assert!(tokio::time::timeout(Duration::from_millis(20), queue.queries.next()).await.is_err(), "failed dispatch left a query offer");
+        assert!(
+            queue.try_forward_query().is_some(),
+            "failed dispatch leaked forwarding permit"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), queue.queries.next())
+                .await
+                .is_err(),
+            "failed dispatch left a query offer"
+        );
         service
             .engine
             .registry

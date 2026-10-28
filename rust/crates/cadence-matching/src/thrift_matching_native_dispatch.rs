@@ -403,14 +403,28 @@ mod tests {
                     Instant::now() + std::time::Duration::from_secs(5),
                     Default::default(),
                 ),
-            ).await.expect("bounded native wrapper call").unwrap();
-            assert_eq!(summary.as_ref().map(|(name, _)| *name), Some("InternalServiceError"), "{procedure}");
+            )
+            .await
+            .expect("bounded native wrapper call")
+            .unwrap();
+            assert_eq!(
+                summary.as_ref().map(|(name, _)| *name),
+                Some("InternalServiceError"),
+                "{procedure}"
+            );
             // The pinned Thrift schema places InternalServiceError at field2.
             // An error reply must contain no success field0, including methods
             // with a response struct and methods with void responses.
-            assert_eq!(result.fields, vec![(2, Value::Struct(Struct {
-                fields: vec![(1, Value::Bytes(b"test".to_vec()))],
-            }))], "{procedure}");
+            assert_eq!(
+                result.fields,
+                vec![(
+                    2,
+                    Value::Struct(Struct {
+                        fields: vec![(1, Value::Bytes(b"test".to_vec()))],
+                    })
+                )],
+                "{procedure}"
+            );
         }
     }
 

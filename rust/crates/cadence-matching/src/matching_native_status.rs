@@ -41,7 +41,7 @@ use tonic::{Code, Status};
 pub const RAW_MESSAGE_MARKER: &str = "x-cadence-raw-grpc-message-bin";
 /// Internal typed envelope retained for the in-process Thrift adapter. It is
 /// removed at the gRPC boundary, where Go may suppress an invalid message.
-pub(crate) const RAW_ERROR_DETAILS_MARKER: &str = "x-cadence-raw-error-details-bin";
+pub(crate) const RAW_ERROR_DETAILS_MARKER: &str = crate::matching_metrics::RAW_ERROR_DETAILS_MARKER;
 
 /// Build a `Status` whose wire `grpc-message` is the Go encoding of
 /// `message`'s exact bytes once passed through `RawStatusService`.

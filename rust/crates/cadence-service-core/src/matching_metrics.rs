@@ -624,10 +624,30 @@ impl Drop for InboundRequestTimer {
 pub trait MatchingErrorClass {
     fn matching_error_metric(&self) -> &'static str;
 }
+/// Internal native error envelope, removed before a gRPC response is sent.
+/// Go may omit wire details when its outer error message is invalid UTF-8;
+/// handler metrics still classify the original typed error before transport.
+pub const RAW_ERROR_DETAILS_MARKER: &str = "x-cadence-raw-error-details-bin";
+
+// Decode only the Any fields of google.rpc.Status. Skipping its message also
+// permits byte-valued native messages without interpreting them as UTF-8.
+#[derive(Clone, PartialEq, prost::Message)]
+struct MatchingErrorDetails {
+    #[prost(message, repeated, tag = "3")]
+    details: Vec<prost_types::Any>,
+}
+
 impl MatchingErrorClass for tonic::Status {
     fn matching_error_metric(&self) -> &'static str {
-        let detail = String::from_utf8_lossy(self.details());
-        for (type_name, metric) in [
+        use prost::Message;
+        let envelope = self.metadata().get_bin(RAW_ERROR_DETAILS_MARKER)
+            .and_then(|value| value.to_bytes().ok())
+            .and_then(|bytes| MatchingErrorDetails::decode(bytes).ok())
+            .or_else(|| MatchingErrorDetails::decode(self.details()).ok());
+        let type_name = envelope.as_ref()
+            .and_then(|value| value.details.first())
+            .and_then(|value| value.type_url.rsplit('.').next());
+        for (candidate, metric) in [
             ("InternalServiceError", CADENCE_FAILURES_PER_TASK_LIST),
             ("BadRequestError", "cadence_errors_bad_request_per_tl"),
             (
@@ -674,7 +694,7 @@ impl MatchingErrorClass for tonic::Status {
                 "cadence_errors_semaphore_not_owned_by_host",
             ),
         ] {
-            if detail.contains(type_name) {
+            if type_name == Some(candidate) {
                 return metric;
             }
         }
@@ -1950,12 +1970,16 @@ mod inbound_tests {
     async fn inbound_rpc_classifies_typed_query_failure() {
         let sink = Arc::new(RecordingMetricSink::default());
         let metrics = MatchingMetrics::new(sink.clone());
+        use prost::Message;
         let status = tonic::Status::with_details(
             tonic::Code::FailedPrecondition,
             "query failed",
-            tonic::codegen::Bytes::from_static(
-                b"type.googleapis.com/uber.cadence.api.v1.QueryFailedError",
-            ),
+            MatchingErrorDetails {
+                details: vec![prost_types::Any {
+                    type_url: "type.googleapis.com/uber.cadence.api.v1.QueryFailedError".into(),
+                    value: Vec::new(),
+                }],
+            }.encode_to_vec().into(),
         );
         let _: Result<(), _> = metrics
             .matching_request("QueryWorkflow", Some("domain-a"), None, None, async {
@@ -1969,6 +1993,58 @@ mod inbound_tests {
         assert!(!events
             .iter()
             .any(|event| event.name == CADENCE_FAILURES_PER_TASK_LIST));
+    }
+
+    #[test]
+    fn handler_error_categories_use_typed_envelopes_before_transport() {
+        use prost::Message;
+        // Go handler/context.go::handleErr recognizes these fourteen types,
+        // including errors whose outer (wrapped) message names another type.
+        for (name, expected) in [
+            ("InternalServiceError", CADENCE_FAILURES_PER_TASK_LIST),
+            ("BadRequestError", "cadence_errors_bad_request_per_tl"),
+            ("EntityNotExistsError", "cadence_errors_entity_not_exists_per_tl"),
+            ("WorkflowExecutionAlreadyStartedError", "cadence_errors_execution_already_started_per_tl"),
+            ("DomainAlreadyExistsError", "cadence_errors_domain_already_exists_per_tl"),
+            ("QueryFailedError", "cadence_errors_query_failed_per_tl"),
+            ("LimitExceededError", "cadence_errors_limit_exceeded_per_tl"),
+            ("ServiceBusyError", "cadence_errors_service_busy_per_tl"),
+            ("DomainNotActiveError", "cadence_errors_domain_not_active_per_tl"),
+            ("RemoteSyncMatchedError", "cadence_errors_remote_syncmatch_failed_per_tl"),
+            ("StickyWorkerUnavailableError", "cadence_errors_sticky_worker_unavailable_per_tl"),
+            ("ReadOnlyPartitionError", "cadence_errors_read_only_partition_per_tl"),
+            ("TaskListNotOwnedByHostError", "cadence_errors_task_list_not_owned_by_host_per_tl"),
+            ("SemaphoreNotOwnedByHostError", "cadence_errors_semaphore_not_owned_by_host"),
+        ] {
+            let detail = MatchingErrorDetails {
+                details: vec![prost_types::Any {
+                    type_url: format!("type.googleapis.com/uber.cadence.api.v1.{name}"),
+                    value: b"InternalServiceError BadRequestError".to_vec(),
+                }],
+            }.encode_to_vec();
+            let status = tonic::Status::with_details(
+                tonic::Code::Unknown, "wrapped: InternalServiceError BadRequestError",
+                detail.clone().into(),
+            );
+            assert_eq!(status.matching_error_metric(), expected, "{name}");
+            // Native invalid-UTF8 errors omit public gRPC details but retain
+            // this private envelope until after handler metrics are recorded.
+            let mut raw = tonic::Status::unknown("invalid message");
+            let mut raw_envelope = detail.clone();
+            raw_envelope.extend_from_slice(&[0x12, 0x01, 0xff]);
+            raw.metadata_mut().insert_bin(RAW_ERROR_DETAILS_MARKER,
+                tonic::metadata::MetadataValue::from_bytes(&raw_envelope));
+            assert_eq!(raw.matching_error_metric(), expected, "native {name}");
+        }
+        let malformed = tonic::Status::with_details(tonic::Code::Unknown, "query failed",
+            tonic::codegen::Bytes::from_static(b"QueryFailedError"));
+        assert_eq!(malformed.matching_error_metric(), CADENCE_FAILURES_PER_TASK_LIST);
+        let unknown = tonic::Status::with_details(tonic::Code::Unknown, "query failed",
+            MatchingErrorDetails { details: vec![prost_types::Any {
+                type_url: "type.googleapis.com/example.QueryFailedErrorSuffix".into(),
+                value: b"QueryFailedError".to_vec(),
+            }] }.encode_to_vec().into());
+        assert_eq!(unknown.matching_error_metric(), CADENCE_FAILURES_PER_TASK_LIST);
     }
 
     #[tokio::test]

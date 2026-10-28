@@ -178,3 +178,29 @@ mixed PostgreSQL SDK/recovery lane. Local checks: `bash -n` and
 ## Selected Matching pass recovered
 
 Run https://github.com/auenkr/cadence-rust/actions/runs/40754945697 completed **success** at `fb049c5515d0c940adc86e038bd3b1ef31b84880`. Downloaded logs prove fresh target `/home/runner/work/_temp/cargo-target-final`, selected cadence-matching Clippy exit0 then tests exit0, including native failover and public refresh failure regressions. Compact evidence: `memory/evidence/matching-native-selected-40754945697/`; complete logs: `/mnt/storage/service/ci-evidence/matching-native-workspace-40754945697/`. This was selected-crate CI, despite the historical local directory name. Advisory whole-workspace formatting exit1 remains reported; changed Matching runtime format exit0. Latest query/Thrift regressions and PostgreSQL oracle invocation postdate this source. No workspace or mixed lane pass is claimed.
+
+## Native error-classification audit correction
+
+Source review of Go `service/matching/handler/context.go::handleErr` and
+`context_test.go::TestHandleErrKnowErrors` found a genuine shared metric bug:
+Rust searched every encoded status byte for error-name substrings. A typed
+QueryFailed error whose message/detail mentioned InternalServiceError selected
+the generic failures counter. Native errors with invalid UTF8 outer messages
+also omit public details to match grpc-go, so the same classifier lost their
+original type even though the private in-process envelope retained it.
+
+Changed the classifier to decode only google.rpc.Status Any fields, compare the
+actual first type name exactly, and read the native private envelope before
+wire details. It skips the outer message so invalid bytes do not prevent typed
+classification. The existing tonic-code fallback remains. The marker constant
+is now shared by native status assembly and metrics to avoid drift. Added a
+fourteen-category regression (normal and private/native envelopes, misleading
+message/payload text, invalid UTF8 outer bytes), malformed-envelope and unknown
+suffix cases. The earlier inbound query fixture used a bare ASCII URL as
+status details, which is not a google.rpc.Status; it now supplies a real encoded
+envelope. These new changes require fresh CI; no test pass is claimed.
+
+Applied the two-file runner formatting patch from run40756335405 for the native
+query and all-method Thrift wrapper regressions. That run is still live and
+must finish; it predates the metric correction. The final source is not frozen.
+No local Cargo, rustfmt or Go command ran; `git diff --check` passed.
