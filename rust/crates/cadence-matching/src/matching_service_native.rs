@@ -116,7 +116,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
         if deadline.is_none() {
-            self.integration.missing_poll_deadline("PollForDecisionTask");
+            self.integration
+                .missing_poll_deadline("PollForDecisionTask");
         }
         let result = self
             .engine
@@ -133,7 +134,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
         if deadline.is_none() {
-            self.integration.missing_poll_deadline("PollForActivityTask");
+            self.integration
+                .missing_poll_deadline("PollForActivityTask");
         }
         let result = self
             .engine

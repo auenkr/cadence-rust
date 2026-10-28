@@ -202,3 +202,100 @@ async fn registered_failover_callbacks_preserve_catchup_and_release_only_eligibl
     );
     runtime.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn registered_failover_callback_reaches_native_registry_attached_after_catchup() {
+    use cadence_common::go_string::GoString;
+    use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        SqliteTaskStore::create(directory.path().join("native-callback.db"), BlobEncoding::ThriftRW)
+            .unwrap(),
+    );
+    let history = crate::matching_history::MatchingHistoryClient::new(
+        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        Duration::from_secs(1),
+        1024,
+    );
+    let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+        store,
+        history,
+        NonZeroU32::new(100).unwrap(),
+    );
+    let key = TaskListKeyBytes {
+        domain_id: uuid::Uuid::from_u128(1),
+        name: GoString::from(&b"callback-\xff"[..]),
+        task_type: 0,
+    };
+    let owner = registry.get(key.clone(), 0, 1).await.unwrap();
+    let dispatcher = owner.dispatcher.clone();
+    let mut poll = tokio::spawn(async move {
+        dispatcher
+            .poll_decision(
+                cadence_proto::native::api::PollForDecisionTaskRequest::default(),
+                Duration::from_secs(30),
+            )
+            .await
+    });
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll)
+        .await
+        .is_err());
+    let source = Arc::new(Source(Mutex::new(domain())));
+    let clock = Arc::new(Clock(AtomicU64::new(0)));
+    let cache = Arc::new(MatchingDomainCache::with_clock(source.clone(), clock.clone()));
+    let slot = Arc::new(Mutex::new(None));
+    MatchingRuntime::start_domain_cache(
+        crate::handlers::AppState::default().domains,
+        cache.clone(),
+        None,
+        slot.clone(),
+    )
+    .await
+    .unwrap();
+    // Production attaches its native registry after the cache starts. The
+    // registered closure must consult the shared slot on every notification.
+    *slot.lock().unwrap() = Some(registry.clone());
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll)
+        .await
+        .is_err());
+    for (global, active_active, version) in
+        [(false, false, 11), (true, true, 12), (true, false, 11)]
+    {
+        {
+            let mut record = source.0.lock().unwrap();
+            record.notification_version += 1;
+            record.is_global_domain = global;
+            record.failover_notification_version = version;
+            record.replication.active_clusters = active_active.then(|| ActiveClusters {
+                active_clusters_by_region: None,
+                active_clusters_by_cluster_attribute: Some(HashMap::from([(
+                    "region".into(),
+                    ClusterAttributeScope::default(),
+                )])),
+            });
+        }
+        clock.0.fetch_add(1, Ordering::SeqCst);
+        cache.refresh_domains().unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll)
+            .await
+            .is_err(), "filtered change released native poll");
+    }
+    {
+        let mut record = source.0.lock().unwrap();
+        record.notification_version += 1;
+        record.failover_notification_version = 13;
+    }
+    clock.0.fetch_add(1, Ordering::SeqCst);
+    cache.refresh_domains().unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(2), poll)
+        .await
+        .expect("registered callback did not release native poll")
+        .unwrap()
+        .unwrap();
+    assert!(response.task_token.is_empty());
+    let same_owner = registry.get(key, 0, 2).await.unwrap();
+    assert!(Arc::ptr_eq(&same_owner.queue, &owner.queue));
+    cache.stop();
+    registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+}

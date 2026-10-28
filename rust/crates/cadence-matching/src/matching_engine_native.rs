@@ -173,11 +173,15 @@ impl NativeMatchingEngine {
                     ("wf-task-list-name", list.name.go_json_string()),
                     (
                         "wf-id",
-                        execution.map(|e| e.workflow_id.go_json_string()).unwrap_or_default(),
+                        execution
+                            .map(|e| e.workflow_id.go_json_string())
+                            .unwrap_or_default(),
                     ),
                     (
                         "wf-run-id",
-                        execution.map(|e| e.run_id.go_json_string()).unwrap_or_default(),
+                        execution
+                            .map(|e| e.run_id.go_json_string())
+                            .unwrap_or_default(),
                     ),
                     ("wf-domain-id", domain_id.go_json_string()),
                     ("wf-task-list-type", task_type.to_string()),
