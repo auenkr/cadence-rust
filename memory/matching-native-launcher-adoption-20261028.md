@@ -21,3 +21,5 @@ The new assembly helper is deliberately not registered or called by the launcher
 ## Parent checkpoint
 
 Registered matching_launch_native and its runner formatter entry; the helper remains uncalled by production. Corrected prior CI failures: updated the failover callback regression for the native-registry slot argument and named the native membership watcher tuple type for clippy. Corrected the isolation provider import to matching_reader_native::NativeIsolationConfig. Its selector is still partial and needs the full drained/poller-window/partition logic before activation. Semaphore cancellation guard changes are saved with their own note, unverified. CI 40720317784 concluded failure on the old failover-test signature and runtime type complexity; no passing integrated gate exists.
+
+Fresh six-crate CI https://github.com/auenkr/cadence-rust/actions/runs/40721231542 at 7094ddd58, clean target and runner formatting enabled; pending. This gate includes the registered assembly helper and reservation cancellation tests.
