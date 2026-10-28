@@ -83,7 +83,9 @@ pub trait ShardProcessorFactory: Send + Sync + 'static {
     fn create_raw(&self, shard_key: Vec<u8>) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
         match String::from_utf8(shard_key) {
             Ok(key) => self.create(key),
-            Err(_) => Box::pin(async { Err("non-UTF-8 shard key unsupported by legacy factory".into()) }),
+            Err(_) => {
+                Box::pin(async { Err("non-UTF-8 shard key unsupported by legacy factory".into()) })
+            }
         }
     }
 }
@@ -94,21 +96,49 @@ pub trait ExecutorRpc: Send + Sync + 'static {
         request: sd::HeartbeatRequest,
         timeout: Duration,
     ) -> BoxFuture<Result<sd::HeartbeatResponse, String>>;
-    fn heartbeat_raw(&self, request: RawHeartbeatRequest, timeout: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
-        let reports = request.reports.into_iter().map(|entry| {
-            String::from_utf8(entry.key).map(|key| (key, entry.value.unwrap_or_default()))
-        }).collect::<Result<HashMap<_, _>, _>>();
+    fn heartbeat_raw(
+        &self,
+        request: RawHeartbeatRequest,
+        timeout: Duration,
+    ) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+        let reports = request
+            .reports
+            .into_iter()
+            .map(|entry| {
+                String::from_utf8(entry.key).map(|key| (key, entry.value.unwrap_or_default()))
+            })
+            .collect::<Result<HashMap<_, _>, _>>();
         let reports = match reports {
             Ok(reports) => reports,
-            Err(_) => return Box::pin(async { Err("non-UTF-8 shard key unsupported by legacy RPC".into()) }),
+            Err(_) => {
+                return Box::pin(async {
+                    Err("non-UTF-8 shard key unsupported by legacy RPC".into())
+                })
+            }
         };
-        let future = self.heartbeat(sd::HeartbeatRequest {
-            namespace: request.namespace, executor_id: request.executor_id, status: request.status,
-            shard_status_reports: reports, metadata: request.metadata,
-        }, timeout);
+        let future = self.heartbeat(
+            sd::HeartbeatRequest {
+                namespace: request.namespace,
+                executor_id: request.executor_id,
+                status: request.status,
+                shard_status_reports: reports,
+                metadata: request.metadata,
+            },
+            timeout,
+        );
         Box::pin(async move {
             let response = future.await?;
-            Ok(RawHeartbeatResponse { assignments: response.shard_assignments.into_iter().map(|(key, value)| RawAssignmentEntry { key: key.into_bytes(), value: Some(value) }).collect(), migration_mode: response.migration_mode })
+            Ok(RawHeartbeatResponse {
+                assignments: response
+                    .shard_assignments
+                    .into_iter()
+                    .map(|(key, value)| RawAssignmentEntry {
+                        key: key.into_bytes(),
+                        value: Some(value),
+                    })
+                    .collect(),
+                migration_mode: response.migration_mode,
+            })
         })
     }
 }
@@ -156,26 +186,37 @@ struct RawShard {
 // (last entry wins) when assignments are applied.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct RawHeartbeatRequest {
-    #[prost(string, tag="1")] pub namespace: String,
-    #[prost(string, tag="2")] pub executor_id: String,
-    #[prost(int32, tag="3")] pub status: i32,
-    #[prost(message, repeated, tag="4")] pub reports: Vec<RawReportEntry>,
-    #[prost(map="string, string", tag="5")] pub metadata: HashMap<String, String>,
+    #[prost(string, tag = "1")]
+    pub namespace: String,
+    #[prost(string, tag = "2")]
+    pub executor_id: String,
+    #[prost(int32, tag = "3")]
+    pub status: i32,
+    #[prost(message, repeated, tag = "4")]
+    pub reports: Vec<RawReportEntry>,
+    #[prost(map = "string, string", tag = "5")]
+    pub metadata: HashMap<String, String>,
 }
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct RawReportEntry {
-    #[prost(bytes="vec", tag="1")] pub key: Vec<u8>,
-    #[prost(message, optional, tag="2")] pub value: Option<sd::ShardStatusReport>,
+    #[prost(bytes = "vec", tag = "1")]
+    pub key: Vec<u8>,
+    #[prost(message, optional, tag = "2")]
+    pub value: Option<sd::ShardStatusReport>,
 }
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct RawHeartbeatResponse {
-    #[prost(message, repeated, tag="1")] pub assignments: Vec<RawAssignmentEntry>,
-    #[prost(int32, tag="2")] pub migration_mode: i32,
+    #[prost(message, repeated, tag = "1")]
+    pub assignments: Vec<RawAssignmentEntry>,
+    #[prost(int32, tag = "2")]
+    pub migration_mode: i32,
 }
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct RawAssignmentEntry {
-    #[prost(bytes="vec", tag="1")] pub key: Vec<u8>,
-    #[prost(message, optional, tag="2")] pub value: Option<sd::ShardAssignment>,
+    #[prost(bytes = "vec", tag = "1")]
+    pub key: Vec<u8>,
+    #[prost(message, optional, tag = "2")]
+    pub value: Option<sd::ShardAssignment>,
 }
 
 type RawOwnerCache = Arc<RwLock<Option<HashMap<Vec<u8>, ShardOwner>>>>;
@@ -585,7 +626,11 @@ impl ExecutorRpc for TonicExecutorRpc {
             .map_err(|_| format!("shard-distributor heartbeat timed out after {timeout:?}"))?
         })
     }
-    fn heartbeat_raw(&self, request: RawHeartbeatRequest, timeout: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+    fn heartbeat_raw(
+        &self,
+        request: RawHeartbeatRequest,
+        timeout: Duration,
+    ) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
         let channel = self.channel.clone();
         Box::pin(async move {
             tokio::time::timeout(timeout, async move {
@@ -599,7 +644,6 @@ impl ExecutorRpc for TonicExecutorRpc {
             }).await.map_err(|_| format!("shard-distributor heartbeat timed out after {timeout:?}"))?
         })
     }
-
 }
 
 /// Go `executorclient.NewNoopExecutor`: owns no shards, so every lookup reports
@@ -883,12 +927,26 @@ impl ShardDistributorExecutor {
         self.get_shard_process_raw(shard_key.as_bytes()).await
     }
 
-    pub async fn get_shard_process_raw(&self, shard_key: &[u8]) -> Result<Arc<dyn ShardProcessor>, GetShardProcessError> {
-        self.state.last_use.lock().expect("SD last-use lock").insert(shard_key.to_vec(), Instant::now());
-        if let Some(processor) = self.processor(shard_key) { return Ok(processor); }
-        let not_found = || GetShardProcessError::NotFound(String::from_utf8_lossy(shard_key).into_owned());
-        if !(self.enabled)() { return Err(not_found()); }
-        self.heartbeat_and_update().await.map_err(GetShardProcessError::Heartbeat)?;
+    pub async fn get_shard_process_raw(
+        &self,
+        shard_key: &[u8],
+    ) -> Result<Arc<dyn ShardProcessor>, GetShardProcessError> {
+        self.state
+            .last_use
+            .lock()
+            .expect("SD last-use lock")
+            .insert(shard_key.to_vec(), Instant::now());
+        if let Some(processor) = self.processor(shard_key) {
+            return Ok(processor);
+        }
+        let not_found =
+            || GetShardProcessError::NotFound(String::from_utf8_lossy(shard_key).into_owned());
+        if !(self.enabled)() {
+            return Err(not_found());
+        }
+        self.heartbeat_and_update()
+            .await
+            .map_err(GetShardProcessError::Heartbeat)?;
         self.processor(shard_key).ok_or_else(not_found)
     }
 
@@ -925,7 +983,10 @@ impl ShardDistributorExecutor {
                 let report = managed.processor.report();
                 RawReportEntry {
                     key: key.clone(),
-                    value: Some(sd::ShardStatusReport { status: report.status as i32, shard_load: report.load }),
+                    value: Some(sd::ShardStatusReport {
+                        status: report.status as i32,
+                        shard_load: report.load,
+                    }),
                 }
             })
             .collect();
@@ -960,7 +1021,14 @@ impl ShardDistributorExecutor {
         let response = self
             .send_heartbeat(sd::ExecutorStatus::Active, RPC_TIMEOUT)
             .await?;
-        self.update_assignments(response.assignments.into_iter().map(|entry| (entry.key, entry.value.unwrap_or_default())).collect()).await;
+        self.update_assignments(
+            response
+                .assignments
+                .into_iter()
+                .map(|entry| (entry.key, entry.value.unwrap_or_default()))
+                .collect(),
+        )
+        .await;
         Ok(())
     }
 
@@ -1547,19 +1615,44 @@ mod tests {
         reports: Arc<Mutex<Vec<Vec<u8>>>>,
     }
     impl ExecutorRpc for RawTestRpc {
-        fn heartbeat(&self, _: sd::HeartbeatRequest, _: Duration) -> BoxFuture<Result<sd::HeartbeatResponse, String>> {
+        fn heartbeat(
+            &self,
+            _: sd::HeartbeatRequest,
+            _: Duration,
+        ) -> BoxFuture<Result<sd::HeartbeatResponse, String>> {
             Box::pin(async { Err("unexpected string RPC".into()) })
         }
-        fn heartbeat_raw(&self, request: RawHeartbeatRequest, _: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
-            self.reports.lock().unwrap().extend(request.reports.into_iter().map(|report| report.key));
+        fn heartbeat_raw(
+            &self,
+            request: RawHeartbeatRequest,
+            _: Duration,
+        ) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+            self.reports
+                .lock()
+                .unwrap()
+                .extend(request.reports.into_iter().map(|report| report.key));
             let assigned = self.assigned.load(Ordering::SeqCst);
-            Box::pin(async move { Ok(RawHeartbeatResponse {
-                assignments: if assigned { vec![RawAssignmentEntry { key: b"queue-\xff".to_vec(), value: Some(sd::ShardAssignment { status: sd::AssignmentStatus::Ready as i32 }) }] } else { vec![] },
-                migration_mode: 0,
-            }) })
+            Box::pin(async move {
+                Ok(RawHeartbeatResponse {
+                    assignments: if assigned {
+                        vec![RawAssignmentEntry {
+                            key: b"queue-\xff".to_vec(),
+                            value: Some(sd::ShardAssignment {
+                                status: sd::AssignmentStatus::Ready as i32,
+                            }),
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    migration_mode: 0,
+                })
+            })
         }
     }
-    struct RawTestFactory { keys: Arc<Mutex<Vec<Vec<u8>>>>, processor: Arc<FakeProcessor> }
+    struct RawTestFactory {
+        keys: Arc<Mutex<Vec<Vec<u8>>>>,
+        processor: Arc<FakeProcessor>,
+    }
     impl ShardProcessorFactory for RawTestFactory {
         fn create(&self, _: String) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
             Box::pin(async { Err("unexpected string factory".into()) })
@@ -1578,25 +1671,55 @@ mod tests {
         let processor = Arc::new(FakeProcessor::default());
         let config = crate::config::ShardDistributorMatchingConfig {
             namespaces: vec![crate::config::ShardDistributorNamespaceConfig {
-                namespace: "matching".into(), heartbeat_interval_nanos: 60_000_000_000,
-                ttl_shard_nanos: 0, ttl_report_nanos: 0,
-            }], peer_ttl_nanos: 0,
+                namespace: "matching".into(),
+                heartbeat_interval_nanos: 60_000_000_000,
+                ttl_shard_nanos: 0,
+                ttl_report_nanos: 0,
+            }],
+            peer_ttl_nanos: 0,
         };
-        let executor = ShardDistributorExecutor::new(&config,
-            Arc::new(RawTestRpc { assigned: assigned.clone(), reports: reports.clone() }),
-            Arc::new(RawTestFactory { keys: keys.clone(), processor: processor.clone() }),
-            Arc::new(|| true), HashMap::new(), None).unwrap();
+        let executor = ShardDistributorExecutor::new(
+            &config,
+            Arc::new(RawTestRpc {
+                assigned: assigned.clone(),
+                reports: reports.clone(),
+            }),
+            Arc::new(RawTestFactory {
+                keys: keys.clone(),
+                processor: processor.clone(),
+            }),
+            Arc::new(|| true),
+            HashMap::new(),
+            None,
+        )
+        .unwrap();
         executor.get_shard_process_raw(b"queue-\xff").await.unwrap();
         assert_eq!(keys.lock().unwrap().as_slice(), &[b"queue-\xff".to_vec()]);
         tokio::time::timeout(Duration::from_secs(1), async {
-            while executor.state.processors.lock().unwrap().get(b"queue-\xff".as_slice()).is_none_or(|p| p.state.load(Ordering::Acquire) != PROCESSOR_STARTED) { tokio::task::yield_now().await; }
-        }).await.unwrap();
+            while executor
+                .state
+                .processors
+                .lock()
+                .unwrap()
+                .get(b"queue-\xff".as_slice())
+                .is_none_or(|p| p.state.load(Ordering::Acquire) != PROCESSOR_STARTED)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         executor.heartbeat_and_update().await.unwrap();
-        assert_eq!(reports.lock().unwrap().as_slice(), &[b"queue-\xff".to_vec()]);
+        assert_eq!(
+            reports.lock().unwrap().as_slice(),
+            &[b"queue-\xff".to_vec()]
+        );
         assigned.store(false, Ordering::SeqCst);
         executor.heartbeat_and_update().await.unwrap();
         assert!(!executor.has_local_shard_process_raw(b"queue-\xff"));
-        tokio::time::timeout(Duration::from_secs(1), processor.stop_complete.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), processor.stop_complete.notified())
+            .await
+            .unwrap();
         executor.shutdown().await;
         assert_eq!(processor.stops.load(Ordering::SeqCst), 1);
     }
@@ -1604,13 +1727,30 @@ mod tests {
     #[test]
     fn raw_heartbeat_map_entries_keep_arbitrary_bytes_on_wire() {
         use prost::Message;
-        let response = RawHeartbeatResponse { assignments: vec![RawAssignmentEntry {
-            key: b"q\xff".to_vec(), value: Some(sd::ShardAssignment { status: sd::AssignmentStatus::Ready as i32 }),
-        }], migration_mode: 0 };
+        let response = RawHeartbeatResponse {
+            assignments: vec![RawAssignmentEntry {
+                key: b"q\xff".to_vec(),
+                value: Some(sd::ShardAssignment {
+                    status: sd::AssignmentStatus::Ready as i32,
+                }),
+            }],
+            migration_mode: 0,
+        };
         let decoded = RawHeartbeatResponse::decode(response.encode_to_vec().as_slice()).unwrap();
         assert_eq!(decoded.assignments[0].key, b"q\xff");
-        let request = RawHeartbeatRequest { namespace: "ns".into(), executor_id: "id".into(), status: 0,
-            reports: vec![RawReportEntry { key: b"q\xff".to_vec(), value: Some(sd::ShardStatusReport { status: 0, shard_load: 0.5 }) }], metadata: HashMap::new() };
+        let request = RawHeartbeatRequest {
+            namespace: "ns".into(),
+            executor_id: "id".into(),
+            status: 0,
+            reports: vec![RawReportEntry {
+                key: b"q\xff".to_vec(),
+                value: Some(sd::ShardStatusReport {
+                    status: 0,
+                    shard_load: 0.5,
+                }),
+            }],
+            metadata: HashMap::new(),
+        };
         let decoded = RawHeartbeatRequest::decode(request.encode_to_vec().as_slice()).unwrap();
         assert_eq!(decoded.reports[0].key, b"q\xff");
     }

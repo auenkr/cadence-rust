@@ -3,12 +3,12 @@
 //! These are admission checks (not waits): domain reservations happen before
 //! the host bucket, and are returned if either stage rejects the call.
 use crate::admin::DynamicConfigOverlay;
+use cadence_common::go_string::GoString;
 use cadence_persistence::dynamic_config;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use cadence_common::go_string::GoString;
 
 const USER_RPS: i64 = 1_200;
 const UNLIMITED_RPS: i64 = i32::MAX as i64;
@@ -203,7 +203,10 @@ impl MatchingRpcQuota {
     }
 
     pub fn set_metric_sink(&self, metric_sink: QuotaMetricSink) {
-        *self.metric_sink.lock().expect("Matching quota metric sink lock") = metric_sink;
+        *self
+            .metric_sink
+            .lock()
+            .expect("Matching quota metric sink lock") = metric_sink;
     }
 
     fn host_rate(overlay: &Arc<Mutex<DynamicConfigOverlay>>, class: RpcClass) -> f64 {
@@ -236,9 +239,15 @@ impl MatchingRpcQuota {
             // Dynamic config domain filters are Go strings (UTF-8). Invalid
             // GoString names still get isolated quota buckets and use the
             // configured host fallback without lossy key conversion.
-            let primary = std::str::from_utf8(domain.as_bytes()).ok().map_or(0, |name| {
-                dynamic_config::integer(config.property_values(domain_key(class)), Some(name), 0)
-            });
+            let primary = std::str::from_utf8(domain.as_bytes())
+                .ok()
+                .map_or(0, |name| {
+                    dynamic_config::integer(
+                        config.property_values(domain_key(class)),
+                        Some(name),
+                        0,
+                    )
+                });
             if primary > 0 {
                 primary as f64
             } else {
@@ -304,7 +313,9 @@ impl MatchingRpcQuota {
             let metric = QuotaRejection {
                 method,
                 class,
-                domain: domain.and_then(|name| std::str::from_utf8(name.as_bytes()).ok()).map(str::to_owned),
+                domain: domain
+                    .and_then(|name| std::str::from_utf8(name.as_bytes()).ok())
+                    .map(str::to_owned),
             };
             #[cfg(test)]
             let () = {
@@ -315,7 +326,10 @@ impl MatchingRpcQuota {
                     .entry((metric.method, metric.class, metric.domain.clone()))
                     .or_default() += 1;
             };
-            (self.metric_sink.lock().expect("Matching quota metric sink lock"))(metric);
+            (self
+                .metric_sink
+                .lock()
+                .expect("Matching quota metric sink lock"))(metric);
         }
         allowed || !reject
     }
@@ -463,7 +477,10 @@ mod tests {
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
         set(&overlay, "matching.rps", vec![entry(1, &[])]);
         let now = Arc::new(AtomicI64::new(10));
-        let clock: Clock = Arc::new({ let now = now.clone(); move || now.load(Ordering::SeqCst) });
+        let clock: Clock = Arc::new({
+            let now = now.clone();
+            move || now.load(Ordering::SeqCst)
+        });
         let quota = MatchingRpcQuota::with_clock(overlay.clone(), clock);
         assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
         set(&overlay, "matching.rps", vec![entry(2, &[])]);

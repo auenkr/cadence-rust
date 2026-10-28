@@ -801,12 +801,16 @@ pub async fn run(
                 let stores =
                     crate::matching_task_store::open_configured_semaphore_stores(&cfg.persistence)
                         .await?;
-                state.semaphore_persistence = Some(
-                    crate::matching_persistence::limit_semaphore_store(stores.legacy, limiter.clone()),
-                );
-                native_semaphore_store = Some(
-                    crate::matching_persistence::limit_semaphore_store_bytes(stores.native, limiter.clone()),
-                );
+                state.semaphore_persistence =
+                    Some(crate::matching_persistence::limit_semaphore_store(
+                        stores.legacy,
+                        limiter.clone(),
+                    ));
+                native_semaphore_store =
+                    Some(crate::matching_persistence::limit_semaphore_store_bytes(
+                        stores.native,
+                        limiter.clone(),
+                    ));
             }
             state.matching_http_isolated = wanted.contains(&service::ServiceName::Matching)
                 && cfg
@@ -1895,16 +1899,25 @@ mod native_fatal_exit_tests {
         let sinks = crate::matching_fatal::native_fatal_sinks(sender);
         let raw = cadence_common::go_string::GoString::from(&b"run\xff"[..]);
         (sinks.writer.unwrap())(cadence_persistence::matching_blob::SqlRunIdBytesError {
-            raw: raw.clone(), message: "invalid UUID".into(),
+            raw: raw.clone(),
+            message: "invalid UUID".into(),
         });
         let cause = receiver.try_recv().unwrap();
-        assert!(matches!(&cause, crate::matching_fatal::MatchingFatal::SqlRunIdBytes(error) if error.raw == raw));
-        assert!(FatalExit::from_cause(&cause).into_error().downcast_ref::<SqlMatchingWriterFatal>().is_some());
+        assert!(
+            matches!(&cause, crate::matching_fatal::MatchingFatal::SqlRunIdBytes(error) if error.raw == raw)
+        );
+        assert!(FatalExit::from_cause(&cause)
+            .into_error()
+            .downcast_ref::<SqlMatchingWriterFatal>()
+            .is_some());
 
         (sinks.reader.unwrap())("duplicate task ID".into());
         let cause = receiver.try_recv().unwrap();
         let error = FatalExit::from_cause(&cause).into_error();
-        assert_eq!(error.downcast_ref::<MatchingReaderFatal>().unwrap().0, "duplicate task ID");
+        assert_eq!(
+            error.downcast_ref::<MatchingReaderFatal>().unwrap().0,
+            "duplicate task ID"
+        );
     }
 }
 

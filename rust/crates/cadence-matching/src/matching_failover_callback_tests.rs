@@ -139,9 +139,14 @@ async fn registered_failover_callbacks_preserve_catchup_and_release_only_eligibl
         source.clone(),
         clock.clone(),
     ));
-    MatchingRuntime::start_domain_cache(domains, cache.clone(), Some(registry.clone()), Arc::new(Mutex::new(None)))
-        .await
-        .unwrap();
+    MatchingRuntime::start_domain_cache(
+        domains,
+        cache.clone(),
+        Some(registry.clone()),
+        Arc::new(Mutex::new(None)),
+    )
+    .await
+    .unwrap();
     runtime.domain_cache = Some(cache.clone());
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut poll)

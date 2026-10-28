@@ -42,14 +42,24 @@ impl NativeMatchingControlContext {
         shard_router: Option<Arc<MatchingShardRouter>>,
     ) -> Self {
         let overlay = state.admin.dynamic_config.clone();
-        if let Some(router) = shard_router { registry.set_shard_router(router); }
-        Self { cache, registry, membership, overlay }
+        if let Some(router) = shard_router {
+            registry.set_shard_router(router);
+        }
+        Self {
+            cache,
+            registry,
+            membership,
+            overlay,
+        }
     }
 
     fn cached_domain_name(&self, id: &GoString) -> Option<String> {
         let id = std::str::from_utf8(id.as_bytes()).ok()?;
         let uuid = uuid::Uuid::parse_str(id).ok()?;
-        self.cache.get_domain_by_id(&uuid.to_string()).ok().map(|domain| domain.info.name)
+        self.cache
+            .get_domain_by_id(&uuid.to_string())
+            .ok()
+            .map(|domain| domain.info.name)
     }
 
     fn task_list_boolean(
@@ -78,7 +88,9 @@ impl NativeControlContextApi for NativeMatchingControlContext {
         if name.is_empty() {
             return Err(Status::invalid_argument("Domain name is not valid."));
         }
-        let id = self.cache.get_domain_id(name)
+        let id = self
+            .cache
+            .get_domain_id(name)
             .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
         uuid::Uuid::parse_str(&id)
             .map_err(|_| Status::internal("Domain cache contains an invalid domain UUID."))
@@ -89,12 +101,18 @@ impl NativeControlContextApi for NativeMatchingControlContext {
             .map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
         let uuid = uuid::Uuid::parse_str(raw)
             .map_err(|error| Status::new(Code::InvalidArgument, error.to_string()))?;
-        let domain = self.cache.get_domain_by_id(&uuid.to_string())
+        let domain = self
+            .cache
+            .get_domain_by_id(&uuid.to_string())
             .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
         Ok(GoString::from(domain.info.name))
     }
 
-    fn check_queue(&self, key: &TaskListKeyBytes, _queue: &NativeQueueHandle) -> Result<(), Status> {
+    fn check_queue(
+        &self,
+        key: &TaskListKeyBytes,
+        _queue: &NativeQueueHandle,
+    ) -> Result<(), Status> {
         // Keep the registry as part of this concrete context's construction
         // contract, and route by the exact raw name used as the registry key.
         self.registry.check_task_list_ownership(&key.name, true)
@@ -103,26 +121,39 @@ impl NativeControlContextApi for NativeMatchingControlContext {
     fn return_all_kinds(&self) -> bool {
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::boolean(
-            config.property_values("matching.matchingReturnAllTaskListKinds"), None, false,
+            config.property_values("matching.matchingReturnAllTaskListKinds"),
+            None,
+            false,
         )
     }
 
     fn scaler_enabled(&self, domain: &GoString, list: &GoString, task_type: i32) -> bool {
-        self.task_list_boolean("matching.enableAdaptiveScaler", domain, list, task_type, false)
+        self.task_list_boolean(
+            "matching.enableAdaptiveScaler",
+            domain,
+            list,
+            task_type,
+            false,
+        )
     }
 
     fn isolation_groups(&self) -> Vec<GoString> {
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::string_list(
             config.property_values("system.allIsolationGroups"),
-        ).into_iter().map(GoString::from).collect()
+        )
+        .into_iter()
+        .map(GoString::from)
+        .collect()
     }
 
     fn poller_window_nanos(&self, domain: &GoString, list: &GoString, task_type: i32) -> i64 {
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_duration_bytes(
             config.property_values("matching.taskIsolationPollerWindow"),
-            self.cached_domain_name(domain).as_deref(), list.as_bytes(), task_type,
+            self.cached_domain_name(domain).as_deref(),
+            list.as_bytes(),
+            task_type,
             2_000_000_000,
         )
     }
@@ -131,8 +162,12 @@ impl NativeControlContextApi for NativeMatchingControlContext {
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_integer_bytes(
             config.property_values("matching.numTasklistWritePartitions"),
-            self.cached_domain_name(domain).as_deref(), root.as_bytes(), task_type, 1,
-        ).max(1)
+            self.cached_domain_name(domain).as_deref(),
+            root.as_bytes(),
+            task_type,
+            1,
+        )
+        .max(1)
     }
 
     fn owner_host(
@@ -141,7 +176,9 @@ impl NativeControlContextApi for NativeMatchingControlContext {
     ) -> crate::matching_dispatch_native::NativeFuture<Result<GoString, Status>> {
         let router = self.registry.shard_router();
         let membership = self.membership.clone();
-        Box::pin(async move { resolve_owner_host(&membership, router.as_deref(), &partition).await })
+        Box::pin(
+            async move { resolve_owner_host(&membership, router.as_deref(), &partition).await },
+        )
     }
 }
 
@@ -151,7 +188,9 @@ async fn resolve_owner_host(
     partition: &GoString,
 ) -> Result<GoString, Status> {
     let address = if let Some(router) = router {
-        router.resolve_bytes(partition.as_bytes()).await
+        router
+            .resolve_bytes(partition.as_bytes())
+            .await
             .map(|(host, _)| host.address)
             .map_err(|error| Status::unavailable(error.to_string()))?
     } else {
@@ -168,11 +207,14 @@ mod tests {
 
     #[tokio::test]
     async fn owner_fallback_routes_using_exact_raw_partition_bytes() {
-        let membership = Membership::new("local", vec![Host {
-            address: "matching.internal:7934".into(),
-            identity: "local".into(),
-            grpc_address: "127.0.0.1:7934".into(),
-        }]);
+        let membership = Membership::new(
+            "local",
+            vec![Host {
+                address: "matching.internal:7934".into(),
+                identity: "local".into(),
+                grpc_address: "127.0.0.1:7934".into(),
+            }],
+        );
         let raw = GoString::from(&b"root-\xff#0"[..]);
         let owner = resolve_owner_host(&membership, None, &raw).await.unwrap();
         assert_eq!(owner.as_bytes(), b"matching.internal:7934");
@@ -181,19 +223,39 @@ mod tests {
     #[test]
     fn byte_filter_does_not_match_replacement_character() {
         let value = DynamicConfigValue {
-            value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: b"17".to_vec() }),
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: b"17".to_vec(),
+            }),
             filters: vec![DynamicConfigFilter {
                 name: "taskListName".into(),
-                value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: br#""\ufffd""#.to_vec() }),
+                value: Some(cadence_api::types::DataBlob {
+                    encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                    data: br#""\ufffd""#.to_vec(),
+                }),
             }],
         };
         let values = cadence_persistence::dynamic_config::PropertyValues::snapshot(vec![value]);
-        assert_eq!(cadence_persistence::dynamic_config::task_list_integer_bytes(
-            values.clone(), None, b"\xff", 0, 1,
-        ), 1);
-        assert_eq!(cadence_persistence::dynamic_config::task_list_integer_bytes(
-            values, None, "\u{fffd}".as_bytes(), 0, 1,
-        ), 17);
+        assert_eq!(
+            cadence_persistence::dynamic_config::task_list_integer_bytes(
+                values.clone(),
+                None,
+                b"\xff",
+                0,
+                1,
+            ),
+            1
+        );
+        assert_eq!(
+            cadence_persistence::dynamic_config::task_list_integer_bytes(
+                values,
+                None,
+                "\u{fffd}".as_bytes(),
+                0,
+                1,
+            ),
+            17
+        );
     }
 
     #[tokio::test]

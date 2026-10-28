@@ -296,37 +296,37 @@ async fn native_actors_deliver_raw_bytes_and_ack_only_persisted_tasks() {
     .await
     .unwrap();
     {
-    let seen = captured.lock().unwrap();
-    assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].task_id, 0);
-    assert_eq!(
-        seen[0]
-            .workflow_execution
-            .as_ref()
-            .unwrap()
-            .workflow_id
-            .as_bytes(),
-        b"sync-\xff"
-    );
-    assert_ne!(
-        seen[0]
-            .workflow_execution
-            .as_ref()
-            .unwrap()
-            .workflow_id
-            .as_bytes(),
-        "sync-�".as_bytes()
-    );
-    assert_eq!(seen[1].task_id, allocated.task_id);
-    assert_eq!(
-        seen[1]
-            .workflow_execution
-            .as_ref()
-            .unwrap()
-            .workflow_id
-            .as_bytes(),
-        b"backlog-\xfe"
-    );
+        let seen = captured.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].task_id, 0);
+        assert_eq!(
+            seen[0]
+                .workflow_execution
+                .as_ref()
+                .unwrap()
+                .workflow_id
+                .as_bytes(),
+            b"sync-\xff"
+        );
+        assert_ne!(
+            seen[0]
+                .workflow_execution
+                .as_ref()
+                .unwrap()
+                .workflow_id
+                .as_bytes(),
+            "sync-�".as_bytes()
+        );
+        assert_eq!(seen[1].task_id, allocated.task_id);
+        assert_eq!(
+            seen[1]
+                .workflow_execution
+                .as_ref()
+                .unwrap()
+                .workflow_id
+                .as_bytes(),
+            b"backlog-\xfe"
+        );
     }
     reader.stop();
     writer.stop();

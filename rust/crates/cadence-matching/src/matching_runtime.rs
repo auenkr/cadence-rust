@@ -36,11 +36,30 @@ type ShardProcessLookup = Arc<
 
 /// Async admission hook for the native host. Install before opening listeners;
 /// registry publication still performs its synchronous assignment recheck.
-pub type NativeShardOwnershipCheck = Arc<dyn Fn(
-    cadence_common::go_string::GoString, bool,
-) -> Pin<Box<dyn Future<Output = Result<(), tonic::Status>> + Send>> + Send + Sync>;
+pub type NativeShardOwnershipCheck = Arc<
+    dyn Fn(
+            cadence_common::go_string::GoString,
+            bool,
+        ) -> Pin<Box<dyn Future<Output = Result<(), tonic::Status>> + Send>>
+        + Send
+        + Sync,
+>;
 
-pub(crate) type NativeShardLookup = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<(), crate::matching_shard_distributor::GetShardProcessError>> + Send>> + Send + Sync>;
+pub(crate) type NativeShardLookup = Arc<
+    dyn Fn(
+            Vec<u8>,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<
+                            (),
+                            crate::matching_shard_distributor::GetShardProcessError,
+                        >,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
 
 pub(crate) fn native_shard_ownership_check(
     membership: crate::matching_membership::Membership,
@@ -60,9 +79,15 @@ pub(crate) fn native_shard_ownership_check(
                 return Err(membership.task_list_not_owned_by_bytes(&name, "not known"));
             }
             if crate::matching_shard_routing::task_list_excluded_from_shard_distributor_bytes(
-                name.as_bytes(), percentage() as u64, exclude(),
+                name.as_bytes(),
+                percentage() as u64,
+                exclude(),
             ) {
-                return if cached { Ok(()) } else { membership.check_task_list_bytes(&name) };
+                return if cached {
+                    Ok(())
+                } else {
+                    membership.check_task_list_bytes(&name)
+                };
             }
             let result = lookup(name.as_bytes().to_vec()).await;
             if *draining.borrow() {
@@ -70,10 +95,14 @@ pub(crate) fn native_shard_ownership_check(
             }
             match result {
                 Ok(()) => Ok(()),
-                Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) =>
-                    Err(membership.task_list_not_owned_by_bytes(&name, "not known")),
-                Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(error)) =>
-                    Err(tonic::Status::internal(format!("failed to lookup ownership in SD: {error}"))),
+                Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(_)) => {
+                    Err(membership.task_list_not_owned_by_bytes(&name, "not known"))
+                }
+                Err(crate::matching_shard_distributor::GetShardProcessError::Heartbeat(error)) => {
+                    Err(tonic::Status::internal(format!(
+                        "failed to lookup ownership in SD: {error}"
+                    )))
+                }
             }
         })
     })
@@ -152,11 +181,11 @@ pub type EvictFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 pub type EvictSelf = Arc<dyn Fn() -> EvictFuture + Send + Sync>;
 type NativeMembershipTask = (oneshot::Sender<()>, JoinHandle<Result<(), tonic::Status>>);
 
-fn ensure_queue_registry_unowned(
-    legacy: bool,
-    native: bool,
-) -> anyhow::Result<()> {
-    anyhow::ensure!(!legacy && !native, "Matching runtime already owns durable queues");
+fn ensure_queue_registry_unowned(legacy: bool, native: bool) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !legacy && !native,
+        "Matching runtime already owns durable queues"
+    );
     Ok(())
 }
 
@@ -187,7 +216,13 @@ pub struct MatchingRuntime {
     matching: Matching,
     registry: Option<crate::matching_registry::QueueRegistry>,
     native_registry: Option<crate::matching_registry_native::NativeQueueRegistry>,
-    native_host: Option<Arc<crate::matching_service_native::NativeMatchingService<crate::matching_host_native::NativeMatchingHost>>>,
+    native_host: Option<
+        Arc<
+            crate::matching_service_native::NativeMatchingService<
+                crate::matching_host_native::NativeMatchingHost,
+            >,
+        >,
+    >,
     native_semaphore: Option<crate::matching_semaphore_service_native::NativeSemaphoreService>,
     native_semaphore_maintenance: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     maintenance_stop: Option<oneshot::Sender<()>>,
@@ -195,7 +230,8 @@ pub struct MatchingRuntime {
     membership_maintenance_stop: Option<oneshot::Sender<()>>,
     membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
-    native_domain_registry: Arc<Mutex<Option<crate::matching_registry_native::NativeQueueRegistry>>>,
+    native_domain_registry:
+        Arc<Mutex<Option<crate::matching_registry_native::NativeQueueRegistry>>>,
     native_membership_maintenance: Option<NativeMembershipTask>,
     membership: Option<crate::matching_membership::Membership>,
     dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
@@ -327,10 +363,11 @@ impl MatchingRuntime {
         let (stop, stopped) = oneshot::channel();
         let maintenance_registry = registry.clone();
         self.maintenance = Some(tokio::spawn(async move {
-            maintenance_registry.maintain_until(Duration::from_secs(10), async {
-                let _ = stopped.await;
-            })
-            .await
+            maintenance_registry
+                .maintain_until(Duration::from_secs(10), async {
+                    let _ = stopped.await;
+                })
+                .await
         }));
         self.maintenance_stop = Some(stop);
         if let Some(check) = self.native_shard_ownership.clone() {
@@ -349,7 +386,11 @@ impl MatchingRuntime {
     pub fn with_native_host(
         mut self,
         registry: crate::matching_registry_native::NativeQueueRegistry,
-        host: Arc<crate::matching_service_native::NativeMatchingService<crate::matching_host_native::NativeMatchingHost>>,
+        host: Arc<
+            crate::matching_service_native::NativeMatchingService<
+                crate::matching_host_native::NativeMatchingHost,
+            >,
+        >,
         semaphore: crate::matching_semaphore_service_native::NativeSemaphoreService,
         membership: crate::matching_membership::Membership,
     ) -> anyhow::Result<Self> {
@@ -414,7 +455,9 @@ impl MatchingRuntime {
         mut self,
         router: crate::matching_shard_routing::MatchingShardRouter,
     ) -> Self {
-        if let Some(registry) = &self.native_registry { registry.set_shard_router(Arc::new(router.clone())); }
+        if let Some(registry) = &self.native_registry {
+            registry.set_shard_router(Arc::new(router.clone()));
+        }
         self.matching = self.matching.clone().with_shard_router(router);
         self
     }
@@ -439,8 +482,10 @@ impl MatchingRuntime {
                 exclude_short_lived,
             ));
         }
-        anyhow::ensure!(self.registry.is_some() || self.native_registry.is_some(),
-            "shard-distributor Matching requires the durable queue registry");
+        anyhow::ensure!(
+            self.registry.is_some() || self.native_registry.is_some(),
+            "shard-distributor Matching requires the durable queue registry"
+        );
         let enabled = {
             let percentage = percentage_onboarded.clone();
             Arc::new(move || {
@@ -452,9 +497,19 @@ impl MatchingRuntime {
         );
         let factory: Arc<dyn crate::matching_shard_distributor::ShardProcessorFactory> =
             if let Some(registry) = &self.native_registry {
-                Arc::new(crate::matching_shard_processor::NativeQueueRegistryShardProcessorFactory::new(registry.clone(), config.report_ttl_nanos()))
+                Arc::new(
+                    crate::matching_shard_processor::NativeQueueRegistryShardProcessorFactory::new(
+                        registry.clone(),
+                        config.report_ttl_nanos(),
+                    ),
+                )
             } else {
-                Arc::new(crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(self.registry.clone().expect("registry checked"), config.report_ttl_nanos()))
+                Arc::new(
+                    crate::matching_shard_processor::QueueRegistryShardProcessorFactory::new(
+                        self.registry.clone().expect("registry checked"),
+                        config.report_ttl_nanos(),
+                    ),
+                )
             };
         let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
         let executor = crate::matching_shard_distributor::ShardDistributorExecutor::new(
@@ -525,11 +580,18 @@ impl MatchingRuntime {
             Box::pin(async move { executor.get_shard_process_raw(&name).await.map(|_| ()) })
         });
         self.native_shard_ownership = Some(native_shard_ownership_check(
-            membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
-            drain_tx.subscribe(), raw_lookup,
+            membership.clone(),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+            drain_tx.subscribe(),
+            raw_lookup,
         ));
         if let Some(registry) = &self.native_registry {
-            registry.set_shard_admission(self.native_shard_ownership.clone().expect("native admission configured"));
+            registry.set_shard_admission(
+                self.native_shard_ownership
+                    .clone()
+                    .expect("native admission configured"),
+            );
         }
         let ownership_check = shard_task_list_ownership_check(
             membership.clone(),
@@ -572,7 +634,9 @@ impl MatchingRuntime {
     }
 
     /// Shared executor used by native admission to refresh an uncached assignment.
-    pub fn shard_distributor_executor(&self) -> Option<crate::matching_shard_distributor::ShardDistributorExecutor> {
+    pub fn shard_distributor_executor(
+        &self,
+    ) -> Option<crate::matching_shard_distributor::ShardDistributorExecutor> {
         self.shard_distributor_executor.clone()
     }
 
@@ -608,17 +672,28 @@ impl MatchingRuntime {
                     >,
                 >
         });
-        let raw_lookup: NativeShardLookup = Arc::new(|name| Box::pin(async move {
-            Err(crate::matching_shard_distributor::GetShardProcessError::NotFound(
-                String::from_utf8_lossy(&name).into_owned(),
-            ))
-        }));
+        let raw_lookup: NativeShardLookup = Arc::new(|name| {
+            Box::pin(async move {
+                Err(
+                    crate::matching_shard_distributor::GetShardProcessError::NotFound(
+                        String::from_utf8_lossy(&name).into_owned(),
+                    ),
+                )
+            })
+        });
         self.native_shard_ownership = Some(native_shard_ownership_check(
-            membership.clone(), percentage_onboarded.clone(), exclude_short_lived.clone(),
-            drain_tx.subscribe(), raw_lookup,
+            membership.clone(),
+            percentage_onboarded.clone(),
+            exclude_short_lived.clone(),
+            drain_tx.subscribe(),
+            raw_lookup,
         ));
         if let Some(registry) = &self.native_registry {
-            registry.set_shard_admission(self.native_shard_ownership.clone().expect("native admission configured"));
+            registry.set_shard_admission(
+                self.native_shard_ownership
+                    .clone()
+                    .expect("native admission configured"),
+            );
         }
         let ownership_check = shard_task_list_ownership_check(
             membership,
@@ -761,9 +836,15 @@ impl MatchingRuntime {
             let (native_stop, mut native_stopped) = oneshot::channel();
             let task = tokio::spawn(async move {
                 loop {
-                    let current = registry.lock().expect("native domain registry lock").clone();
+                    let current = registry
+                        .lock()
+                        .expect("native domain registry lock")
+                        .clone();
                     if let Some(current) = current {
-                        if let Err(error) = current.unload_non_owned(crate::grpc_matching::matching_now()).await {
+                        if let Err(error) = current
+                            .unload_non_owned(crate::grpc_matching::matching_now())
+                            .await
+                        {
                             eprintln!("Native Matching membership cleanup failed: {error}");
                         }
                     }
@@ -998,16 +1079,22 @@ impl MatchingRuntime {
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }
-        let native_membership_result = if let Some((stop, task)) = self.native_membership_maintenance.take() {
+        let native_membership_result = if let Some((stop, task)) =
+            self.native_membership_maintenance.take()
+        {
             let _ = stop.send(());
             task.await
                 .map_err(|error| {
                     anyhow::anyhow!("joining native Matching membership maintenance: {error}")
                 })
-                .and_then(|result| result.map_err(|error| {
-                    anyhow::anyhow!("stopping native Matching membership maintenance: {error}")
-                }))
-        } else { Ok(()) };
+                .and_then(|result| {
+                    result.map_err(|error| {
+                        anyhow::anyhow!("stopping native Matching membership maintenance: {error}")
+                    })
+                })
+        } else {
+            Ok(())
+        };
         if let Some(stop) = self.maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -1042,10 +1129,15 @@ impl MatchingRuntime {
         if let Some(registry) = &self.native_registry {
             registry.wait_for_writers().await;
         }
-        let native_semaphore_result = if let Some((stop, task)) = self.native_semaphore_maintenance.take() {
+        let native_semaphore_result = if let Some((stop, task)) =
+            self.native_semaphore_maintenance.take()
+        {
             let _ = stop.send(());
-            task.await.map_err(|error| anyhow::anyhow!("joining native semaphore maintenance: {error}"))
-        } else { Ok(()) };
+            task.await
+                .map_err(|error| anyhow::anyhow!("joining native semaphore maintenance: {error}"))
+        } else {
+            Ok(())
+        };
         if let Some(semaphore) = &self.native_semaphore {
             semaphore.stop_all();
         }
@@ -1298,10 +1390,13 @@ mod tests {
         use std::sync::atomic::{AtomicI64, Ordering};
 
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(
-            directory.path().join("noop-native.db"),
-            BlobEncoding::ThriftRW,
-        ).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(
+                directory.path().join("noop-native.db"),
+                BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
+        );
         let history = crate::matching_history::MatchingHistoryClient::new(
             tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
             Duration::from_secs(1),
@@ -1309,11 +1404,17 @@ mod tests {
         );
         let membership = empty_membership();
         let registry = crate::matching_registry_native::NativeQueueRegistry::new(
-            store, history, NonZeroU32::new(100).unwrap(),
-        ).with_membership(membership.native_membership());
+            store,
+            history,
+            NonZeroU32::new(100).unwrap(),
+        )
+        .with_membership(membership.native_membership());
         let percent = Arc::new(AtomicI64::new(100));
         registry.set_ownership_policy(native_noop_shard_policy(
-            Arc::new({ let percent = percent.clone(); move || percent.load(Ordering::SeqCst) }),
+            Arc::new({
+                let percent = percent.clone();
+                move || percent.load(Ordering::SeqCst)
+            }),
             Arc::new(|| false),
         ));
         let raw = cadence_common::go_string::GoString::from(&b"queue-\xff"[..]);
@@ -1346,13 +1447,21 @@ mod tests {
             history,
             NonZeroU32::new(100).unwrap(),
         );
-        let owner = tokio::time::timeout(Duration::from_secs(2), registry.get(
-            cadence_persistence::matching_native_task_store::TaskListKeyBytes {
-                domain_id: uuid::Uuid::from_u128(1),
-                name: cadence_common::go_string::GoString::from(&b"shutdown-\xff"[..]),
-                task_type: 0,
-            }, 0, crate::grpc_matching::matching_now(),
-        )).await.unwrap().unwrap();
+        let owner = tokio::time::timeout(
+            Duration::from_secs(2),
+            registry.get(
+                cadence_persistence::matching_native_task_store::TaskListKeyBytes {
+                    domain_id: uuid::Uuid::from_u128(1),
+                    name: cadence_common::go_string::GoString::from(&b"shutdown-\xff"[..]),
+                    task_type: 0,
+                },
+                0,
+                crate::grpc_matching::matching_now(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let joining_registry = registry.clone();
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(async move {
@@ -1370,7 +1479,8 @@ mod tests {
             .expect("native registry should shut down cleanly");
         assert!(owner.queue.is_stopped());
         tokio::time::timeout(Duration::from_secs(2), joining_registry.wait_for_writers())
-            .await.expect("native writers should join after owner shutdown");
+            .await
+            .expect("native writers should join after owner shutdown");
     }
 
     fn dynamic_config_test_value(runtime: &MatchingRuntime, key: &str) -> i64 {
@@ -1562,19 +1672,34 @@ mod tests {
         let lookup: NativeShardLookup = Arc::new(move |name| {
             calls.lock().unwrap().push(name.clone());
             Box::pin(async move {
-                if name == b"bad-\xff" { Err(GetShardProcessError::NotFound("missing".into())) }
-                else { Err(GetShardProcessError::Heartbeat("offline".into())) }
+                if name == b"bad-\xff" {
+                    Err(GetShardProcessError::NotFound("missing".into()))
+                } else {
+                    Err(GetShardProcessError::Heartbeat("offline".into()))
+                }
             })
         });
-        let check = native_shard_ownership_check(empty_membership(), Arc::new(|| 100), Arc::new(|| false), receiver, lookup);
+        let check = native_shard_ownership_check(
+            empty_membership(),
+            Arc::new(|| 100),
+            Arc::new(|| false),
+            receiver,
+            lookup,
+        );
         let raw = GoString::from(&b"bad-\xff"[..]);
-        assert_eq!(check(raw.clone(), false).await.unwrap_err().code(), tonic::Code::Aborted);
+        assert_eq!(
+            check(raw.clone(), false).await.unwrap_err().code(),
+            tonic::Code::Aborted
+        );
         assert_eq!(seen.lock().unwrap().as_slice(), &[b"bad-\xff".to_vec()]);
         let error = check(GoString::from("other"), false).await.unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("offline"));
         drain.send(true).unwrap();
-        assert_eq!(check(raw, false).await.unwrap_err().code(), tonic::Code::Aborted);
+        assert_eq!(
+            check(raw, false).await.unwrap_err().code(),
+            tonic::Code::Aborted
+        );
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
 
@@ -1582,11 +1707,21 @@ mod tests {
     async fn native_admission_excluded_cached_and_noop() {
         use cadence_common::go_string::GoString;
         let (_drain, receiver) = tokio::sync::watch::channel(false);
-        let lookup: NativeShardLookup = Arc::new(|_| Box::pin(async { panic!("excluded names skip executor") }));
-        let check = native_shard_ownership_check(empty_membership(), Arc::new(|| 0), Arc::new(|| false), receiver, lookup);
+        let lookup: NativeShardLookup =
+            Arc::new(|_| Box::pin(async { panic!("excluded names skip executor") }));
+        let check = native_shard_ownership_check(
+            empty_membership(),
+            Arc::new(|| 0),
+            Arc::new(|| false),
+            receiver,
+            lookup,
+        );
         let raw = GoString::from(&b"raw-\xff"[..]);
         assert!(check(raw.clone(), true).await.is_ok());
-        assert_eq!(check(raw, false).await.unwrap_err().code(), tonic::Code::Internal);
+        assert_eq!(
+            check(raw, false).await.unwrap_err().code(),
+            tonic::Code::Internal
+        );
     }
 
     #[test]

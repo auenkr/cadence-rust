@@ -12,11 +12,14 @@
 //! Single process: one host owns every bucket, so the membership ring check
 //! that routes buckets to hosts is a self-check.
 
-use cadence_api::enums::SemaphoreAcquireOutcome;
-use cadence_common::liveness::Liveness;
-use cadence_common::go_string::GoString;
-use cadence_persistence::{AcquireError, GrantOutcome, semaphores_native::{SemaphorePersistenceBytes, SemaphoreRowBytes}};
 use crate::matching_semaphore_native::{IdentifierBytes, IdentifierError};
+use cadence_api::enums::SemaphoreAcquireOutcome;
+use cadence_common::go_string::GoString;
+use cadence_common::liveness::Liveness;
+use cadence_persistence::{
+    semaphores_native::{SemaphorePersistenceBytes, SemaphoreRowBytes},
+    AcquireError, GrantOutcome,
+};
 pub type Identifier = IdentifierBytes;
 use std::{
     collections::HashMap,
@@ -42,9 +45,15 @@ fn now_nanos() -> i64 {
 fn validate_identifier(id: &Identifier) -> Result<(), ManagerError> {
     match id.validate() {
         Ok(()) => Ok(()),
-        Err(IdentifierError::MissingDomain) => Err(ManagerError::BadRequest("domainID is required".into())),
-        Err(IdentifierError::MissingName) => Err(ManagerError::BadRequest("semaphoreName is required".into())),
-        Err(IdentifierError::NegativeBucket(bucket)) => Err(ManagerError::BadRequest(format!("bucket must not be negative, got {bucket}"))),
+        Err(IdentifierError::MissingDomain) => {
+            Err(ManagerError::BadRequest("domainID is required".into()))
+        }
+        Err(IdentifierError::MissingName) => {
+            Err(ManagerError::BadRequest("semaphoreName is required".into()))
+        }
+        Err(IdentifierError::NegativeBucket(bucket)) => Err(ManagerError::BadRequest(format!(
+            "bucket must not be negative, got {bucket}"
+        ))),
     }
 }
 
@@ -125,7 +134,9 @@ struct Reservation<'a> {
 }
 
 impl Reservation<'_> {
-    fn consumed(&mut self) { self.restore = false; }
+    fn consumed(&mut self) {
+        self.restore = false;
+    }
 }
 
 impl Drop for Reservation<'_> {
@@ -198,7 +209,10 @@ impl Manager {
                 State::Stopped => return Err(ManagerError::NotReady),
             }
         }
-        let mut load = LoadInFlight { manager: self, completed: false };
+        let mut load = LoadInFlight {
+            manager: self,
+            completed: false,
+        };
         let loaded = self.load().await;
         load.completed = true;
         if loaded.is_err() {
@@ -235,10 +249,9 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
-        self.store.get_semaphore_metadata(
-            &self.id.domain_id,
-            &self.id.semaphore_name,
-        ).await?;
+        self.store
+            .get_semaphore_metadata(&self.id.domain_id, &self.id.semaphore_name)
+            .await?;
         let rows = self.scan_bucket().await?;
         // Go builds the free set only from rows returned by the scan. Metadata
         // does not prove that an absent token row exists or is unheld.
@@ -378,14 +391,21 @@ impl Manager {
             let Some(token_id) = self.reserve() else {
                 break;
             };
-            let mut reservation = Reservation { manager: self, token_id, restore: true };
-            let outcome = self.store.grant_semaphore_token(
-                &self.id.domain_id,
-                &self.id.semaphore_name,
-                self.id.bucket,
+            let mut reservation = Reservation {
+                manager: self,
                 token_id,
-                owner_id,
-            ).await;
+                restore: true,
+            };
+            let outcome = self
+                .store
+                .grant_semaphore_token(
+                    &self.id.domain_id,
+                    &self.id.semaphore_name,
+                    self.id.bucket,
+                    token_id,
+                    owner_id,
+                )
+                .await;
             let outcome = match outcome {
                 Ok(outcome) => outcome,
                 Err(error) => {
@@ -403,7 +423,10 @@ impl Manager {
                         token_id,
                     });
                 }
-                GrantOutcome::SlotTaken => { reservation.consumed(); continue },
+                GrantOutcome::SlotTaken => {
+                    reservation.consumed();
+                    continue;
+                }
                 GrantOutcome::Unknown => {
                     // Like Go's default branch: an outcome we cannot read says
                     // nothing about the slot, so the id goes back.
@@ -438,12 +461,16 @@ impl Manager {
 
     /// Go `confirmHold`: verify the reverse-index entry against the token row.
     async fn confirm_hold(&self, owner_id: &GoString, token_id: i32) -> Result<bool, ManagerError> {
-        match self.store.get_semaphore_ownership_by_token(
-            &self.id.domain_id,
-            &self.id.semaphore_name,
-            self.id.bucket,
-            token_id,
-        ).await {
+        match self
+            .store
+            .get_semaphore_ownership_by_token(
+                &self.id.domain_id,
+                &self.id.semaphore_name,
+                self.id.bucket,
+                token_id,
+            )
+            .await
+        {
             Ok(holder) if holder == *owner_id => Ok(true),
             Ok(holder) => {
                 // The index is stale; return the slot only if the row says it
@@ -497,7 +524,11 @@ impl Manager {
 
     #[cfg(test)]
     fn free_count(&self) -> usize {
-        self.index.lock().expect("semaphore manager lock").free_list.len()
+        self.index
+            .lock()
+            .expect("semaphore manager lock")
+            .free_list
+            .len()
     }
 }
 
@@ -579,7 +610,8 @@ impl Registry {
     /// reuses the manager; then always `Start`, since the request that
     /// registered it may not have started it.
     pub async fn get_or_create(&self, id: Identifier) -> Result<Arc<Manager>, ManagerError> {
-        self.get_or_create_with_idle_ttl(id, self.idle_ttl_nanos).await
+        self.get_or_create_with_idle_ttl(id, self.idle_ttl_nanos)
+            .await
     }
 
     /// Go passes `IdleTTL: cfg.SemaphoreIdleTime(domainName)` when it creates
@@ -665,11 +697,18 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_persistence::{semaphores::{AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata}, semaphores_native::{InMemorySemaphorePersistenceBytes, SemaphoreBucketPageBytes, SemaphorePersistenceBytes}};
     use async_trait::async_trait;
+    use cadence_persistence::{
+        semaphores::{AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata},
+        semaphores_native::{
+            InMemorySemaphorePersistenceBytes, SemaphoreBucketPageBytes, SemaphorePersistenceBytes,
+        },
+    };
     use tokio::sync::Notify;
 
-    fn bytes(value: &[u8]) -> GoString { GoString::from(value.to_vec()) }
+    fn bytes(value: &[u8]) -> GoString {
+        GoString::from(value.to_vec())
+    }
 
     #[derive(Debug)]
     struct ParkGrant {
@@ -680,20 +719,91 @@ mod tests {
     }
     #[async_trait]
     impl SemaphorePersistenceBytes for ParkGrant {
-        async fn create_semaphore(&self, d: &GoString, n: &GoString, s: i32, b: i32) -> Result<SemaphoreMetadata, SemaphoreError> { self.inner.create_semaphore(d,n,s,b).await }
-        async fn get_semaphore_metadata(&self,d:&GoString,n:&GoString)->Result<SemaphoreMetadata,AcquireError>{ self.inner.get_semaphore_metadata(d,n).await }
-        async fn scan_semaphore_bucket(&self,d:&GoString,n:&GoString,b:i32,_p:usize,t:Option<&[u8]>)->Result<SemaphoreBucketPageBytes,AcquireError>{
-            self.scan_pages.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let all = self.inner.scan_semaphore_bucket(d,n,b,usize::MAX,None).await?;
-            let offset = t.and_then(|v| std::str::from_utf8(v).ok()).and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+        async fn create_semaphore(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            s: i32,
+            b: i32,
+        ) -> Result<SemaphoreMetadata, SemaphoreError> {
+            self.inner.create_semaphore(d, n, s, b).await
+        }
+        async fn get_semaphore_metadata(
+            &self,
+            d: &GoString,
+            n: &GoString,
+        ) -> Result<SemaphoreMetadata, AcquireError> {
+            self.inner.get_semaphore_metadata(d, n).await
+        }
+        async fn scan_semaphore_bucket(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            b: i32,
+            _p: usize,
+            t: Option<&[u8]>,
+        ) -> Result<SemaphoreBucketPageBytes, AcquireError> {
+            self.scan_pages
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let all = self
+                .inner
+                .scan_semaphore_bucket(d, n, b, usize::MAX, None)
+                .await?;
+            let offset = t
+                .and_then(|v| std::str::from_utf8(v).ok())
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0);
             let end = (offset + 1).min(all.rows.len());
             let next_page_token = (end < all.rows.len()).then(|| end.to_string().into_bytes());
-            Ok(SemaphoreBucketPageBytes { rows: all.rows.into_iter().skip(offset).take(1).collect(), next_page_token })
+            Ok(SemaphoreBucketPageBytes {
+                rows: all.rows.into_iter().skip(offset).take(1).collect(),
+                next_page_token,
+            })
         }
-        async fn get_semaphore_ownership_by_token(&self,d:&GoString,n:&GoString,b:i32,t:i32)->Result<GoString,AcquireError>{ self.inner.get_semaphore_ownership_by_token(d,n,b,t).await }
-        async fn get_semaphore_ownership_by_owner(&self,d:&GoString,n:&GoString,b:i32,o:&GoString)->Result<i32,AcquireError>{ self.inner.get_semaphore_ownership_by_owner(d,n,b,o).await }
-        async fn grant_semaphore_token(&self,d:&GoString,n:&GoString,b:i32,t:i32,o:&GoString)->Result<GrantOutcome,AcquireError>{ self.entered.notify_one(); self.release.notified().await; self.inner.grant_semaphore_token(d,n,b,t,o).await }
-        async fn release_semaphore_token(&self,d:&GoString,n:&GoString,b:i32,t:i32,o:&GoString)->Result<bool,AcquireError>{ self.inner.release_semaphore_token(d,n,b,t,o).await }
+        async fn get_semaphore_ownership_by_token(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            b: i32,
+            t: i32,
+        ) -> Result<GoString, AcquireError> {
+            self.inner
+                .get_semaphore_ownership_by_token(d, n, b, t)
+                .await
+        }
+        async fn get_semaphore_ownership_by_owner(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            b: i32,
+            o: &GoString,
+        ) -> Result<i32, AcquireError> {
+            self.inner
+                .get_semaphore_ownership_by_owner(d, n, b, o)
+                .await
+        }
+        async fn grant_semaphore_token(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            b: i32,
+            t: i32,
+            o: &GoString,
+        ) -> Result<GrantOutcome, AcquireError> {
+            self.entered.notify_one();
+            self.release.notified().await;
+            self.inner.grant_semaphore_token(d, n, b, t, o).await
+        }
+        async fn release_semaphore_token(
+            &self,
+            d: &GoString,
+            n: &GoString,
+            b: i32,
+            t: i32,
+            o: &GoString,
+        ) -> Result<bool, AcquireError> {
+            self.inner.release_semaphore_token(d, n, b, t, o).await
+        }
     }
 
     #[tokio::test]
@@ -702,12 +812,23 @@ mod tests {
         let domain = bytes(b"cancel-d");
         let name = bytes(b"cancel-s");
         inner.create_semaphore(&domain, &name, 3, 3).await.unwrap();
-        let store = Arc::new(ParkGrant { inner, entered: Notify::new(), release: Notify::new(), scan_pages: std::sync::atomic::AtomicUsize::new(0) });
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: std::sync::atomic::AtomicUsize::new(0),
+        });
         let registry = Registry::new(store.clone());
         let id = Identifier::new(domain.clone(), name.clone(), 0).unwrap();
         let manager = registry.get_or_create(id.clone()).await.unwrap();
-        assert!(store.scan_pages.load(std::sync::atomic::Ordering::SeqCst) > 1, "startup fixture must page across multiple rows");
-        let pending = { let manager = manager.clone(); tokio::spawn(async move { manager.acquire(&bytes(b"1:x:r:1"), None).await }) };
+        assert!(
+            store.scan_pages.load(std::sync::atomic::Ordering::SeqCst) > 1,
+            "startup fixture must page across multiple rows"
+        );
+        let pending = {
+            let manager = manager.clone();
+            tokio::spawn(async move { manager.acquire(&bytes(b"1:x:r:1"), None).await })
+        };
         store.entered.notified().await;
         pending.abort();
         let _ = pending.await;
@@ -715,10 +836,23 @@ mod tests {
         assert_eq!(manager.free_count(), 1);
         let result = manager.acquire(&bytes(b"1:y:r:2"), None).await.unwrap();
         assert_eq!(result.outcome, SemaphoreAcquireOutcome::Acquired);
-        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, result.token_id).await.unwrap(), bytes(b"1:y:r:2"));
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(&domain, &name, 0, result.token_id)
+                .await
+                .unwrap(),
+            bytes(b"1:y:r:2")
+        );
         manager.stop();
         let restarted = registry.get_or_create(id).await.unwrap();
-        assert_eq!(restarted.acquire(&bytes(b"1:y:r:2"), None).await.unwrap().token_id, result.token_id);
+        assert_eq!(
+            restarted
+                .acquire(&bytes(b"1:y:r:2"), None)
+                .await
+                .unwrap()
+                .token_id,
+            result.token_id
+        );
     }
 
     #[tokio::test]
@@ -730,21 +864,51 @@ mod tests {
         // Includes malformed UTF-8 bytes, a distinct U+FFFD spelling, and separator bytes.
         let owner = bytes(b"1:\xff:\xfe\xef\xbf\xbd:1");
         let registry = Registry::new(store.clone());
-        let manager = registry.get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap()).await.unwrap();
+        let manager = registry
+            .get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap())
+            .await
+            .unwrap();
         let first = manager.acquire(&owner, None).await.unwrap();
         assert_eq!(first.outcome, SemaphoreAcquireOutcome::Acquired);
         assert_eq!(manager.acquire(&owner, None).await.unwrap(), first);
-        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id).await.unwrap(), owner);
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id)
+                .await
+                .unwrap(),
+            owner
+        );
 
         let replacement = bytes("1:�:�:1".as_bytes());
-        assert!(!store.release_semaphore_token(&domain, &name, 0, first.token_id, &replacement).await.unwrap());
-        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id).await.unwrap(), owner);
-        assert!(store.release_semaphore_token(&domain, &name, 0, first.token_id, &owner).await.unwrap());
+        assert!(!store
+            .release_semaphore_token(&domain, &name, 0, first.token_id, &replacement)
+            .await
+            .unwrap());
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(&domain, &name, 0, first.token_id)
+                .await
+                .unwrap(),
+            owner
+        );
+        assert!(store
+            .release_semaphore_token(&domain, &name, 0, first.token_id, &owner)
+            .await
+            .unwrap());
         manager.stop();
-        let restarted = registry.get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap()).await.unwrap();
+        let restarted = registry
+            .get_or_create(Identifier::new(domain.clone(), name.clone(), 0).unwrap())
+            .await
+            .unwrap();
         let again = restarted.acquire(&owner, None).await.unwrap();
         assert_eq!(again.outcome, SemaphoreAcquireOutcome::Acquired);
-        assert_eq!(store.get_semaphore_ownership_by_token(&domain, &name, 0, again.token_id).await.unwrap(), owner);
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(&domain, &name, 0, again.token_id)
+                .await
+                .unwrap(),
+            owner
+        );
     }
 
     #[tokio::test]
@@ -755,17 +919,22 @@ mod tests {
         store.create_semaphore(&domain, &name, 3, 3).await.unwrap();
         // Seed a hold that startup must discover.
         let held_owner = bytes(b"1:w:r:9");
-        store.grant_semaphore_token(&domain, &name, 0, 2, &held_owner).await.unwrap();
+        store
+            .grant_semaphore_token(&domain, &name, 0, 2, &held_owner)
+            .await
+            .unwrap();
         let registry = Registry::new(store);
         let id = Identifier::new(domain, name, 0).unwrap();
         let old = registry.get_or_create(id.clone()).await.unwrap();
         assert_eq!(old.free_count(), 2);
         old.stop();
-        assert!(matches!(old.acquire(&bytes(b"1:x:r:1"), None).await, Err(ManagerError::NotReady)));
+        assert!(matches!(
+            old.acquire(&bytes(b"1:x:r:1"), None).await,
+            Err(ManagerError::NotReady)
+        ));
         let replacement = registry.get_or_create(id).await.unwrap();
         assert!(!Arc::ptr_eq(&old, &replacement));
         assert_eq!(replacement.free_count(), 2);
         assert!(registry.by_identifier(replacement.identifier()).is_some());
     }
 }
-

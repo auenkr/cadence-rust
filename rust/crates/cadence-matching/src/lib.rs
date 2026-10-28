@@ -55,10 +55,14 @@ pub mod matching_standby_native;
 // Injected client faults are tonic Status, like the forwarding call sites.
 mod matching_blocking;
 pub mod matching_config;
+#[allow(clippy::result_large_err)]
+pub mod matching_control_context_native;
 pub mod matching_domain_cache;
 pub mod matching_domain_uuid;
 #[cfg(test)]
 mod matching_dyncfg_defaults_tests;
+#[allow(clippy::result_large_err)]
+pub mod matching_engine_context_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_engine_native;
 pub mod matching_fatal;
@@ -68,6 +72,10 @@ pub mod matching_handler;
 #[allow(clippy::result_large_err)]
 pub mod matching_handler_native;
 pub mod matching_host_limiter;
+#[allow(clippy::result_large_err)]
+pub mod matching_host_native;
+#[allow(clippy::result_large_err)]
+pub mod matching_launch_native;
 pub mod matching_limiter;
 #[allow(clippy::result_large_err)]
 pub mod matching_membership;
@@ -95,27 +103,19 @@ pub mod matching_ringpop_provider;
 pub mod matching_runtime;
 #[allow(clippy::result_large_err)]
 pub mod matching_runtime_native;
-#[allow(clippy::result_large_err)]
-pub mod matching_service_native;
 pub mod matching_scaler;
 #[allow(clippy::result_large_err)]
 pub mod matching_scaler_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_scaler_runtime_native;
 pub mod matching_semaphore;
-pub mod matching_semaphore_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_semaphore_manager_native;
+pub mod matching_semaphore_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_semaphore_service_native;
 #[allow(clippy::result_large_err)]
-pub mod matching_control_context_native;
-#[allow(clippy::result_large_err)]
-pub mod matching_engine_context_native;
-#[allow(clippy::result_large_err)]
-pub mod matching_host_native;
-#[allow(clippy::result_large_err)]
-pub mod matching_launch_native;
+pub mod matching_service_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_shard_distributor;
 #[allow(clippy::result_large_err)]
@@ -124,11 +124,11 @@ pub mod matching_shard_processor;
 pub mod matching_shard_routing;
 pub mod matching_sync;
 pub mod matching_sync_native;
-#[allow(clippy::result_large_err)]
-mod matching_transport_native;
 pub mod matching_task_info_log;
 pub mod matching_task_store;
 pub mod matching_throttled_logger;
+#[allow(clippy::result_large_err)]
+mod matching_transport_native;
 #[allow(clippy::result_large_err)]
 pub mod matching_writer;
 #[allow(clippy::result_large_err)]

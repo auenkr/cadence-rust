@@ -470,7 +470,13 @@ pub enum ScalerObservation {
     },
     ScaleChange(bool),
     IsolationRebalance,
-    Group { group: GoString, before_assignable: bool, after_assignable: bool, before_count: i64, after_count: i64 },
+    Group {
+        group: GoString,
+        before_assignable: bool,
+        after_assignable: bool,
+        before_count: i64,
+        after_count: i64,
+    },
     PartitionDrained,
     UpdateRequested,
     UpdateFailed,
@@ -483,7 +489,11 @@ pub fn starter_with_metrics(
     describe_remote: DescribePartition,
     metrics: ScalerMetrics,
 ) -> NativeScalerStarter {
-    starter_with_metrics_provider(provider, describe_remote, Arc::new(move |_| metrics.clone()))
+    starter_with_metrics_provider(
+        provider,
+        describe_remote,
+        Arc::new(move |_| metrics.clone()),
+    )
 }
 
 pub fn starter_with_metrics_provider(
@@ -670,7 +680,11 @@ async fn run(
         )
         .max(0) as usize;
         let write_changed = target != current.write_partitions.len();
-        if write_changed { observe(ScalerObservation::ScaleChange(target > current.write_partitions.len())); }
+        if write_changed {
+            observe(ScalerObservation::ScaleChange(
+                target > current.write_partitions.len(),
+            ));
+        }
         let mut write = if write_changed {
             (0..target as i32)
                 .map(|id| {
@@ -687,7 +701,11 @@ async fn run(
         } else {
             current.write_partitions.clone()
         };
-        let before_assignable: HashMap<_, _> = balancer.groups.iter().map(|(g, s)| (g.clone(), s.assignable)).collect();
+        let before_assignable: HashMap<_, _> = balancer
+            .groups
+            .iter()
+            .map(|(g, s)| (g.clone(), s.assignable))
+            .collect();
         let before_counts = balancer.partitions_per_group(&write);
         let isolation_changed = if metrics.isolation_enabled {
             let (next, changed) =
@@ -698,9 +716,19 @@ async fn run(
             balancer.reset();
             false
         };
-        if isolation_changed { observe(ScalerObservation::IsolationRebalance); }
+        if isolation_changed {
+            observe(ScalerObservation::IsolationRebalance);
+        }
         let after_counts = balancer.partitions_per_group(&write);
-        let mut groups: Vec<_> = metrics.has_pollers_by_group.keys().chain(before_assignable.keys()).chain(balancer.groups.keys()).chain(before_counts.keys()).chain(after_counts.keys()).cloned().collect();
+        let mut groups: Vec<_> = metrics
+            .has_pollers_by_group
+            .keys()
+            .chain(before_assignable.keys())
+            .chain(balancer.groups.keys())
+            .chain(before_counts.keys())
+            .chain(after_counts.keys())
+            .cloned()
+            .collect();
         groups.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         groups.dedup();
         for group in groups {
@@ -737,13 +765,14 @@ async fn run(
             if entry.is_some_and(|p| p.read_only && p.empty) {
                 read.remove(&id);
                 read_changed = true;
-
             } else {
                 break;
             }
             id -= 1;
         }
-        if read_changed && read.len() < current.read_partitions.len() { observe(ScalerObservation::PartitionDrained); }
+        if read_changed && read.len() < current.read_partitions.len() {
+            observe(ScalerObservation::PartitionDrained);
+        }
         observe(ScalerObservation::Calculation {
             qps: metrics.total_qps,
             current_write_count: current.write_partitions.len(),

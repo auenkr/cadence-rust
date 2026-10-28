@@ -234,12 +234,19 @@ impl std::fmt::Debug for RateLimitedSemaphoreStoreBytes {
 }
 
 impl RateLimitedSemaphoreStoreBytes {
-    fn permit_acquire(&self, operation: &'static str, domain_id: &GoString) -> Result<(), AcquireError> {
+    fn permit_acquire(
+        &self,
+        operation: &'static str,
+        domain_id: &GoString,
+    ) -> Result<(), AcquireError> {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter
-                .record_rejection(operation, std::str::from_utf8(domain_id.as_bytes()).ok(), None);
+            self.limiter.record_rejection(
+                operation,
+                std::str::from_utf8(domain_id.as_bytes()).ok(),
+                None,
+            );
             Err(AcquireError::Throttled(REJECTED.into()))
         }
     }
@@ -251,8 +258,11 @@ impl RateLimitedSemaphoreStoreBytes {
         if self.limiter.allow() {
             Ok(())
         } else {
-            self.limiter
-                .record_rejection(operation, std::str::from_utf8(domain_id.as_bytes()).ok(), None);
+            self.limiter.record_rejection(
+                operation,
+                std::str::from_utf8(domain_id.as_bytes()).ok(),
+                None,
+            );
             Err(SemaphoreError::Throttled(REJECTED.into()))
         }
     }

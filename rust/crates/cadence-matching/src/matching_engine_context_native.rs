@@ -4,9 +4,12 @@
 //! real cancellation-map guard used by its RPC lifecycle.
 use crate::{
     handlers::AppState,
-    matching_domain_cache::MatchingDomainCache,
     matching_dispatch_native::{NativeFuture, NativeMatchingApi, NativePollObserver},
-    matching_engine_native::{DecisionAddContext, NativeControlContext, NativePollContext, NativePollRegistration, NativeQueryContext, NativeQueryParent},
+    matching_domain_cache::MatchingDomainCache,
+    matching_engine_native::{
+        DecisionAddContext, NativeControlContext, NativePollContext, NativePollRegistration,
+        NativeQueryContext, NativeQueryParent,
+    },
     matching_forward_native::RemoteNativeMatching,
     matching_membership::Membership,
     matching_registry_native::NativeQueueHandle,
@@ -17,25 +20,63 @@ use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
 use std::{sync::Arc, time::Duration};
 use tonic::Status;
 
-pub type PollRegistrar = Arc<dyn Fn(&GoString, &GoString, i32, &GoString) -> NativePollRegistration + Send + Sync>;
-pub type PollObserverFactory = Arc<dyn Fn(&GoString, &GoString, i32, i32, &GoString) -> Option<Arc<dyn NativePollObserver>> + Send + Sync>;
+pub type PollRegistrar =
+    Arc<dyn Fn(&GoString, &GoString, i32, &GoString) -> NativePollRegistration + Send + Sync>;
+pub type PollObserverFactory = Arc<
+    dyn Fn(&GoString, &GoString, i32, i32, &GoString) -> Option<Arc<dyn NativePollObserver>>
+        + Send
+        + Sync,
+>;
 
 /// Create observers with the live poll request's persistence kind and isolation group.
-pub fn metrics_poll_observer_factory(metrics: crate::matching_metrics::MatchingMetrics, cache: Arc<MatchingDomainCache>) -> PollObserverFactory {
-    metrics_poll_observer_factory_with_names(metrics, Arc::new(move |id| cache.get_domain_by_id(&id.to_string()).ok().map(|d| d.info.name)))
+pub fn metrics_poll_observer_factory(
+    metrics: crate::matching_metrics::MatchingMetrics,
+    cache: Arc<MatchingDomainCache>,
+) -> PollObserverFactory {
+    metrics_poll_observer_factory_with_names(
+        metrics,
+        Arc::new(move |id| {
+            cache
+                .get_domain_by_id(&id.to_string())
+                .ok()
+                .map(|d| d.info.name)
+        }),
+    )
 }
 
-fn metrics_poll_observer_factory_with_names(metrics: crate::matching_metrics::MatchingMetrics, names: Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>) -> PollObserverFactory {
-    Arc::new(move |domain, list, task_type, task_list_kind, isolation_group| {
-        let domain = domain.as_utf8().ok().and_then(|id| uuid::Uuid::parse_str(id).ok())
-            .and_then(|id| names(id)).filter(|n| !n.is_empty()).unwrap_or_else(|| "_unknown_".to_owned());
-        let context = crate::matching_metrics::PollMetricContext {
-            domain, task_list: String::from_utf8_lossy(list.as_bytes()).into_owned(), task_list_kind,
-            task_type: if task_type == 1 { "activity_task" } else { "decision_task" },
-            poller_isolation_group: String::from_utf8_lossy(isolation_group.as_bytes()).into_owned(),
-        };
-        Some(Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(metrics.clone(), context)) as Arc<dyn NativePollObserver>)
-    })
+fn metrics_poll_observer_factory_with_names(
+    metrics: crate::matching_metrics::MatchingMetrics,
+    names: Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>,
+) -> PollObserverFactory {
+    Arc::new(
+        move |domain, list, task_type, task_list_kind, isolation_group| {
+            let domain = domain
+                .as_utf8()
+                .ok()
+                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                .and_then(|id| names(id))
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| "_unknown_".to_owned());
+            let context = crate::matching_metrics::PollMetricContext {
+                domain,
+                task_list: String::from_utf8_lossy(list.as_bytes()).into_owned(),
+                task_list_kind,
+                task_type: if task_type == 1 {
+                    "activity_task"
+                } else {
+                    "decision_task"
+                },
+                poller_isolation_group: String::from_utf8_lossy(isolation_group.as_bytes())
+                    .into_owned(),
+            };
+            Some(
+                Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(
+                    metrics.clone(),
+                    context,
+                )) as Arc<dyn NativePollObserver>,
+            )
+        },
+    )
 }
 
 /// Native engine context assembled from the same state as the gRPC Matching
@@ -65,60 +106,120 @@ impl NativeMatchingEngineContext {
         register: PollRegistrar,
         observer: Option<PollObserverFactory>,
     ) -> Self {
-        Self { control, cache, domains: state.domains.clone(), cluster: state.current_cluster_name.clone(), overlay: state.admin.dynamic_config.clone(), membership, shard_router, routing_registry: None, register, observer }
+        Self {
+            control,
+            cache,
+            domains: state.domains.clone(),
+            cluster: state.current_cluster_name.clone(),
+            overlay: state.admin.dynamic_config.clone(),
+            membership,
+            shard_router,
+            routing_registry: None,
+            register,
+            observer,
+        }
     }
 
     /// Share the runtime's live router rather than freezing its startup value.
-    pub fn with_routing_registry(mut self, registry: crate::matching_registry_native::NativeQueueRegistry) -> Self {
-        if let Some(router) = self.shard_router.take() { registry.set_shard_router(router); }
+    pub fn with_routing_registry(
+        mut self,
+        registry: crate::matching_registry_native::NativeQueueRegistry,
+    ) -> Self {
+        if let Some(router) = self.shard_router.take() {
+            registry.set_shard_router(router);
+        }
         self.routing_registry = Some(registry);
         self
     }
     fn current_router(&self) -> Option<Arc<MatchingShardRouter>> {
-        self.routing_registry.as_ref().and_then(|registry| registry.shard_router()).or_else(|| self.shard_router.clone())
+        self.routing_registry
+            .as_ref()
+            .and_then(|registry| registry.shard_router())
+            .or_else(|| self.shard_router.clone())
     }
     fn active(&self, id: &GoString) -> bool {
-        std::str::from_utf8(id.as_bytes()).ok()
+        std::str::from_utf8(id.as_bytes())
+            .ok()
             .and_then(|id| self.domains.is_active_in(id, &self.cluster).ok())
             .unwrap_or(true)
     }
 
-    fn dynamic_duration(&self, key: &str, domain: &GoString, list: &GoString, kind: i32, default: i64) -> Duration {
+    fn dynamic_duration(
+        &self,
+        key: &str,
+        domain: &GoString,
+        list: &GoString,
+        kind: i32,
+        default: i64,
+    ) -> Duration {
         let overlay = self.state_overlay();
         let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
-        Duration::from_nanos(cadence_persistence::dynamic_config::task_list_duration_bytes(
-            config.property_values(key), domain_name.as_deref(), list.as_bytes(), kind, default,
-        ).max(0) as u64)
+        Duration::from_nanos(
+            cadence_persistence::dynamic_config::task_list_duration_bytes(
+                config.property_values(key),
+                domain_name.as_deref(),
+                list.as_bytes(),
+                kind,
+                default,
+            )
+            .max(0) as u64,
+        )
     }
 
-    fn dynamic_integer(&self, key: &str, domain: &GoString, list: &GoString, kind: i32, default: i64) -> i64 {
+    fn dynamic_integer(
+        &self,
+        key: &str,
+        domain: &GoString,
+        list: &GoString,
+        kind: i32,
+        default: i64,
+    ) -> i64 {
         let overlay = self.state_overlay();
         let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
         cadence_persistence::dynamic_config::task_list_integer_bytes(
-            config.property_values(key), domain_name.as_deref(), list.as_bytes(), kind, default,
+            config.property_values(key),
+            domain_name.as_deref(),
+            list.as_bytes(),
+            kind,
+            default,
         )
     }
 
-    fn dynamic_boolean(&self, key: &str, domain: &GoString, list: &GoString, kind: i32, default: bool) -> bool {
+    fn dynamic_boolean(
+        &self,
+        key: &str,
+        domain: &GoString,
+        list: &GoString,
+        kind: i32,
+        default: bool,
+    ) -> bool {
         let overlay = self.state_overlay();
         let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
         cadence_persistence::dynamic_config::task_list_boolean_bytes(
-            config.property_values(key), domain_name.as_deref(), list.as_bytes(), kind, default,
+            config.property_values(key),
+            domain_name.as_deref(),
+            list.as_bytes(),
+            kind,
+            default,
         )
     }
 
     fn cached_domain_name(&self, id: &GoString) -> Option<String> {
         let id = std::str::from_utf8(id.as_bytes()).ok()?;
         let uuid = uuid::Uuid::parse_str(id).ok()?;
-        self.cache.get_domain_by_id(&uuid.to_string()).ok().map(|domain| domain.info.name)
+        self.cache
+            .get_domain_by_id(&uuid.to_string())
+            .ok()
+            .map(|domain| domain.info.name)
     }
 
-    fn state_overlay(&self) -> Arc<std::sync::Mutex<crate::admin::DynamicConfigOverlay>> { self.overlay.clone() }
+    fn state_overlay(&self) -> Arc<std::sync::Mutex<crate::admin::DynamicConfigOverlay>> {
+        self.overlay.clone()
+    }
 }
-
 
 impl DecisionAddContext for NativeMatchingEngineContext {
     fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status> {
@@ -126,77 +227,189 @@ impl DecisionAddContext for NativeMatchingEngineContext {
         Ok(self.active(&id))
     }
     fn forward_degree(&self, domain: uuid::Uuid, root: &GoString, task_type: i32) -> i64 {
-        self.dynamic_integer("matching.forwarderMaxChildrenPerNode", &GoString::from(domain.to_string()), root, task_type, 20).max(1)
+        self.dynamic_integer(
+            "matching.forwarderMaxChildrenPerNode",
+            &GoString::from(domain.to_string()),
+            root,
+            task_type,
+            20,
+        )
+        .max(1)
     }
-    fn check_write_partition(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> { self.control.check_queue(key, queue) }
-    fn remote_parent(&self, name: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
+    fn check_write_partition(
+        &self,
+        key: &TaskListKeyBytes,
+        queue: &NativeQueueHandle,
+    ) -> Result<(), Status> {
+        self.control.check_queue(key, queue)
+    }
+    fn remote_parent(
+        &self,
+        name: GoString,
+    ) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
         let router = self.current_router();
         let membership = self.membership.clone();
         Box::pin(async move {
             let channel = if let Some(router) = router {
-                router.remote_channel_bytes(name.as_bytes()).await.map(|(channel, _)| channel).map_err(|error| Status::unavailable(error.to_string()))?
-            } else { membership.remote_channel_bytes(name.as_bytes())? };
-            Ok(channel.map(|channel| Arc::new(RemoteNativeMatching(channel)) as Arc<dyn NativeMatchingApi>))
+                router
+                    .remote_channel_bytes(name.as_bytes())
+                    .await
+                    .map(|(channel, _)| channel)
+                    .map_err(|error| Status::unavailable(error.to_string()))?
+            } else {
+                membership.remote_channel_bytes(name.as_bytes())?
+            };
+            Ok(channel.map(|channel| {
+                Arc::new(RemoteNativeMatching(channel)) as Arc<dyn NativeMatchingApi>
+            }))
         })
     }
 }
 
 impl NativePollContext for NativeMatchingEngineContext {
-    fn domain_name(&self, id: &GoString) -> Result<GoString, Status> { self.control.domain_name(id) }
-    fn domain_active(&self, id: &GoString) -> Result<bool, Status> { Ok(self.active(id)) }
-    fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> { self.control.check_queue(key, queue) }
-    fn register_poll(&self, domain: &GoString, list: &GoString, task_type: i32, poller: &GoString) -> NativePollRegistration { (self.register)(domain, list, task_type, poller) }
+    fn domain_name(&self, id: &GoString) -> Result<GoString, Status> {
+        self.control.domain_name(id)
+    }
+    fn domain_active(&self, id: &GoString) -> Result<bool, Status> {
+        Ok(self.active(id))
+    }
+    fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> {
+        self.control.check_queue(key, queue)
+    }
+    fn register_poll(
+        &self,
+        domain: &GoString,
+        list: &GoString,
+        task_type: i32,
+        poller: &GoString,
+    ) -> NativePollRegistration {
+        (self.register)(domain, list, task_type, poller)
+    }
     fn failover(&self, domain: &GoString) -> NativeFuture<()> {
-        let Ok(raw) = std::str::from_utf8(domain.as_bytes()) else { return Box::pin(std::future::pending()) };
+        let Ok(raw) = std::str::from_utf8(domain.as_bytes()) else {
+            return Box::pin(std::future::pending());
+        };
         let raw = raw.to_owned();
         let mut subscription = self.domains.subscribe_failover(&raw);
-        Box::pin(async move { let _ = subscription.changed().await; })
+        Box::pin(async move {
+            let _ = subscription.changed().await;
+        })
     }
     fn expiration(&self, domain: &GoString, list: &GoString, task_type: i32) -> Duration {
-        self.dynamic_duration("matching.longPollExpirationInterval", domain, list, task_type, 60_000_000_000)
+        self.dynamic_duration(
+            "matching.longPollExpirationInterval",
+            domain,
+            list,
+            task_type,
+            60_000_000_000,
+        )
     }
     fn override_rate(&self, domain: &GoString, list: &GoString, task_type: i32) -> f64 {
         let config = self.overlay.lock().expect("admin lock");
-        cadence_persistence::dynamic_config::task_list_float_bytes(config.property_values("matching.overrideTaskListRps"), self.cached_domain_name(domain).as_deref(), list.as_bytes(), task_type, 0.0)
+        cadence_persistence::dynamic_config::task_list_float_bytes(
+            config.property_values("matching.overrideTaskListRps"),
+            self.cached_domain_name(domain).as_deref(),
+            list.as_bytes(),
+            task_type,
+            0.0,
+        )
     }
-    fn auto_config_enabled(&self, domain: &GoString, list: &GoString, task_type: i32) -> bool { self.dynamic_boolean("matching.enableClientAutoConfig", domain, list, task_type, false) }
-    fn observer_with_context(&self, domain: &GoString, list: &GoString, task_type: i32, task_list_kind: i32, isolation_group: &GoString) -> Option<Arc<dyn NativePollObserver>> { self.observer.as_ref().and_then(|factory| factory(domain, list, task_type, task_list_kind, isolation_group)) }
+    fn auto_config_enabled(&self, domain: &GoString, list: &GoString, task_type: i32) -> bool {
+        self.dynamic_boolean(
+            "matching.enableClientAutoConfig",
+            domain,
+            list,
+            task_type,
+            false,
+        )
+    }
+    fn observer_with_context(
+        &self,
+        domain: &GoString,
+        list: &GoString,
+        task_type: i32,
+        task_list_kind: i32,
+        isolation_group: &GoString,
+    ) -> Option<Arc<dyn NativePollObserver>> {
+        self.observer
+            .as_ref()
+            .and_then(|factory| factory(domain, list, task_type, task_list_kind, isolation_group))
+    }
 }
 
 impl NativeQueryContext for NativeMatchingEngineContext {
-    fn domain_name(&self, id: &GoString) -> Result<GoString, Status> { self.control.domain_name(id) }
-    fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> { self.control.check_queue(key, queue) }
-    fn forward_degree(&self, domain: uuid::Uuid, root: &GoString) -> i64 { self.dynamic_integer("matching.forwarderMaxChildrenPerNode", &GoString::from(domain.to_string()), root, 0, 20).max(1) }
-    fn remote_parent(&self, name: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> {
+    fn domain_name(&self, id: &GoString) -> Result<GoString, Status> {
+        self.control.domain_name(id)
+    }
+    fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> {
+        self.control.check_queue(key, queue)
+    }
+    fn forward_degree(&self, domain: uuid::Uuid, root: &GoString) -> i64 {
+        self.dynamic_integer(
+            "matching.forwarderMaxChildrenPerNode",
+            &GoString::from(domain.to_string()),
+            root,
+            0,
+            20,
+        )
+        .max(1)
+    }
+    fn remote_parent(
+        &self,
+        name: GoString,
+    ) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> {
         let router = self.current_router();
         let membership = self.membership.clone();
         Box::pin(async move {
             let channel = if let Some(router) = router {
-                router.remote_channel_bytes(name.as_bytes()).await.map(|(channel, _)| channel).map_err(|error| Status::unavailable(error.to_string()))?
-            } else { membership.remote_channel_bytes(name.as_bytes())? };
-            Ok(channel.map(|channel| Arc::new(RemoteNativeMatching(channel)) as Arc<dyn NativeQueryParent>))
+                router
+                    .remote_channel_bytes(name.as_bytes())
+                    .await
+                    .map(|(channel, _)| channel)
+                    .map_err(|error| Status::unavailable(error.to_string()))?
+            } else {
+                membership.remote_channel_bytes(name.as_bytes())?
+            };
+            Ok(channel.map(|channel| {
+                Arc::new(RemoteNativeMatching(channel)) as Arc<dyn NativeQueryParent>
+            }))
         })
     }
-    fn default_deadline(&self) -> tokio::time::Instant { tokio::time::Instant::now() + Duration::from_secs(10) }
+    fn default_deadline(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now() + Duration::from_secs(10)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
     use super::*;
+    use cadence_api::admin::{DynamicConfigFilter, DynamicConfigValue};
 
     #[test]
     fn poll_observers_keep_normal_and_sticky_tags_distinct() {
         use crate::matching_metrics::{MatchingMetrics, RecordingMetricSink, POLL_SUCCESS};
         let sink = Arc::new(RecordingMetricSink::default());
-        let factory = metrics_poll_observer_factory_with_names(MatchingMetrics::new(sink.clone()), Arc::new(|_| Some("domain-a".into())));
+        let factory = metrics_poll_observer_factory_with_names(
+            MatchingMetrics::new(sink.clone()),
+            Arc::new(|_| Some("domain-a".into())),
+        );
         let domain = GoString::from(uuid::Uuid::nil().to_string());
         for (list, kind, group) in [("normal-list", 0, "group-a"), ("sticky-list", 1, "group-b")] {
-            factory(&domain, &GoString::from(list), 0, kind, &GoString::from(group)).unwrap().poll_success(false);
+            factory(
+                &domain,
+                &GoString::from(list),
+                0,
+                kind,
+                &GoString::from(group),
+            )
+            .unwrap()
+            .poll_success(false);
         }
         let events = sink.events();
         for list in ["normal-list", "__sticky__"] {
-            assert!(events.iter().any(|e| e.name == POLL_SUCCESS && e.tags.get("tasklist").is_some_and(|v| v == list) && e.tags.get("domain").is_some_and(|v| v == "domain-a")));
+            assert!(events.iter().any(|e| e.name == POLL_SUCCESS
+                && e.tags.get("tasklist").is_some_and(|v| v == list)
+                && e.tags.get("domain").is_some_and(|v| v == "domain-a")));
         }
     }
 
@@ -204,17 +417,38 @@ mod tests {
     fn task_list_config_filter_keeps_invalid_utf8_distinct() {
         let configured = DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
-                encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: b"17".to_vec(),
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: b"17".to_vec(),
             }),
             filters: vec![DynamicConfigFilter {
                 name: "taskListName".into(),
                 value: Some(cadence_api::types::DataBlob {
-                    encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: br#""\ufffd""#.to_vec(),
+                    encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                    data: br#""\ufffd""#.to_vec(),
                 }),
             }],
         };
-        let values = cadence_persistence::dynamic_config::PropertyValues::snapshot(vec![configured]);
-        assert_eq!(cadence_persistence::dynamic_config::task_list_integer_bytes(values.clone(), None, b"\xff", 0, 1), 1);
-        assert_eq!(cadence_persistence::dynamic_config::task_list_integer_bytes(values, None, "\u{fffd}".as_bytes(), 0, 1), 17);
+        let values =
+            cadence_persistence::dynamic_config::PropertyValues::snapshot(vec![configured]);
+        assert_eq!(
+            cadence_persistence::dynamic_config::task_list_integer_bytes(
+                values.clone(),
+                None,
+                b"\xff",
+                0,
+                1
+            ),
+            1
+        );
+        assert_eq!(
+            cadence_persistence::dynamic_config::task_list_integer_bytes(
+                values,
+                None,
+                "\u{fffd}".as_bytes(),
+                0,
+                1
+            ),
+            17
+        );
     }
 }

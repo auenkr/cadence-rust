@@ -27,7 +27,8 @@ use crate::{
 /// Inputs already opened and limited by the configured production launcher.
 /// Both stores must use the same persistence limiter as the domain cache.
 pub struct ConfiguredNativeAssembly {
-    pub task_store: Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
+    pub task_store:
+        Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
     pub semaphore_store: Arc<dyn SemaphorePersistenceBytes>,
     pub history: crate::matching_history::MatchingHistoryClient,
     pub cache: Arc<MatchingDomainCache>,
@@ -56,15 +57,30 @@ pub async fn assemble_configured(
         crate::matching_fatal::native_fatal_sinks(deps.fatal),
     );
     let (registry, slot) = crate::matching_runtime_native::attach_live_native_registry(
-        registry, &state, deps.cache.clone(), deps.membership.clone(), None,
+        registry,
+        &state,
+        deps.cache.clone(),
+        deps.membership.clone(),
+        None,
         deps.metrics.clone(),
     );
     let timeout_metric = semaphore_timeout_metric(deps.cache.clone(), deps.metrics.clone());
     assemble(
-        state, deps.cache, registry, deps.semaphore_store, deps.membership,
-        None, deps.quota, deps.domain_parse, deps.drain, deps.metrics,
-        timeout_metric, Some(deps.poll_observer), Some(slot),
-    ).await
+        state,
+        deps.cache,
+        registry,
+        deps.semaphore_store,
+        deps.membership,
+        None,
+        deps.quota,
+        deps.domain_parse,
+        deps.drain,
+        deps.metrics,
+        timeout_metric,
+        Some(deps.poll_observer),
+        Some(slot),
+    )
+    .await
 }
 
 fn semaphore_timeout_metric(
@@ -72,13 +88,16 @@ fn semaphore_timeout_metric(
     metrics: crate::matching_metrics::MatchingMetrics,
 ) -> ContextTimeoutMetric {
     Arc::new(move |domain, semaphore, metadata| {
-        let name = domain.as_utf8().ok()
+        let name = domain
+            .as_utf8()
+            .ok()
             .and_then(|id| uuid::Uuid::parse_str(id).ok())
             .and_then(|id| cache.get_domain_by_id(&id.to_string()).ok())
             .map(|domain| domain.info.name);
         let semaphore = String::from_utf8_lossy(semaphore.as_bytes());
         metrics.semaphore_context_timeout(
-            name.as_deref(), &semaphore,
+            name.as_deref(),
+            &semaphore,
             Some(crate::matching_metrics::MatchingMetrics::context_from_metadata(metadata, "grpc")),
         );
     })
@@ -113,7 +132,8 @@ pub async fn assemble(
                 .map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
             let id = uuid::Uuid::parse_str(raw)
                 .map_err(|error| Status::invalid_argument(error.to_string()))?;
-            let domain = cache.get_domain_by_id(&id.to_string())
+            let domain = cache
+                .get_domain_by_id(&id.to_string())
                 .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
             Ok(GoString::from(domain.info.name))
         })
@@ -125,20 +145,35 @@ pub async fn assemble(
         let overlay = overlay.lock().expect("admin lock");
         (
             cadence_persistence::dynamic_config::boolean(
-                overlay.property_values("system.enableDistributedSemaphore"), Some(name), false,
+                overlay.property_values("system.enableDistributedSemaphore"),
+                Some(name),
+                false,
             ),
             crate::matching_config::semaphore_idle_time(
-                overlay.property_values("matching.semaphoreIdleTime"), name,
+                overlay.property_values("matching.semaphoreIdleTime"),
+                name,
             ),
         )
     });
     let semaphore = NativeSemaphoreService::new(
-        Registry::new(semaphore_store), membership.clone(), domain_name, config,
-        Arc::new(move || shutdown_handle.is_shutting_down()), timeout_metric,
+        Registry::new(semaphore_store),
+        membership.clone(),
+        domain_name,
+        config,
+        Arc::new(move || shutdown_handle.is_shutting_down()),
+        timeout_metric,
     );
     let host = Arc::new(NativeMatchingHost::assemble(
-        state, cache, registry.clone(), membership.clone(), shard_router, quota,
-        domain_parse, semaphore.callback(), metrics, observer,
+        state,
+        cache,
+        registry.clone(),
+        membership.clone(),
+        shard_router,
+        quota,
+        domain_parse,
+        semaphore.callback(),
+        metrics,
+        observer,
     ));
     if let Some(slot) = slot {
         let service: Arc<dyn cadence_proto::native::NativeMatchingApi> = host.clone();
@@ -149,16 +184,38 @@ pub async fn assemble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
+    use std::time::Duration;
 
     struct EmptySource;
     impl crate::matching_domain_cache::DomainMetadataSource for EmptySource {
-        fn metadata_version(&self, _: Duration) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> { Ok(0) }
-        fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
-            Ok(crate::matching_domain_cache::DomainMetadataPage { domains: vec![], next_page_token: None })
+        fn metadata_version(
+            &self,
+            _: Duration,
+        ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
+            Ok(0)
         }
-        fn get_domain(&self, _: Option<&str>, _: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
+        fn list_domains(
+            &self,
+            _: usize,
+            _: Option<&[u8]>,
+            _: Duration,
+        ) -> Result<
+            crate::matching_domain_cache::DomainMetadataPage,
+            crate::matching_domain_cache::DomainMetadataSourceError,
+        > {
+            Ok(crate::matching_domain_cache::DomainMetadataPage {
+                domains: vec![],
+                next_page_token: None,
+            })
+        }
+        fn get_domain(
+            &self,
+            _: Option<&str>,
+            _: Option<&str>,
+            _: Duration,
+        ) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError>
+        {
             Err(crate::matching_domain_cache::DomainMetadataSourceError::permanent("missing"))
         }
     }
@@ -166,13 +223,20 @@ mod tests {
     #[tokio::test]
     async fn configured_service_gates_admission_and_stops() {
         let directory = tempfile::tempdir().unwrap();
-        let store = Arc::new(cadence_persistence::matching_sqlite::SqliteTaskStore::create(
-            directory.path().join("native.db"), cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
-        ).unwrap());
+        let store = Arc::new(
+            cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                directory.path().join("native.db"),
+                cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
+        );
         let state = AppState::default();
         let cache = Arc::new(MatchingDomainCache::new(Arc::new(EmptySource)));
         let metrics = crate::matching_metrics::MatchingMetrics::default();
-        let quota = Arc::new(MatchingRpcQuota::with_metric_sink(state.admin.dynamic_config.clone(), Arc::new(|_| {})));
+        let quota = Arc::new(MatchingRpcQuota::with_metric_sink(
+            state.admin.dynamic_config.clone(),
+            Arc::new(|_| {}),
+        ));
         let (fatal, _fatal_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut runtime = assemble_configured(state, ConfiguredNativeAssembly {
             task_store: store,
@@ -190,13 +254,30 @@ mod tests {
             metrics,
         }).await.unwrap();
         let service = runtime.matching().native_service().unwrap().clone();
-        let request = || tonic::Request::new(cadence_proto::native::matching::GetTaskListsByDomainRequest::default());
-        assert!(tokio::time::timeout(Duration::from_millis(20), service.get_task_lists_by_domain(request())).await.is_err());
+        let request = || {
+            tonic::Request::new(
+                cadence_proto::native::matching::GetTaskListsByDomainRequest::default(),
+            )
+        };
+        assert!(tokio::time::timeout(
+            Duration::from_millis(20),
+            service.get_task_lists_by_domain(request())
+        )
+        .await
+        .is_err());
         runtime.mark_started();
-        let result = tokio::time::timeout(Duration::from_secs(1), service.get_task_lists_by_domain(request())).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            service.get_task_lists_by_domain(request()),
+        )
+        .await
+        .unwrap();
         assert!(result.is_err()); // Missing domain proves the request passed startup and quota admission.
         runtime.shutdown().await.unwrap();
-        let error = service.get_task_lists_by_domain(request()).await.unwrap_err();
+        let error = service
+            .get_task_lists_by_domain(request())
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unavailable);
     }
 }

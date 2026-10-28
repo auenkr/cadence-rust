@@ -49,12 +49,17 @@ impl GoString {
         let mut rest = self.as_bytes();
         while !rest.is_empty() {
             match std::str::from_utf8(rest) {
-                Ok(text) => { push_quoted_text(&mut out, text); break; }
+                Ok(text) => {
+                    push_quoted_text(&mut out, text);
+                    break;
+                }
                 Err(error) => {
                     let (valid, tail) = rest.split_at(error.valid_up_to());
                     push_quoted_text(&mut out, std::str::from_utf8(valid).unwrap());
                     let invalid = error.error_len().unwrap_or(tail.len());
-                    for byte in &tail[..invalid] { out.push_str(&format!("\\x{byte:02x}")); }
+                    for byte in &tail[..invalid] {
+                        out.push_str(&format!("\\x{byte:02x}"));
+                    }
                     rest = &tail[invalid..];
                 }
             }
@@ -115,9 +120,13 @@ fn push_quoted_text(out: &mut String, text: &str) {
             '"' => out.push_str("\\\""),
             c if !go_is_print(c) => {
                 let value = c as u32;
-                if value < 0x20 || value == 0x7f { out.push_str(&format!("\\x{value:02x}")); }
-                else if value < 0x10000 { out.push_str(&format!("\\u{value:04x}")); }
-                else { out.push_str(&format!("\\U{value:08x}")); }
+                if value < 0x20 || value == 0x7f {
+                    out.push_str(&format!("\\x{value:02x}"));
+                } else if value < 0x10000 {
+                    out.push_str(&format!("\\u{value:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{value:08x}"));
+                }
             }
             c => out.push(c),
         }
@@ -133,7 +142,11 @@ fn go_is_print(ch: char) -> bool {
     if value < 0x10000 {
         in_ranges(PRINT16, value) && NOT_PRINT16.binary_search(&(value as u16)).is_err()
     } else {
-        in_ranges(PRINT32, value) && (value >= 0x20000 || NOT_PRINT32.binary_search(&((value - 0x10000) as u16)).is_err())
+        in_ranges(PRINT32, value)
+            && (value >= 0x20000
+                || NOT_PRINT32
+                    .binary_search(&((value - 0x10000) as u16))
+                    .is_err())
     }
 }
 
@@ -210,10 +223,18 @@ mod tests {
 
     #[test]
     fn go_quotes_preserve_invalid_bytes_and_go_printable_ranges() {
-        assert_eq!(GoString::from(&b"\xff\xe2\x82\0\n\"\\"[..]).go_quoted_string(),
-            "\"\\xff\\xe2\\x82\\x00\\n\\\"\\\\\"");
-        assert_eq!(GoString::from("�\u{037a}\u{09d7}").go_quoted_string(), "\"�\u{037a}\u{09d7}\"");
-        assert_eq!(GoString::from("\u{0085}\u{0378}").go_quoted_string(), "\"\\u0085\\u0378\"");
+        assert_eq!(
+            GoString::from(&b"\xff\xe2\x82\0\n\"\\"[..]).go_quoted_string(),
+            "\"\\xff\\xe2\\x82\\x00\\n\\\"\\\\\""
+        );
+        assert_eq!(
+            GoString::from("�\u{037a}\u{09d7}").go_quoted_string(),
+            "\"�\u{037a}\u{09d7}\""
+        );
+        assert_eq!(
+            GoString::from("\u{0085}\u{0378}").go_quoted_string(),
+            "\"\\u0085\\u0378\""
+        );
     }
 
     fn check_json(bytes: &[u8], expected: &str) {

@@ -71,7 +71,8 @@ pub trait NativePollObserver: Send + Sync {
         _task_forwarded: bool,
         _poll_forwarded: bool,
         _partition: Option<&std::collections::BTreeMap<GoString, GoString>>,
-    ) {}
+    ) {
+    }
     fn async_match_latency(&self, _latency: Duration) {}
     fn poll_already_started(&self) {}
     fn poll_timeout(&self) {}
@@ -1358,7 +1359,11 @@ impl NativeTaskDispatcher {
                 let poll_forwarded = lifecycle.as_ref().is_some_and(|l| l.forwarded);
                 observer.poll_success(task.sync.is_some());
                 observer.poll_match_latency(poll_started.elapsed(), poll_forwarded, forward_failed);
-                observer.poll_match(task.forwarded, poll_forwarded, task.task.data.partition_config.as_ref());
+                observer.poll_match(
+                    task.forwarded,
+                    poll_forwarded,
+                    task.task.data.partition_config.as_ref(),
+                );
                 if task.sync.is_none() {
                     observer.async_match_latency(Duration::from_nanos(
                         (now().saturating_sub(task.task.data.created_nanos)).max(0) as u64,

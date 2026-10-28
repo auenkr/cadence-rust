@@ -104,10 +104,14 @@ impl crate::matching_engine_native::NativeQueryParent for InProcessNativeMatchin
         &self,
         request: n::matching::QueryWorkflowRequest,
         deadline: tokio::time::Instant,
-    ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+    ) -> NativeFuture<
+        Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>,
+    > {
         let service = self.0.clone();
         Box::pin(async move {
-            service.query_workflow(timed(request, deadline)).await
+            service
+                .query_workflow(timed(request, deadline))
+                .await
                 .map(tonic::Response::into_inner)
                 .map_err(crate::matching_query_native::NativeQueryError::Status)
         })
@@ -119,10 +123,14 @@ impl crate::matching_engine_native::NativeQueryParent for RemoteNativeMatching {
         &self,
         request: n::matching::QueryWorkflowRequest,
         deadline: tokio::time::Instant,
-    ) -> NativeFuture<Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>> {
+    ) -> NativeFuture<
+        Result<n::matching::QueryWorkflowResponse, crate::matching_query_native::NativeQueryError>,
+    > {
         let channel = self.0.clone();
         Box::pin(async move {
-            MatchingApiClient::new(channel).query_workflow(remote(request, deadline)).await
+            MatchingApiClient::new(channel)
+                .query_workflow(remote(request, deadline))
+                .await
                 .map(tonic::Response::into_inner)
                 .map_err(crate::matching_query_native::NativeQueryError::Status)
         })
@@ -363,22 +371,38 @@ mod tests {
 
             let query = m::QueryWorkflowRequest {
                 domain_id: vec![0xff].into(),
-                task_list: Some(api::TaskList { name: vec![0xfe].into(), ..Default::default() }),
+                task_list: Some(api::TaskList {
+                    name: vec![0xfe].into(),
+                    ..Default::default()
+                }),
                 forwarded_from: vec![0xfd, 0].into(),
                 request: Some(api::QueryWorkflowRequest {
                     workflow_execution: Some(api::WorkflowExecution {
-                        workflow_id: vec![0xff, 0].into(), run_id: vec![0xfe].into(),
+                        workflow_id: vec![0xff, 0].into(),
+                        run_id: vec![0xfe].into(),
                     }),
                     ..Default::default()
                 }),
             };
             let reply = crate::matching_engine_native::NativeQueryParent::query_workflow(
-                &adapter, query.clone(), deadline()).await.unwrap();
+                &adapter,
+                query.clone(),
+                deadline(),
+            )
+            .await
+            .unwrap();
             assert_eq!(peer.queried.lock().unwrap().as_ref(), Some(&query));
             assert_eq!(reply.query_result.unwrap().data, vec![0xff, 0xfe]);
             let busy = crate::matching_engine_native::NativeQueryParent::query_workflow(
-                &adapter, m::QueryWorkflowRequest { forwarded_from: "busy".into(), ..Default::default() },
-                deadline()).await.unwrap_err();
+                &adapter,
+                m::QueryWorkflowRequest {
+                    forwarded_from: "busy".into(),
+                    ..Default::default()
+                },
+                deadline(),
+            )
+            .await
+            .unwrap_err();
             let crate::matching_query_native::NativeQueryError::Status(busy) = busy else {
                 panic!("remote typed status must remain a status")
             };

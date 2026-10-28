@@ -155,8 +155,12 @@ struct OfferGuard<'a> {
 
 impl Drop for OfferGuard<'_> {
     fn drop(&mut self) {
-        self.channel.pending.lock().expect("matching query lock")
-            .offers.retain(|(id, _, _)| *id != self.id);
+        self.channel
+            .pending
+            .lock()
+            .expect("matching query lock")
+            .offers
+            .retain(|(id, _, _)| *id != self.id);
     }
 }
 
@@ -260,7 +264,9 @@ impl QueryChannel {
             if entries.get(task_id).is_some_and(|(g, _)| *g > generation) {
                 return (generation, receiver);
             }
-            self.waiting.lock().expect("matching query lock")
+            self.waiting
+                .lock()
+                .expect("matching query lock")
                 .insert(task_id.clone(), (generation, sender));
             entries.insert(task_id.clone(), (generation, self.clone()));
         } else {
@@ -413,8 +419,6 @@ impl QueryChannel {
             None => Err(not_found()),
         }
     }
-
-
 }
 
 fn supports_sticky_query(client_impl: &[u8], feature_version: &[u8]) -> bool {
@@ -628,7 +632,10 @@ mod tests {
             std::task::Poll::Pending => panic!("published offer must wake waiting poll"),
         };
         assert_eq!(delivered.task_id.as_bytes(), b"q-\xff");
-        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Matched)));
+        assert!(matches!(
+            poll(offer.as_mut()),
+            std::task::Poll::Ready(OfferResult::Matched)
+        ));
     }
 
     #[test]
@@ -651,7 +658,10 @@ mod tests {
             _ => panic!("query branch precedes simultaneously ready backlog"),
         };
         assert_eq!(selected.task_id.as_bytes(), b"query");
-        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Matched)));
+        assert!(matches!(
+            poll(offer.as_mut()),
+            std::task::Poll::Ready(OfferResult::Matched)
+        ));
     }
 
     #[test]
@@ -665,7 +675,10 @@ mod tests {
         ));
         assert!(poll(offer.as_mut()).is_pending());
         drop(next);
-        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Forward(()))));
+        assert!(matches!(
+            poll(offer.as_mut()),
+            std::task::Poll::Ready(OfferResult::Forward(()))
+        ));
         drop(offer);
         assert!(channel.pending.lock().unwrap().offers.is_empty());
     }
@@ -680,14 +693,20 @@ mod tests {
                 _backlog = std::future::ready(()) => None,
             }
         });
-        assert!(matches!(poll(poll_race.as_mut()), std::task::Poll::Ready(None)));
+        assert!(matches!(
+            poll(poll_race.as_mut()),
+            std::task::Poll::Ready(None)
+        ));
         // Dropping the losing `next` future withdraws its waiter registration.
         drop(poll_race);
         let mut offer = Box::pin(channel.offer_or_forward(
             query(GoString::from(&b"forward-after-backlog"[..])),
             std::future::ready(()),
         ));
-        assert!(matches!(poll(offer.as_mut()), std::task::Poll::Ready(OfferResult::Forward(()))));
+        assert!(matches!(
+            poll(offer.as_mut()),
+            std::task::Poll::Ready(OfferResult::Forward(()))
+        ));
     }
 
     #[tokio::test]
@@ -698,11 +717,18 @@ mod tests {
         let (_old, old_guard) = channel.register_guarded(&id);
         let (receiver, new_guard) = channel.register_guarded(&id);
         drop(old_guard);
-        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        let mut offer =
+            Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
         drop(offer);
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), channel.next()).await.is_err());
-        index.deliver(&id, QueryOutcome::Internal(Status::internal("new"))).unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), channel.next())
+                .await
+                .is_err()
+        );
+        index
+            .deliver(&id, QueryOutcome::Internal(Status::internal("new")))
+            .unwrap();
         assert!(receiver.await.is_ok());
         drop(new_guard);
     }
@@ -745,16 +771,32 @@ mod tests {
         let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), permit_rx));
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
         permit_tx.send(()).unwrap();
-        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Forward(Ok(()))));
-        assert!(tokio::time::timeout(Duration::from_millis(50), channel.next()).await.is_err());
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), offer)
+                .await
+                .unwrap(),
+            OfferResult::Forward(Ok(()))
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), channel.next())
+                .await
+                .is_err()
+        );
 
         let (permit_tx, permit_rx) = oneshot::channel::<()>();
         let mut offer = Box::pin(channel.offer_or_forward(query(other.clone()), permit_rx));
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
-        let received = tokio::time::timeout(Duration::from_secs(1), channel.next()).await.unwrap();
+        let received = tokio::time::timeout(Duration::from_secs(1), channel.next())
+            .await
+            .unwrap();
         assert_eq!(received.task_id, other);
         permit_tx.send(()).unwrap();
-        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Matched));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), offer)
+                .await
+                .unwrap(),
+            OfferResult::Matched
+        ));
     }
 
     #[tokio::test]
@@ -764,15 +806,31 @@ mod tests {
         let id = GoString::from(vec![0xfe]);
         let (receiver, _registration) = channel.register_guarded(&id);
         let mut first_poll = Box::pin(channel.next());
-        assert!(matches!(poll(first_poll.as_mut()), std::task::Poll::Pending));
-        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        assert!(matches!(
+            poll(first_poll.as_mut()),
+            std::task::Poll::Pending
+        ));
+        let mut offer =
+            Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
         drop(first_poll);
-        let received = tokio::time::timeout(Duration::from_secs(1), channel.next()).await.unwrap();
+        let received = tokio::time::timeout(Duration::from_secs(1), channel.next())
+            .await
+            .unwrap();
         assert_eq!(received.task_id, id);
-        channel.complete(&id, QueryOutcome::Internal(Status::internal("done"))).unwrap();
-        assert!(matches!(tokio::time::timeout(Duration::from_secs(1), offer).await.unwrap(), OfferResult::Matched));
-        assert!(tokio::time::timeout(Duration::from_secs(1), receiver).await.unwrap().is_ok());
+        channel
+            .complete(&id, QueryOutcome::Internal(Status::internal("done")))
+            .unwrap();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), offer)
+                .await
+                .unwrap(),
+            OfferResult::Matched
+        ));
+        assert!(tokio::time::timeout(Duration::from_secs(1), receiver)
+            .await
+            .unwrap()
+            .is_ok());
     }
 
     #[tokio::test]
@@ -780,9 +838,12 @@ mod tests {
         let channel = Arc::new(QueryChannel::new());
         let id = raw(7);
         let (receiver, _registration) = channel.register_guarded(&id);
-        let mut offer = Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
+        let mut offer =
+            Box::pin(channel.offer_or_forward(query(id.clone()), std::future::pending::<()>()));
         assert!(matches!(poll(offer.as_mut()), std::task::Poll::Pending));
-        let offered = tokio::time::timeout(std::time::Duration::from_secs(1), channel.next()).await.unwrap();
+        let offered = tokio::time::timeout(std::time::Duration::from_secs(1), channel.next())
+            .await
+            .unwrap();
         assert!(matches!(offer.await, OfferResult::Matched));
         let response = query_response(offered, &state());
         let expected = JsonTaskTokenSerializer::serialize_query_token_bytes(&QueryTaskTokenBytes {

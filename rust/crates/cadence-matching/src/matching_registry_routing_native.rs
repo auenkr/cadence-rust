@@ -17,21 +17,23 @@
 //! conversion or replacement-character fallback.
 
 pub use crate::matching_registry_native::{
-    NativeLocalPollServiceBuilder, NativePartitionRefresher, NativeParentRouter,
+    NativeLocalPollServiceBuilder, NativeParentRouter, NativePartitionRefresher,
 };
-
 
 /// A publish-after-construction service slot. Only weak references are stored:
 /// a registry owner cannot keep its host (and consequently itself) alive.
 #[derive(Clone, Default)]
 pub struct NativeServiceSlot {
-    service: std::sync::Arc<std::sync::RwLock<Option<std::sync::Weak<dyn cadence_proto::native::NativeMatchingApi>>>>,
+    service: std::sync::Arc<
+        std::sync::RwLock<Option<std::sync::Weak<dyn cadence_proto::native::NativeMatchingApi>>>,
+    >,
 }
 
 impl NativeServiceSlot {
     /// Publish the same service retained by the launcher/runtime before admission.
     pub fn publish(&self, service: &std::sync::Arc<dyn cadence_proto::native::NativeMatchingApi>) {
-        *self.service.write().expect("native service slot lock") = Some(std::sync::Arc::downgrade(service));
+        *self.service.write().expect("native service slot lock") =
+            Some(std::sync::Arc::downgrade(service));
     }
 
     /// Local forwarding fails closed until publication and after host teardown.
@@ -39,8 +41,15 @@ impl NativeServiceSlot {
         let slot = self.clone();
         std::sync::Arc::new(move |host| {
             let _registry = host.registry()?;
-            let service = slot.service.read().expect("native service slot lock").as_ref()?.upgrade()?;
-            Some(std::sync::Arc::new(crate::matching_forward_native::InProcessNativeMatching(service)))
+            let service = slot
+                .service
+                .read()
+                .expect("native service slot lock")
+                .as_ref()?
+                .upgrade()?;
+            Some(std::sync::Arc::new(
+                crate::matching_forward_native::InProcessNativeMatching(service),
+            ))
         })
     }
 }
@@ -54,7 +63,9 @@ pub fn partition_refresher(
     std::sync::Arc::new(move |notification| {
         let membership = membership.clone();
         Box::pin(async move {
-            let channel = match membership.channel_for_task_list_owner_bytes(notification.task_list.as_bytes()) {
+            let channel = match membership
+                .channel_for_task_list_owner_bytes(notification.task_list.as_bytes())
+            {
                 Ok((_, channel)) => channel,
                 Err(error) => {
                     tracing::warn!(task_list = ?notification.task_list.as_bytes(), %error, "resolving Matching partition refresh owner failed");
@@ -64,16 +75,20 @@ pub fn partition_refresher(
             let deadline = notification.deadline;
             let mut request = tonic::Request::new(refresh_request(notification));
             if let Some(deadline) = deadline {
-                request.set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
+                request
+                    .set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
             }
             crate::matching_dispatch::matching_yarpc_grpc_metadata(&mut request);
-            let mut client = cadence_proto::native_service::matching_api_client::MatchingApiClient::new(channel);
+            let mut client =
+                cadence_proto::native_service::matching_api_client::MatchingApiClient::new(channel);
             let call = client.refresh_task_list_partition_config(request);
             match deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, call).await
+                Some(deadline) => tokio::time::timeout_at(deadline, call)
+                    .await
                     .map_err(|_| tonic::Status::deadline_exceeded("context deadline exceeded"))?,
                 None => call.await,
-            }.map(|_| ())
+            }
+            .map(|_| ())
         })
     })
 }
@@ -83,9 +98,12 @@ fn refresh_request(
 ) -> cadence_proto::native::matching::RefreshTaskListPartitionConfigRequest {
     use cadence_proto::native::{api, matching};
     let config = notification.config;
-    let partitions = |map: std::collections::HashMap<i32, Vec<cadence_common::go_string::GoString>>| {
-        map.into_iter().map(|(id, isolation_groups)| (id, api::TaskListPartition { isolation_groups })).collect()
-    };
+    let partitions =
+        |map: std::collections::HashMap<i32, Vec<cadence_common::go_string::GoString>>| {
+            map.into_iter()
+                .map(|(id, isolation_groups)| (id, api::TaskListPartition { isolation_groups }))
+                .collect()
+        };
     matching::RefreshTaskListPartitionConfigRequest {
         domain_id: notification.domain_id.to_string().into(),
         task_list: Some(api::TaskList {
@@ -107,24 +125,42 @@ fn refresh_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        matching_partition_native::NativeStoredPartitionConfig,
+        matching_registry_native::NativePartitionRefresh,
+    };
     use cadence_common::go_string::GoString;
-    use crate::{matching_partition_native::NativeStoredPartitionConfig, matching_registry_native::NativePartitionRefresh};
     use prost::Message;
 
     #[test]
     fn refresh_request_keeps_raw_partition_and_groups() {
-        let groups = vec![GoString::from(&b"\xff"[..]), GoString::from(&b"\xfe"[..]), GoString::from("\u{fffd}")];
+        let groups = vec![
+            GoString::from(&b"\xff"[..]),
+            GoString::from(&b"\xfe"[..]),
+            GoString::from("\u{fffd}"),
+        ];
         let config = NativeStoredPartitionConfig {
             version: 19,
             read_partitions: std::collections::HashMap::from([(2, groups.clone())]),
             write_partitions: std::collections::HashMap::from([(0, groups.clone())]),
         };
         let request = refresh_request(NativePartitionRefresh {
-            domain_id: uuid::Uuid::nil(), task_list: GoString::from(&b"/__cadence_sys/root\xff/2"[..]),
-            kind: 0, task_type: 1, config, deadline: None,
+            domain_id: uuid::Uuid::nil(),
+            task_list: GoString::from(&b"/__cadence_sys/root\xff/2"[..]),
+            kind: 0,
+            task_type: 1,
+            config,
+            deadline: None,
         });
-        let decoded = cadence_proto::native::matching::RefreshTaskListPartitionConfigRequest::decode(request.encode_to_vec().as_slice()).unwrap();
-        assert_eq!(decoded.task_list.unwrap().name.as_bytes(), b"/__cadence_sys/root\xff/2");
+        let decoded =
+            cadence_proto::native::matching::RefreshTaskListPartitionConfigRequest::decode(
+                request.encode_to_vec().as_slice(),
+            )
+            .unwrap();
+        assert_eq!(
+            decoded.task_list.unwrap().name.as_bytes(),
+            b"/__cadence_sys/root\xff/2"
+        );
         assert_eq!(decoded.task_list_type, 2);
         let config = decoded.partition_config.unwrap();
         assert_eq!(config.version, 19);
