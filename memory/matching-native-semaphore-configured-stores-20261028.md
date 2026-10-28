@@ -7,3 +7,5 @@ Added limit_semaphore_store_bytes with the same seven operation names, shared li
 Registered the completed host assembler for CI. Its note documents missing byte-valued quota/metrics/lifecycle integration; registration does not make it a complete production host.
 
 CI https://github.com/auenkr/cadence-rust/actions/runs/40718207876 at 01d862f51cfe31c2fcb9cc5079cda6992f9af030 failed compiling Cassandra paging: Option<Arc<[u8]>> must convert to the native contract Option<Vec<u8>>. The active Cassandra source review owns that file. No local Cargo/Go/formatting/test ran.
+
+Fresh five-crate CI https://github.com/auenkr/cadence-rust/actions/runs/40719459374 at cbd8152fe (full source SHA available from run), clean target and runner formatting; pending. Includes registered host, native semaphore manager/store, shared session factory/limiter, Cassandra LWT decoding and paging type fix.
