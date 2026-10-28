@@ -429,6 +429,67 @@ mod tests {
     }
 
     #[test]
+    fn every_declared_matching_exception_preserves_raw_fields_and_wire_id() {
+        // Go's handler passes known errors through; Thrift exposes only the
+        // exceptions declared for each method. Exercise that actual boundary,
+        // including envelopes suppressed by grpc-go for invalid outer text.
+        let payload = ErrorStrings {
+            one: vec![b"old".to_vec(), vec![0xff]],
+            two: vec![vec![0xfe]],
+            three: vec![b"cluster".to_vec()],
+            four: vec![vec![0xfd], "�".as_bytes().to_vec()],
+        }
+        .encode_to_vec();
+        for method in cadence_thrift::service::METHODS
+            .iter()
+            .filter(|method| method.service == "MatchingService")
+        {
+            for &(name, id) in method.exceptions {
+                for message in [b"wrapped: error".as_slice(), &[0xff, 0xfe, 0][..]] {
+                    let status = raw_detailed_status(
+                        tonic::Code::Unknown,
+                        &GoString::from(message),
+                        name,
+                        payload.clone(),
+                    );
+                    let (result, summary) = application_error_bytes(method, status);
+                    assert_eq!(summary.unwrap().0, name, "{}", method.method);
+                    let scalar = |bytes: &[u8]| Value::Bytes(bytes.to_vec());
+                    let mut fields = vec![(1, scalar(message))];
+                    match name {
+                        "DomainNotActiveError" => fields.extend([
+                            (2, scalar(&[0xff])),
+                            (3, scalar(&[0xfe])),
+                            (4, scalar(b"cluster")),
+                            (5, Value::List(vec![scalar(&[0xfd]), scalar("�".as_bytes())])),
+                        ]),
+                        "EntityNotExistsError" => fields.extend([
+                            (2, scalar(&[0xff])),
+                            (3, scalar(&[0xfe])),
+                            (4, Value::List(vec![scalar(b"cluster")])),
+                        ]),
+                        "ServiceBusyError" => fields.push((2, scalar(&[0xff]))),
+                        "TaskListNotOwnedByHostError" => fields = vec![
+                            (1, scalar(&[0xff])),
+                            (2, scalar(&[0xfe])),
+                            (3, scalar(b"cluster")),
+                        ],
+                        "RemoteSyncMatchedError" => fields = vec![(10, scalar(message))],
+                        "BadRequestError" | "InternalServiceError" | "LimitExceededError"
+                        | "QueryFailedError" | "StickyWorkerUnavailableError" => {},
+                        other => panic!("unreviewed Matching exception {other}"),
+                    }
+                    assert_eq!(
+                        result,
+                        Struct { fields: vec![(id, Value::Struct(Struct { fields }))] },
+                        "{} {name} {message:?}", method.method,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn raw_query_failure_keeps_declared_exception_and_message() {
         let method =
             cadence_thrift::service::find_method("MatchingService::QueryWorkflow").unwrap();

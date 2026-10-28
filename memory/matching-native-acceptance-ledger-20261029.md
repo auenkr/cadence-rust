@@ -227,3 +227,15 @@ checks live values, zero, bad-value fallback and byte-exact task filters.
 Details: `matching-native-integration-20261029.md` (Async reader duration
 correction). This code and the error-metric correction postdate the live
 workspace run40756335405 and need fresh validation/formatting. No final pin.
+
+## Native error boundary reconciliation
+
+See `matching-native-error-boundary-audit-20261029.md` for exact observed
+native query, refresh, callback and Thrift wrapper passes recovered from
+run40756335405. That workspace run still failed later in service-core. Added
+an unvalidated native matrix for all ten distinct declared Thrift exception
+types across every pinned Matching method (valid/invalid outer messages,
+raw payloads and exact exception field IDs). This postdates run40758347908.
+Applied run40757715608 formatting patch for metrics/duration provider.
+Final immutable candidate remains open; retain current terminal CI evidence
+before dispatching the final formatted source.

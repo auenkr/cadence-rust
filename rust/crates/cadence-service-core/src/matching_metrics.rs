@@ -640,11 +640,14 @@ struct MatchingErrorDetails {
 impl MatchingErrorClass for tonic::Status {
     fn matching_error_metric(&self) -> &'static str {
         use prost::Message;
-        let envelope = self.metadata().get_bin(RAW_ERROR_DETAILS_MARKER)
+        let envelope = self
+            .metadata()
+            .get_bin(RAW_ERROR_DETAILS_MARKER)
             .and_then(|value| value.to_bytes().ok())
             .and_then(|bytes| MatchingErrorDetails::decode(bytes).ok())
             .or_else(|| MatchingErrorDetails::decode(self.details()).ok());
-        let type_name = envelope.as_ref()
+        let type_name = envelope
+            .as_ref()
             .and_then(|value| value.details.first())
             .and_then(|value| value.type_url.rsplit('.').next());
         for (candidate, metric) in [
@@ -1979,7 +1982,9 @@ mod inbound_tests {
                     type_url: "type.googleapis.com/uber.cadence.api.v1.QueryFailedError".into(),
                     value: Vec::new(),
                 }],
-            }.encode_to_vec().into(),
+            }
+            .encode_to_vec()
+            .into(),
         );
         let _: Result<(), _> = metrics
             .matching_request("QueryWorkflow", Some("domain-a"), None, None, async {
@@ -2003,27 +2008,56 @@ mod inbound_tests {
         for (name, expected) in [
             ("InternalServiceError", CADENCE_FAILURES_PER_TASK_LIST),
             ("BadRequestError", "cadence_errors_bad_request_per_tl"),
-            ("EntityNotExistsError", "cadence_errors_entity_not_exists_per_tl"),
-            ("WorkflowExecutionAlreadyStartedError", "cadence_errors_execution_already_started_per_tl"),
-            ("DomainAlreadyExistsError", "cadence_errors_domain_already_exists_per_tl"),
+            (
+                "EntityNotExistsError",
+                "cadence_errors_entity_not_exists_per_tl",
+            ),
+            (
+                "WorkflowExecutionAlreadyStartedError",
+                "cadence_errors_execution_already_started_per_tl",
+            ),
+            (
+                "DomainAlreadyExistsError",
+                "cadence_errors_domain_already_exists_per_tl",
+            ),
             ("QueryFailedError", "cadence_errors_query_failed_per_tl"),
             ("LimitExceededError", "cadence_errors_limit_exceeded_per_tl"),
             ("ServiceBusyError", "cadence_errors_service_busy_per_tl"),
-            ("DomainNotActiveError", "cadence_errors_domain_not_active_per_tl"),
-            ("RemoteSyncMatchedError", "cadence_errors_remote_syncmatch_failed_per_tl"),
-            ("StickyWorkerUnavailableError", "cadence_errors_sticky_worker_unavailable_per_tl"),
-            ("ReadOnlyPartitionError", "cadence_errors_read_only_partition_per_tl"),
-            ("TaskListNotOwnedByHostError", "cadence_errors_task_list_not_owned_by_host_per_tl"),
-            ("SemaphoreNotOwnedByHostError", "cadence_errors_semaphore_not_owned_by_host"),
+            (
+                "DomainNotActiveError",
+                "cadence_errors_domain_not_active_per_tl",
+            ),
+            (
+                "RemoteSyncMatchedError",
+                "cadence_errors_remote_syncmatch_failed_per_tl",
+            ),
+            (
+                "StickyWorkerUnavailableError",
+                "cadence_errors_sticky_worker_unavailable_per_tl",
+            ),
+            (
+                "ReadOnlyPartitionError",
+                "cadence_errors_read_only_partition_per_tl",
+            ),
+            (
+                "TaskListNotOwnedByHostError",
+                "cadence_errors_task_list_not_owned_by_host_per_tl",
+            ),
+            (
+                "SemaphoreNotOwnedByHostError",
+                "cadence_errors_semaphore_not_owned_by_host",
+            ),
         ] {
             let detail = MatchingErrorDetails {
                 details: vec![prost_types::Any {
                     type_url: format!("type.googleapis.com/uber.cadence.api.v1.{name}"),
                     value: b"InternalServiceError BadRequestError".to_vec(),
                 }],
-            }.encode_to_vec();
+            }
+            .encode_to_vec();
             let status = tonic::Status::with_details(
-                tonic::Code::Unknown, "wrapped: InternalServiceError BadRequestError",
+                tonic::Code::Unknown,
+                "wrapped: InternalServiceError BadRequestError",
                 detail.clone().into(),
             );
             assert_eq!(status.matching_error_metric(), expected, "{name}");
@@ -2032,19 +2066,37 @@ mod inbound_tests {
             let mut raw = tonic::Status::unknown("invalid message");
             let mut raw_envelope = detail.clone();
             raw_envelope.extend_from_slice(&[0x12, 0x01, 0xff]);
-            raw.metadata_mut().insert_bin(RAW_ERROR_DETAILS_MARKER,
-                tonic::metadata::MetadataValue::from_bytes(&raw_envelope));
+            raw.metadata_mut().insert_bin(
+                RAW_ERROR_DETAILS_MARKER,
+                tonic::metadata::MetadataValue::from_bytes(&raw_envelope),
+            );
             assert_eq!(raw.matching_error_metric(), expected, "native {name}");
         }
-        let malformed = tonic::Status::with_details(tonic::Code::Unknown, "query failed",
-            tonic::codegen::Bytes::from_static(b"QueryFailedError"));
-        assert_eq!(malformed.matching_error_metric(), CADENCE_FAILURES_PER_TASK_LIST);
-        let unknown = tonic::Status::with_details(tonic::Code::Unknown, "query failed",
-            MatchingErrorDetails { details: vec![prost_types::Any {
-                type_url: "type.googleapis.com/example.QueryFailedErrorSuffix".into(),
-                value: b"QueryFailedError".to_vec(),
-            }] }.encode_to_vec().into());
-        assert_eq!(unknown.matching_error_metric(), CADENCE_FAILURES_PER_TASK_LIST);
+        let malformed = tonic::Status::with_details(
+            tonic::Code::Unknown,
+            "query failed",
+            tonic::codegen::Bytes::from_static(b"QueryFailedError"),
+        );
+        assert_eq!(
+            malformed.matching_error_metric(),
+            CADENCE_FAILURES_PER_TASK_LIST
+        );
+        let unknown = tonic::Status::with_details(
+            tonic::Code::Unknown,
+            "query failed",
+            MatchingErrorDetails {
+                details: vec![prost_types::Any {
+                    type_url: "type.googleapis.com/example.QueryFailedErrorSuffix".into(),
+                    value: b"QueryFailedError".to_vec(),
+                }],
+            }
+            .encode_to_vec()
+            .into(),
+        );
+        assert_eq!(
+            unknown.matching_error_metric(),
+            CADENCE_FAILURES_PER_TASK_LIST
+        );
     }
 
     #[tokio::test]

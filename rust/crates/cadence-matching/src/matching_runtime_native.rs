@@ -372,7 +372,9 @@ fn reader_properties_provider(
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
 ) -> crate::matching_registry_native::NativeReaderPropertiesProvider {
     let dispatch_timeout = duration_provider(
-        cache.clone(), overlay.clone(), "matching.asyncTaskDispatchTimeout",
+        cache.clone(),
+        overlay.clone(),
+        "matching.asyncTaskDispatchTimeout",
         crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
     );
     Arc::new(move |domain: &GoString, task: &GoString, task_type| {
@@ -658,17 +660,38 @@ mod tests {
             (br#""0s""#.as_slice(), 0),
             (br#""invalid""#.as_slice(), 3_000_000_000),
         ] {
-            overlay.lock().unwrap().update(false, "matching.asyncTaskDispatchTimeout", vec![
-                value(json, vec![]),
-                value(br#""75ms""#, vec![filter("taskListName", br#""queue-\ufffd""#), filter("taskType", b"0")]),
-            ]);
-            assert_eq!((raw.dispatch_timeout)(), expected, "invalid bytes must not alias U+FFFD");
+            overlay.lock().unwrap().update(
+                false,
+                "matching.asyncTaskDispatchTimeout",
+                vec![
+                    value(json, vec![]),
+                    value(
+                        br#""75ms""#,
+                        vec![
+                            filter("taskListName", br#""queue-\ufffd""#),
+                            filter("taskType", b"0"),
+                        ],
+                    ),
+                ],
+            );
+            assert_eq!(
+                (raw.dispatch_timeout)(),
+                expected,
+                "invalid bytes must not alias U+FFFD"
+            );
             assert_eq!((valid.dispatch_timeout)(), 75_000_000, "decision filter");
             assert_eq!((activity.dispatch_timeout)(), expected, "task type filter");
         }
         // Numeric reader fields retain integer property semantics.
-        overlay.lock().unwrap().update(false, "matching.getTasksBatchSize", vec![value(b"17", vec![])]);
-        overlay.lock().unwrap().update(false, "matching.readRangeSize", vec![value(b"42", vec![])]);
+        overlay.lock().unwrap().update(
+            false,
+            "matching.getTasksBatchSize",
+            vec![value(b"17", vec![])],
+        );
+        overlay
+            .lock()
+            .unwrap()
+            .update(false, "matching.readRangeSize", vec![value(b"42", vec![])]);
         assert_eq!((raw.batch_size)(), 17);
         assert_eq!((raw.read_range_size)(), 42);
     }
