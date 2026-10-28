@@ -886,7 +886,7 @@ impl ShardDistributorExecutor {
     pub async fn get_shard_process_raw(&self, shard_key: &[u8]) -> Result<Arc<dyn ShardProcessor>, GetShardProcessError> {
         self.state.last_use.lock().expect("SD last-use lock").insert(shard_key.to_vec(), Instant::now());
         if let Some(processor) = self.processor(shard_key) { return Ok(processor); }
-        let not_found = || GetShardProcessError::NotFound(format!("{shard_key:?}"));
+        let not_found = || GetShardProcessError::NotFound(String::from_utf8_lossy(shard_key).into_owned());
         if !(self.enabled)() { return Err(not_found()); }
         self.heartbeat_and_update().await.map_err(GetShardProcessError::Heartbeat)?;
         self.processor(shard_key).ok_or_else(not_found)
@@ -954,6 +954,9 @@ impl ShardDistributorExecutor {
             // progress; GetShardProcess then performs its normal local recheck.
             return Ok(());
         };
+        if *self.stop_rx.borrow() {
+            return Err("shard-distributor executor stopped".into());
+        }
         let response = self
             .send_heartbeat(sd::ExecutorStatus::Active, RPC_TIMEOUT)
             .await?;
@@ -1071,6 +1074,9 @@ impl ShardDistributorExecutor {
     }
 
     async fn stop_all_processors(&self) {
+        // An admission heartbeat may already be in flight when shutdown begins.
+        // Wait for its assignment update before detaching the final processors.
+        let _assignment = self.state.assignment_lock.lock().await;
         let keys: Vec<_> = self
             .state
             .processors
@@ -1534,6 +1540,79 @@ mod tests {
             sd::ExecutorStatus::Draining as i32
         );
         server.abort();
+    }
+
+    struct RawTestRpc {
+        assigned: Arc<AtomicBool>,
+        reports: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+    impl ExecutorRpc for RawTestRpc {
+        fn heartbeat(&self, _: sd::HeartbeatRequest, _: Duration) -> BoxFuture<Result<sd::HeartbeatResponse, String>> {
+            Box::pin(async { Err("unexpected string RPC".into()) })
+        }
+        fn heartbeat_raw(&self, request: RawHeartbeatRequest, _: Duration) -> BoxFuture<Result<RawHeartbeatResponse, String>> {
+            self.reports.lock().unwrap().extend(request.reports.into_iter().map(|report| report.key));
+            let assigned = self.assigned.load(Ordering::SeqCst);
+            Box::pin(async move { Ok(RawHeartbeatResponse {
+                assignments: if assigned { vec![RawAssignmentEntry { key: b"queue-\xff".to_vec(), value: Some(sd::ShardAssignment { status: sd::AssignmentStatus::Ready as i32 }) }] } else { vec![] },
+                migration_mode: 0,
+            }) })
+        }
+    }
+    struct RawTestFactory { keys: Arc<Mutex<Vec<Vec<u8>>>>, processor: Arc<FakeProcessor> }
+    impl ShardProcessorFactory for RawTestFactory {
+        fn create(&self, _: String) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
+            Box::pin(async { Err("unexpected string factory".into()) })
+        }
+        fn create_raw(&self, key: Vec<u8>) -> BoxFuture<Result<Arc<dyn ShardProcessor>, String>> {
+            self.keys.lock().unwrap().push(key);
+            let processor: Arc<dyn ShardProcessor> = self.processor.clone();
+            Box::pin(async move { Ok(processor) })
+        }
+    }
+    #[tokio::test]
+    async fn raw_executor_assigns_reports_and_revokes_exact_bytes() {
+        let assigned = Arc::new(AtomicBool::new(true));
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let keys = Arc::new(Mutex::new(Vec::new()));
+        let processor = Arc::new(FakeProcessor::default());
+        let config = crate::config::ShardDistributorMatchingConfig {
+            namespaces: vec![crate::config::ShardDistributorNamespaceConfig {
+                namespace: "matching".into(), heartbeat_interval_nanos: 60_000_000_000,
+                ttl_shard_nanos: 0, ttl_report_nanos: 0,
+            }], peer_ttl_nanos: 0,
+        };
+        let executor = ShardDistributorExecutor::new(&config,
+            Arc::new(RawTestRpc { assigned: assigned.clone(), reports: reports.clone() }),
+            Arc::new(RawTestFactory { keys: keys.clone(), processor: processor.clone() }),
+            Arc::new(|| true), HashMap::new(), None).unwrap();
+        executor.get_shard_process_raw(b"queue-\xff").await.unwrap();
+        assert_eq!(keys.lock().unwrap().as_slice(), &[b"queue-\xff".to_vec()]);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while executor.state.processors.lock().unwrap().get(b"queue-\xff".as_slice()).is_none_or(|p| p.state.load(Ordering::Acquire) != PROCESSOR_STARTED) { tokio::task::yield_now().await; }
+        }).await.unwrap();
+        executor.heartbeat_and_update().await.unwrap();
+        assert_eq!(reports.lock().unwrap().as_slice(), &[b"queue-\xff".to_vec()]);
+        assigned.store(false, Ordering::SeqCst);
+        executor.heartbeat_and_update().await.unwrap();
+        assert!(!executor.has_local_shard_process_raw(b"queue-\xff"));
+        tokio::time::timeout(Duration::from_secs(1), processor.stop_complete.notified()).await.unwrap();
+        executor.shutdown().await;
+        assert_eq!(processor.stops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn raw_heartbeat_map_entries_keep_arbitrary_bytes_on_wire() {
+        use prost::Message;
+        let response = RawHeartbeatResponse { assignments: vec![RawAssignmentEntry {
+            key: b"q\xff".to_vec(), value: Some(sd::ShardAssignment { status: sd::AssignmentStatus::Ready as i32 }),
+        }], migration_mode: 0 };
+        let decoded = RawHeartbeatResponse::decode(response.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.assignments[0].key, b"q\xff");
+        let request = RawHeartbeatRequest { namespace: "ns".into(), executor_id: "id".into(), status: 0,
+            reports: vec![RawReportEntry { key: b"q\xff".to_vec(), value: Some(sd::ShardStatusReport { status: 0, shard_load: 0.5 }) }], metadata: HashMap::new() };
+        let decoded = RawHeartbeatRequest::decode(request.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.reports[0].key, b"q\xff");
     }
 
     #[test]
