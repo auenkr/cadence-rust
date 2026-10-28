@@ -158,6 +158,7 @@ async fn served_raw_status_normalizes_message_details_and_marker() {
         assert_eq!(headers.len(), 3);
         for h in &headers {
             assert!(h.get(RAW_MESSAGE_MARKER).is_none(), "marker leaked: {h:?}");
+            assert!(h.get("x-cadence-raw-error-details-bin").is_none(), "typed marker leaked: {h:?}");
             assert_eq!(h["grpc-status"], "5");
         }
 

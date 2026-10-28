@@ -16,6 +16,10 @@ use tonic::{Request, Status};
 #[path = "thrift_matching_schema.rs"]
 mod schema;
 
+#[path = "thrift_matching_native_dispatch.rs"]
+mod native_dispatch;
+pub use native_dispatch::dispatch_native_with_context;
+
 fn wire_type(value: &Value) -> u8 {
     match value {
         Value::Bool(_) => 2,

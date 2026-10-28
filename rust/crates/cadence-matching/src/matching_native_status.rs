@@ -39,6 +39,9 @@ use tonic::{Code, Status};
 
 /// Private marker header (binary metadata) holding the original message.
 pub const RAW_MESSAGE_MARKER: &str = "x-cadence-raw-grpc-message-bin";
+/// Internal typed envelope retained for the in-process Thrift adapter. It is
+/// removed at the gRPC boundary, where Go may suppress an invalid message.
+pub(crate) const RAW_ERROR_DETAILS_MARKER: &str = "x-cadence-raw-error-details-bin";
 
 /// Build a `Status` whose wire `grpc-message` is the Go encoding of
 /// `message`'s exact bytes once passed through `RawStatusService`.
@@ -72,12 +75,6 @@ struct RpcStatusBytes {
 /// message. `detail` is the already encoded api.v1 error message.
 pub fn raw_detailed_status(code: Code, message: &GoString, name: &str, detail: Vec<u8>) -> Status {
     use prost::Message;
-    // grpc-go converts gogo/status into google.rpc.Status, then marshals it
-    // with protobuf/v2. An invalid UTF-8 Status.message fails that marshal;
-    // grpc-go still sends grpc-message, but omits grpc-status-details-bin.
-    if message.as_utf8().is_err() {
-        return raw_status(code, message, tonic::codegen::Bytes::new());
-    }
     let envelope = RpcStatusBytes {
         code: code as i32,
         message: message.as_bytes().to_vec(),
@@ -86,7 +83,20 @@ pub fn raw_detailed_status(code: Code, message: &GoString, name: &str, detail: V
             value: detail,
         }],
     };
-    raw_status(code, message, envelope.encode_to_vec().into())
+    let encoded = envelope.encode_to_vec();
+    // grpc-go suppresses the details header if outer message marshaling fails.
+    // Thrift still needs the error's type and original fields in that case.
+    let details = if message.as_utf8().is_ok() {
+        encoded.clone().into()
+    } else {
+        tonic::codegen::Bytes::new()
+    };
+    let mut status = raw_status(code, message, details);
+    status.metadata_mut().insert_bin(
+        RAW_ERROR_DETAILS_MARKER,
+        BinaryMetadataValue::from_bytes(&encoded),
+    );
+    status
 }
 
 /// grpc-go `encodeGrpcMessage` over arbitrary bytes.
@@ -136,6 +146,7 @@ fn marker_engine() -> GeneralPurpose {
 
 /// Rewrite one response in place. Unmarked responses are untouched.
 fn rewrite_headers<B>(response: &mut http::Response<B>) {
+    response.headers_mut().remove(RAW_ERROR_DETAILS_MARKER);
     let Some(marker) = response.headers_mut().remove(RAW_MESSAGE_MARKER) else {
         return;
     };

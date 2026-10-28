@@ -260,6 +260,7 @@ jobs:
             crates/cadence-matching/src/matching_history_tchannel_native.rs
             crates/cadence-matching/src/matching_history_peer_resolver.rs
             crates/cadence-matching/src/thrift_matching_native.rs
+            crates/cadence-matching/src/thrift_matching_native_dispatch.rs
             crates/cadence-proto/src/lib.rs
             crates/cadence-proto/src/native.rs
             crates/cadence-matching/src/grpc_matching.rs
