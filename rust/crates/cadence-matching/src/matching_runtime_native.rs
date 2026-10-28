@@ -36,7 +36,8 @@ pub fn native_queue_registry(
 ) -> NativeQueueRegistry {
     let overlay = state.admin.dynamic_config.clone();
     let history = history.with_record_started_timeout_bytes(record_started_timeout_provider(
-        cache.clone(), overlay.clone(),
+        cache.clone(),
+        overlay.clone(),
     ));
     let domains = state.domains.clone();
     let cluster = cluster.into();
@@ -629,13 +630,27 @@ mod tests {
         let provider = record_started_timeout_provider(Arc::new(empty_cache()), overlay.clone());
         let id = b"00000000-0000-0000-0000-000000000001";
         assert_eq!(provider(id), Duration::from_secs(1));
-        for (value, expected) in [(br#""250ms""#.as_slice(), Duration::from_millis(250)), (br#""0s""#.as_slice(), Duration::ZERO)] {
-            overlay.lock().unwrap().update(false, "matching.recordTaskStartedTimeout", vec![DynamicConfigValue {
-                value: Some(cadence_api::types::DataBlob { encoding_type: None, data: value.to_vec() }),
-                filters: vec![],
-            }]);
+        for (value, expected) in [
+            (br#""250ms""#.as_slice(), Duration::from_millis(250)),
+            (br#""0s""#.as_slice(), Duration::ZERO),
+        ] {
+            overlay.lock().unwrap().update(
+                false,
+                "matching.recordTaskStartedTimeout",
+                vec![DynamicConfigValue {
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: None,
+                        data: value.to_vec(),
+                    }),
+                    filters: vec![],
+                }],
+            );
             assert_eq!(provider(id), expected);
-            assert_eq!(provider(b"\xff"), expected, "invalid domain bytes use the global property");
+            assert_eq!(
+                provider(b"\xff"),
+                expected,
+                "invalid domain bytes use the global property"
+            );
         }
     }
 

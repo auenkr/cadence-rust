@@ -538,9 +538,7 @@ impl Matching {
             {
                 Ok(Ok(id)) => Ok(id),
                 Ok(Err(error)) => Err(error.into_status()),
-                Err(error) if error.is_panic() => {
-                    std::panic::resume_unwind(error.into_panic())
-                }
+                Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
                 Err(error) => Err(Status::internal(error.to_string())),
             };
         }
