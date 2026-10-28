@@ -19,8 +19,14 @@ use crate::matching_engine_native::{
 /// Mandatory host callbacks used by the native handler. There are no
 /// permissive defaults: the runtime must provide Go-equivalent lifecycle,
 /// admission, domain and ownership checks before the engine is entered.
-pub trait NativeMatchingIntegration: DecisionAddContext + NativePollContext
-    + NativeQueryContext + NativeControlContext + Send + Sync + 'static
+pub trait NativeMatchingIntegration:
+    DecisionAddContext
+    + NativePollContext
+    + NativeQueryContext
+    + NativeControlContext
+    + Send
+    + Sync
+    + 'static
 {
     fn check_started(&self) -> crate::matching_dispatch_native::NativeFuture<Result<(), Status>>;
     fn admit(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status>;
@@ -35,7 +41,9 @@ pub trait NativeMatchingIntegration: DecisionAddContext + NativePollContext
     fn acquire_semaphore(
         &self,
         request: Request<n::matching::AcquireSemaphoreRequest>,
-    ) -> crate::matching_dispatch_native::NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>>;
+    ) -> crate::matching_dispatch_native::NativeFuture<
+        Result<Response<n::matching::AcquireSemaphoreResponse>, Status>,
+    >;
 }
 
 /// A native Matching service over an already constructed native engine.
@@ -50,7 +58,10 @@ pub struct NativeMatchingService<C> {
 
 impl<C> NativeMatchingService<C> {
     pub fn new(engine: NativeMatchingEngine, integration: C) -> Self {
-        Self { engine, integration }
+        Self {
+            engine,
+            integration,
+        }
     }
 
     async fn enter(&self, method: &'static str, domain: Option<&GoString>) -> Result<(), Status>
@@ -67,49 +78,83 @@ impl<C> NativeMatchingService<C> {
 }
 
 impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
-    async fn core_add_decision_task(&self, request: Request<n::matching::AddDecisionTaskRequest>) -> Result<Response<n::matching::AddDecisionTaskResponse>, Status> {
+    async fn core_add_decision_task(
+        &self,
+        request: Request<n::matching::AddDecisionTaskRequest>,
+    ) -> Result<Response<n::matching::AddDecisionTaskResponse>, Status> {
         const M: &str = "add_decision_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
-        let result = self.engine.add_decision_task(request, deadline, &self.integration).await;
+        let result = self
+            .engine
+            .add_decision_task(request, deadline, &self.integration)
+            .await;
         result.map(Response::new)
     }
-    async fn core_add_activity_task(&self, request: Request<n::matching::AddActivityTaskRequest>) -> Result<Response<n::matching::AddActivityTaskResponse>, Status> {
+    async fn core_add_activity_task(
+        &self,
+        request: Request<n::matching::AddActivityTaskRequest>,
+    ) -> Result<Response<n::matching::AddActivityTaskResponse>, Status> {
         const M: &str = "add_activity_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
-        let result = self.engine.add_activity_task(request, deadline, &self.integration).await;
+        let result = self
+            .engine
+            .add_activity_task(request, deadline, &self.integration)
+            .await;
         result.map(Response::new)
     }
-    async fn core_poll_for_decision_task(&self, request: Request<n::matching::PollForDecisionTaskRequest>) -> Result<Response<n::matching::PollForDecisionTaskResponse>, Status> {
+    async fn core_poll_for_decision_task(
+        &self,
+        request: Request<n::matching::PollForDecisionTaskRequest>,
+    ) -> Result<Response<n::matching::PollForDecisionTaskResponse>, Status> {
         const M: &str = "poll_for_decision_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
-        let result = self.engine.poll_for_decision_task(request, deadline, &self.integration).await;
+        let result = self
+            .engine
+            .poll_for_decision_task(request, deadline, &self.integration)
+            .await;
         result.map(Response::new)
     }
-    async fn core_poll_for_activity_task(&self, request: Request<n::matching::PollForActivityTaskRequest>) -> Result<Response<n::matching::PollForActivityTaskResponse>, Status> {
+    async fn core_poll_for_activity_task(
+        &self,
+        request: Request<n::matching::PollForActivityTaskRequest>,
+    ) -> Result<Response<n::matching::PollForActivityTaskResponse>, Status> {
         const M: &str = "poll_for_activity_task";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
-        let result = self.engine.poll_for_activity_task(request, deadline, &self.integration).await;
+        let result = self
+            .engine
+            .poll_for_activity_task(request, deadline, &self.integration)
+            .await;
         result.map(Response::new)
     }
-    async fn core_query_workflow(&self, request: Request<n::matching::QueryWorkflowRequest>) -> Result<Response<n::matching::QueryWorkflowResponse>, Status> {
+    async fn core_query_workflow(
+        &self,
+        request: Request<n::matching::QueryWorkflowRequest>,
+    ) -> Result<Response<n::matching::QueryWorkflowResponse>, Status> {
         const M: &str = "query_workflow";
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(M, Some(&request.domain_id)).await?;
-        match self.engine.query_workflow(request, deadline, &self.integration).await {
+        match self
+            .engine
+            .query_workflow(request, deadline, &self.integration)
+            .await
+        {
             Ok(response) => Ok(Response::new(response)),
-            Err(error) => Err(error.into_status())
+            Err(error) => Err(error.into_status()),
         }
     }
-    async fn core_acquire_semaphore(&self, request: Request<n::matching::AcquireSemaphoreRequest>) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
+    async fn core_acquire_semaphore(
+        &self,
+        request: Request<n::matching::AcquireSemaphoreRequest>,
+    ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         const M: &str = "acquire_semaphore";
         self.enter(M, Some(&request.get_ref().domain_id)).await?;
         self.integration.acquire_semaphore(request).await
@@ -124,8 +169,11 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         self.enter(METHOD, Some(&request.domain_id)).await?;
         let result = control_with_deadline(deadline, async {
             // Queue ownership is checked by the engine after manager lookup.
-            self.engine.describe_task_list(request, &self.integration).await
-        }).await;
+            self.engine
+                .describe_task_list(request, &self.integration)
+                .await
+        })
+        .await;
         result.map(Response::new)
     }
 
@@ -153,8 +201,12 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         let deadline = Self::deadline(&request);
         let request = request.into_inner();
         self.enter(METHOD, Some(&request.domain_id)).await?;
-        let result = control_with_deadline(deadline, self.engine
-            .cancel_outstanding_poll(request, &self.integration)).await;
+        let result = control_with_deadline(
+            deadline,
+            self.engine
+                .cancel_outstanding_poll(request, &self.integration),
+        )
+        .await;
         result.map(Response::new)
     }
 
@@ -195,7 +247,8 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
             self.engine
                 .update_task_list_partition_config(request, deadline, &self.integration)
                 .await
-        }).await;
+        })
+        .await;
         result.map(Response::new)
     }
 
@@ -211,182 +264,483 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
             self.engine
                 .refresh_task_list_partition_config(request, deadline, &self.integration)
                 .await
-        }).await;
+        })
+        .await;
         result.map(Response::new)
     }
 }
 
 #[tonic::async_trait]
 impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingService<C> {
-    async fn add_decision_task(&self, request: Request<n::matching::AddDecisionTaskRequest>) -> Result<Response<n::matching::AddDecisionTaskResponse>, Status> {
+    async fn add_decision_task(
+        &self,
+        request: Request<n::matching::AddDecisionTaskRequest>,
+    ) -> Result<Response<n::matching::AddDecisionTaskResponse>, Status> {
         crate::matching_panic::capture("add_decision_task", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "add_decision_task")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
-            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            "decision_task", String::new());
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "AddDecisionTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_add_decision_task(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "add_decision_task")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            record_forwarded(
+                self.integration.metrics(),
+                &request.get_ref().forwarded_from,
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                "decision_task",
+                String::new(),
+            );
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "AddDecisionTask",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_add_decision_task(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn add_activity_task(&self, request: Request<n::matching::AddActivityTaskRequest>) -> Result<Response<n::matching::AddActivityTaskResponse>, Status> {
+    async fn add_activity_task(
+        &self,
+        request: Request<n::matching::AddActivityTaskRequest>,
+    ) -> Result<Response<n::matching::AddActivityTaskResponse>, Status> {
         crate::matching_panic::capture("add_activity_task", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "add_activity_task")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
-            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            "activity_task", String::new());
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "AddActivityTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_add_activity_task(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "add_activity_task")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            record_forwarded(
+                self.integration.metrics(),
+                &request.get_ref().forwarded_from,
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                "activity_task",
+                String::new(),
+            );
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "AddActivityTask",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_add_activity_task(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn poll_for_decision_task(&self, request: Request<n::matching::PollForDecisionTaskRequest>) -> Result<Response<n::matching::PollForDecisionTaskResponse>, Status> {
+    async fn poll_for_decision_task(
+        &self,
+        request: Request<n::matching::PollForDecisionTaskRequest>,
+    ) -> Result<Response<n::matching::PollForDecisionTaskResponse>, Status> {
         crate::matching_panic::capture("poll_for_decision_task", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "poll_for_decision_task")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
-        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
-            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            "decision_task", metric_string(&request.get_ref().isolation_group));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "PollForDecisionTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_poll_for_decision_task(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "poll_for_decision_task")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .request
+                .as_ref()
+                .and_then(|r| r.task_list.as_ref())
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            record_forwarded(
+                self.integration.metrics(),
+                &request.get_ref().forwarded_from,
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                "decision_task",
+                metric_string(&request.get_ref().isolation_group),
+            );
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "PollForDecisionTask",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_poll_for_decision_task(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn poll_for_activity_task(&self, request: Request<n::matching::PollForActivityTaskRequest>) -> Result<Response<n::matching::PollForActivityTaskResponse>, Status> {
+    async fn poll_for_activity_task(
+        &self,
+        request: Request<n::matching::PollForActivityTaskRequest>,
+    ) -> Result<Response<n::matching::PollForActivityTaskResponse>, Status> {
         crate::matching_panic::capture("poll_for_activity_task", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "poll_for_activity_task")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
-        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
-            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            "activity_task", metric_string(&request.get_ref().isolation_group));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "PollForActivityTask", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_poll_for_activity_task(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "poll_for_activity_task")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .request
+                .as_ref()
+                .and_then(|r| r.task_list.as_ref())
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            record_forwarded(
+                self.integration.metrics(),
+                &request.get_ref().forwarded_from,
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                "activity_task",
+                metric_string(&request.get_ref().isolation_group),
+            );
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "PollForActivityTask",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_poll_for_activity_task(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn query_workflow(&self, request: Request<n::matching::QueryWorkflowRequest>) -> Result<Response<n::matching::QueryWorkflowResponse>, Status> {
+    async fn query_workflow(
+        &self,
+        request: Request<n::matching::QueryWorkflowRequest>,
+    ) -> Result<Response<n::matching::QueryWorkflowResponse>, Status> {
         crate::matching_panic::capture("query_workflow", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "query_workflow")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        record_forwarded(self.integration.metrics(), &request.get_ref().forwarded_from,
-            domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            "decision_task", String::new());
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "QueryWorkflow", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_query_workflow(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "query_workflow")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            record_forwarded(
+                self.integration.metrics(),
+                &request.get_ref().forwarded_from,
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                "decision_task",
+                String::new(),
+            );
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "QueryWorkflow",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_query_workflow(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn respond_query_task_completed(&self, request: Request<n::matching::RespondQueryTaskCompletedRequest>) -> Result<Response<n::matching::RespondQueryTaskCompletedResponse>, Status> {
+    async fn respond_query_task_completed(
+        &self,
+        request: Request<n::matching::RespondQueryTaskCompletedRequest>,
+    ) -> Result<Response<n::matching::RespondQueryTaskCompletedResponse>, Status> {
         crate::matching_panic::capture("respond_query_task_completed", async move {
-        NativeMatchingEngine::validate_query_completion_mapper(request.get_ref())?;
-        self.integration.check_domain(&request.get_ref().domain_id, "respond_query_task_completed")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "RespondQueryTaskCompleted", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_respond_query_task_completed(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            NativeMatchingEngine::validate_query_completion_mapper(request.get_ref())?;
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "respond_query_task_completed")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "RespondQueryTaskCompleted",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_respond_query_task_completed(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn cancel_outstanding_poll(&self, request: Request<n::matching::CancelOutstandingPollRequest>) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
+    async fn cancel_outstanding_poll(
+        &self,
+        request: Request<n::matching::CancelOutstandingPollRequest>,
+    ) -> Result<Response<n::matching::CancelOutstandingPollResponse>, Status> {
         crate::matching_panic::capture("cancel_outstanding_poll", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "CancelOutstandingPoll", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_cancel_outstanding_poll(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "cancel_outstanding_poll")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "CancelOutstandingPoll",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_cancel_outstanding_poll(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn describe_task_list(&self, request: Request<n::matching::DescribeTaskListRequest>) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
+    async fn describe_task_list(
+        &self,
+        request: Request<n::matching::DescribeTaskListRequest>,
+    ) -> Result<Response<n::matching::DescribeTaskListResponse>, Status> {
         crate::matching_panic::capture("describe_task_list", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "describe_task_list")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().request.as_ref().and_then(|r| r.task_list.as_ref()).map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "DescribeTaskList", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_describe_task_list(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "describe_task_list")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .request
+                .as_ref()
+                .and_then(|r| r.task_list.as_ref())
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "DescribeTaskList",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_describe_task_list(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn list_task_list_partitions(&self, request: Request<n::matching::ListTaskListPartitionsRequest>) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
+    async fn list_task_list_partitions(
+        &self,
+        request: Request<n::matching::ListTaskListPartitionsRequest>,
+    ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
         crate::matching_panic::capture("list_task_list_partitions", async move {
-        let domain = Some(metric_string(&request.get_ref().domain));
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "ListTaskListPartitions", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_list_task_list_partitions(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            let domain = Some(metric_string(&request.get_ref().domain));
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "ListTaskListPartitions",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_list_task_list_partitions(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn get_task_lists_by_domain(&self, request: Request<n::matching::GetTaskListsByDomainRequest>) -> Result<Response<n::matching::GetTaskListsByDomainResponse>, Status> {
+    async fn get_task_lists_by_domain(
+        &self,
+        request: Request<n::matching::GetTaskListsByDomainRequest>,
+    ) -> Result<Response<n::matching::GetTaskListsByDomainResponse>, Status> {
         crate::matching_panic::capture("get_task_lists_by_domain", async move {
-        let domain = Some(metric_string(&request.get_ref().domain));
-        let list: Option<(String, Option<i32>)> = None;
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "GetTaskListsByDomain", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_get_task_lists_by_domain(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            let domain = Some(metric_string(&request.get_ref().domain));
+            let list: Option<(String, Option<i32>)> = None;
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "GetTaskListsByDomain",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_get_task_lists_by_domain(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn update_task_list_partition_config(&self, request: Request<n::matching::UpdateTaskListPartitionConfigRequest>) -> Result<Response<n::matching::UpdateTaskListPartitionConfigResponse>, Status> {
+    async fn update_task_list_partition_config(
+        &self,
+        request: Request<n::matching::UpdateTaskListPartitionConfigRequest>,
+    ) -> Result<Response<n::matching::UpdateTaskListPartitionConfigResponse>, Status> {
         crate::matching_panic::capture("update_task_list_partition_config", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "update_task_list_partition_config")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "UpdateTaskListPartitionConfig", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_update_task_list_partition_config(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration.check_domain(
+                &request.get_ref().domain_id,
+                "update_task_list_partition_config",
+            )?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "UpdateTaskListPartitionConfig",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_update_task_list_partition_config(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn refresh_task_list_partition_config(&self, request: Request<n::matching::RefreshTaskListPartitionConfigRequest>) -> Result<Response<n::matching::RefreshTaskListPartitionConfigResponse>, Status> {
+    async fn refresh_task_list_partition_config(
+        &self,
+        request: Request<n::matching::RefreshTaskListPartitionConfigRequest>,
+    ) -> Result<Response<n::matching::RefreshTaskListPartitionConfigResponse>, Status> {
         crate::matching_panic::capture("refresh_task_list_partition_config", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "refresh_task_list_partition_config")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = request.get_ref().task_list.as_ref().map(|t| (metric_string(&t.name), Some(t.kind)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "RefreshTaskListPartitionConfig", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_refresh_task_list_partition_config(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration.check_domain(
+                &request.get_ref().domain_id,
+                "refresh_task_list_partition_config",
+            )?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = request
+                .get_ref()
+                .task_list
+                .as_ref()
+                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "RefreshTaskListPartitionConfig",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_refresh_task_list_partition_config(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
-    async fn acquire_semaphore(&self, request: Request<n::matching::AcquireSemaphoreRequest>) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
+    async fn acquire_semaphore(
+        &self,
+        request: Request<n::matching::AcquireSemaphoreRequest>,
+    ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         crate::matching_panic::capture("acquire_semaphore", async move {
-        self.integration.check_domain(&request.get_ref().domain_id, "acquire_semaphore")?;
-        let domain = self.integration.metric_domain_name(&request.get_ref().domain_id).as_ref().map(metric_string);
-        let list = Some((metric_string(&request.get_ref().semaphore_name), Some(0)));
-        let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(request.metadata(), "grpc");
-        observe(self.integration.metrics(),
-            "AcquireSemaphore", domain.as_deref(), list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
-            context, self.core_acquire_semaphore(request),
-        ).await
-        }).await.unwrap_or_else(|message| Err(Status::unknown(message)))
+            self.integration
+                .check_domain(&request.get_ref().domain_id, "acquire_semaphore")?;
+            let domain = self
+                .integration
+                .metric_domain_name(&request.get_ref().domain_id)
+                .as_ref()
+                .map(metric_string);
+            let list = Some((metric_string(&request.get_ref().semaphore_name), Some(0)));
+            let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                request.metadata(),
+                "grpc",
+            );
+            observe(
+                self.integration.metrics(),
+                "AcquireSemaphore",
+                domain.as_deref(),
+                list.as_ref().map(|(name, kind)| (name.as_str(), *kind)),
+                context,
+                self.core_acquire_semaphore(request),
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
 }
 
@@ -412,13 +766,19 @@ fn record_forwarded(
 // Control methods do not currently pass deadlines to their queue lookup. Bound
 // their asynchronous work here; dropping the lookup leaves dispatched startup
 // detached while cancelling a still-pending ownership admission.
-async fn control_with_deadline<F, T>(deadline: Option<tokio::time::Instant>, future: F) -> Result<T, Status>
+async fn control_with_deadline<F, T>(
+    deadline: Option<tokio::time::Instant>,
+    future: F,
+) -> Result<T, Status>
 where
     F: std::future::Future<Output = Result<T, Status>>,
 {
     match deadline {
-        Some(deadline) if tokio::time::Instant::now() >= deadline => Err(Status::internal("context deadline exceeded")),
-        Some(deadline) => tokio::time::timeout_at(deadline, future).await
+        Some(deadline) if tokio::time::Instant::now() >= deadline => {
+            Err(Status::internal("context deadline exceeded"))
+        }
+        Some(deadline) => tokio::time::timeout_at(deadline, future)
+            .await
             .unwrap_or_else(|_| Err(Status::internal("context deadline exceeded"))),
         None => future.await,
     }
@@ -435,7 +795,9 @@ async fn observe<F, T>(
 where
     F: std::future::Future<Output = Result<T, Status>>,
 {
-    metrics.matching_request(method, domain, list, Some(context), future).await
+    metrics
+        .matching_request(method, domain, list, Some(context), future)
+        .await
 }
 
 // Metrics sinks accept UTF-8 strings. Invalid byte sequences are represented
@@ -459,15 +821,31 @@ mod tests {
         let metrics = MatchingMetrics::new(sink.clone());
         let metadata = tonic::metadata::MetadataMap::new();
         let context = MatchingMetrics::context_from_metadata(&metadata, "grpc");
-        let thrift = InboundMetricContext { caller: Some("frontend".into()), transport: Some("thrift".into()) };
-        let result: Result<(), Status> = metrics.with_inbound_context(thrift, observe(
-            &metrics, "AddDecisionTask", Some("domain-a"), Some(("queue", Some(0))), context,
-            async { Err(Status::resource_exhausted("quota")) },
-        )).await;
+        let thrift = InboundMetricContext {
+            caller: Some("frontend".into()),
+            transport: Some("thrift".into()),
+        };
+        let result: Result<(), Status> = metrics
+            .with_inbound_context(
+                thrift,
+                observe(
+                    &metrics,
+                    "AddDecisionTask",
+                    Some("domain-a"),
+                    Some(("queue", Some(0))),
+                    context,
+                    async { Err(Status::resource_exhausted("quota")) },
+                ),
+            )
+            .await;
         assert_eq!(result.unwrap_err().code(), tonic::Code::ResourceExhausted);
         let events = sink.events();
-        assert!(events.iter().any(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST));
-        assert!(events.iter().any(|event| event.name == CADENCE_LATENCY_PER_TASK_LIST));
+        assert!(events
+            .iter()
+            .any(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST));
+        assert!(events
+            .iter()
+            .any(|event| event.name == CADENCE_LATENCY_PER_TASK_LIST));
         let tags = &events[0].tags;
         assert_eq!(tags[OPERATION_TAG], "AddDecisionTask");
         assert_eq!(tags[DOMAIN_TAG], "domain-a");
@@ -486,16 +864,24 @@ mod tests {
         let task = tokio::spawn(async move {
             let mut metadata = tonic::metadata::MetadataMap::new();
             metadata.insert("rpc-caller", "worker".parse().unwrap());
-            observe(&metrics, "PollForDecisionTask", None, Some(("sticky", Some(1))),
+            observe(
+                &metrics,
+                "PollForDecisionTask",
+                None,
+                Some(("sticky", Some(1))),
                 MatchingMetrics::context_from_metadata(&metadata, "grpc"),
-                std::future::pending::<Result<(), Status>>()).await
+                std::future::pending::<Result<(), Status>>(),
+            )
+            .await
         });
         tokio::task::yield_now().await;
         task.abort();
         let _ = task.await;
         let events = sink.events();
         assert_eq!(events.len(), 3);
-        assert!(events.iter().any(|event| event.name == CADENCE_LATENCY_PER_TASK_LIST));
+        assert!(events
+            .iter()
+            .any(|event| event.name == CADENCE_LATENCY_PER_TASK_LIST));
         assert_eq!(events[0].tags[TASK_LIST_TAG], "__sticky__");
         assert_eq!(events[0].tags[CALLER_TAG], "worker");
         assert_eq!(events[0].tags[TRANSPORT_TAG], "grpc");
@@ -510,78 +896,211 @@ mod tests {
     use crate::matching_registry_native::NativeQueueHandle;
     use std::{sync::Arc, time::Duration};
     impl DecisionAddContext for Integration {
-        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> { Ok(true) }
-        fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 { 1 }
-        fn check_write_partition(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
-        fn remote_parent(&self, _: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> { Box::pin(async { Ok(None) }) }
+        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
+            Ok(true)
+        }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
+            1
+        }
+        fn check_write_partition(
+            &self,
+            _: &TaskListKeyBytes,
+            _: &NativeQueueHandle,
+        ) -> Result<(), Status> {
+            Ok(())
+        }
+        fn remote_parent(
+            &self,
+            _: GoString,
+        ) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
+            Box::pin(async { Ok(None) })
+        }
     }
     impl NativePollContext for Integration {
-        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
-        fn domain_active(&self, _: &GoString) -> Result<bool, Status> { Ok(true) }
-        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
-        fn register_poll(&self, _: &GoString, _: &GoString, _: i32, _: &GoString) -> NativePollRegistration {
-            NativePollRegistration { cancel: Arc::new(tokio::sync::Notify::new()), guard: Box::new(()) }
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> {
+            Ok("domain".into())
         }
-        fn failover(&self, _: &GoString) -> NativeFuture<()> { Box::pin(std::future::pending()) }
-        fn expiration(&self, _: &GoString, _: &GoString, _: i32) -> Duration { Duration::from_secs(10) }
-        fn override_rate(&self, _: &GoString, _: &GoString, _: i32) -> f64 { 0.0 }
-        fn auto_config_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool { false }
+        fn domain_active(&self, _: &GoString) -> Result<bool, Status> {
+            Ok(true)
+        }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> {
+            Ok(())
+        }
+        fn register_poll(
+            &self,
+            _: &GoString,
+            _: &GoString,
+            _: i32,
+            _: &GoString,
+        ) -> NativePollRegistration {
+            NativePollRegistration {
+                cancel: Arc::new(tokio::sync::Notify::new()),
+                guard: Box::new(()),
+            }
+        }
+        fn failover(&self, _: &GoString) -> NativeFuture<()> {
+            Box::pin(std::future::pending())
+        }
+        fn expiration(&self, _: &GoString, _: &GoString, _: i32) -> Duration {
+            Duration::from_secs(10)
+        }
+        fn override_rate(&self, _: &GoString, _: &GoString, _: i32) -> f64 {
+            0.0
+        }
+        fn auto_config_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool {
+            false
+        }
     }
     impl NativeQueryContext for Integration {
-        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
-        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
-        fn forward_degree(&self, _: uuid::Uuid, _: &GoString) -> i64 { 1 }
-        fn remote_parent(&self, _: GoString) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> { Box::pin(async { Ok(None) }) }
-        fn default_deadline(&self) -> tokio::time::Instant { tokio::time::Instant::now() + Duration::from_secs(10) }
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> {
+            Ok("domain".into())
+        }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> {
+            Ok(())
+        }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString) -> i64 {
+            1
+        }
+        fn remote_parent(
+            &self,
+            _: GoString,
+        ) -> NativeFuture<Result<Option<Arc<dyn NativeQueryParent>>, Status>> {
+            Box::pin(async { Ok(None) })
+        }
+        fn default_deadline(&self) -> tokio::time::Instant {
+            tokio::time::Instant::now() + Duration::from_secs(10)
+        }
     }
     impl NativeControlContext for Integration {
-        fn domain_id(&self, _: &GoString) -> Result<uuid::Uuid, Status> { Ok(uuid::Uuid::from_u128(1)) }
-        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> { Ok("domain".into()) }
-        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> { Ok(()) }
-        fn return_all_kinds(&self) -> bool { true }
-        fn scaler_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool { false }
-        fn isolation_groups(&self) -> Vec<GoString> { vec![] }
-        fn poller_window_nanos(&self, _: &GoString, _: &GoString, _: i32) -> i64 { 0 }
-        fn write_partition_count(&self, _: &GoString, _: &GoString, _: i32) -> i64 { 1 }
-        fn owner_host(&self, _: GoString) -> NativeFuture<Result<GoString, Status>> { Box::pin(async { Ok(GoString::default()) }) }
+        fn domain_id(&self, _: &GoString) -> Result<uuid::Uuid, Status> {
+            Ok(uuid::Uuid::from_u128(1))
+        }
+        fn domain_name(&self, _: &GoString) -> Result<GoString, Status> {
+            Ok("domain".into())
+        }
+        fn check_queue(&self, _: &TaskListKeyBytes, _: &NativeQueueHandle) -> Result<(), Status> {
+            Ok(())
+        }
+        fn return_all_kinds(&self) -> bool {
+            true
+        }
+        fn scaler_enabled(&self, _: &GoString, _: &GoString, _: i32) -> bool {
+            false
+        }
+        fn isolation_groups(&self) -> Vec<GoString> {
+            vec![]
+        }
+        fn poller_window_nanos(&self, _: &GoString, _: &GoString, _: i32) -> i64 {
+            0
+        }
+        fn write_partition_count(&self, _: &GoString, _: &GoString, _: i32) -> i64 {
+            1
+        }
+        fn owner_host(&self, _: GoString) -> NativeFuture<Result<GoString, Status>> {
+            Box::pin(async { Ok(GoString::default()) })
+        }
     }
     impl NativeMatchingIntegration for Integration {
-        fn check_started(&self) -> NativeFuture<Result<(), Status>> { Box::pin(async { Ok(()) }) }
-        fn admit(&self, _: &'static str, _: Option<&GoString>) -> Result<(), Status> {
-            if self.reject { Err(Status::resource_exhausted("quota")) } else { Ok(()) }
+        fn check_started(&self) -> NativeFuture<Result<(), Status>> {
+            Box::pin(async { Ok(()) })
         }
-        fn metrics(&self) -> &crate::matching_metrics::MatchingMetrics { &self.metrics }
-        fn metric_domain_name(&self, _: &GoString) -> Option<GoString> { Some("domain".into()) }
-        fn check_owned(&self, _: &TaskListKeyBytes) -> Result<(), Status> { Ok(()) }
-        fn domain_for_name(&self, _: &GoString) -> Result<uuid::Uuid, Status> { Ok(uuid::Uuid::from_u128(1)) }
-        fn check_domain(&self, _: &GoString, _: &'static str) -> Result<(), Status> { Ok(()) }
-        fn acquire_semaphore(&self, _: Request<n::matching::AcquireSemaphoreRequest>) -> NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>> { Box::pin(async { Err(Status::unimplemented("test")) }) }
+        fn admit(&self, _: &'static str, _: Option<&GoString>) -> Result<(), Status> {
+            if self.reject {
+                Err(Status::resource_exhausted("quota"))
+            } else {
+                Ok(())
+            }
+        }
+        fn metrics(&self) -> &crate::matching_metrics::MatchingMetrics {
+            &self.metrics
+        }
+        fn metric_domain_name(&self, _: &GoString) -> Option<GoString> {
+            Some("domain".into())
+        }
+        fn check_owned(&self, _: &TaskListKeyBytes) -> Result<(), Status> {
+            Ok(())
+        }
+        fn domain_for_name(&self, _: &GoString) -> Result<uuid::Uuid, Status> {
+            Ok(uuid::Uuid::from_u128(1))
+        }
+        fn check_domain(&self, _: &GoString, _: &'static str) -> Result<(), Status> {
+            Ok(())
+        }
+        fn acquire_semaphore(
+            &self,
+            _: Request<n::matching::AcquireSemaphoreRequest>,
+        ) -> NativeFuture<Result<Response<n::matching::AcquireSemaphoreResponse>, Status>> {
+            Box::pin(async { Err(Status::unimplemented("test")) })
+        }
     }
-    fn service(reject: bool) -> (tempfile::TempDir, NativeMatchingService<Integration>, Arc<crate::matching_metrics::RecordingMetricSink>, Arc<cadence_persistence::matching_sqlite::SqliteTaskStore>) {
+    fn service(
+        reject: bool,
+    ) -> (
+        tempfile::TempDir,
+        NativeMatchingService<Integration>,
+        Arc<crate::matching_metrics::RecordingMetricSink>,
+        Arc<cadence_persistence::matching_sqlite::SqliteTaskStore>,
+    ) {
         use cadence_persistence::{matching_blob::BlobEncoding, matching_sqlite::SqliteTaskStore};
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let store = Arc::new(
+            SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap(),
+        );
         let history = crate::matching_history::MatchingHistoryClient::new(
-            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(), Duration::from_secs(1), 32 * 1024 * 1024);
-        let registry = crate::matching_registry_native::NativeQueueRegistry::new(store.clone(), history, std::num::NonZeroU32::new(100).unwrap());
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            32 * 1024 * 1024,
+        );
+        let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+            store.clone(),
+            history,
+            std::num::NonZeroU32::new(100).unwrap(),
+        );
         let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
-        let integration = Integration { metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()), reject };
-        (dir, NativeMatchingService::new(NativeMatchingEngine::new(registry), integration), sink, store)
+        let integration = Integration {
+            metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()),
+            reject,
+        };
+        (
+            dir,
+            NativeMatchingService::new(NativeMatchingEngine::new(registry), integration),
+            sink,
+            store,
+        )
     }
     #[tokio::test]
     async fn actual_handler_counts_forwarded_quota_failure_and_captures_panic() {
-        use cadence_proto::native::NativeMatchingApi as _;
         use crate::matching_metrics::FORWARDED_PER_TASK_LIST;
+        use cadence_proto::native::NativeMatchingApi as _;
         let (_dir, service, sink, _) = service(true);
         let request = n::matching::AddDecisionTaskRequest {
             forwarded_from: GoString::from(&b"\xff"[..]),
-            task_list: Some(n::api::TaskList { name: "queue".into(), ..Default::default() }),
+            task_list: Some(n::api::TaskList {
+                name: "queue".into(),
+                ..Default::default()
+            }),
             ..Default::default()
         };
-        assert_eq!(service.add_decision_task(Request::new(request)).await.unwrap_err().code(), tonic::Code::ResourceExhausted);
-        assert_eq!(sink.events().iter().filter(|event| event.name == FORWARDED_PER_TASK_LIST).count(), 1);
+        assert_eq!(
+            service
+                .add_decision_task(Request::new(request))
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::ResourceExhausted
+        );
+        assert_eq!(
+            sink.events()
+                .iter()
+                .filter(|event| event.name == FORWARDED_PER_TASK_LIST)
+                .count(),
+            1
+        );
         crate::matching_panic::arm_panic_for_test("add_decision_task", 1);
-        let error = service.add_decision_task(Request::new(Default::default())).await.unwrap_err();
+        let error = service
+            .add_decision_task(Request::new(Default::default()))
+            .await
+            .unwrap_err();
         assert!(crate::matching_panic::is_captured_panic(&error));
     }
     #[tokio::test]
@@ -594,28 +1113,74 @@ mod tests {
         let completion = completed.clone();
         let entered = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let calls = entered.clone();
-        service.engine.registry.set_shard_admission(Arc::new(move |_, _| {
-            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let release = release.clone(); let completion = completion.clone();
-            Box::pin(async move { release.notified().await; completion.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok(()) })
-        }));
+        service
+            .engine
+            .registry
+            .set_shard_admission(Arc::new(move |_, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let release = release.clone();
+                let completion = completion.clone();
+                Box::pin(async move {
+                    release.notified().await;
+                    completion.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                })
+            }));
         let domain: GoString = uuid::Uuid::from_u128(1).to_string().into();
-        let list = n::api::TaskList { name: "queue".into(), ..Default::default() };
-        let mut add = Request::new(n::matching::AddDecisionTaskRequest { domain_id: domain.clone(), task_list: Some(list.clone()), ..Default::default() });
+        let list = n::api::TaskList {
+            name: "queue".into(),
+            ..Default::default()
+        };
+        let mut add = Request::new(n::matching::AddDecisionTaskRequest {
+            domain_id: domain.clone(),
+            task_list: Some(list.clone()),
+            ..Default::default()
+        });
         add.set_timeout(Duration::from_millis(50));
-        let err = tokio::time::timeout(Duration::from_secs(2), service.add_decision_task(add)).await.unwrap().unwrap_err();
+        let err = tokio::time::timeout(Duration::from_secs(2), service.add_decision_task(add))
+            .await
+            .unwrap()
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        let mut poll = Request::new(n::matching::PollForDecisionTaskRequest { domain_id: domain.clone(), request: Some(n::api::PollForDecisionTaskRequest { task_list: Some(list.clone()), ..Default::default() }), ..Default::default() });
+        let mut poll = Request::new(n::matching::PollForDecisionTaskRequest {
+            domain_id: domain.clone(),
+            request: Some(n::api::PollForDecisionTaskRequest {
+                task_list: Some(list.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
         poll.set_timeout(Duration::from_millis(50));
-        let err = tokio::time::timeout(Duration::from_secs(2), service.poll_for_decision_task(poll)).await.unwrap().unwrap_err();
+        let err =
+            tokio::time::timeout(Duration::from_secs(2), service.poll_for_decision_task(poll))
+                .await
+                .unwrap()
+                .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        let mut query = Request::new(n::matching::QueryWorkflowRequest { domain_id: domain.clone(), task_list: Some(list.clone()), ..Default::default() });
+        let mut query = Request::new(n::matching::QueryWorkflowRequest {
+            domain_id: domain.clone(),
+            task_list: Some(list.clone()),
+            ..Default::default()
+        });
         query.set_timeout(Duration::from_millis(50));
-        let err = tokio::time::timeout(Duration::from_secs(2), service.query_workflow(query)).await.unwrap().unwrap_err();
+        let err = tokio::time::timeout(Duration::from_secs(2), service.query_workflow(query))
+            .await
+            .unwrap()
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        let mut describe = Request::new(n::matching::DescribeTaskListRequest { domain_id: domain, request: Some(n::api::DescribeTaskListRequest { task_list: Some(list), ..Default::default() }) });
+        let mut describe = Request::new(n::matching::DescribeTaskListRequest {
+            domain_id: domain,
+            request: Some(n::api::DescribeTaskListRequest {
+                task_list: Some(list),
+                ..Default::default()
+            }),
+        });
         describe.set_timeout(Duration::from_millis(50));
-        let err = tokio::time::timeout(Duration::from_secs(2), service.describe_task_list(describe)).await.unwrap().unwrap_err();
+        let err =
+            tokio::time::timeout(Duration::from_secs(2), service.describe_task_list(describe))
+                .await
+                .unwrap()
+                .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
         assert_eq!(entered.load(std::sync::atomic::Ordering::SeqCst), 4);
         released.notify_waiters();
@@ -623,8 +1188,15 @@ mod tests {
         assert_eq!(completed.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(service.engine.registry.loaded_owner_count(), 0);
         use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
-        let key = TaskListKeyBytes { domain_id: uuid::Uuid::from_u128(1), name: "queue".into(), task_type: 0 };
-        assert!(store.get_task_list(&key).is_err(), "pending admission must not lease storage");
+        let key = TaskListKeyBytes {
+            domain_id: uuid::Uuid::from_u128(1),
+            name: "queue".into(),
+            task_type: 0,
+        };
+        assert!(
+            MatchingTaskStoreBytes::get_task_list(store.as_ref(), &key).is_err(),
+            "pending admission must not lease storage"
+        );
     }
 
     #[test]
@@ -639,11 +1211,19 @@ mod tests {
         let methods = n::NATIVE_MATCHING_METHODS;
         assert_eq!(methods.len(), 13);
         for name in [
-            "PollForDecisionTask", "PollForActivityTask", "AddDecisionTask",
-            "AddActivityTask", "QueryWorkflow", "RespondQueryTaskCompleted",
-            "CancelOutstandingPoll", "DescribeTaskList", "ListTaskListPartitions",
-            "GetTaskListsByDomain", "UpdateTaskListPartitionConfig",
-            "RefreshTaskListPartitionConfig", "AcquireSemaphore",
+            "PollForDecisionTask",
+            "PollForActivityTask",
+            "AddDecisionTask",
+            "AddActivityTask",
+            "QueryWorkflow",
+            "RespondQueryTaskCompleted",
+            "CancelOutstandingPoll",
+            "DescribeTaskList",
+            "ListTaskListPartitions",
+            "GetTaskListsByDomain",
+            "UpdateTaskListPartitionConfig",
+            "RefreshTaskListPartitionConfig",
+            "AcquireSemaphore",
         ] {
             assert!(methods.contains(&name), "missing native RPC {name}");
         }

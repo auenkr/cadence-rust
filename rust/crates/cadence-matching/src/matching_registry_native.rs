@@ -312,7 +312,8 @@ struct State {
     stopped: bool,
 }
 
-type NativeShardRouterSlot = Arc<RwLock<Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>>>;
+type NativeShardRouterSlot =
+    Arc<RwLock<Option<Arc<crate::matching_shard_routing::MatchingShardRouter>>>>;
 
 /// Queue creation and insertion run in the same blocking worker, so cancelling
 /// an RPC while its lease is acquired cannot orphan or duplicate that lease.
@@ -675,11 +676,17 @@ impl NativeQueueRegistry {
     /// Shared by all registry clones and native engine contexts. Publish the
     /// discovered router before admitting requests; readers release the lock
     /// before any asynchronous owner lookup.
-    pub fn set_shard_router(&self, router: Arc<crate::matching_shard_routing::MatchingShardRouter>) {
+    pub fn set_shard_router(
+        &self,
+        router: Arc<crate::matching_shard_routing::MatchingShardRouter>,
+    ) {
         *self.shard_router.write().expect("native shard router lock") = Some(router);
     }
     pub fn shard_router(&self) -> Option<Arc<crate::matching_shard_routing::MatchingShardRouter>> {
-        self.shard_router.read().expect("native shard router lock").clone()
+        self.shard_router
+            .read()
+            .expect("native shard router lock")
+            .clone()
     }
     pub fn with_local_poll_service(mut self, factory: NativeLocalPollFactory) -> Self {
         self.local_poll_service = Some(factory);
@@ -695,9 +702,8 @@ impl NativeQueueRegistry {
         build_local: NativeLocalPollServiceBuilder,
         refresh: NativePartitionRefresher,
     ) -> Self {
-        let factory: NativeLocalPollFactory = Arc::new(move |host| {
-            host.registry().map(|registry| build_local(registry))
-        });
+        let factory: NativeLocalPollFactory =
+            Arc::new(move |host| host.registry().map(|registry| build_local(registry)));
         self.with_live_routing_factory(membership, router, factory, refresh)
     }
 
@@ -710,21 +716,33 @@ impl NativeQueueRegistry {
         factory: NativeLocalPollFactory,
         refresh: NativePartitionRefresher,
     ) -> Self {
-        if let Some(router) = router { self.set_shard_router(router); }
+        if let Some(router) = router {
+            self.set_shard_router(router);
+        }
         let parent_membership = membership.clone();
         let parent_router = self.shard_router.clone();
         let parent: NativeParentRouter = Arc::new(move |name| {
             let membership = parent_membership.clone();
             let name = name.clone();
-            let router = parent_router.read().expect("native shard router lock").clone();
+            let router = parent_router
+                .read()
+                .expect("native shard router lock")
+                .clone();
             Box::pin(async move {
                 let channel = if let Some(router) = router {
-                    router.remote_channel_bytes(name.as_bytes()).await
-                        .map_err(|error| Status::unavailable(error.to_string()))?.0
+                    router
+                        .remote_channel_bytes(name.as_bytes())
+                        .await
+                        .map_err(|error| Status::unavailable(error.to_string()))?
+                        .0
                 } else {
                     membership.remote_channel_bytes(name.as_bytes())?
                 };
-                Ok(channel.map(|channel| Arc::new(crate::matching_forward_native::RemoteNativeMatching(channel)) as Arc<dyn NativeMatchingApi>))
+                Ok(channel.map(|channel| {
+                    Arc::new(crate::matching_forward_native::RemoteNativeMatching(
+                        channel,
+                    )) as Arc<dyn NativeMatchingApi>
+                }))
             })
         });
         let local_membership = membership.native_membership();
@@ -1036,7 +1054,11 @@ impl NativeQueueRegistry {
         response
     }
 
-    pub(crate) fn check_task_list_ownership(&self, name: &GoString, cached: bool) -> Result<(), Status> {
+    pub(crate) fn check_task_list_ownership(
+        &self,
+        name: &GoString,
+        cached: bool,
+    ) -> Result<(), Status> {
         let policy = self
             .ownership_policy
             .read()
@@ -1136,23 +1158,28 @@ impl NativeQueueRegistry {
     > {
         Box::pin(async move {
             let lookup = async move {
-            if !(0..=1).contains(&key.task_type) {
-                return Err(Status::invalid_argument("Unknown persistence task type."));
-            }
-            let check = self.admission.read().expect("Matching admission lock").clone();
-            if let Some(check) = check {
-                let cached = self.contains_cached(&key);
-                check(key.name.clone(), cached).await?;
-            }
-            // Do not dispatch startup if admission completed after expiry.
-            if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
-                return Err(Status::internal("context deadline exceeded"));
-            }
-            let registry = self.clone();
-            owner_work(move |readers| registry.get_blocking(key, kind, now, readers)).await
+                if !(0..=1).contains(&key.task_type) {
+                    return Err(Status::invalid_argument("Unknown persistence task type."));
+                }
+                let check = self
+                    .admission
+                    .read()
+                    .expect("Matching admission lock")
+                    .clone();
+                if let Some(check) = check {
+                    let cached = self.contains_cached(&key);
+                    check(key.name.clone(), cached).await?;
+                }
+                // Do not dispatch startup if admission completed after expiry.
+                if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
+                    return Err(Status::internal("context deadline exceeded"));
+                }
+                let registry = self.clone();
+                owner_work(move |readers| registry.get_blocking(key, kind, now, readers)).await
             };
             match deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, lookup).await
+                Some(deadline) => tokio::time::timeout_at(deadline, lookup)
+                    .await
                     .unwrap_or_else(|_| Err(Status::internal("context deadline exceeded"))),
                 None => lookup.await,
             }
@@ -2349,7 +2376,11 @@ mod tests {
         let slot = crate::matching_registry_routing_native::NativeServiceSlot::default();
         let factory = slot.factory();
         let host = NativeLocalPollHost {
-            detached: { let mut detached = registry.clone(); detached.state = Arc::new(Mutex::new(State::default())); detached },
+            detached: {
+                let mut detached = registry.clone();
+                detached.state = Arc::new(Mutex::new(State::default()));
+                detached
+            },
             state: Arc::downgrade(&registry.state),
         };
         assert!(factory(host.clone()).is_none());
@@ -2358,16 +2389,25 @@ mod tests {
         slot.publish(&service);
         let api = factory(host.clone()).unwrap();
         let raw = b"parent-\xff";
-        api.add_decision_task(cadence_proto::native::matching::AddDecisionTaskRequest {
-            task_list: Some(cadence_proto::native::api::TaskList { name: GoString::from(&raw[..]), ..Default::default() }),
-            ..Default::default()
-        }, tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
+        api.add_decision_task(
+            cadence_proto::native::matching::AddDecisionTaskRequest {
+                task_list: Some(cadence_proto::native::api::TaskList {
+                    name: GoString::from(&raw[..]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            tokio::time::Instant::now() + Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
         assert_eq!(&*peer.0.lock().unwrap(), raw);
         drop(api);
         drop(service);
         drop(peer);
         assert!(factory(host.clone()).is_none());
-        let service: Arc<dyn cadence_proto::native::NativeMatchingApi> = Arc::new(SlotPeer::default());
+        let service: Arc<dyn cadence_proto::native::NativeMatchingApi> =
+            Arc::new(SlotPeer::default());
         slot.publish(&service);
         drop(registry);
         assert!(factory(host).is_none());
@@ -2430,12 +2470,18 @@ mod tests {
         assert!(retained.shard_router().is_none());
         let membership = crate::matching_membership::Membership::new("local", vec![]);
         let router = Arc::new(crate::matching_shard_routing::MatchingShardRouter::new(
-            membership.clone(), None, Arc::new(|| 0), Arc::new(|| false),
+            membership.clone(),
+            None,
+            Arc::new(|| 0),
+            Arc::new(|| false),
         ));
         registry.set_shard_router(router.clone());
         assert!(Arc::ptr_eq(&retained.shard_router().unwrap(), &router));
         let replacement = Arc::new(crate::matching_shard_routing::MatchingShardRouter::new(
-            membership, None, Arc::new(|| 100), Arc::new(|| false),
+            membership,
+            None,
+            Arc::new(|| 100),
+            Arc::new(|| false),
         ));
         retained.set_shard_router(replacement.clone());
         assert!(Arc::ptr_eq(&registry.shard_router().unwrap(), &replacement));
@@ -2489,7 +2535,10 @@ mod tests {
         let (drain, receiver) = tokio::sync::watch::channel(false);
         let check = crate::matching_runtime::native_shard_ownership_check(
             crate::matching_membership::Membership::new("local", vec![]),
-            Arc::new(|| 100), Arc::new(|| false), receiver, lookup,
+            Arc::new(|| 100),
+            Arc::new(|| false),
+            receiver,
+            lookup,
         );
         registry.set_ownership_policy(NativeQueueOwnershipPolicy {
             is_shard_distributor_eligible: Arc::new(|_| true),
@@ -2501,7 +2550,10 @@ mod tests {
         let first = clone.get(raw.clone(), 0, registry_now()).await.unwrap();
         let second = clone.get(raw.clone(), 0, registry_now()).await.unwrap();
         assert!(Arc::ptr_eq(&first.queue, &second.queue));
-        assert_eq!(*calls.lock().unwrap(), vec![b"queue-\xff".to_vec(), b"queue-\xff".to_vec()]);
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![b"queue-\xff".to_vec(), b"queue-\xff".to_vec()]
+        );
         drain.send(true).unwrap();
         assert!(clone.get(raw, 0, registry_now()).await.is_err());
         assert_eq!(calls.lock().unwrap().len(), 2);
@@ -2529,10 +2581,18 @@ mod tests {
     #[tokio::test]
     async fn admission_failure_cancellation_and_shutdown_never_publish() {
         let (_dir, registry) = fixture();
-        registry.set_shard_admission(Arc::new(|_, _| Box::pin(async {
-            Err(Status::unavailable("heartbeat failed"))
-        })));
-        assert_eq!(registry.get(key(b"failed"), 0, registry_now()).await.err().unwrap().code(), tonic::Code::Unavailable);
+        registry.set_shard_admission(Arc::new(|_, _| {
+            Box::pin(async { Err(Status::unavailable("heartbeat failed")) })
+        }));
+        assert_eq!(
+            registry
+                .get(key(b"failed"), 0, registry_now())
+                .await
+                .err()
+                .unwrap()
+                .code(),
+            tonic::Code::Unavailable
+        );
         assert_eq!(registry.loaded_owner_count(), 0);
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
@@ -2541,18 +2601,37 @@ mod tests {
         registry.set_shard_admission(Arc::new(move |_, _| {
             let started = started.clone();
             let unblock = unblock.clone();
-            Box::pin(async move { started.notify_one(); unblock.notified().await; Ok(()) })
+            Box::pin(async move {
+                started.notify_one();
+                unblock.notified().await;
+                Ok(())
+            })
         }));
         let pending_registry = registry.clone();
-        let pending = tokio::spawn(async move { pending_registry.get(key(b"race"), 0, registry_now()).await });
-        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        let pending =
+            tokio::spawn(
+                async move { pending_registry.get(key(b"race"), 0, registry_now()).await },
+            );
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
         registry.shutdown(registry_now()).await.unwrap();
         release.notify_one();
-        assert!(tokio::time::timeout(Duration::from_secs(2), pending).await.unwrap().unwrap().is_err());
+        assert!(tokio::time::timeout(Duration::from_secs(2), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err());
         assert_eq!(registry.loaded_owner_count(), 0);
         let cancelled_registry = registry.clone();
-        let cancelled = tokio::spawn(async move { cancelled_registry.get(key(b"cancel"), 0, registry_now()).await });
-        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        let cancelled = tokio::spawn(async move {
+            cancelled_registry
+                .get(key(b"cancel"), 0, registry_now())
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
         cancelled.abort();
         let _ = cancelled.await;
         assert_eq!(registry.loaded_owner_count(), 0);
