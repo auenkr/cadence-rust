@@ -13,3 +13,5 @@ Integration contract and blockers:
 - Added source regressions for observer sink/context and native fatal conversion through the launcher with raw SQL RunID bytes. Existing host tests exercise the startup gate, but these additions do not establish configured startup, admission, storage/limiter or service parity. Add end-to-end configured-store and failure/recovery tests during integration.
 
 Validation: `git diff --check` passed; no local Cargo, formatting, Go validation, builds or tests were run. CI evidence will be recorded separately; no service completion claim.
+
+Six-crate clean-target clippy/test and runner formatting dispatched at source head `d3c4d7197df988ebfd58005dab6c2d7fd6561eb0`: https://github.com/auenkr/cadence-rust/actions/runs/40727844840 . Status was in progress with no conclusion at handoff. This does not validate the subsequent documentation-only commit. Parent baseline run 40727183000 was not cancelled.
