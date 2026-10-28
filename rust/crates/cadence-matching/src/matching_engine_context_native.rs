@@ -35,12 +35,7 @@ pub fn metrics_poll_observer_factory(
 ) -> PollObserverFactory {
     metrics_poll_observer_factory_with_names(
         metrics,
-        Arc::new(move |id| {
-            cache
-                .get_domain_by_id(id)
-                .ok()
-                .map(|d| d.info.name)
-        }),
+        Arc::new(move |id| cache.get_domain_by_id(id).ok().map(|d| d.info.name)),
     )
 }
 
@@ -68,12 +63,13 @@ fn metrics_poll_observer_factory_with_names(
                 poller_isolation_group: String::from_utf8_lossy(isolation_group.as_bytes())
                     .into_owned(),
             };
-            Some(
-                Arc::new(crate::matching_host_native::NativeMetricsPollObserver::new(
+            Some(Arc::new(
+                crate::matching_host_native::NativeMetricsPollObserver::new(
                     metrics.clone(),
                     context,
-                ).with_raw_isolation_group(isolation_group.clone())) as Arc<dyn NativePollObserver>,
-            )
+                )
+                .with_raw_isolation_group(isolation_group.clone()),
+            ) as Arc<dyn NativePollObserver>)
         },
     )
 }
@@ -385,19 +381,34 @@ mod tests {
 
     #[test]
     fn isolation_success_compares_raw_names_before_label_sanitization() {
-        use crate::matching_metrics::{MatchingMetrics, RecordingMetricSink, ISOLATION_TASK_MATCH, ISOLATION_SUCCESS};
+        use crate::matching_metrics::{
+            MatchingMetrics, RecordingMetricSink, ISOLATION_SUCCESS, ISOLATION_TASK_MATCH,
+        };
         use std::collections::BTreeMap;
         let domain = GoString::from(uuid::Uuid::nil().to_string());
         let task_group = GoString::from(b"zone-\xff".as_slice());
-        for (poller, matched) in [(task_group.clone(), true), (GoString::from(b"zone-\xfe".as_slice()), false), (GoString::from("zone-\u{fffd}"), false)] {
+        for (poller, matched) in [
+            (task_group.clone(), true),
+            (GoString::from(b"zone-\xfe".as_slice()), false),
+            (GoString::from("zone-\u{fffd}"), false),
+        ] {
             let sink = Arc::new(RecordingMetricSink::default());
-            let factory = metrics_poll_observer_factory_with_names(MatchingMetrics::new(sink.clone()), Arc::new(|_| Some("domain-a".into())));
+            let factory = metrics_poll_observer_factory_with_names(
+                MatchingMetrics::new(sink.clone()),
+                Arc::new(|_| Some("domain-a".into())),
+            );
             let observer = factory(&domain, &GoString::from("list"), 0, 0, &poller).unwrap();
-            let partition = BTreeMap::from([(GoString::from("isolation-group"), task_group.clone())]);
+            let partition =
+                BTreeMap::from([(GoString::from("isolation-group"), task_group.clone())]);
             observer.poll_match(false, false, Some(&partition));
             let events = sink.events();
-            assert!(events.iter().any(|event| event.name == ISOLATION_TASK_MATCH));
-            assert_eq!(events.iter().any(|event| event.name == ISOLATION_SUCCESS), matched);
+            assert!(events
+                .iter()
+                .any(|event| event.name == ISOLATION_TASK_MATCH));
+            assert_eq!(
+                events.iter().any(|event| event.name == ISOLATION_SUCCESS),
+                matched
+            );
         }
     }
 
@@ -422,7 +433,7 @@ mod tests {
             .poll_success(false);
         }
         let events = sink.events();
-        for list in ["normal-list", "__sticky__"] {
+        for list in ["normal_list", "__sticky__"] {
             assert!(events.iter().any(|e| e.name == POLL_SUCCESS
                 && e.tags.get("tasklist").is_some_and(|v| v == list)
                 && e.tags.get("domain").is_some_and(|v| v == "domain-a")));

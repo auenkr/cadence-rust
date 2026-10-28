@@ -130,7 +130,12 @@ impl MetricSink for GoRollupSink {
     fn record(&self, event: MetricEvent) {
         let rollup = crate::matching_metrics_rollup::rollup(event.name).map(|name| {
             let mut tags = BTreeMap::new();
-            for key in ["operation", "histogram_start", "histogram_end", "histogram_scale"] {
+            for key in [
+                "operation",
+                "histogram_start",
+                "histogram_end",
+                "histogram_scale",
+            ] {
                 if let Some(value) = event.tags.get(key) {
                     tags.insert(key.to_owned(), value.clone());
                 }
@@ -996,13 +1001,21 @@ impl MatchingMetrics {
         poll_forwarded: bool,
         partition: Option<&BTreeMap<String, String>>,
     ) {
-        let isolation_success = partition.and_then(|config| {
-            config.get("isolation-group").map(|current| {
-                config.get("original-isolation-group").unwrap_or(current)
-                    == &context.poller_isolation_group
+        let isolation_success = partition
+            .and_then(|config| {
+                config.get("isolation-group").map(|current| {
+                    config.get("original-isolation-group").unwrap_or(current)
+                        == &context.poller_isolation_group
+                })
             })
-        }).unwrap_or(false);
-        self.poll_match_with_isolation_result(context, task_forwarded, poll_forwarded, partition, isolation_success);
+            .unwrap_or(false);
+        self.poll_match_with_isolation_result(
+            context,
+            task_forwarded,
+            poll_forwarded,
+            partition,
+            isolation_success,
+        );
     }
 
     /// Native callers compare raw Go strings before converting metric labels.

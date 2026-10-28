@@ -502,7 +502,7 @@ mod scoped_metric_tests {
             });
         }
         let events = sink.events();
-        for (name, group) in [("queue-a", "group-a"), ("queue-b", "group-b")] {
+        for (name, group) in [("queue_a", "group_a"), ("queue_b", "group_b")] {
             assert!(events.iter().any(|e| e.name == ESTIMATED_ADD_TASK_QPS
                 && e.tags.get("tasklist").is_some_and(|v| v == name)
                 && e.tags.get("domain").is_some_and(|v| v == "domain-a")));

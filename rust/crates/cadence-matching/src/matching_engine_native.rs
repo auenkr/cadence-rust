@@ -437,7 +437,11 @@ mod tests {
             ..Default::default()
         };
         let error = engine
-            .add_decision_task(request, Some(tokio::time::Instant::now()), &TestContext)
+            .add_decision_task(
+                request,
+                Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+                &TestContext,
+            )
             .await
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unavailable);

@@ -129,3 +129,35 @@ persistence queue identity are unchanged. Extended the native cold-domain
 regression with uppercase and compact aliases of an ID containing hex letters;
 both must retain the Go exists-but-not-loaded Internal result after canonical
 lookup. This new source awaits CI; the live earlier pin cannot validate it.
+
+
+## Recovered test failures and fixture corrections
+
+Run40750262783 concluded cancelled after the newer source dispatch, but its
+uploaded test.log records Matching lib failure: 940 passed, 8 failed, 2 ignored.
+Clippy exit0 is preserved with exact source/target and the failure report in
+`memory/evidence/matching-native-workspace-40750262783/`. Full downloaded logs
+remain under `/mnt/storage/service/ci-evidence/matching-native-workspace-40750262783`.
+This run does not establish a workspace pass.
+
+All eight failures have specific fixture mismatches with existing production
+contracts: two metric tests expected hyphens where the Go-compatible sink
+sanitizes task-list/group tags to underscores; three config/isolation/timeout
+tests supplied JSON blobs without the required JSON encoding enum; the forwarded
+no-match test supplied an already expired deadline, now correctly rejected at
+admission before reaching forwarding; the semaphore cancellation fixture grew
+to three free tokens but still expected one after cancellation; and the typed
+Thrift test injected ClientVersionNotSupportedError into QueryWorkflow, whose
+pinned Thrift method does not declare it and therefore correctly falls back to
+InternalServiceError. The typed payload test now uses the declared three-field
+TaskListNotOwnedByHostError and checks its exception ID/name as well as raw bytes.
+The cancellation test checks free counts before, during and after cancellation,
+after the next grant, and on restart, retaining its persistence/owner assertions.
+No production behavior is altered by these fixture corrections.
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40751551998 at
+`a2fa01e43477a2efe540f2bf98f99fd869d9b647` was dispatched with clean workspace,
+runner formatting and the original-Go UUID oracle. It predates these fixture
+corrections; preserve its formatting patch before replacing it. No pass claimed.
+T3 PR linking still fails with "The calling provider no longer owns an active
+thread run"; automatic PR monitoring is not established.

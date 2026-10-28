@@ -825,17 +825,20 @@ mod tests {
             store.scan_pages.load(std::sync::atomic::Ordering::SeqCst) > 1,
             "startup fixture must page across multiple rows"
         );
+        assert_eq!(manager.free_count(), 3);
         let pending = {
             let manager = manager.clone();
             tokio::spawn(async move { manager.acquire(&bytes(b"1:x:r:1"), None).await })
         };
         store.entered.notified().await;
+        assert_eq!(manager.free_count(), 2);
         pending.abort();
         let _ = pending.await;
         store.release.notify_one();
-        assert_eq!(manager.free_count(), 1);
+        assert_eq!(manager.free_count(), 3);
         let result = manager.acquire(&bytes(b"1:y:r:2"), None).await.unwrap();
         assert_eq!(result.outcome, SemaphoreAcquireOutcome::Acquired);
+        assert_eq!(manager.free_count(), 2);
         assert_eq!(
             store
                 .get_semaphore_ownership_by_token(&domain, &name, 0, result.token_id)
@@ -845,6 +848,7 @@ mod tests {
         );
         manager.stop();
         let restarted = registry.get_or_create(id).await.unwrap();
+        assert_eq!(restarted.free_count(), 2);
         assert_eq!(
             restarted
                 .acquire(&bytes(b"1:y:r:2"), None)

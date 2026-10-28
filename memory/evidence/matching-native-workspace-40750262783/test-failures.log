@@ -1,0 +1,73 @@
+
+failures:
+
+---- matching_engine_context_native::tests::poll_observers_keep_normal_and_sticky_tags_distinct stdout ----
+
+thread 'matching_engine_context_native::tests::poll_observers_keep_normal_and_sticky_tags_distinct' (22895) panicked at crates/cadence-matching/src/matching_engine_context_native.rs:410:13:
+assertion failed: events.iter().any(|e|
+        e.name == POLL_SUCCESS &&
+                e.tags.get("tasklist").is_some_and(|v| v == list) &&
+            e.tags.get("domain").is_some_and(|v| v == "domain-a"))
+
+---- matching_engine_native::tests::forwarded_failure_never_persists_raw_identifiers stdout ----
+
+thread 'matching_engine_native::tests::forwarded_failure_never_persists_raw_identifiers' (22934) panicked at crates/cadence-matching/src/matching_engine_native.rs:443:9:
+assertion `left == right` failed
+  left: Internal
+ right: Unavailable
+
+---- matching_runtime_native::tests::byte_isolation_selector_uses_live_poller_and_partition_fixtures stdout ----
+
+thread 'matching_runtime_native::tests::byte_isolation_selector_uses_live_poller_and_partition_fixtures' (23486) panicked at crates/cadence-matching/src/matching_runtime_native.rs:701:9:
+assertion `left == right` failed
+  left: (GoString([]), 0, Some("group_unknown"))
+ right: (GoString([122, 111, 110, 101, 45, 239, 191, 189]), 0, None)
+
+---- matching_runtime_native::tests::native_config_filter_preserves_invalid_task_list_bytes stdout ----
+
+thread 'matching_runtime_native::tests::native_config_filter_preserves_invalid_task_list_bytes' (23488) panicked at crates/cadence-matching/src/matching_runtime_native.rs:623:9:
+assertion failed: !replacement
+
+---- matching_runtime_native::tests::record_started_provider_observes_live_config_and_zero_timeout stdout ----
+
+thread 'matching_runtime_native::tests::record_started_provider_observes_live_config_and_zero_timeout' (23490) panicked at crates/cadence-matching/src/matching_runtime_native.rs:648:13:
+assertion `left == right` failed
+  left: 1s
+ right: 250ms
+
+---- matching_scaler_runtime_native::scoped_metric_tests::scaler_observations_keep_root_and_isolation_tags_separate stdout ----
+
+thread 'matching_scaler_runtime_native::scoped_metric_tests::scaler_observations_keep_root_and_isolation_tags_separate' (23553) panicked at crates/cadence-matching/src/matching_scaler_runtime_native.rs:506:13:
+assertion failed: events.iter().any(|e|
+        e.name == ESTIMATED_ADD_TASK_QPS &&
+                e.tags.get("tasklist").is_some_and(|v| v == name) &&
+            e.tags.get("domain").is_some_and(|v| v == "domain-a"))
+
+---- matching_semaphore_manager_native::tests::cancelled_conditional_write_restores_reservation_and_restart_scans_consistently stdout ----
+
+thread 'matching_semaphore_manager_native::tests::cancelled_conditional_write_restores_reservation_and_restart_scans_consistently' (23620) panicked at crates/cadence-matching/src/matching_semaphore_manager_native.rs:836:9:
+assertion `left == right` failed
+  left: 3
+ right: 1
+
+---- thrift_matching::native_dispatch::tests::typed_error_payload_strings_remain_raw stdout ----
+
+thread 'thrift_matching::native_dispatch::tests::typed_error_payload_strings_remain_raw' (23848) panicked at crates/cadence-matching/src/thrift_matching_native_dispatch.rs:430:9:
+assertion `left == right` failed
+  left: [(1, Bytes([67, 108, 105, 101, 110, 116, 32, 118, 101, 114, 115, 105, 111, 110, 32, 110, 111, 116, 32, 115, 117, 112, 112, 111, 114, 116, 101, 100]))]
+ right: [(1, Bytes([255])), (2, Bytes([254])), (3, Bytes([239, 191, 189]))]
+
+
+failures:
+    matching_engine_context_native::tests::poll_observers_keep_normal_and_sticky_tags_distinct
+    matching_engine_native::tests::forwarded_failure_never_persists_raw_identifiers
+    matching_runtime_native::tests::byte_isolation_selector_uses_live_poller_and_partition_fixtures
+    matching_runtime_native::tests::native_config_filter_preserves_invalid_task_list_bytes
+    matching_runtime_native::tests::record_started_provider_observes_live_config_and_zero_timeout
+    matching_scaler_runtime_native::scoped_metric_tests::scaler_observations_keep_root_and_isolation_tags_separate
+    matching_semaphore_manager_native::tests::cancelled_conditional_write_restores_reservation_and_restart_scans_consistently
+    thrift_matching::native_dispatch::tests::typed_error_payload_strings_remain_raw
+
+test result: FAILED. 940 passed; 8 failed; 2 ignored; 0 measured; 0 filtered out; finished in 37.36s
+
+error: test failed, to rerun pass `-p cadence-matching --lib`

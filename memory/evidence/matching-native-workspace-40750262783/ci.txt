@@ -1,0 +1,5 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40750262783
+Head: 78bda6afcc3852eabeb4eade2110ca16609bb533
+Conclusion: cancelled (superseded by later source)
+Clippy: exit 0
+Tests: 940 passed, 8 failed, 2 ignored in Matching lib before cancellation; no workspace pass

@@ -360,7 +360,10 @@ mod tests {
             for alias in [id.to_uppercase(), id.replace('-', "")] {
                 let error = context.domain_name(&GoString::from(alias)).unwrap_err();
                 assert_eq!(error.code(), tonic::Code::Internal);
-                assert_eq!(error.message(), "DefaultDomainCache encounter case where domain exists but cannot be loaded");
+                assert_eq!(
+                    error.message(),
+                    "DefaultDomainCache encounter case where domain exists but cannot be loaded"
+                );
             }
             assert!(!domains.is_active_in(&id, "local").unwrap());
             assert!(domains.is_active_in(&id, "remote").unwrap());

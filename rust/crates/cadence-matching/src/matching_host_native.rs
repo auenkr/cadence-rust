@@ -49,7 +49,11 @@ impl NativeMetricsPollObserver {
         context: crate::matching_metrics::PollMetricContext,
     ) -> Self {
         let raw_poller_isolation_group = GoString::from(context.poller_isolation_group.as_str());
-        Self { metrics, context, raw_poller_isolation_group }
+        Self {
+            metrics,
+            context,
+            raw_poller_isolation_group,
+        }
     }
     pub fn with_raw_isolation_group(mut self, group: GoString) -> Self {
         self.raw_poller_isolation_group = group;
@@ -88,12 +92,16 @@ impl NativePollObserver for NativeMetricsPollObserver {
                 })
                 .collect()
         });
-        let isolation_success = partition.and_then(|config| {
-            config.get(b"isolation-group".as_slice()).map(|current| {
-                config.get(b"original-isolation-group".as_slice()).unwrap_or(current)
-                    == &self.raw_poller_isolation_group
+        let isolation_success = partition
+            .and_then(|config| {
+                config.get(b"isolation-group".as_slice()).map(|current| {
+                    config
+                        .get(b"original-isolation-group".as_slice())
+                        .unwrap_or(current)
+                        == &self.raw_poller_isolation_group
+                })
             })
-        }).unwrap_or(false);
+            .unwrap_or(false);
         self.metrics.poll_match_with_isolation_result(
             &self.context,
             task_forwarded,

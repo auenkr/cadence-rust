@@ -585,13 +585,13 @@ mod tests {
     fn native_config_filter_preserves_invalid_task_list_bytes() {
         let value = DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
-                encoding_type: None,
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
                 data: b"false".to_vec(),
             }),
             filters: vec![DynamicConfigFilter {
                 name: "taskListName".into(),
                 value: Some(cadence_api::types::DataBlob {
-                    encoding_type: None,
+                    encoding_type: Some(cadence_api::enums::EncodingType::JSON),
                     data: br#""\ufffd""#.to_vec(),
                 }),
             }],
@@ -637,7 +637,7 @@ mod tests {
                 "matching.recordTaskStartedTimeout",
                 vec![DynamicConfigValue {
                     value: Some(cadence_api::types::DataBlob {
-                        encoding_type: None,
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
                         data: value.to_vec(),
                     }),
                     filters: vec![],
@@ -660,7 +660,7 @@ mod tests {
         let invalid_group = GoString::from(&b"zone-\xff"[..]);
         let configured_value = DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
-                encoding_type: None,
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
                 data: br#"["zone-\uFFFD"]"#.to_vec(),
             }),
             filters: Vec::new(),

@@ -202,9 +202,12 @@ impl DomainMetadataSource for MatchingDomainMetadataStore {
     }
 }
 
-impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore {
+impl DomainMetadataSource
+    for cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore
+{
     fn metadata_version(&self, _timeout: Duration) -> Result<i64, DomainMetadataSourceError> {
-        self.metadata_version().map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
+        self.metadata_version()
+            .map_err(|error| DomainMetadataSourceError::transient(error.to_string()))
     }
 
     fn list_domains(
@@ -219,8 +222,13 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
             MatchingDomainMetadataError::InvalidPageSize | MatchingDomainMetadataError::InvalidBlob(_) => DomainMetadataSourceError::permanent(error.to_string()),
             _ => DomainMetadataSourceError::transient(error.to_string()),
         })?;
-        for domain in &page.domains { validate_typed_domain_config(domain)?; }
-        Ok(DomainMetadataPage { domains: page.domains, next_page_token: page.next_page_token })
+        for domain in &page.domains {
+            validate_typed_domain_config(domain)?;
+        }
+        Ok(DomainMetadataPage {
+            domains: page.domains,
+            next_page_token: page.next_page_token,
+        })
     }
 
     fn get_domain(
@@ -229,19 +237,23 @@ impl DomainMetadataSource for cadence_persistence::matching_domain_metadata::Cas
         id: Option<&str>,
         _timeout: Duration,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(self, name, id)
-            .map_err(|error| match error {
-                MatchingDomainMetadataError::NotFound(_) | MatchingDomainMetadataError::BothIdAndName
-                | MatchingDomainMetadataError::EmptyIdentity | MatchingDomainMetadataError::InvalidUuid(_) => {
-                    let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
-                        DomainErrorClass::NotFound
-                    } else {
-                        DomainErrorClass::BadRequest
-                    };
-                    DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
-                }
-                _ => DomainMetadataSourceError::transient(error.to_string()),
-            })
+        cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(
+            self, name, id,
+        )
+        .map_err(|error| match error {
+            MatchingDomainMetadataError::NotFound(_)
+            | MatchingDomainMetadataError::BothIdAndName
+            | MatchingDomainMetadataError::EmptyIdentity
+            | MatchingDomainMetadataError::InvalidUuid(_) => {
+                let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
+                    DomainErrorClass::NotFound
+                } else {
+                    DomainErrorClass::BadRequest
+                };
+                DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
+            }
+            _ => DomainMetadataSourceError::transient(error.to_string()),
+        })
     }
 }
 
@@ -370,10 +382,20 @@ impl DomainCacheError {
         match self {
             Self::EmptyName => tonic::Status::invalid_argument("Domain name is empty"),
             Self::EmptyId => tonic::Status::invalid_argument("DomainID is empty."),
-            Self::SourceClassified { message, class: DomainErrorClass::NotFound } => crate::grpc::domain_not_found(message),
-            Self::SourceClassified { message, class: DomainErrorClass::BadRequest } => tonic::Status::invalid_argument(message),
-            Self::SourceClassified { message, .. } | Self::Source(message) => tonic::Status::internal(message),
-            Self::ExistsButNotLoaded(_) => tonic::Status::internal("DefaultDomainCache encounter case where domain exists but cannot be loaded"),
+            Self::SourceClassified {
+                message,
+                class: DomainErrorClass::NotFound,
+            } => crate::grpc::domain_not_found(message),
+            Self::SourceClassified {
+                message,
+                class: DomainErrorClass::BadRequest,
+            } => tonic::Status::invalid_argument(message),
+            Self::SourceClassified { message, .. } | Self::Source(message) => {
+                tonic::Status::internal(message)
+            }
+            Self::ExistsButNotLoaded(_) => tonic::Status::internal(
+                "DefaultDomainCache encounter case where domain exists but cannot be loaded",
+            ),
             Self::Stopped => tonic::Status::internal("domain cache is stopped"),
         }
     }
@@ -603,7 +625,10 @@ impl MatchingDomainCache {
     }
 
     /// Backend parse mode for the pre-handler domain lookup guard (set before sharing).
-    pub fn with_domain_id_parse(mut self, mode: crate::matching_domain_uuid::DomainIdParse) -> Self {
+    pub fn with_domain_id_parse(
+        mut self,
+        mode: crate::matching_domain_uuid::DomainIdParse,
+    ) -> Self {
         self.domain_id_parse = mode;
         self
     }
