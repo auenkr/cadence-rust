@@ -1864,6 +1864,29 @@ impl FatalExit {
 }
 
 #[cfg(test)]
+mod native_fatal_exit_tests {
+    use super::*;
+
+    #[test]
+    fn native_writer_and_reader_share_the_launcher_fatal_path() {
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let sinks = crate::matching_fatal::native_fatal_sinks(sender);
+        let raw = cadence_common::go_string::GoString::from(&b"run\xff"[..]);
+        (sinks.writer.unwrap())(cadence_persistence::matching_blob::SqlRunIdBytesError {
+            raw: raw.clone(), message: "invalid UUID".into(),
+        });
+        let cause = receiver.try_recv().unwrap();
+        assert!(matches!(&cause, crate::matching_fatal::MatchingFatal::SqlRunIdBytes(error) if error.raw == raw));
+        assert!(FatalExit::from_cause(&cause).into_error().downcast_ref::<SqlMatchingWriterFatal>().is_some());
+
+        (sinks.reader.unwrap())("duplicate task ID".into());
+        let cause = receiver.try_recv().unwrap();
+        let error = FatalExit::from_cause(&cause).into_error();
+        assert_eq!(error.downcast_ref::<MatchingReaderFatal>().unwrap().0, "duplicate task ID");
+    }
+}
+
+#[cfg(test)]
 mod matching_http_listener_tests {
     use super::*;
     #[tokio::test]
