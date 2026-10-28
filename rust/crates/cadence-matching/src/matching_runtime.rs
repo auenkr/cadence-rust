@@ -90,6 +90,14 @@ pub type DrainDuration = Arc<dyn Fn() -> Duration + Send + Sync>;
 pub type EvictFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 pub type EvictSelf = Arc<dyn Fn() -> EvictFuture + Send + Sync>;
 
+fn ensure_queue_registry_unowned(
+    legacy: bool,
+    native: bool,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(!legacy && !native, "Matching runtime already owns durable queues");
+    Ok(())
+}
+
 async fn drain_service<F, Fut>(
     evict_self: &mut Option<EvictSelf>,
     drain_duration: &DrainDuration,
@@ -122,6 +130,9 @@ pub struct MatchingRuntime {
     membership_maintenance_stop: Option<oneshot::Sender<()>>,
     membership_maintenance: Option<JoinHandle<Result<(), tonic::Status>>>,
     domain_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
+    native_domain_registry: Arc<Mutex<Option<crate::matching_registry_native::NativeQueueRegistry>>>,
+    native_membership_maintenance: Option<(oneshot::Sender<()>, JoinHandle<Result<(), tonic::Status>>)>,
+    membership: Option<crate::matching_membership::Membership>,
     dynamic_config_watch: Option<(oneshot::Sender<()>, JoinHandle<()>)>,
     shard_distributor_executor: Option<crate::matching_shard_distributor::ShardDistributorExecutor>,
     shard_distributor_spectator: Option<crate::matching_shard_distributor::TonicSpectator>,
@@ -164,6 +175,9 @@ impl MatchingRuntime {
             membership_maintenance_stop: None,
             membership_maintenance: None,
             domain_cache: None,
+            native_domain_registry: Arc::new(Mutex::new(None)),
+            native_membership_maintenance: None,
+            membership: None,
             dynamic_config_watch: None,
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
@@ -205,6 +219,9 @@ impl MatchingRuntime {
             membership_maintenance_stop: None,
             membership_maintenance: None,
             domain_cache: None,
+            native_domain_registry: Arc::new(Mutex::new(None)),
+            native_membership_maintenance: None,
+            membership: None,
             dynamic_config_watch: None,
             shard_distributor_executor: None,
             shard_distributor_spectator: None,
@@ -227,20 +244,25 @@ impl MatchingRuntime {
         registry: crate::matching_registry_native::NativeQueueRegistry,
         service: Arc<dyn cadence_proto::native::NativeMatchingApi>,
     ) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            self.registry.is_none() && self.native_registry.is_none(),
-            "Matching runtime already owns durable queues"
-        );
+        ensure_queue_registry_unowned(self.registry.is_some(), self.native_registry.is_some())?;
         self.matching = self.matching.clone().with_native_service(service);
+        *self
+            .native_domain_registry
+            .lock()
+            .expect("native domain registry lock") = Some(registry.clone());
         let (stop, stopped) = oneshot::channel();
         let maintenance_registry = registry.clone();
         self.maintenance = Some(tokio::spawn(async move {
             maintenance_registry.maintain_until(Duration::from_secs(10), async {
                 let _ = stopped.await;
-            }).await
+            })
+            .await
         }));
         self.maintenance_stop = Some(stop);
         self.native_registry = Some(registry);
+        if let Some(membership) = self.membership.clone() {
+            self.start_native_membership_maintenance(membership);
+        }
         Ok(self)
     }
 
@@ -535,7 +557,8 @@ impl MatchingRuntime {
     /// RPC listeners. Both the handler and durable queue registry use this
     /// same snapshot for ownership and forwarding.
     pub fn with_membership(mut self, membership: crate::matching_membership::Membership) -> Self {
-        self.matching = self.matching.clone().with_membership(membership);
+        self.matching = self.matching.clone().with_membership(membership.clone());
+        self.membership = Some(membership.clone());
         let matching = self.matching.clone();
         let (stop, stopped) = oneshot::channel();
         self.membership_maintenance = Some(tokio::spawn(async move {
@@ -546,7 +569,38 @@ impl MatchingRuntime {
                 .await
         }));
         self.membership_maintenance_stop = Some(stop);
+        if self.native_registry.is_some() {
+            self.start_native_membership_maintenance(membership);
+        }
         self
+    }
+
+    fn start_native_membership_maintenance(
+        &mut self,
+        membership: crate::matching_membership::Membership,
+    ) {
+        if self.native_membership_maintenance.is_none() {
+            let registry = self.native_domain_registry.clone();
+            let mut changes = membership.subscribe();
+            let (native_stop, mut native_stopped) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                loop {
+                    let current = registry.lock().expect("native domain registry lock").clone();
+                    if let Some(current) = current {
+                        if let Err(error) = current.unload_non_owned(crate::grpc_matching::matching_now()).await {
+                            eprintln!("Native Matching membership cleanup failed: {error}");
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut native_stopped => return Ok(()),
+                        changed = changes.changed() => {
+                            if changed.is_err() { return Ok(()); }
+                        }
+                    }
+                }
+            });
+            self.native_membership_maintenance = Some((native_stop, task));
+        }
     }
 
     /// Start and connect the persistence-backed domain cache before constructing
@@ -557,8 +611,16 @@ impl MatchingRuntime {
         drain_duration: DrainDuration,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
     ) -> anyhow::Result<Self> {
-        Self::start_domain_cache(state.domains.clone(), cache.clone(), None).await?;
+        let native_registry = Arc::new(Mutex::new(None));
+        Self::start_domain_cache(
+            state.domains.clone(),
+            cache.clone(),
+            None,
+            native_registry.clone(),
+        )
+        .await?;
         let mut runtime = Self::in_memory(state, drain_duration);
+        runtime.native_domain_registry = native_registry;
         runtime.matching = runtime.matching.clone().with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
@@ -582,7 +644,13 @@ impl MatchingRuntime {
             poll_expiration,
             drain_duration,
         );
-        Self::start_domain_cache(domains, cache.clone(), runtime.registry.clone()).await?;
+        Self::start_domain_cache(
+            domains,
+            cache.clone(),
+            runtime.registry.clone(),
+            runtime.native_domain_registry.clone(),
+        )
+        .await?;
         runtime.matching = runtime.matching.clone().with_domain_cache(cache.clone());
         runtime.domain_cache = Some(cache);
         Ok(runtime)
@@ -592,6 +660,7 @@ impl MatchingRuntime {
         domains: cadence_persistence::InMemoryDomainStore,
         cache: Arc<crate::matching_domain_cache::MatchingDomainCache>,
         registry: Option<crate::matching_registry::QueueRegistry>,
+        native_registry: Arc<Mutex<Option<crate::matching_registry_native::NativeQueueRegistry>>>,
     ) -> anyhow::Result<()> {
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
@@ -603,6 +672,7 @@ impl MatchingRuntime {
             let changed: crate::matching_domain_cache::DomainChangeCallback = Arc::new({
                 let notification_version = notification_version.clone();
                 let runtime = runtime.clone();
+                let native_registry = native_registry.clone();
                 move |entries| {
                     domains.sync_matching_metadata(entries);
                     let mut version = notification_version
@@ -630,8 +700,22 @@ impl MatchingRuntime {
                                 }),
                             );
                             if let Some(registry) = &registry {
-                                for domain in notified {
-                                    if let Ok(domain) = uuid::Uuid::parse_str(&domain) {
+                                for domain in &notified {
+                                    if let Ok(domain) = uuid::Uuid::parse_str(domain) {
+                                        let registry = registry.clone();
+                                        runtime.spawn(async move {
+                                            registry.release_domain_failover_polls(domain).await;
+                                        });
+                                    }
+                                }
+                            }
+                            if let Some(registry) = native_registry
+                                .lock()
+                                .expect("native domain registry lock")
+                                .clone()
+                            {
+                                for domain in notified.iter() {
+                                    if let Ok(domain) = uuid::Uuid::parse_str(domain) {
                                         let registry = registry.clone();
                                         runtime.spawn(async move {
                                             registry.release_domain_failover_polls(domain).await;
@@ -735,6 +819,16 @@ impl MatchingRuntime {
         if let Some(stop) = self.membership_maintenance_stop.take() {
             let _ = stop.send(());
         }
+        let native_membership_result = if let Some((stop, task)) = self.native_membership_maintenance.take() {
+            let _ = stop.send(());
+            task.await
+                .map_err(|error| {
+                    anyhow::anyhow!("joining native Matching membership maintenance: {error}")
+                })
+                .and_then(|result| result.map_err(|error| {
+                    anyhow::anyhow!("stopping native Matching membership maintenance: {error}")
+                }))
+        } else { Ok(()) };
         if let Some(stop) = self.maintenance_stop.take() {
             let _ = stop.send(());
         }
@@ -790,6 +884,7 @@ impl MatchingRuntime {
             cache.stop();
         }
         maintenance_result?;
+        native_membership_result?;
         membership_result?;
         peer_cleanup_result?;
         dynamic_config_result?;
@@ -812,6 +907,10 @@ impl Drop for MatchingRuntime {
             let _ = stop.send(());
         }
         if let Some(task) = self.membership_maintenance.take() {
+            task.abort();
+        }
+        if let Some((stop, task)) = self.native_membership_maintenance.take() {
+            let _ = stop.send(());
             task.abort();
         }
         if let Some((stop, task)) = self.dynamic_config_watch.take() {
@@ -990,6 +1089,61 @@ mod tests {
 
     fn empty_membership() -> crate::matching_membership::Membership {
         crate::matching_membership::Membership::new("local", Vec::new())
+    }
+
+    #[test]
+    fn durable_queue_ownership_guard_rejects_either_existing_registry() {
+        assert!(ensure_queue_registry_unowned(false, false).is_ok());
+        assert!(ensure_queue_registry_unowned(true, false).is_err());
+        assert!(ensure_queue_registry_unowned(false, true).is_err());
+        assert!(ensure_queue_registry_unowned(true, true).is_err());
+    }
+
+    #[tokio::test]
+    async fn native_registry_maintenance_stops_and_joins_on_shutdown_signal() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            SqliteTaskStore::create(
+                directory.path().join("native-maintenance.db"),
+                BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
+        );
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+            Duration::from_secs(1),
+            32 * 1024 * 1024,
+        );
+        let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+            store,
+            history,
+            NonZeroU32::new(100).unwrap(),
+        );
+        let owner = tokio::time::timeout(Duration::from_secs(2), registry.get(
+            cadence_persistence::matching_native_task_store::TaskListKeyBytes {
+                domain_id: uuid::Uuid::from_u128(1),
+                name: cadence_common::go_string::GoString::from(&b"shutdown-\xff"[..]),
+                task_type: 0,
+            }, 0, crate::grpc_matching::matching_now(),
+        )).await.unwrap().unwrap();
+        let joining_registry = registry.clone();
+        let (stop, stopped) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            registry
+                .maintain_until(Duration::from_secs(60), async {
+                    let _ = stopped.await;
+                })
+                .await
+        });
+        stop.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .expect("native maintenance should stop promptly")
+            .expect("native maintenance task should join")
+            .expect("native registry should shut down cleanly");
+        assert!(owner.queue.is_stopped());
+        tokio::time::timeout(Duration::from_secs(2), joining_registry.wait_for_writers())
+            .await.expect("native writers should join after owner shutdown");
     }
 
     fn dynamic_config_test_value(runtime: &MatchingRuntime, key: &str) -> i64 {
