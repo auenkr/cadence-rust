@@ -106,15 +106,37 @@ impl NativeSemaphoreService {
         &self,
         request: Request<n::matching::AcquireSemaphoreRequest>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
+        // Tonic drops the handler future on a wire deadline or disconnect. Go's
+        // handler keeps running while Start uses its background timeout, then
+        // observes the canceled caller and records the context-error metric.
+        struct CancelOnDrop(tokio::sync::watch::Sender<bool>);
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) {
+                self.0.send_replace(true);
+            }
+        }
+        let (cancel_sender, dropped) = tokio::sync::watch::channel(false);
+        let _cancel_on_drop = CancelOnDrop(cancel_sender);
+        let service = self.clone();
+        tokio::spawn(async move { service.acquire_owned(request, dropped).await })
+            .await
+            .map_err(|_| Status::internal("semaphore handler task failed"))?
+    }
+
+    async fn acquire_owned(
+        &self,
+        request: Request<n::matching::AcquireSemaphoreRequest>,
+        dropped: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         let deadline = crate::matching_sync::request_deadline(&request);
         let cancelled = request
             .extensions()
             .get::<CallerCancel>()
             .map(|c| c.0.clone());
         let r = request.get_ref();
-        let result = self.acquire_inner(r, deadline, cancelled.clone()).await;
+        let result = self.acquire_inner(r, deadline, cancelled.clone(), dropped.clone()).await;
         match result {
-            Err(error) => match caller_ended(deadline, cancelled.as_ref()) {
+            Err(error) => match caller_ended(deadline, cancelled.as_ref(), &dropped) {
                 Some(ended) => {
                     // The host resolves the metric domain using its handler cache.
                     (self.context_timeout)(&r.domain_id, &r.semaphore_name, request.metadata());
@@ -130,6 +152,7 @@ impl NativeSemaphoreService {
         r: &n::matching::AcquireSemaphoreRequest,
         deadline: Option<tokio::time::Instant>,
         cancelled: Option<tokio::sync::watch::Receiver<bool>>,
+        mut dropped: tokio::sync::watch::Receiver<bool>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         let owner = parse_owner_bytes(r.owner_id.as_bytes())
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
@@ -170,18 +193,15 @@ impl NativeSemaphoreService {
             .map_err(|_| startup_timeout_status(&id))?
             .map_err(status)?
         };
-        if let Some(ended) = caller_ended(deadline, cancelled.as_ref()) {
+        if let Some(ended) = caller_ended(deadline, cancelled.as_ref(), &dropped) {
             return Err(Status::internal(ended));
         }
         let acquire = manager.acquire(&r.owner_id, deadline);
         tokio::pin!(acquire);
-        let result = if let Some(mut cancel) = cancelled {
-            tokio::select! {
-                result = &mut acquire => result.map_err(status)?,
-                _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { std::future::pending::<()>().await; } } } => return Err(Status::internal("context canceled")),
-            }
-        } else {
-            acquire.await.map_err(status)?
+        let result = tokio::select! {
+            result = &mut acquire => result.map_err(status)?,
+            _ = wait_cancelled(cancelled) => return Err(Status::internal("context canceled")),
+            _ = wait_for_cancel(&mut dropped) => return Err(Status::internal("context canceled")),
         };
         let outcome = match result.outcome {
             cadence_api::enums::SemaphoreAcquireOutcome::Acquired => 1,
@@ -211,13 +231,32 @@ fn startup_timeout_status(id: &IdentifierBytes) -> Status {
 fn caller_ended(
     deadline: Option<tokio::time::Instant>,
     cancelled: Option<&tokio::sync::watch::Receiver<bool>>,
+    dropped: &tokio::sync::watch::Receiver<bool>,
 ) -> Option<&'static str> {
     if cancelled.is_some_and(|c| *c.borrow()) {
         Some("context canceled")
     } else if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
         Some("context deadline exceeded")
+    } else if *dropped.borrow() {
+        Some("context canceled")
     } else {
         None
+    }
+}
+
+async fn wait_for_cancel(cancel: &mut tokio::sync::watch::Receiver<bool>) {
+    while !*cancel.borrow_and_update() {
+        if cancel.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+async fn wait_cancelled(mut cancel: Option<tokio::sync::watch::Receiver<bool>>) {
+    if let Some(cancel) = &mut cancel {
+        wait_for_cancel(cancel).await;
+    } else {
+        std::future::pending::<()>().await;
     }
 }
 fn identifier_status(error: IdentifierError) -> Status {
