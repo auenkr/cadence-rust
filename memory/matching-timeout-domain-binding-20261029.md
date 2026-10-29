@@ -9,3 +9,5 @@ Go `matcher.Offer` uses local task wait before immediate local/forward selection
 Focused CI and mixed cluster verification are required. Exact Go ready-channel selection fairness, response/deadline simultaneity, forwarded-backlog parent deadlines and other manager configuration binding remain open; this source audit is not service acceptance. No local Cargo, Go or runtime validation was performed.
 
 Initial focused dispatch: https://github.com/auenkr/cadence-rust/actions/runs/40910910099, exact head `1a88d5d4636b8be51446f1b54d8eeca7b4dd0412`. Observed in progress, conclusion unavailable. Superseded by the subsequent source commit adding the Clippy argument-count annotation; it is not validation for that later source.
+
+Replacement focused dispatch: https://github.com/auenkr/cadence-rust/actions/runs/40910970647, exact source head `b61ba5d954fb8bc46e816298dbde4101dd3a5ead`; observed pending with no conclusion. The preceding run was sent a cancellation request. This evidence-only update does not change the tested source. Collect terminal result and formatting artifact if needed before integration; no success is claimed.
