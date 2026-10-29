@@ -2651,6 +2651,8 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_idle_ticker_retains_lease_and_manager_after_recovery() {
+        use std::sync::atomic::Ordering;
+
         for ttl in [0, -1, -2, 1] {
             let (_directory, registry) = fixture();
             let setting = Arc::new(std::sync::atomic::AtomicI64::new(ttl));
