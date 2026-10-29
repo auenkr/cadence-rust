@@ -326,7 +326,7 @@ mod tests {
                 scan_entered: Notify::new(), scan_release: Notify::new(),
             });
             let domain = GoString::from(DOMAIN);
-            for name in ["sem", "deadline"] {
+            for name in ["sem", "deadline", "wire-deadline"] {
                 store.inner.create_semaphore(&domain, &GoString::from(name), 1, 1).await.unwrap();
             }
             let state = AppState::default();
@@ -411,11 +411,37 @@ mod tests {
             assert_eq!(error.message(), "context deadline exceeded");
             assert_eq!(count(), 2);
             store.release.notify_one();
-            let mut retry_client = client;
+            let mut retry_client = client.clone();
             let retry = tokio::time::timeout(Duration::from_secs(3), retry_client.acquire_semaphore(
                 request("deadline", "1:retry:r:5", Some(Duration::from_secs(2))),
             )).await.unwrap().unwrap().into_inner();
             assert_eq!(retry.outcome, 1);
+
+            // A real wire deadline ends the client RPC. Tonic 0.12 maps its
+            // server timeout to Cancelled (a client-enforced deadline may instead
+            // report DeadlineExceeded). Go's background startup
+            // remains in flight: a later caller waits for that same scan and can
+            // acquire after it finishes. No server error or metric is observable
+            // through the expired client RPC.
+            store.park_scan.store(true, Ordering::SeqCst);
+            let scans_before = store.scan_pages.load(Ordering::SeqCst);
+            let mut wire_client = client.clone();
+            let wire_request = request("wire-deadline", "1:wire:r:6", Some(Duration::from_millis(500)));
+            let wire = tokio::spawn(async move { wire_client.acquire_semaphore(wire_request).await });
+            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified()).await.unwrap();
+            let error = tokio::time::timeout(Duration::from_secs(2), wire).await.unwrap().unwrap().unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Cancelled);
+            let mut waiter_client = client.clone();
+            let waiter_request = request("wire-deadline", "1:waiter:r:7", Some(Duration::from_secs(3)));
+            let mut waiter = tokio::spawn(async move { waiter_client.acquire_semaphore(waiter_request).await });
+            assert!(tokio::time::timeout(Duration::from_millis(200), &mut waiter).await.is_err(),
+                "later caller must wait for the original background scan");
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            store.scan_release.notify_one();
+            store.release.notify_one();
+            let response = tokio::time::timeout(Duration::from_secs(2), waiter).await.unwrap().unwrap().unwrap().into_inner();
+            assert_eq!(response.outcome, 1);
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
             runtime.shutdown().await.unwrap();
             server.abort();
         }).await.expect("configured transport scenario timed out");
