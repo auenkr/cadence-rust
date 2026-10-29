@@ -111,9 +111,13 @@ fn dispatch_timeout_nanos(config: &ReaderConfig) -> i64 {
         None => config.dispatch_timeout.as_nanos() as i64,
     }
 }
+fn ack_interval_duration(nanos: i64) -> Duration {
+    Duration::from_nanos(nanos.max(0) as u64)
+}
+
 fn update_ack_interval(config: &ReaderConfig) -> Duration {
     match &config.live {
-        Some(live) => Duration::from_nanos((live.update_ack_interval)().max(1) as u64),
+        Some(live) => ack_interval_duration((live.update_ack_interval)()),
         None => Duration::from_nanos(DEFAULT_UPDATE_ACK_INTERVAL_NANOS as u64),
     }
 }
@@ -1123,6 +1127,18 @@ impl NativeTaskReader {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ack_interval_nonpositive_is_immediate() {
+        // Go time.NewTimer/Reset fire immediately for nonpositive durations.
+        assert_eq!(super::ack_interval_duration(i64::MIN), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(-1), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(0), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(1), Duration::from_nanos(1));
+        assert_eq!(
+            super::ack_interval_duration(i64::MAX),
+            Duration::from_nanos(i64::MAX as u64)
+        );
+    }
     use super::*;
     use cadence_persistence::{
         matching_blob::{BlobEncoding, TaskListDataBytes},

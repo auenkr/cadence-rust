@@ -1480,7 +1480,7 @@ impl NativeQueueRegistry {
             idle_ttl_nanos,
         ));
         let next_ack_update = registry.update_ack_interval.as_ref().map(|provider| {
-            let nanos = provider(&domain, &lookup.1, lookup.2).max(1) as u64;
+            let nanos = provider(&domain, &lookup.1, lookup.2).max(0) as u64;
             tokio::time::Instant::now() + Duration::from_nanos(nanos)
         });
         // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
@@ -2287,7 +2287,7 @@ impl NativeQueueRegistry {
                     .lock()
                     .expect("Matching ack timer lock") =
                     registry.update_ack_interval.as_ref().map(|provider| {
-                        let nanos = provider(&gs(key.0), &key.1, key.2).max(1) as u64;
+                        let nanos = provider(&gs(key.0), &key.1, key.2).max(0) as u64;
                         tokio::time::Instant::now() + Duration::from_nanos(nanos)
                     });
                 if owner.queue.is_stopped() && registry.detach(&key, &owner) {
