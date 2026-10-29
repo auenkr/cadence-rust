@@ -79,7 +79,14 @@ impl DynamicBucket {
         let burst = if rate == 0.0 {
             0
         } else {
-            (rate.ceil() as i64).max(1)
+            // Go's amd64 float-to-int conversion returns MinInt for an
+            // out-of-range value; Rust casts saturate instead.
+            let rounded = rate.ceil();
+            if rounded >= 9_223_372_036_854_775_808.0 {
+                1
+            } else {
+                (rounded as i64).max(1)
+            }
         };
         (rate, burst)
     }
@@ -154,6 +161,12 @@ fn domain_key(class: RpcClass) -> &'static str {
 fn host_default(class: RpcClass) -> i64 {
     match class {
         RpcClass::User => USER_RPS,
+        RpcClass::Worker => UNLIMITED_RPS,
+    }
+}
+fn domain_default(class: RpcClass) -> i64 {
+    match class {
+        RpcClass::User => 0,
         RpcClass::Worker => UNLIMITED_RPS,
     }
 }
@@ -238,11 +251,11 @@ impl MatchingRpcQuota {
             let config = overlay.lock().expect("admin config lock");
             // An invalid-byte name cannot match a UTF-8 domain filter, but
             // the unfiltered domain quota still applies. Keep its bucket key
-            // raw and only fall back to the host rate when that quota is zero.
+            // raw and fall back to the host rate when that quota is nonpositive.
             let primary = dynamic_config::integer(
                 config.property_values(domain_key(class)),
                 std::str::from_utf8(domain.as_bytes()).ok(),
-                0,
+                domain_default(class),
             );
             if primary > 0 {
                 primary as f64
@@ -269,7 +282,7 @@ impl MatchingRpcQuota {
     pub fn allow_go_string(&self, method: MatchingRpc, domain: Option<&GoString>) -> bool {
         let (class, reject) = method.policy();
         let now = (self.clock)();
-        let domain_bucket = domain.map(|name| {
+        let domain_bucket = domain.filter(|name| !name.as_bytes().is_empty()).map(|name| {
             let key = (class, name.clone());
             let mut state = self.state.lock().expect("Matching quota lock");
             state
@@ -446,6 +459,30 @@ mod tests {
         set(&overlay, "matching.rps", vec![entry(2, &[])]);
         now.store(5_000_000_011, Ordering::SeqCst);
         assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, None));
+    }
+
+    #[test]
+    fn worker_domain_default_does_not_follow_host_and_empty_domain_skips_bucket() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.workerrps", vec![entry(1, &[])]);
+        set(&overlay, "matching.domainrps", vec![entry(1, &[])]);
+        let quota = MatchingRpcQuota::with_clock(overlay, Arc::new(|| 10));
+        assert!(quota.allow(MatchingRpc::AddDecisionTask, Some("alpha")));
+        let state = quota.state.lock().unwrap();
+        let worker = state.domains[&(RpcClass::Worker, "alpha".into())].clone();
+        drop(state);
+        assert_eq!(worker.lock().unwrap().limiter.burst(), UNLIMITED_RPS);
+        assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, Some("")));
+        assert!(quota.allow(MatchingRpc::GetTaskListsByDomain, Some("")));
+        assert!(!quota.state.lock().unwrap().domains.contains_key(&(RpcClass::User, "".into())));
+    }
+
+    #[test]
+    fn extreme_positive_rate_uses_go_amd64_minimum_burst() {
+        assert_eq!(DynamicBucket::rate_and_burst(i64::MAX as f64).1, 1);
+        assert_eq!(DynamicBucket::rate_and_burst(i32::MAX as f64).1, i32::MAX as i64);
+        assert_eq!(DynamicBucket::rate_and_burst(0.0).1, 0);
+        assert_eq!(DynamicBucket::rate_and_burst(-1.0).1, 1);
     }
 
     #[test]
