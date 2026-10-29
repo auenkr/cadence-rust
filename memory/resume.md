@@ -719,3 +719,18 @@ log for final outcome. Full implementation details in matching-membership-next.m
 Whole Matching remains incomplete; production discovery/runtime wiring and other
 listed parity gaps remain. Next focused operational config gap: Go's
 matching.overrideTaskListRPS, read on each poll in task_list_manager.go:715.
+
+## CI status — 2026-10-29
+One read-only query of [run 40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+confirmed live `in_progress` at exact head `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`
+(`t3/matching-startup-integration-review`). At 08:15:01Z workspace formatting,
+changed Matching runtime formatting, and Clippy had succeeded; Test was in
+progress and later evidence uploads/identity were pending. No terminal
+conclusion, test totals, or exit files were available. This head predates the
+semaphore/adapter regressions later being integrated by Terra and cannot validate
+them. See `matching-native-checkpoint-20261029.md` and
+`evidence/matching-format-ci-40840392628.md`. Matching remains incomplete;
+`bf9f3d3` remains frozen/unchanged, no native mixed lane has passed, and all ten
+mixed gates remain required. Next dependency is Terra's regression integration
+and review, followed by freezing one coherent candidate and running fresh-target
+CI before serial mixed gates.

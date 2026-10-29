@@ -1,8 +1,8 @@
 # Matching native checkpoint — 2026-10-29
 
 Documentation-only state captured on shared `master`. Matching remains
-incomplete; no native mixed lane has passed. No CI/delegate status was polled,
-no validation was run, and nothing was dispatched during this checkpoint.
+incomplete; no native mixed lane has passed. One read-only status query was
+made for run `40840392628`; no validation was run and nothing was dispatched.
 
 ## Candidate and validation
 
@@ -10,10 +10,18 @@ no validation was run, and nothing was dispatched during this checkpoint.
   on `t3/matching-startup-integration-review`. It includes the diagnostics,
   pool, and lock fixes. Source review exists; validation does not.
 - Run `40839466118` failed the scoped formatting check at
-  `matching_runtime.rs:925`; Clippy and tests were skipped. Formatting artifact
-  run `40840392628` is expected to correspond to `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`
-  and remains the last known live run. A separate Luna worker is collecting it;
-  its result was not retrieved here.
+  `matching_runtime.rs:925`; Clippy and tests were skipped. The one
+  authoritative status read of formatting artifact run
+  [40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+  confirms exact head `d4ee53f00d505246dc0b7fbbe353d7e989a91c49` on
+  `t3/matching-startup-integration-review`. At `2026-10-29T08:15:01Z`, run
+  status was `in_progress`: workspace formatting, changed-Matching-runtime
+  formatting, and Clippy succeeded; Test was in progress and later evidence
+  upload/identity steps were pending. This is a live status only, not a terminal
+  conclusion. No exit files or test totals were available from this query. See
+  `memory/evidence/matching-format-ci-40840392628.md` for the compact record.
+- This candidate predates the later semaphore and adapter regression changes
+  under Terra integration/review, so this run cannot validate those changes.
 - Adapter regression branch `t3/matching-lock-regressions` at
   `04826c745` covers four engine and three control cold production limiter
   paths. It has no validation evidence.
@@ -55,8 +63,10 @@ before serial mixed validation. There is no native lane pass to report.
 
 ## Dependency chain
 
-1. Collect and review formatting artifact `40840392628` against the exact
-   candidate SHA; independently establish whether formatting is resolved.
+1. After this run reaches a terminal state, collect and review artifact
+   `40840392628` against the exact candidate SHA, including actual formatting,
+   Clippy, and test exit files and test totals. Formatting and Clippy are
+   observed successes; tests were still in progress at the one status read.
 2. Complete Terra's source review/integration of both regression branches;
    reconcile their exact commits and preserve focused regression coverage.
 3. Freeze one integrated candidate. Run fresh-target CI (Clippy then workspace
