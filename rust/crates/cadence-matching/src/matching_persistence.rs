@@ -273,7 +273,7 @@ impl RateLimitedDomainSource {
             DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
             DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
             DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
-            DomainErrorClass::Internal => PersistenceErrorClass::Internal,
+            DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
         });
         self.limiter.record_domain_call(operation, elapsed, class);
     }
@@ -376,6 +376,23 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         self.record("GetDomain", started.elapsed(), &result);
         result
     }
+    fn get_domain_by_raw_id(
+        &self,
+        id: &[u8],
+        timeout: std::time::Duration,
+        mode: crate::matching_domain_uuid::DomainIdParse,
+    ) -> Result<cadence_persistence::matching_domain_metadata::MatchingDomainMetadata, DomainMetadataSourceError> {
+        self.permit("GetDomain", None)?;
+        let started = std::time::Instant::now();
+        let result = self.source.get_domain_by_raw_id(id, timeout, mode);
+        if result.as_ref().err().is_some_and(|error| error.class == crate::matching_domain_cache::DomainErrorClass::CapturedPanic) {
+            self.limiter.record_domain_panic_request("GetDomain");
+        } else {
+            self.record("GetDomain", started.elapsed(), &result);
+        }
+        result
+    }
+
 }
 
 #[derive(Debug)]
@@ -538,6 +555,47 @@ mod list_domain_metric_tests {
         > {
             Err(DomainMetadataSourceError::transient("unused"))
         }
+    }
+
+    #[test]
+    fn raw_sql_miss_rate_limit_precedes_parse_and_panic_only_counts_request() {
+        use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
+        use crate::matching_domain_cache::MatchingDomainCache;
+        use crate::matching_domain_uuid::DomainIdParse;
+        let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
+        overlay.lock().unwrap().update(false, "matching.persistenceMaxQPS", vec![DynamicConfigValue {
+            filters: vec![], value: Some(DataBlob { encoding_type: Some(EncodingType::JSON), data: b"1".to_vec() }),
+        }]);
+        let limiter = MatchingPersistenceLimiter::new(overlay, Arc::new(AtomicUsize::new(1)));
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        let cache = MatchingDomainCache::new(limit_domain_source(Arc::new(EmptyDomainList), limiter.clone()))
+            .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
+        let panic = cache.get_domain_by_raw_id(&[0xff]).unwrap_err();
+        assert!(crate::matching_panic::is_captured_panic(&panic));
+        let events = sink.events();
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
+        assert!(!events.iter().any(|e| e.name.starts_with("persistence_errors") || e.name.starts_with("persistence_latency")));
+        // The first call used the only token, so even malformed bytes are rejected
+        // before the SQL parser is reached on the second call.
+        let rejected = cache.get_domain_by_raw_id(b"bad").unwrap_err();
+        assert_eq!(rejected.code(), tonic::Code::Internal);
+        assert_eq!(rejected.message(), REJECTED);
+        assert_eq!(limiter.rejected(), 1);
+    }
+
+    #[test]
+    fn raw_sql_accepted_non_utf8_wrapper_reaches_source_with_uuid_body() {
+        use crate::matching_domain_cache::MatchingDomainCache;
+        use crate::matching_domain_uuid::DomainIdParse;
+        let cache = MatchingDomainCache::new(Arc::new(EmptyDomainList))
+            .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
+        let mut id = b"x0123abcd-4567-89ef-abcd-0123456789aby".to_vec();
+        id[0] = 0xff;
+        id[37] = 0xfe;
+        let error = cache.get_domain_by_raw_id(&id).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert_eq!(error.message(), "unused");
     }
 
     #[test]

@@ -317,6 +317,23 @@ impl MatchingPersistenceLimiter {
         self.record_call(operation, None, elapsed, class);
     }
 
+    // A Go panic unwinds after the request counter and before latency/error metrics.
+    pub(crate) fn record_domain_panic_request(&self, operation: &'static str) {
+        use crate::matching_metrics::*;
+        let sink = self.metric_sink.read().expect("Matching metrics sink lock");
+        sink.record(MetricEvent {
+            name: PERSISTENCE_REQUESTS,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: std::collections::BTreeMap::from([
+                (OPERATION_TAG.to_owned(), operation.to_owned()),
+                (IS_RETRY_TAG.to_owned(), (persistence_retry_count() > 0).to_string()),
+                (TASK_CATEGORY_TAG.to_owned(), "none".into()),
+            ]),
+            histogram: None,
+        });
+    }
+
     fn record_call(
         &self,
         operation: &'static str,

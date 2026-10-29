@@ -41,6 +41,7 @@ pub enum DomainErrorClass {
     NotFound,
     BadRequest,
     DbUnavailable,
+    CapturedPanic,
 }
 
 impl DomainMetadataSourceError {
@@ -97,10 +98,26 @@ pub trait DomainMetadataSource: Send + Sync + 'static {
         &self,
         id: &[u8],
         timeout: Duration,
+        mode: crate::matching_domain_uuid::DomainIdParse,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-        let id = std::str::from_utf8(id).map_err(|_| {
-            DomainMetadataSourceError::permanent("UUID is invalid.")
-                .with_class(DomainErrorClass::BadRequest)
+        if mode == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
+            crate::matching_domain_uuid::raw_sql_lookup_guard(id).map_err(|status| {
+                DomainMetadataSourceError::permanent(status.message())
+                    .with_class(DomainErrorClass::CapturedPanic)
+            })?;
+        }
+        // SQL's parser accepts arbitrary outer bytes for the 38-byte form.
+        let backend_id = if mode == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
+            match id.len() {
+                38 => &id[1..37],
+                45 => &id[9..],
+                _ => id,
+            }
+        } else {
+            id
+        };
+        let id = std::str::from_utf8(backend_id).map_err(|_| {
+            DomainMetadataSourceError::permanent("raw non-UTF8 domain ID cannot be passed to this metadata source")
         })?;
         self.get_domain(None, Some(id), timeout)
     }
@@ -804,21 +821,14 @@ impl MatchingDomainCache {
         if let Some(entry) = text.and_then(|key| self.by_id(key)) {
             return Ok(entry);
         }
-        if self.domain_id_parse == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
-            crate::matching_domain_uuid::raw_sql_lookup_guard(id)?;
-        }
-        // google/uuid accepts arbitrary first and last bytes in its 38-byte form.
-        // Only the persistence query is normalized; cache identity stays raw.
-        let backend_id = if text.is_none() && id.len() == 38
-            && self.domain_id_parse == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic
-        {
-            &id[1..37]
-        } else {
-            id
-        };
-        self.source.get_domain_by_raw_id(backend_id, DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
-            .map_err(cache_source_error)
-            .map_err(DomainCacheError::into_status)?;
+        self.source.get_domain_by_raw_id(id, DOMAIN_CACHE_PERSISTENCE_TIMEOUT, self.domain_id_parse)
+            .map_err(|error| {
+                if error.class == DomainErrorClass::CapturedPanic {
+                    tonic::Status::unknown(error.message)
+                } else {
+                    cache_source_error(error).into_status()
+                }
+            })?;
         self.refresh_after_miss(None, text).map_err(DomainCacheError::into_status)?;
         text.and_then(|key| self.by_id(key)).ok_or_else(|| {
             DomainCacheError::ExistsButNotLoaded(String::new()).into_status()
