@@ -1,13 +1,12 @@
 # Native Matching acceptance ledger — 2026-10-29
 
-> Latest checkpoint update: see `matching-native-checkpoint-20261029.md`.
-> It records the source-reviewed but unvalidated integration candidate
-> `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`, formatting failure/run status,
-> two unverified regression branches, and the required ten mixed lanes. In
-> particular, keep two-node MySQL; the old frozen `bf9f3d3` PostgreSQL attempt
-> failed before SDK workflows, and no native mixed lane has passed. The requested
-> audit note thread was unavailable (`thread_not_found`), so it supplies no
-> evidence. This documentation update does not alter source or lane results.
+> Latest state: see `matching-native-checkpoint-20261029.md` and
+> `matching-candidate-source-closure-review-20261029.md`. Scheduler-owned run
+> `40841353614` was last known live with Test in progress at exact source
+> `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`; no terminal result is available.
+> Formatted source commit `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` has no CI
+> credit. No native mixed lane has passed. Frozen ref remains
+> `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
 
 Matching remains incomplete. This is the current acceptance index; earlier v7
 and older runtime results are historical. No native mixed lane has passed.

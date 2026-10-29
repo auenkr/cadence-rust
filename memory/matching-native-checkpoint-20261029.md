@@ -1,9 +1,34 @@
 # Matching native checkpoint — 2026-10-29
 
 Documentation-only state on shared `master`. Matching remains incomplete; no
-native mixed lane has passed. Run `40840392628` is now terminal and was reviewed
-against its artifacts at the expected exact head. No CI was dispatched and no
-source, workflow, or service implementation was changed.
+native mixed lane has passed. Current scheduler observation (from the user): run
+`40841353614` is live, with Test in progress, at exact source
+`e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`; it has no terminal result yet. Do
+not report an outcome or dispatch/poll Actions from this checkpoint.
+
+Current docs record the source closure review in
+`matching-candidate-source-closure-review-20261029.md` and the formatting
+artifact provenance in `matching-ci-scheduler-evidence-20261029.md`. Source
+candidate `8cc72372ad605dcdce4f03e86c895dc90115fd38` is docs-only after `e84e`;
+formatting commit `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` changes two Rust
+files and has no CI credit. The formatting patch SHA256 is
+`a5b3d531e4a31da663e09e1381ec949b7e4c66b8687d52f3b2c5062b9484a58a`.
+Frozen `matching-native-final-20261029` remains
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
+
+Bounded source closure review found no additional concrete defect. Open parity
+coverage remains ownership error cases, concurrent poll/zero-dispatch/isolation,
+full config map, and configured semaphore startup timeout. Terra worker
+`39eccb25` is actively addressing those. Luna scheduler `cdc9c685` owns all run
+checks and dispatch; do not poll Actions/delegate status or dispatch. No Cargo,
+rustfmt, Go or validation ran. No source/workflow edit or mixed native pass is
+claimed.
+
+Next chain: Terra gap closure and focused formatted CI; integrate any source
+changes; freeze one immutable SHA; fresh uncached workspace Clippy then tests;
+actual PostgreSQL pool dependency oracle; then the ten mixed lanes serially;
+finish parity/evidence closure before History. Earlier evidence below is
+historical and must not be mistaken for current-source acceptance.
 
 ## Candidate and validation
 

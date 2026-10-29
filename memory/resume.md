@@ -1,3 +1,28 @@
+## Matching docs checkpoint — 2026-10-29
+
+Shared `master` was clean at `1edbe51f85d586994c50756380ad04cae21e7a37` before
+this docs-only update. Matching remains current and incomplete. Scheduler's
+last known state is run `40841353614` live at exact source
+`e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`, Test in progress with no terminal
+result. Do not poll it: Luna scheduler `cdc9c685` owns Actions observation and
+dispatch. `8cc72372ad605dcdce4f03e86c895dc90115fd38` is docs-only after `e84e`;
+formatting commit `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` changes two Rust
+files and receives no CI credit. Preserve frozen ref
+`matching-native-final-20261029` at
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
+
+Source review found no additional concrete defect; ownership error mapping,
+concurrent poll/zero-dispatch/isolation, complete config-map coverage, and
+configured semaphore startup-timeout evidence remain open. Terra `39eccb25` is
+working on these. Required sequence: Terra closure and focused formatted CI;
+integrate source changes; freeze immutable SHA; fresh uncached workspace Clippy
+then tests; PostgreSQL pool dependency oracle; all ten mixed lanes serially;
+close parity/evidence before History. See
+`matching-native-checkpoint-20261029.md`,
+`matching-native-acceptance-ledger-20261029.md`,
+`matching-candidate-source-closure-review-20261029.md`, and
+`matching-ci-scheduler-evidence-20261029.md`.
+
 ## DNS accepted; explicit Luna restart — 2026-10-19
 
 Main87e3f1352 (pushed) integrates DNS/SRV worker9ff5d527d; source/manifest/lock/fixture byte-identical checked. Final15focused, actual localGo/Rust lookup, injectedGo provider oracle and strictserverClippy pass; durable memory/evidence/ringpop-dns-provider/final.md. Linux cgo/pureGo/platform and resolver-config reload differences remain explicit audit gaps.
