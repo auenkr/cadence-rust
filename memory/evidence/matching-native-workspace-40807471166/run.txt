@@ -1,0 +1,12 @@
+GitHub Actions run: https://github.com/auenkr/cadence-rust/actions/runs/40807471166
+Conclusion: success
+Head/source identity: bf9f3d9387a72c4ed26b4be0a85025e65fd485a1 (frozen ref matching-native-final-20261029)
+Job: clippy-test, completed 2026-10-29 02:45:36Z, success
+Fresh target selected before validation: /home/runner/work/_temp/cargo-target-final (RUNNER_TEMP/cargo-target-final; clean per workflow step).
+Clippy: clippy.exit=0; log retained.
+Workspace tests: test.exit=0; full test.log retained in CI download; compact terminal summary retained here.
+Formatting outcomes: fmt.exit=0; Matching runtime, TLS-touched and query-touched format checks all exit0. workspace-format.exit=1: advisory cargo fmt --all -- --check found unrelated formatting diffs outside those scoped changed-file checks; workflow records this check but intentionally continues.
+No formatting mutation was performed (formatting patch steps skipped).
+Go oracle artifacts are retained under /mnt/storage/service/ci-evidence/matching-native-workspace-40807471166/downloaded/; source SHA was checked against this candidate. Matching metrics evidence records Rust example binary SHA256 7129a6a49df2aeb71b49d47355a7c843b744628a9fc1a75cb6f2a7893e40e170.
+This credits the exact-pin workspace CI pass only. It does not prove any of the ten mixed-cluster acceptance lanes or complete Matching parity.
+PostgreSQL mixed gate run40808334141 was subsequently cancelled. Replacement40808511931 uses the same head SHA; not yet credited.

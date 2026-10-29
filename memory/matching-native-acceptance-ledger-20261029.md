@@ -15,11 +15,18 @@ remote ref `matching-native-final-20261029` (verified with `git ls-remote`).
 Whole-workspace Actions [40807471166](https://github.com/auenkr/cadence-rust/actions/runs/40807471166)
 passed at that exact SHA with fresh target, sequential Clippy then workspace
 tests, original-Go domain/source oracles enabled, and no formatting mutation.
-Clippy and test exits are 0; Matching reports 972 passed and 2 ignored. Four metric
-comparisons match. Targeted formatting passes; workspace-wide formatting reports
-existing differences (exit1), so no whole-workspace formatting pass is claimed.
-Evidence: `evidence/matching-native-workspace-40807471166/workspace-result.txt`. The selected predecessor runs failed on
-compile/test lint issues, now corrected; their compact evidence is retained below.
+`clippy.exit=0` and `test.exit=0`; fresh target was
+`/home/runner/work/_temp/cargo-target-final`. `fmt.exit=0` and scoped Matching
+runtime, TLS and query format checks were 0. The advisory full-workspace format
+check recorded `workspace-format.exit=1` for formatting diffs elsewhere; the
+workflow intentionally continued, and no formatter mutation occurred. Matching
+reports 972 passed and 2 ignored. Four metric comparisons match. Run identity,
+actual exit files and compact test summary are retained in
+`evidence/matching-native-workspace-40807471166/`; complete downloads are in
+`/mnt/storage/service/ci-evidence/matching-native-workspace-40807471166/`. This
+credits exact-pin workspace CI only, not mixed-lane acceptance. The selected
+predecessor runs failed on compile/test lint issues, now corrected; their compact
+evidence is retained below.
 
 Latest completed whole-workspace pass remains historical:
 [40803510954](https://github.com/auenkr/cadence-rust/actions/runs/40803510954)
@@ -36,8 +43,8 @@ change the immutable ref used to build and run the candidate.
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Run40807471166 passed at frozen bf9f3d938; retained Clippy/test exits0 and fresh target identity. Historical workspace pass40803510954 predates candidate changes and cannot supply final-pin credit. |
-| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Run [40808334141](https://github.com/auenkr/cadence-rust/actions/runs/40808334141) live at frozen SHA; PostgreSQL client step observed. Results pending. |
+| Fresh uncached workspace Clippy, then workspace tests | Pass at frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`: run40807471166 success, clean runner target, Clippy0 then workspace tests0. `fmt.exit=0`; scoped format checks0; advisory workspace-wide format check `workspace-format.exit=1` for unrelated formatting diffs. Evidence: `evidence/matching-native-workspace-40807471166/`. |
+| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Run [40808334141](https://github.com/auenkr/cadence-rust/actions/runs/40808334141) pending at the same frozen SHA; no credit yet. |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
 | Configstore live settings + SDK + restart/recovery | Not dispatched |

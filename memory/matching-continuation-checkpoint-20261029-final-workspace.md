@@ -7,3 +7,7 @@ Final workspace run https://github.com/auenkr/cadence-rust/actions/runs/40807471
 PostgreSQL run https://github.com/auenkr/cadence-rust/actions/runs/40808334141 was discovered already live at the frozen SHA; PostgreSQL client installation observed. An accidental duplicate dispatch40808357056 was immediately cancelled. Original run40808334141 remained authoritatively in_progress afterward. Inspect that existing run before dispatching anything else; workflows share concurrency and all mixed lanes must run serially. Do not restart merely because observation takes time.
 
 No local Cargo/Go/formatting/runtime validation ran. Matching remains incomplete. Retain and inspect actual topology, SDK, restart/recovery, probe, binary hash and cleanup artifacts when PostgreSQL terminates; then continue the other nine lanes and supplemental dependency oracles. Acceptance index: matching-native-acceptance-ledger-20261029.md. Checkout remains master.
+
+## Cancellation correction
+
+Later authoritative inspection found both40808334141 and40808357056 terminal cancelled: the duplicate dispatch had triggered cancel-in-progress for the original. No PostgreSQL outcome is credited. Dispatched single replacement https://github.com/auenkr/cadence-rust/actions/runs/40808511931 at unchanged frozen SHA. Inspect this run next. Recovered pre-existing untracked workspace evidence and ignored-test/artifact checklists; retained with updated run status.
