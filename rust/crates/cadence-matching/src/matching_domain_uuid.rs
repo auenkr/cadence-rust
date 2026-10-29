@@ -26,14 +26,18 @@ fn is_hex(byte: u8) -> bool {
 
 /// google/uuid v1.6.0 `Parse` error text, or `None` when Go accepts the string.
 pub fn go_uuid_parse_error(input: &str) -> Option<String> {
-    let bytes = input.as_bytes();
+    go_uuid_parse_error_bytes(input.as_bytes())
+}
+
+/// Parse the raw bytes of a Go string without changing its identity.
+pub fn go_uuid_parse_error_bytes(bytes: &[u8]) -> Option<String> {
     let body: &[u8] = match bytes.len() {
         36 => bytes,
         45 => {
             if !bytes[..9].eq_ignore_ascii_case(b"urn:uuid:") {
                 return Some(format!(
-                    "invalid urn prefix: {:?}",
-                    String::from_utf8_lossy(&bytes[..9])
+                    "invalid urn prefix: {}",
+                    cadence_common::go_string::GoString::from(&bytes[..9]).go_quoted_string()
                 ));
             }
             &bytes[9..]
@@ -80,6 +84,22 @@ pub fn domain_lookup_guard(
     }
 }
 
+/// Model SQL MustParseUUID after a cache miss, including arbitrary Go string bytes.
+#[allow(clippy::result_large_err)]
+pub fn raw_sql_lookup_guard(id: &[u8]) -> Result<(), Status> {
+    if id.is_empty() {
+        return Ok(());
+    }
+    if let Some(error) = go_uuid_parse_error_bytes(id) {
+        let mut panic = b"uuid: Parse(".to_vec();
+        panic.extend_from_slice(id);
+        panic.extend_from_slice(format!("): {error}").as_bytes());
+        let quoted = cadence_common::go_string::GoString::from(panic.as_slice()).go_quoted_string();
+        return Err(Status::unknown(format!("panic object is not error: {quoted}")));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +139,17 @@ mod tests {
         let bad_hex = GOOD.replacen('0', "g", 1);
         assert_eq!(go_uuid_parse_error(&bad_hex), Some("invalid UUID format".into()));
         assert_eq!(go_uuid_parse_error(&"z".repeat(32)), Some("invalid UUID format".into()));
+    }
+
+    #[test]
+    fn raw_bytes_follow_go_parser_and_quoting() {
+        assert_eq!(go_uuid_parse_error_bytes(&[0xff]), Some("invalid UUID length: 1".into()));
+        let mut bracketed = format!("x{GOOD}y").into_bytes();
+        bracketed[0] = 0xff;
+        assert_eq!(go_uuid_parse_error_bytes(&bracketed), None);
+        let error = raw_sql_lookup_guard(&[0xff]).unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Unknown);
+        assert_eq!(error.message(), r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#);
     }
 
     #[test]

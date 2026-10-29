@@ -1136,7 +1136,7 @@ mod tests {
             (GoString::from(uuid::Uuid::from_u128(99).to_string()), tonic::Code::NotFound, "source domain missing"),
             (GoString::from("malformed"), tonic::Code::InvalidArgument, "UUID is invalid."),
             (GoString::default(), tonic::Code::InvalidArgument, "DomainID is empty."),
-            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "invalid domain UUID"),
+            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "UUID is invalid."),
         ] {
             for forwarded in [false, true] {
                 let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
@@ -1152,6 +1152,34 @@ mod tests {
                     let key = TaskListKeyBytes { domain_id, name: "source-cache".into(), task_type: 1 };
                     assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
                 }
+            }
+        }
+        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn activity_source_sql_parse_panics_reach_handler() {
+        use crate::matching_domain_uuid::DomainIdParse;
+        use crate::matching_engine_context_native::source_domain_tests::{cache_with_mode, record};
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
+        let (_dir, mut service, _sink, store) = service(false);
+        service.integration.source_cache = Some(cache_with_mode(vec![record(0xabc, 0)], DomainIdParse::GoogleUuidPanic));
+        for (source, message) in [
+            (&b"malformed"[..], r#"panic object is not error: "uuid: Parse(malformed): invalid UUID length: 9""#),
+            (&b"\xff"[..], r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#),
+        ] {
+            for forwarded in [false, true] {
+                let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                    source_domain_id: GoString::from(source),
+                    task_list: Some(n::api::TaskList { name: "source-sql".into(), ..Default::default() }),
+                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
+                    ..Default::default()
+                })).await.unwrap_err();
+                assert_eq!(error.code(), tonic::Code::Unknown);
+                assert_eq!(error.message(), message);
+                let key = TaskListKeyBytes { domain_id: uuid::Uuid::from_u128(1), name: "source-sql".into(), task_type: 1 };
+                assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
             }
         }
         service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();

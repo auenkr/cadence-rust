@@ -64,3 +64,28 @@ These are unvalidated source changes, not a CI pass or completed parity claim.
 The test source emulates a UUID-parsing backend's canonical stored cache keys;
 it is not a new original-Go oracle. Existing Go spelling oracle and mixed gates
 still supply independent runtime evidence. No local Cargo/Go/rustfmt ran.
+
+## Raw source lookup correction — unvalidated
+
+On branch t3/matching-raw-domain-errors, based on d9ac938ba, the activity
+lookup uses raw bytes and performs exact cache lookup before backend parsing.
+For the configured SQL mode, a miss models google/uuid MustParse's captured
+Unknown panic for malformed ASCII and invalid UTF-8, including Go byte quoting;
+accepted 38-byte UUIDs with non-UTF8 wrapper bytes are normalized only for the
+persistence query, never for cache identity. Empty source remains BadRequest.
+The raw metadata source hook allows a source to return its own typed error;
+the default invalid-UTF8 behavior is the existing Cassandra-like BadRequest
+fixture, not evidence of a real Cassandra integration. Source helper and public
+handler tests cover SQL and lenient error paths, forwarded and unforwarded,
+with no task persistence. No original-Go oracle was run or added.
+
+Limitations: SQL panic emulation occurs at the cache boundary before the
+rate-limited persistence wrapper; a simultaneous persistence rate-limit
+rejection can therefore win in Go but lose to the modeled panic in Rust.
+Non-UTF8 domain IDs cannot be loaded into the current UTF-8 metadata cache;
+custom raw-capable sources need to override the new hook. Native Cassandra
+metadata reader is unsupported. Source analysis: Go common/cache/domainCache.go
+GetDomainByID and getDomainByID; common/persistence/sql/sql_domain_store.go
+GetDomain; common/persistence/serialization/uuid.go MustParseUUID; Matching
+handler CapturePanic and tasklist AddTask. No Cargo, Go, rustfmt, Actions or
+mixed-cluster validation was run; parent must run CI and assess these limits.
