@@ -330,12 +330,6 @@ fn reader_properties_provider(
     cache: Arc<MatchingDomainCache>,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
 ) -> crate::matching_registry_native::NativeReaderPropertiesProvider {
-    let dispatch_timeout = duration_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.asyncTaskDispatchTimeout",
-        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
-    );
     Arc::new(move |domain: &GoString, task: &GoString, task_type| {
         let name = cached_domain_name(&cache, domain);
         let scoped = |key: &'static str, default| {
@@ -364,6 +358,9 @@ fn reader_properties_provider(
                 )
             }) as crate::matching_reader::LiveInt
         };
+        let timeout_overlay = overlay.clone();
+        let timeout_name = name.clone();
+        let timeout_task = task.clone();
         let ack_overlay = overlay.clone();
         let ack_name = name.clone();
         let ack_task = task.clone();
@@ -376,12 +373,16 @@ fn reader_properties_provider(
                 "matching.readRangeSize",
                 crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
             ),
-            dispatch_timeout: {
-                let provider = dispatch_timeout.clone();
-                let domain = domain.clone();
-                let task = task.clone();
-                Arc::new(move || provider(&domain, &task, task_type))
-            },
+            dispatch_timeout: Arc::new(move || {
+                let config = timeout_overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration_bytes(
+                    config.property_values("matching.asyncTaskDispatchTimeout"),
+                    timeout_name.as_deref(),
+                    timeout_task.as_bytes(),
+                    task_type,
+                    crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+                )
+            }),
             update_ack_interval: Arc::new(move || {
                 let config = ack_overlay.lock().expect("admin lock");
                 cadence_persistence::dynamic_config::task_list_duration_bytes(
