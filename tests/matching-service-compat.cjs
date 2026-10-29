@@ -8,6 +8,7 @@ const { createRequire } = require('node:module');
 const tls = require('node:tls');
 const { createTaskObserver } = require('./matching-task-observer.cjs');
 const { runProbeScenarios } = require('./matching-probe-scenarios.cjs');
+const { runNativeIsolationRecovery, listName: recoveryListName } = require('./matching-native-isolation-recovery.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -1587,6 +1588,22 @@ async function run() {
   assert(!cancelledB.error, `cancelled poll must not fail: ${cancelledB.error?.message}`);
   assert(!cancelledB.response?.activityId && !cancelledB.response?.taskToken?.length, 'other isolation group must not consume the isolated activity');
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: isolatedTask.taskToken, result: payload('isolated-ok') });
+  if (productionMode && !process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS) {
+    // The direct internal API is needed to attach isolation metadata. In a
+    // two-node ring, select this queue's owner rather than the previous queue's.
+    const isolatedClient = clients.Matching;
+    clients.Matching = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    if (failureRecoveryMode) {
+      try {
+        await call('Matching', 'DescribeTaskList', { domainId, request: { taskList: { name: recoveryListName }, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+      } catch (error) {
+        if (error.code !== grpc.status.ABORTED) throw error;
+        clients.Matching = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+      }
+    }
+    await runNativeIsolationRecovery({ call, domain, domainId, id, startRequest, payload, work });
+    clients.Matching = isolatedClient;
+  }
   // Empty partition entries must survive Rust -> Go Frontend -> protobufjs.
   // The Go gogo decoder treats an omitted default map value as a nil pointer.
   await call('Matching', 'UpdateTaskListPartitionConfig', {
