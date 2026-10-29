@@ -68,15 +68,30 @@ impl DynamicConfigOverlay {
         let mut overlay = Self::default();
         for entry in snapshot.entries.iter().flatten() {
             let mut values = entry.values.clone();
-            if matches!(entry.name.as_str(), "matching.persistenceMaxQPS" | "matching.persistenceGlobalMaxQPS") {
+            if matches!(
+                entry.name.as_str(),
+                "matching.persistenceMaxQPS"
+                    | "matching.persistenceGlobalMaxQPS"
+                    | "matching.rps"
+                    | "matching.workerrps"
+                    | "matching.domainrps"
+                    | "matching.domainworkerrps"
+            ) {
                 for value in &mut values {
                     if let Some(blob) = value.value.as_mut() {
                         if blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON) {
-                            if let Ok(serde_json::Value::Number(number)) = serde_json::from_slice::<serde_json::Value>(&blob.data) {
+                            if let Ok(serde_json::Value::Number(number)) =
+                                serde_json::from_slice::<serde_json::Value>(&blob.data)
+                            {
                                 if let Some(n) = number.as_f64().filter(|n| n.is_finite() && n.trunc() == *n) {
-                                    // Go decodes all config-store JSON numbers as float64,
-                                    // then converts integral values to amd64 int.
-                                    let integer = if n >= 9_223_372_036_854_775_808.0 || n < -9_223_372_036_854_775_808.0 { i64::MIN } else { n as i64 };
+                                    // Go decodes JSON numbers as float64 before amd64 int conversion.
+                                    let integer = if n >= 9_223_372_036_854_775_808.0
+                                        || n < -9_223_372_036_854_775_808.0
+                                    {
+                                        i64::MIN
+                                    } else {
+                                        n as i64
+                                    };
                                     blob.data = integer.to_string().into_bytes();
                                 }
                             }
@@ -1189,6 +1204,33 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn matching_rpc_quota_store_integers_follow_go_json_conversion() {
+        use cadence_persistence::{config_store::Snapshot, dynamic_config::integer};
+        let value = |n: &str| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob::new(
+                cadence_api::enums::EncodingType::JSON,
+                n.as_bytes().to_vec(),
+            )),
+            filters: vec![],
+        };
+        for (input, expected) in [("1.0", 1), ("1.5", 42), ("9223372036854775807", i64::MIN)] {
+            let snapshot = Snapshot {
+                version: 1,
+                schema_version: 0,
+                entries: Some(vec![cadence_api::admin::DynamicConfigEntry {
+                    name: "matching.workerrps".into(),
+                    values: vec![value(input)],
+                }]),
+            };
+            let overlay = DynamicConfigOverlay::from_config_store(&snapshot);
+            assert_eq!(
+                integer(overlay.property_values("matching.workerrps"), None, 42),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn overlay_get_update_restore_list() {
