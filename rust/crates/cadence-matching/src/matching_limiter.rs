@@ -13,7 +13,7 @@ use cadence_common::{
 };
 use std::{
     sync::{Arc, Mutex},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 
@@ -24,26 +24,17 @@ pub const TASK_DISPATCH_RPS_TTL_NANOS: i64 = 60_000_000_000;
 /// Go `MatchingMinTaskThrottlingBurstSize` default.
 pub const MIN_TASK_THROTTLING_BURST_SIZE: i64 = 1;
 
-/// Monotonic-anchored wall clock in Unix nanoseconds.
+/// Process-local monotonic nanosecond clock; only differences are meaningful.
 #[derive(Clone, Copy, Debug)]
 pub struct MonotonicClock {
-    anchor_wall: i64,
     anchor: Instant,
 }
 impl MonotonicClock {
     pub fn new() -> Self {
-        let anchor_wall = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_nanos() as i64)
-            .unwrap_or_default();
-        Self {
-            anchor_wall,
-            anchor: Instant::now(),
-        }
+        Self { anchor: Instant::now() }
     }
     pub fn now(&self) -> i64 {
-        self.anchor_wall
-            .saturating_add(self.anchor.elapsed().as_nanos() as i64)
+        self.anchor.elapsed().as_nanos().min(i64::MAX as u128) as i64
     }
 }
 impl Default for MonotonicClock {
@@ -184,13 +175,13 @@ impl TaskListLimiter {
     /// Await one limiter token under the reader's dispatch deadline, matching
     /// Go `Ratelimiter.Wait` reachable through `taskMatcher.ratelimit`.
     ///
-    /// `deadline` is an absolute Unix-nanosecond instant on the same monotonic
+    /// `deadline` is an absolute instant in the limiter clock on the same monotonic
     /// clock. A token acquired here stays consumed even if the subsequent
     /// matcher handoff is cancelled, because Go's `Wait` already returned nil.
     pub async fn wait_until(
         &self,
         mut stop: watch::Receiver<bool>,
-        deadline: Option<i64>,
+        deadline: Option<i128>,
     ) -> WaitOutcome {
         // Go checks ctx.Err() before consuming any token.
         if *stop.borrow() {
@@ -398,8 +389,8 @@ mod tests {
     fn advance(now: &Arc<AtomicI64>, by: Duration) {
         now.fetch_add(by.as_nanos() as i64, Ordering::SeqCst);
     }
-    fn deadline_after(now: &Arc<AtomicI64>, after: Duration) -> i64 {
-        now.load(Ordering::SeqCst) + after.as_nanos() as i64
+    fn deadline_after(now: &Arc<AtomicI64>, after: Duration) -> i128 {
+        i128::from(now.load(Ordering::SeqCst)) + after.as_nanos() as i128
     }
     fn assert_elapsed(expected: Duration, actual: Duration) {
         assert!(
@@ -411,7 +402,7 @@ mod tests {
     async fn allow(limiter: &TaskListLimiter, now: &Arc<AtomicI64>) -> bool {
         let (_stop, stopped) = watch::channel(false);
         let deadline = now.load(Ordering::SeqCst);
-        limiter.wait_until(stopped, Some(deadline)).await == WaitOutcome::Acquired
+        limiter.wait_until(stopped, Some(i128::from(deadline))).await == WaitOutcome::Acquired
     }
     /// Go `for limit.Allow() {}`: drains every token available at the current time.
     async fn drain(limiter: &TaskListLimiter, now: &Arc<AtomicI64>) {

@@ -431,7 +431,7 @@ impl QueueHandle {
             let stop = self.sync_matcher.stop_signal();
             let acquired = tokio::time::timeout_at(
                 deadline,
-                self.limiter.wait_until(stop, Some(limiter_deadline)),
+                self.limiter.wait_until(stop, Some(i128::from(limiter_deadline))),
             )
             .await;
             match acquired {

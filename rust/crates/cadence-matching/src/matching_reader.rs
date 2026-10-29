@@ -789,7 +789,7 @@ impl TaskReader {
                                     isolation_duration,
                                     timeout_buffer.as_nanos() as i64,
                                 );
-                                dispatch_limiter.now().saturating_add(timeout)
+                                i128::from(dispatch_limiter.now()) + i128::from(timeout)
                             });
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
@@ -882,7 +882,7 @@ impl TaskReader {
                                     trace_root, trace_partition, parent_destination, task.data.workflow_id,
                                     task.data.run_id_string(), task.data.schedule_id, task.task_id,
                                     forward_started.elapsed().as_millis(), forward_status,
-                                    deadline.map(|at| at.saturating_sub(dispatch_limiter.now()).max(0) / 1_000_000).unwrap_or(-1),
+                                    deadline.map(|at| at.saturating_sub(i128::from(dispatch_limiter.now())).max(0) / 1_000_000).unwrap_or(-1),
                                 ));
                                 drop(token);
                                 match result {
@@ -925,7 +925,7 @@ impl TaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(dispatch_limiter.now()).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).max(0) as u64,
                                 );
                                 tokio::time::timeout(remaining, attempt)
                                     .await

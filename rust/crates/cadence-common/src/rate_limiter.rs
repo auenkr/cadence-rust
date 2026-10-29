@@ -184,14 +184,14 @@ impl RateLimiter {
     pub fn reserve_wait(
         &mut self,
         now: i64,
-        deadline: Option<i64>,
+        deadline: Option<i128>,
     ) -> Result<Reservation, WaitError> {
         let now = self.now(now);
         let reservation = self.reserve_raw(now, i64::MAX);
         let error = if !reservation.ok {
             Some(WaitError::ZeroBurst)
         } else if reservation.delay_nanos() > 0
-            && deadline.is_some_and(|deadline| reservation.at > i128::from(deadline))
+            && deadline.is_some_and(|deadline| reservation.at > deadline)
         {
             Some(WaitError::Deadline)
         } else {
@@ -251,6 +251,18 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     #[test]
+    fn wait_reservation_can_cross_i64_timestamp_boundary() {
+        let now = i64::MAX - 100;
+        let mut limiter = RateLimiter::new(1.0, 1);
+        assert!(limiter.reserve_wait(now, None).is_ok());
+        let deadline = i128::from(now) + 2_000_000_000;
+        let reservation = limiter.reserve_wait(now, Some(deadline)).unwrap();
+        assert_eq!(reservation.delay_nanos(), 1_000_000_000);
+        limiter.cancel(&reservation);
+        assert_eq!(limiter.reserve_wait(now, Some(i128::from(now) + 1)).unwrap_err(), WaitError::Deadline);
+    }
+
+    #[test]
     fn clock_rate_original_go_operations() {
         let cases: serde_json::Value =
             serde_json::from_str(include_str!("../../../../tests/fixtures/clock-rate.json"))
@@ -287,7 +299,7 @@ mod tests {
                     "tokens" => {
                         limiter.tokens(now);
                     }
-                    "wait" => match limiter.reserve_wait(now, step["deadline"].as_i64()) {
+                    "wait" => match limiter.reserve_wait(now, step["deadline"].as_i64().map(i128::from)) {
                         Ok(reservation) => {
                             wait_delay = reservation.delay_nanos();
                             wait_error = "ok";
