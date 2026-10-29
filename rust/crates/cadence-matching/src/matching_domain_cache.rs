@@ -260,14 +260,34 @@ impl DomainMetadataSource
         })
     }
 
+    fn get_domain_by_raw_id(
+        &self,
+        id: &[u8],
+        timeout: Duration,
+        _mode: crate::matching_domain_uuid::DomainIdParse,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let parsed = crate::matching_domain_uuid::cassandra_uuid_bytes(id).map_err(|error| {
+            DomainMetadataSourceError::transient(format!("GetDomain operation failed. Error: {error}"))
+        })?;
+        self.get_domain(None, Some(&parsed.to_string()), timeout)
+    }
+
     fn get_domain(
         &self,
         name: Option<&str>,
         id: Option<&str>,
         _timeout: Duration,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let canonical = match (name, id) {
+            (None, Some(id)) if !id.is_empty() => Some(
+                crate::matching_domain_uuid::cassandra_uuid_bytes(id.as_bytes())
+                    .map_err(|error| DomainMetadataSourceError::transient(format!("GetDomain operation failed. Error: {error}")))?
+                    .to_string(),
+            ),
+            _ => None,
+        };
         cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(
-            self, name, id,
+            self, name, canonical.as_deref().or(id),
         )
         .map_err(|error| match error {
             MatchingDomainMetadataError::NotFound(_)

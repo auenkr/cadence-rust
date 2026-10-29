@@ -555,6 +555,21 @@ pub(crate) mod source_domain_tests {
         fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
             Ok(DomainMetadataPage { domains: self.0.clone(), next_page_token: None })
         }
+        fn get_domain_by_raw_id(&self, id: &[u8], timeout: Duration, mode: crate::matching_domain_uuid::DomainIdParse) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+            if mode == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
+                crate::matching_domain_uuid::raw_sql_lookup_guard(id).map_err(|status| DomainMetadataSourceError::permanent(status.message()).with_class(DomainErrorClass::CapturedPanic))?;
+            } else if std::str::from_utf8(id).is_err() {
+                // Explicit test-backend response, not the trait's conversion fallback.
+                return Err(DomainMetadataSourceError::permanent("injected raw backend error").with_class(DomainErrorClass::BadRequest));
+            }
+            let backend_id = match (mode, id.len()) {
+                (crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic, 38) => &id[1..37],
+                (crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic, 45) => &id[9..],
+                _ => id,
+            };
+            let id = std::str::from_utf8(backend_id).expect("validated fixture ID");
+            self.get_domain(None, Some(id), timeout)
+        }
         fn get_domain(&self, _: Option<&str>, id: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
             let id = id.unwrap_or_default();
             let parsed = uuid::Uuid::parse_str(id).map_err(|_| DomainMetadataSourceError::permanent("UUID is invalid.").with_class(DomainErrorClass::BadRequest))?;
@@ -589,7 +604,7 @@ pub(crate) mod source_domain_tests {
         let lenient = cache(vec![domain]);
         let error = cached_domain_active(&lenient, &GoString::from(&b"\xff"[..]), "active").unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
-        assert_eq!(error.message(), "UUID is invalid.");
+        assert_eq!(error.message(), "injected raw backend error");
     }
 
     #[test]
