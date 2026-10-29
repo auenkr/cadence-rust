@@ -538,7 +538,7 @@ impl QueueHandle {
 }
 // Go starts liveness with time.NewTicker(ttl / 2), which rejects a
 // nonpositive period. Do not turn invalid settings into a busy idle timer.
-fn idle_check_interval(ttl_nanos: i64) -> Result<std::time::Duration, Status> {
+pub(crate) fn idle_check_interval(ttl_nanos: i64) -> Result<std::time::Duration, Status> {
     let half = ttl_nanos / 2;
     if half <= 0 {
         return Err(Status::internal(
@@ -549,7 +549,7 @@ fn idle_check_interval(ttl_nanos: i64) -> Result<std::time::Duration, Status> {
 }
 
 // Advance to the next ticker boundary without narrowing the missed tick count.
-fn next_idle_tick(
+pub(crate) fn next_idle_tick(
     deadline: tokio::time::Instant,
     now: tokio::time::Instant,
     interval: std::time::Duration,

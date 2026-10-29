@@ -1389,6 +1389,14 @@ impl NativeQueueRegistry {
     ) -> Result<Arc<Owner>, Status> {
         let registry = self;
         let domain = gs(key.domain_id);
+        let idle_ttl_nanos = Self::provider(
+            &registry.idle_tasklist_check_interval,
+            &domain,
+            &lookup.1,
+            lookup.2,
+            300_000_000_000,
+        );
+        let idle_half = crate::matching_registry::idle_check_interval(idle_ttl_nanos)?;
         let metric_context = registry.metric_context(lookup, kind);
         registry.metrics.lease_request(&metric_context);
         let queue = match DurableTaskQueueBytes::open(
@@ -1451,14 +1459,6 @@ impl NativeQueueRegistry {
                     .max(1)
             })
         };
-        let idle_ttl_nanos = Self::provider(
-            &registry.idle_tasklist_check_interval,
-            &domain,
-            &lookup.1,
-            lookup.2,
-            300_000_000_000,
-        )
-        .max(1);
         let liveness = Arc::new(cadence_common::liveness::Liveness::new(
             registry_now(),
             idle_ttl_nanos,
@@ -1661,7 +1661,6 @@ impl NativeQueueRegistry {
         if let Some(forward) = forward {
             dispatcher = dispatcher.with_forward(forward);
         }
-        let idle_half = Duration::from_nanos((idle_ttl_nanos / 2).max(1) as u64);
         Ok(Arc::new(Owner {
             forward_tasks,
             forward_rate,
@@ -2137,10 +2136,11 @@ impl NativeQueueRegistry {
                             return None;
                         }
                         // Go uses a ticker at TTL/2; retain its cadence after delayed ticks.
-                        let ttl = owner.idle_ttl_nanos.max(2);
-                        let interval = Duration::from_nanos((ttl / 2) as u64);
-                        let lag = tokio::time::Instant::now().saturating_duration_since(*next);
-                        *next += interval * ((lag.as_nanos() / interval.as_nanos() + 1) as u32);
+                        let interval = crate::matching_registry::idle_check_interval(owner.idle_ttl_nanos)
+                            .expect("validated idle ticker interval");
+                        *next = crate::matching_registry::next_idle_tick(
+                            *next, tokio::time::Instant::now(), interval,
+                        );
                         (!owner.liveness.is_alive(now)).then(|| (key.clone(), owner.clone()))
                     })
                     .collect::<Vec<_>>()
@@ -2373,6 +2373,20 @@ mod tests {
             created_nanos: 0,
             partition_config: None,
         }
+    }
+
+    #[tokio::test]
+    async fn native_invalid_idle_interval_rejects_owner_before_lease() {
+        let (_directory, registry) = fixture();
+        let registry = registry.with_idle_tasklist_check_interval(Arc::new(|_, _, _| 1));
+        let task_key = key(b"invalid-idle");
+        let lookup = (task_key.domain_id, task_key.name.clone(), task_key.task_type);
+        let error = match registry.build_owner(&task_key, &lookup, 0, 1) {
+            Ok(_) => panic!("invalid ticker period accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
     }
 
     #[tokio::test]

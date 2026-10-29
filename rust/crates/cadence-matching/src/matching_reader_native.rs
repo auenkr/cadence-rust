@@ -930,6 +930,11 @@ impl NativeTaskReader {
                 let notification = wake.notified();
                 tokio::pin!(notification);
                 notification.as_mut().enable();
+                // Arm the scan subscription before selecting: notify_waiters does
+                // not retain a permit in the gap between two subscriptions.
+                let scan_notification = wake.notified();
+                tokio::pin!(scan_notification);
+                scan_notification.as_mut().enable();
                 tokio::select! {
                     _ = &mut notification => {},
                     _ = std::future::ready(()), if scan_pending => {},
@@ -967,11 +972,6 @@ impl NativeTaskReader {
                     }
                     _ = pump_stop.changed() => break,
                 }
-                // Keep a separate subscription active during the scan and buffer
-                // admission, so a concurrent append is not lost.
-                let scan_notification = wake.notified();
-                tokio::pin!(scan_notification);
-                scan_notification.as_mut().enable();
                 let queue_copy = queue.clone();
                 let scan_config = config.clone();
                 let result = crate::matching_blocking::run(move || {
