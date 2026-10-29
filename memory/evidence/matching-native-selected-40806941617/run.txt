@@ -1,0 +1,8 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40806941617
+Source: fef2b6c3782f8ca0ab95e98d4eb56d66bd09a260
+Conclusion: failure
+Clippy: exit101, result_large_err in new blocked-source regression thread closure. Changed closure to return the is_err boolean consumed by its assertion.
+Tests: skipped
+Formatting: successful; exact-source patch applied and committed as34c988bc0.
+Full failed log: /mnt/storage/service/ci-evidence/matching-native-selected-40806941617/failed.log
+Formatting artifact: /mnt/storage/service/ci-evidence/matching-native-format-40806941617/matching-format.patch

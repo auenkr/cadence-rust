@@ -291,3 +291,7 @@ Run failed Clippy with E0061/E0308: Cassandra raw override called the inherent p
 ## CI formatting applied — run 40806941617
 
 Downloaded `matching-format-patch` from [40806941617](https://github.com/auenkr/cadence-rust/actions/runs/40806941617), source `fef2b6c3782f8ca0ab95e98d4eb56d66bd09a260`. The exact-source patch passed `git apply --check`, was applied, inspected, and passed `git diff --check`. Ten Matching files are formatted from the runner; no local Cargo or rustfmt ran. The patch is retained at `/mnt/storage/service/ci-evidence/matching-native-format-40806941617/matching-format.patch`. The source run is live at Clippy as last observed. Final workspace run must test the committed formatted source without formatting mutation, then all mixed gates must use that same immutable pin. No final acceptance pass is claimed.
+
+## Workspace candidate preparation
+
+Selected run40806941617 failed solely on `clippy::result_large_err` in the new blocked-source test's thread return. Changed it to return the boolean used by the assertion. No production behavior changed. Tests were skipped, so their outcomes remain unproven. Next dispatch is a whole-workspace fresh-target Clippy-then-test run with original-Go source/domain oracles enabled and no formatter mutation. Candidate validation ref will stay frozen while that run and subsequent serial mixed lanes execute. Acceptance remains pending.

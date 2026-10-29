@@ -712,7 +712,8 @@ mod list_domain_metric_tests {
         let cache = MatchingDomainCache::new(limit_domain_source(source, limiter))
             .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
         let lookup = std::thread::spawn(move || {
-            cache.get_domain_by_raw_id(b"01234567890123456789012345678901")
+            let result = cache.get_domain_by_raw_id(b"01234567890123456789012345678901");
+            result.is_err()
         });
 
         entered_rx.recv().unwrap();
@@ -730,7 +731,7 @@ mod list_domain_metric_tests {
                 || e.name.starts_with("persistence_errors")));
 
         release_tx.send(()).unwrap();
-        assert!(lookup.join().unwrap().is_err());
+        assert!(lookup.join().unwrap());
         let events = sink.events();
         assert_eq!(
             events
