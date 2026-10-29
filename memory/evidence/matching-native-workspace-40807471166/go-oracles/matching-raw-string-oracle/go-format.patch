@@ -1,0 +1,200 @@
+diff --git a/tests/matching-raw-string-oracle.go b/tests/matching-raw-string-oracle.go
+index d1d5653..422bf5b 100644
+--- a/tests/matching-raw-string-oracle.go
++++ b/tests/matching-raw-string-oracle.go
+@@ -10,39 +10,44 @@ import (
+ 	"unicode/utf8"
+ 
+ 	farm "github.com/dgryski/go-farm"
++	"github.com/gocql/gocql"
++	gogorpc "github.com/gogo/googleapis/google/rpc"
+ 	"github.com/gogo/protobuf/proto"
++	gogostatus "github.com/gogo/status"
+ 	"github.com/google/uuid"
+-	"github.com/gocql/gocql"
+ 	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
+ 	matchingv1 "github.com/uber/cadence/.gen/proto/matching/v1"
+ 	"github.com/uber/cadence/common"
++	cadencetypes "github.com/uber/cadence/common/types"
++	protomapper "github.com/uber/cadence/common/types/mapper/proto"
+ 	"github.com/uber/cadence/service/matching/tasklist"
+ 	"go.uber.org/yarpc/encoding/protobuf"
+-    "go.uber.org/yarpc/yarpcerrors"
+-    gogorpc "github.com/gogo/googleapis/google/rpc"
+-    gogostatus "github.com/gogo/status"
+-    grpcstatus "google.golang.org/grpc/status"
+-    googleproto "google.golang.org/protobuf/proto"
+-    cadencetypes "github.com/uber/cadence/common/types"
+-    protomapper "github.com/uber/cadence/common/types/mapper/proto"
+-
++	"go.uber.org/yarpc/yarpcerrors"
++	grpcstatus "google.golang.org/grpc/status"
++	googleproto "google.golang.org/protobuf/proto"
+ )
+ 
+ // Follow YARPC's gogo error envelope -> grpc-go status conversion. The
+ // transport uses protobuf/v2 for the outer google.rpc.Status marshal and drops
+ // grpc-status-details-bin if it fails (for example invalid Status.message).
+ func grpcErrorCase(err error) map[string]interface{} {
+-    mapped := yarpcerrors.FromError(protomapper.FromError(err))
+-    envelope := &gogorpc.Status{}
+-    if err := proto.Unmarshal(mapped.Details(), envelope); err != nil { panic(err) }
+-    status, ok := grpcstatus.FromError(gogostatus.ErrorProto(envelope))
+-    if !ok { panic("expected gogo GRPCStatus conversion") }
+-    encoded, marshalErr := googleproto.Marshal(status.Proto())
+-    if marshalErr != nil { encoded = nil }
+-    return map[string]interface{}{
+-        "code": int32(status.Code()), "messageHex": hex.EncodeToString([]byte(status.Message())),
+-        "transportDetailsHex": hex.EncodeToString(encoded), "marshalError": errorText(marshalErr),
+-    }
++	mapped := yarpcerrors.FromError(protomapper.FromError(err))
++	envelope := &gogorpc.Status{}
++	if err := proto.Unmarshal(mapped.Details(), envelope); err != nil {
++		panic(err)
++	}
++	status, ok := grpcstatus.FromError(gogostatus.ErrorProto(envelope))
++	if !ok {
++		panic("expected gogo GRPCStatus conversion")
++	}
++	encoded, marshalErr := googleproto.Marshal(status.Proto())
++	if marshalErr != nil {
++		encoded = nil
++	}
++	return map[string]interface{}{
++		"code": int32(status.Code()), "messageHex": hex.EncodeToString([]byte(status.Message())),
++		"transportDetailsHex": hex.EncodeToString(encoded), "marshalError": errorText(marshalErr),
++	}
+ }
+ 
+ // Build wire strings independently of the generated marshal implementation so
+@@ -136,8 +141,17 @@ func nativeWireEdgeCases() []map[string]interface{} {
+ 		out = varintAppend(out, uint64(len(value)))
+ 		return append(out, value...)
+ 	}
+-	join := func(parts ...[]byte) []byte { var out []byte; for _, part := range parts { out = append(out, part...) }; return out }
+-	inputs := []struct { name string; wire []byte }{
++	join := func(parts ...[]byte) []byte {
++		var out []byte
++		for _, part := range parts {
++			out = append(out, part...)
++		}
++		return out
++	}
++	inputs := []struct {
++		name string
++		wire []byte
++	}{
+ 		{"duplicate_scalar_last_wins", join(bytesField(1, []byte("first")), bytesField(1, []byte("last")))},
+ 		{"wrong_wire_scalar", join(bytesField(1, []byte("kept")), tag(1, 0), varint(7))},
+ 		{"duplicate_raw_map_keys", join(
+@@ -157,10 +171,14 @@ func nativeWireEdgeCases() []map[string]interface{} {
+ 	for _, input := range inputs {
+ 		decoded := &matchingv1.AddDecisionTaskRequest{}
+ 		codec, ok := protobuf.GetCodecForEncoding(protobuf.Encoding)
+-		if !ok { panic("missing pinned YARPC protobuf codec") }
++		if !ok {
++			panic("missing pinned YARPC protobuf codec")
++		}
+ 		err := codec.Unmarshal(input.wire, decoded)
+ 		row := map[string]interface{}{"name": input.name, "inputHex": hex.EncodeToString(input.wire), "error": errorText(err), "errorType": ""}
+-		if err != nil { row["errorType"] = fmt.Sprintf("%T", err) }
++		if err != nil {
++			row["errorType"] = fmt.Sprintf("%T", err)
++		}
+ 		row["domainIdHex"] = hex.EncodeToString([]byte(decoded.DomainId))
+ 		row["workflowExecutionPresent"] = decoded.WorkflowExecution != nil
+ 		if decoded.WorkflowExecution != nil {
+@@ -169,21 +187,30 @@ func nativeWireEdgeCases() []map[string]interface{} {
+ 		}
+ 		row["scheduleToStartTimeoutPresent"] = decoded.ScheduleToStartTimeout != nil
+ 		maps := make([][]string, 0, len(decoded.PartitionConfig))
+-		for key, value := range decoded.PartitionConfig { maps = append(maps, []string{hex.EncodeToString([]byte(key)), hex.EncodeToString([]byte(value))}) }
++		for key, value := range decoded.PartitionConfig {
++			maps = append(maps, []string{hex.EncodeToString([]byte(key)), hex.EncodeToString([]byte(value))})
++		}
+ 		row["partitionConfigHex"] = maps
+ 		out = append(out, row)
+ 	}
+-	for _, input := range []struct { name string; wire []byte }{
++	for _, input := range []struct {
++		name string
++		wire []byte
++	}{
+ 		{"empty_wrapper_presence", bytesField(4, nil)},
+ 		{"zero_wrapper_presence", bytesField(4, []byte{0x08, 0x00})},
+ 		{"duplicate_wrapper_message_merge", join(bytesField(4, []byte{0x08, 0x07}), bytesField(4, nil))},
+ 	} {
+ 		decoded := &matchingv1.PollForDecisionTaskResponse{}
+ 		codec, ok := protobuf.GetCodecForEncoding(protobuf.Encoding)
+-		if !ok { panic("missing pinned YARPC protobuf codec") }
++		if !ok {
++			panic("missing pinned YARPC protobuf codec")
++		}
+ 		err := codec.Unmarshal(input.wire, decoded)
+ 		row := map[string]interface{}{"name": input.name, "message": "pollDecisionResponse", "inputHex": hex.EncodeToString(input.wire), "error": errorText(err), "previousStartedPresent": decoded.PreviousStartedEventId != nil}
+-		if decoded.PreviousStartedEventId != nil { row["previousStartedValue"] = decoded.PreviousStartedEventId.Value }
++		if decoded.PreviousStartedEventId != nil {
++			row["previousStartedValue"] = decoded.PreviousStartedEventId.Value
++		}
+ 		out = append(out, row)
+ 	}
+ 	return out
+@@ -214,7 +241,9 @@ func main() {
+ 		{0xe1, 0x80, 0xff}, {0xc0, 0xaf}, {0xe2, 0x82}, []byte("é"), []byte("<>&"), []byte("\u2028\u2029"),
+ 	}
+ 	allBytes := make([]byte, 256)
+-	for i := range allBytes { allBytes[i] = byte(i) }
++	for i := range allBytes {
++		allBytes[i] = byte(i)
++	}
+ 	names = append(names, allBytes)
+ 	canonical := []byte("e1b8e2d3-5c1f-4a77-9b0a-6a0a1f0e5d11")
+ 	names = append(names, canonical, []byte("e1b8e2d35c1f4a779b0a6a0a1f0e5d11"), append([]byte("URN:UUID:"), canonical...))
+@@ -231,7 +260,9 @@ func main() {
+ 			DomainID: string(raw), WorkflowID: string(raw), WorkflowType: string(raw), RunID: string(raw),
+ 			ScheduleID: -7, ScheduleAttempt: 9, ActivityID: string(raw), ActivityType: string(raw),
+ 		})
+-		if err != nil { panic(err) }
++		if err != nil {
++			panic(err)
++		}
+ 		googleID, googleErr := uuid.Parse(string(raw))
+ 		cassandraID, cassandraErr := gocql.ParseUUID(string(raw))
+ 		partitionName := append([]byte("/__cadence_sys/"), raw...)
+@@ -239,22 +270,26 @@ func main() {
+ 		queryJSON, err := common.NewJSONTaskTokenSerializer().SerializeQueryTaskToken(&common.QueryTaskToken{
+ 			DomainID: string(raw), WorkflowID: string(raw), RunID: string(raw), TaskList: string(raw), TaskID: string(raw),
+ 		})
+-		if err != nil { panic(err) }
++		if err != nil {
++			panic(err)
++		}
+ 		rows = append(rows, map[string]interface{}{
+ 			"hex": hex.EncodeToString(raw), "length": len(raw),
+ 			"validUtf8": utf8.Valid(raw), "hash32": farm.Hash32(input),
+-			"jsonText": string(encoded),
+-			"protobuf": protobufCases(raw),
+-            "grpcQueryError": grpcErrorCase(&cadencetypes.QueryFailedError{Message: string(raw)}),
+-            "grpcVersionError": grpcErrorCase(&cadencetypes.ClientVersionNotSupportedError{
+-                FeatureVersion: string(raw), ClientImpl: string(raw), SupportedVersions: ">=1.5.0",
+-            }),
++			"jsonText":       string(encoded),
++			"protobuf":       protobufCases(raw),
++			"grpcQueryError": grpcErrorCase(&cadencetypes.QueryFailedError{Message: string(raw)}),
++			"grpcVersionError": grpcErrorCase(&cadencetypes.ClientVersionNotSupportedError{
++				FeatureVersion: string(raw), ClientImpl: string(raw), SupportedVersions: ">=1.5.0",
++			}),
+ 			"taskTokenJSON": string(taskJSON), "queryTokenJSON": string(queryJSON),
+-			"googleUUID": map[string]interface{}{"error": errorText(googleErr), "uuidHex": hex.EncodeToString(googleID[:])},
++			"googleUUID":    map[string]interface{}{"error": errorText(googleErr), "uuidHex": hex.EncodeToString(googleID[:])},
+ 			"cassandraUUID": map[string]interface{}{"error": errorText(cassandraErr), "uuidHex": hex.EncodeToString(cassandraID[:])},
+-			"taskList": identifierCase(raw), "taskListPartition": identifierCase(partitionName),
++			"taskList":      identifierCase(raw), "taskListPartition": identifierCase(partitionName),
+ 		})
+-		if len(rows) == 1 { rows[0]["nativeWireEdgeCases"] = nativeWireEdgeCases() }
++		if len(rows) == 1 {
++			rows[0]["nativeWireEdgeCases"] = nativeWireEdgeCases()
++		}
+ 	}
+ 	if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {
+ 		fmt.Fprintln(os.Stderr, err)

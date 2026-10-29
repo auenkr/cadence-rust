@@ -1,0 +1,1 @@
+go test -overlay $RUNNER_TEMP/source-domain-boundary-overlay.json ./service/matching/tasklist ./common/persistence/sql -run ^TestSourceDomainBoundary -count=1 -v
