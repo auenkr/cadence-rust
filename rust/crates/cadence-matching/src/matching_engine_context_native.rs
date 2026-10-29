@@ -55,15 +55,14 @@ fn metrics_poll_observer_factory_with_names(
                 .unwrap_or_else(|| "_unknown_".to_owned());
             let context = crate::matching_metrics::PollMetricContext {
                 domain,
-                task_list: String::from_utf8_lossy(list.as_bytes()).into_owned(),
+                task_list: list.go_rune_string(),
                 task_list_kind,
                 task_type: if task_type == 1 {
                     "activity_task"
                 } else {
                     "decision_task"
                 },
-                poller_isolation_group: String::from_utf8_lossy(isolation_group.as_bytes())
-                    .into_owned(),
+                poller_isolation_group: isolation_group.go_rune_string(),
             };
             Some(Arc::new(
                 crate::matching_host_native::NativeMetricsPollObserver::new(

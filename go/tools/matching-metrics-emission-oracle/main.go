@@ -67,6 +67,11 @@ func main() {
 		emit(root)
 		return
 	}
+	// Exercise the production tally sanitizer with Go byte strings. A
+	// truncated sequence emits one replacement per byte, without truncation.
+	for _, name := range []string{"raw-\xe2\x82", "raw-\xff", "raw-�", "raw-é", strings.Repeat("x", 300) + "tail"} {
+		client.Scope(metrics.MatchingTaskListMgrScope, metrics.DomainTag("domain-a"), metrics.TaskListTag(name), metrics.TaskListTypeTag("decision")).IncCounter(metrics.PollSuccessPerTaskListCounter)
+	}
 	ctx := client.Scope(metrics.MatchingTaskListMgrScope, metrics.DomainTag("domain-a"), metrics.TaskListTag("queue-a"), metrics.TaskListTypeTag("decision"))
 	ctx.IncCounter(metrics.PollSuccessPerTaskListCounter)
 	ctx.IncCounter(metrics.PollTimeoutPerTaskListCounter)

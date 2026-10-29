@@ -12,7 +12,7 @@ proved.
 
 No final immutable candidate is frozen. Latest fresh whole-workspace run:
 https://github.com/auenkr/cadence-rust/actions/runs/40759246848 at
-`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227` (in progress at dispatch review).
+`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227` (**success**, reviewed from downloaded artifacts).
 Includes quota correction, typed metrics and duration fixes, runner formatting
 from run40757715608, and the new all-declared-native-Thrift-error matrix.
 Fresh target, sequential Clippy/workspace tests, runner parity formatting and
@@ -37,7 +37,7 @@ and same-pin successful whole-workspace validation.
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending run40759246848; runs40757715608 and40756335405 failed the raw-byte domain quota regression; run40758347908 was superseded. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Run40759246848 passed at c6c8ef1bb (fresh target, Clippy0/test0); subsequent metric corrections need new CI; runs40757715608 and40756335405 failed the raw-byte domain quota regression; run40758347908 was superseded. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
@@ -237,3 +237,5 @@ raw payloads and exact exception field IDs). This postdates run40758347908.
 Applied run40757715608 formatting patch for metrics/duration provider.
 Final immutable candidate remains open; retain current terminal CI evidence
 before dispatching the final formatted source.
+
+Continuation: run40759246848 passed; compact evidence retained. New metric rendering and native AddTask counter corrections postdate that source and remain unvalidated. See latest integration checkpoint; final candidate still open. User requested save/push and master sync after validation.

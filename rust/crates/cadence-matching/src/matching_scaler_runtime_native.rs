@@ -79,7 +79,7 @@ fn scoped_scaler_metrics_with_names(
             .unwrap_or_else(|| "_unknown_".to_owned());
         let context = crate::matching_metrics::PollMetricContext {
             domain,
-            task_list: String::from_utf8_lossy(root.name.as_bytes()).into_owned(),
+            task_list: root.name.go_rune_string(),
             task_list_kind: 0,
             task_type: if root.task_type == 1 {
                 "activity_task"
@@ -112,7 +112,7 @@ fn scoped_scaler_metrics_with_names(
                 before_count,
                 after_count,
             } => {
-                let group = String::from_utf8_lossy(group.as_bytes());
+                let group = group.go_rune_string();
                 if before_assignable != after_assignable {
                     metrics.isolation_group_counter(
                         if after_assignable {

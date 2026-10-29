@@ -58,7 +58,7 @@ fn registry_now() -> i64 {
         .unwrap_or_default()
 }
 
-/// Diagnostic/metric text only. Never use for selection, routing or keys.
+/// Diagnostic text only. Never use for selection, routing or keys.
 fn diag(bytes: &[u8]) -> String {
     const LIMIT: usize = 256;
     let mut text = String::from_utf8_lossy(&bytes[..bytes.len().min(LIMIT)]).into_owned();
@@ -887,7 +887,7 @@ impl NativeQueueRegistry {
     fn metric_context(&self, key: &Key, kind: i16) -> matching_metrics::PollMetricContext {
         matching_metrics::PollMetricContext {
             domain: self.metric_domain(key.0),
-            task_list: diag(key.1.as_bytes()),
+            task_list: key.1.go_rune_string(),
             task_list_kind: i32::from(kind),
             task_type: task_type_tag(key.2),
             poller_isolation_group: String::new(),
@@ -2443,6 +2443,17 @@ mod tests {
             created_nanos: 0,
             partition_config: None,
         }
+    }
+
+    #[test]
+    fn metric_context_keeps_full_name_and_go_invalid_byte_runes() {
+        let (_directory, registry) = fixture();
+        let mut raw = vec![b'x'; 300];
+        raw.extend_from_slice(b"-\xe2\x82");
+        let name = GoString::from(raw.clone());
+        let context = registry.metric_context(&(Uuid::nil(), name.clone(), 0), 0);
+        assert_eq!(context.task_list, format!("{}-��", "x".repeat(300)));
+        assert_eq!(name.as_bytes(), raw);
     }
 
     #[test]

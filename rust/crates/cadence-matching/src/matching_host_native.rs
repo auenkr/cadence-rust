@@ -86,7 +86,7 @@ impl NativePollObserver for NativeMetricsPollObserver {
                     partition.get(key.as_bytes()).map(|value| {
                         (
                             key.to_owned(),
-                            String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                            value.go_rune_string(),
                         )
                     })
                 })
@@ -377,6 +377,17 @@ impl NativeMatchingIntegration for NativeMatchingHost {
 }
 
 impl DecisionAddContext for NativeMatchingHost {
+    fn observe_add_request(
+        &self,
+        domain: &GoString,
+        list: &cadence_proto::native::api::TaskList,
+        task_type: i32,
+        forwarded: bool,
+    ) -> Result<(), Status> {
+        let name = NativeControlContext::domain_name(self.control.as_ref(), domain)?;
+        record_add_request(&self.metrics, &name, list, task_type, forwarded);
+        Ok(())
+    }
     fn domain_active(&self, id: uuid::Uuid) -> Result<bool, Status> {
         DecisionAddContext::domain_active(&self.engine, id)
     }
@@ -396,6 +407,22 @@ impl DecisionAddContext for NativeMatchingHost {
     ) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
         DecisionAddContext::remote_parent(&self.engine, name)
     }
+}
+pub(crate) fn record_add_request(
+    metrics: &crate::matching_metrics::MatchingMetrics,
+    domain: &GoString,
+    list: &cadence_proto::native::api::TaskList,
+    task_type: i32,
+    forwarded: bool,
+) {
+    metrics.add_task_request(
+        &domain.go_rune_string(),
+        &list.name.go_rune_string(),
+        i32::from(crate::matching_handler_native::persistence_kind(list.kind)),
+        forwarded,
+        if task_type == 0 { "decision_task" } else { "activity_task" },
+        crate::grpc_matching::matching_host_name(),
+    );
 }
 impl NativePollContext for NativeMatchingHost {
     fn domain_name(&self, id: &GoString) -> Result<GoString, Status> {

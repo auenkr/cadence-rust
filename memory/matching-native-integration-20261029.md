@@ -302,3 +302,39 @@ observation timed out; it passed Clippy but did not finish tests. Partial logs
 are retained in `memory/evidence/matching-native-workspace-40758347908/`.
 No mixed gate runs. Final source remains unfrozen until this combined candidate
 and any final formatting are validated. No local Cargo/Go execution.
+
+## Saved continuation: workspace pass and metric parity corrections
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40759246848 completed
+**success** at `c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227`. Downloaded
+artifacts confirm fresh `/home/runner/work/_temp/cargo-target-final`, Clippy
+exit0 then whole-workspace test exit0; service-core173 passed. Live Go tally
+comparison passed all four modes. Compact source/exit/test-summary/metric
+comparison evidence is retained in `evidence/matching-native-workspace-40759246848/`.
+Full downloads are under `/mnt/storage/service/ci-evidence/`. Applied the
+runner formatting patch for the declared Thrift error matrix. This is the
+first recovered combined workspace pass; it does not establish mixed acceptance.
+
+Subsequent source audit corrected native metric sink rendering: use Go rune
+conversion (one replacement per malformed byte), retain full long task names,
+and avoid diagnostic quotes/truncation in labels. Raw routing/storage identity
+is unchanged. Extended the actual Go tally emission oracle with malformed,
+replacement-rune, non-ASCII and >256-byte names, and matching Rust emissions.
+
+The native engine also omitted Go AddTask traffic counting entirely. Added a
+host callback after identifier validation and domain-name resolution, before
+manager lookup, preserving normal/non-forwarded conditions and protobuf-to-Go
+kind mapping (including normal=1 and unknown/default handling). Restored its
+Info log through the existing configured sink. A handler regression covers
+both task types, normal/default/unknown/sticky/ephemeral kinds, forwarded,
+malformed-name and quota rejection; injected ownership-admission failure
+checks the metric is recorded before manager creation without publishing an
+owner. The regression uses the same emission helper as the production host.
+These changes are UNVALIDATED until the next CI executes them. No local Cargo,
+Go or rustfmt ran; `git diff --check` passed. No replacement agents were started.
+
+User requested progress saving and remote master synchronization. Save/push
+this source and evidence first, dispatch fresh workspace CI with runner
+formatting, retain any patch and terminal logs, then integrate the validated
+source into master and push. Matching remains incomplete: all ten native mixed
+SDK/restart/recovery lanes, supplemental oracles and final parity audit remain.
