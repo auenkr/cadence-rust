@@ -297,7 +297,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -339,7 +339,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -382,7 +382,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -425,7 +425,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -467,7 +467,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -510,7 +510,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -544,7 +544,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -579,7 +579,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -607,7 +607,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -667,7 +667,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -703,7 +703,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .get_ref()
                 .task_list
                 .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -751,6 +751,15 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
+}
+
+// The generated native model retains protobuf enum values. Metrics consume
+// Go's internal task-list kinds, including nil/unknown mapping to normal.
+fn metric_task_list(list: &n::api::TaskList) -> (String, Option<i32>) {
+    (
+        metric_string(&list.name),
+        Some(i32::from(crate::matching_handler_native::persistence_kind(list.kind))),
+    )
 }
 
 fn record_forwarded(
@@ -1138,6 +1147,12 @@ mod tests {
                     })).await.unwrap_err()
                 };
                 assert_eq!(status.code(), if reject { tonic::Code::ResourceExhausted } else { tonic::Code::Internal });
+                let request_events: Vec<_> = sink.events().into_iter().filter(|e| e.name == CADENCE_REQUESTS_PER_TASK_LIST || e.name == FORWARDED_PER_TASK_LIST).collect();
+                let expected_label = if kind == 2 { "__sticky__" } else if kind == 3 { "__ephemeral__" } else if malformed { "___cadence_sys_invalid" } else { "queue___" };
+                assert!(!request_events.is_empty());
+                for event in request_events {
+                    assert_eq!(event.tags[TASK_LIST_TAG], expected_label, "kind={kind}");
+                }
                 let events: Vec<_> = sink.events().into_iter().filter(|e| e.name == CADENCE_TASKLIST_REQUEST).collect();
                 assert_eq!(events.len(), expected, "activity={activity}, kind={kind}, forwarded={forwarded}, malformed={malformed}, reject={reject}");
                 if let Some(event) = events.first() {

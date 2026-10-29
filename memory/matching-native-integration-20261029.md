@@ -338,3 +338,22 @@ this source and evidence first, dispatch fresh workspace CI with runner
 formatting, retain any patch and terminal logs, then integrate the validated
 source into master and push. Matching remains incomplete: all ten native mixed
 SDK/restart/recovery lanes, supplemental oracles and final parity audit remain.
+
+## Native request metric kind correction
+
+Saved source e9ac81063656fb7be42ceb216b00b268e94cc973 and evidence were
+pushed. Fresh workspace run https://github.com/auenkr/cadence-rust/actions/runs/40802091633
+was confirmed live through Clippy. Follow-up source inspection found native
+request wrappers passed protobuf task-list kind directly into the metric sink,
+which expects Go internal kinds: normal protobuf1 was labeled sticky,
+sticky2 was labeled ephemeral. Poll observers already convert correctly.
+
+Added a shared native request-list metric converter using persistence_kind
+for all eleven wrapper sites. Extended the actual handler matrix to assert
+request and forwarded labels, including nil/default, unknown, normal, sticky
+and ephemeral mapping. This correction is unvalidated. The changed source
+supersedes e9ac81063, so a new branch-head CI run will cancel the older run
+through the workflow concurrency rule; cancellation is due to a concrete
+source correction, not an observation timeout. No local Cargo/Go/rustfmt ran.
+Master synchronization remains pending validated latest source. PR1 is linked
+and watched; its body should be refreshed with the new source and run URL.
