@@ -1,0 +1,7 @@
+# Original-Go source-domain boundary oracle — UNEXECUTED
+
+This change adds optional Go overlays to the existing `go_domain_cache_uuid_oracle` rust-ci dispatch. No local Go, Cargo, rustfmt, or gate was run, and no CI was dispatched. No run URL or conclusion exists yet; this is not parity evidence until CI passes.
+
+Dispatch on the branch containing this commit: `gh workflow run rust-ci.yml --ref t3/go-domain-boundary-oracle -f package=cadence-matching -f go_domain_cache_uuid_oracle=true`. The existing UUID spelling oracle remains enabled by the same input. The additional artifact `source-domain-boundary-oracle` records source SHA, overlay, command, output and exit code (three-day retention). Record the actual run URL, head SHA and conclusion after execution.
+
+The manager overlay invokes real `AddTask` with malformed ASCII and non-UTF8 source bytes, distinct destination, and both ordinary and forwarded requests. Its strict cache expectation checks the exact source bytes and its same-pointer assertion checks preservation of the typed lookup failure. The SQL overlay exercises the actual domain store through domain manager, rate limiter and metered wrapper in factory order: throttling returns the typed limiter error before any SQL access; permitting malformed/non-UTF8 input reaches the parser and captures the same panic as direct `MustParseUUID` on those bytes. A valid uppercase UUID reaches the SQL filter and produces the typed not-found error. This is bounded boundary evidence, not a mixed-cluster or end-to-end SDK test.

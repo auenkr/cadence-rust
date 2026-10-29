@@ -180,6 +180,33 @@ jobs:
           name: domain-cache-uuid-oracle
           retention-days: 3
           path: ${{ runner.temp }}/domain-cache-uuid-oracle
+      - name: Run original-Go source-domain boundary oracle
+        if: inputs.go_domain_cache_uuid_oracle == true
+        working-directory: go
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/source-domain-boundary-oracle"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          cat > "$RUNNER_TEMP/source-domain-boundary-overlay.json" <<EOF
+          {"Replace":{"$GITHUB_WORKSPACE/go/service/matching/tasklist/source_domain_boundary_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-source-domain-boundary-manager-oracle_test.go","$GITHUB_WORKSPACE/go/common/persistence/sql/source_domain_boundary_oracle_test.go":"$GITHUB_WORKSPACE/tests/go-source-domain-boundary-sql-oracle_test.go"}}
+          EOF
+          cp "$RUNNER_TEMP/source-domain-boundary-overlay.json" "$evidence/overlay.json"
+          printf '%s\n' 'go test -overlay $RUNNER_TEMP/source-domain-boundary-overlay.json ./service/matching/tasklist ./common/persistence/sql -run ^TestSourceDomainBoundary -count=1 -v' > "$evidence/command.txt"
+          set +e
+          go test -overlay "$RUNNER_TEMP/source-domain-boundary-overlay.json" ./service/matching/tasklist ./common/persistence/sql \
+            -run '^TestSourceDomainBoundary' -count=1 -v > "$evidence/go-oracle.log" 2>&1
+          result=$?
+          echo "$result" > "$evidence/go-oracle.exit"
+          cat "$evidence/go-oracle.log"
+          exit "$result"
+      - name: Upload original-Go source-domain boundary oracle evidence
+        if: always() && inputs.go_domain_cache_uuid_oracle == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-domain-boundary-oracle
+          retention-days: 3
+          path: ${{ runner.temp }}/source-domain-boundary-oracle
       - name: Verify Go mapped IPv4 CIDR oracle
         run: GO111MODULE=off go run tests/matching-unleash/go_ipnet_oracle.go
       - name: Verify reviewed Go History TChannel wire fixture
