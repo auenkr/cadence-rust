@@ -781,13 +781,21 @@ pub async fn run(
                     debug_mode,
                 ),
             );
-            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let matching_member_provider: std::sync::Arc<
+                std::sync::RwLock<Option<std::sync::Arc<crate::matching_ringpop_provider::MatchingRingpopProvider>>>,
+            > = std::sync::Arc::new(std::sync::RwLock::new(None));
             let matching_persistence_limiter =
                 if wanted.contains(&service::ServiceName::Matching) && !embedded_development {
                     Some(
-                        crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+                        crate::matching_persistence_limiter::MatchingPersistenceLimiter::with_member_count(
                             state.admin.dynamic_config.clone(),
-                            matching_member_count.clone(),
+                            {
+                                let provider = matching_member_provider.clone();
+                                std::sync::Arc::new(move || {
+                                    provider.read().map_err(|_| ())?.as_ref()
+                                        .map(|p| p.service_member_count()).ok_or(())
+                                })
+                            },
                         ),
                     )
                 } else {
@@ -1091,24 +1099,9 @@ pub async fn run(
             } else {
                 None
             };
-            if let Some(provider) = matching_ringpop_provider.as_ref() {
-                matching_member_count.store(
-                    provider.service_member_count(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                let provider = provider.clone();
-                let member_count = matching_member_count.clone();
-                tokio::spawn(async move {
-                    let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
-                    loop {
-                        refresh.tick().await;
-                        member_count.store(
-                            provider.service_member_count(),
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                    }
-                });
-            }
+            *matching_member_provider
+                .write()
+                .expect("Matching member provider lock") = matching_ringpop_provider.clone();
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
                 crate::matching_membership::Membership::new(
                     provider.local_identity().to_owned(),

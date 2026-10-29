@@ -160,7 +160,7 @@ impl MatchingRingpopProvider {
 
     /// Number of visible members for this provider's service label.
     pub fn service_member_count(&self) -> usize {
-        Self::service_members(&self.snapshot().members, &self.service).len()
+        Self::service_members(&Self::current_members(&self.node), &self.service).len()
     }
 
     fn current_members(node: &RingpopNode) -> Vec<PeerMember> {

@@ -17,6 +17,7 @@ const REFRESH_NANOS: i64 = 5_000_000_000;
 type DomainNameResolver = Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>;
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+type MemberCount = Arc<dyn Fn() -> Result<usize, ()> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PersistenceRateSnapshot {
@@ -88,7 +89,7 @@ impl PersistenceErrorClass {
 /// configured default datastore. Rejections are counted for observability.
 pub struct MatchingPersistenceLimiter {
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
-    matching_members: Arc<AtomicUsize>,
+    matching_members: MemberCount,
     clock: Clock,
     state: Mutex<LimiterState>,
     #[cfg(test)]
@@ -164,9 +165,33 @@ impl MatchingPersistenceLimiter {
         matching_members: Arc<AtomicUsize>,
         clock: Clock,
     ) -> Arc<Self> {
+        Self::with_member_count_and_clock(
+            overlay,
+            Arc::new(move || Ok(matching_members.load(Ordering::Relaxed))),
+            clock,
+        )
+    }
+
+    pub(crate) fn with_member_count(
+        overlay: Arc<Mutex<DynamicConfigOverlay>>,
+        matching_members: MemberCount,
+    ) -> Arc<Self> {
+        Self::with_member_count_and_clock(overlay, matching_members, Arc::new(monotonic_nanos))
+    }
+
+    fn with_member_count_and_clock(
+        overlay: Arc<Mutex<DynamicConfigOverlay>>,
+        matching_members: MemberCount,
+        clock: Clock,
+    ) -> Arc<Self> {
         let now = clock();
-        let snapshot = read_rate_snapshot(&overlay, matching_members.load(Ordering::Relaxed));
-        let enabled = snapshot.effective_qps > 0.0;
+        let initial = read_rate_snapshot(&overlay, &matching_members);
+        let enabled = initial.effective_qps > 0.0;
+        let snapshot = if enabled {
+            read_rate_snapshot(&overlay, &matching_members)
+        } else {
+            initial
+        };
         let mut limiter = RateLimiter::new(snapshot.effective_qps, burst(snapshot.effective_qps));
         limiter.tokens(now);
         Arc::new(Self {
@@ -623,7 +648,7 @@ impl MatchingPersistenceLimiter {
         }
         if now.saturating_sub(state.last_refresh_nanos) >= REFRESH_NANOS {
             let snapshot =
-                read_rate_snapshot(&self.overlay, self.matching_members.load(Ordering::Relaxed));
+                read_rate_snapshot(&self.overlay, &self.matching_members);
             state
                 .limiter
                 .set_limit_and_burst(snapshot.effective_qps, burst(snapshot.effective_qps));
@@ -663,18 +688,23 @@ fn burst(qps: f64) -> i64 {
 
 fn read_rate_snapshot(
     overlay: &Arc<Mutex<DynamicConfigOverlay>>,
-    matching_members: usize,
+    member_count: &MemberCount,
 ) -> PersistenceRateSnapshot {
     let overlay = overlay.lock().expect("admin dynamic config lock");
-    let host_values = overlay.property_values("matching.persistenceMaxQPS");
-    let host_qps =
-        cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT) as f64;
     let global_values = overlay.property_values("matching.persistenceGlobalMaxQPS");
     let global_qps = cadence_persistence::dynamic_config::integer(
         global_values,
         None,
         GLOBAL_QPS_DEFAULT,
     ) as f64;
+    let host_values = overlay.property_values("matching.persistenceMaxQPS");
+    let host_qps =
+        cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT) as f64;
+    let matching_members = if global_qps > 0.0 {
+        member_count().unwrap_or(0)
+    } else {
+        0
+    };
     let effective_qps = if global_qps > 0.0 && matching_members > 0 {
         (global_qps / matching_members as f64)
             .max(1.0)
@@ -719,6 +749,34 @@ mod tests {
                 }),
             }],
         );
+    }
+
+    #[test]
+    fn construction_resamples_and_refresh_uses_live_membership_or_host_on_error() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.persistenceMaxQPS", 10);
+        set(&overlay, "matching.persistenceGlobalMaxQPS", 8);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let now = Arc::new(AtomicI64::new(0));
+        let clock = now.clone();
+        let limiter = MatchingPersistenceLimiter::with_member_count_and_clock(
+            overlay,
+            Arc::new(move || match count.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(1), // factory enablement
+                1 => Ok(4), // dynamic limiter construction
+                2 => Ok(2), // refreshed resolver membership
+                _ => Err(()), // resolver failure falls back to host
+            }),
+            Arc::new(move || clock.load(Ordering::SeqCst)),
+        );
+        assert_eq!(limiter.snapshot().effective_qps, 2.0);
+        now.store(REFRESH_NANOS, Ordering::SeqCst);
+        limiter.allow();
+        assert_eq!(limiter.snapshot().effective_qps, 4.0);
+        now.store(2 * REFRESH_NANOS, Ordering::SeqCst);
+        limiter.allow();
+        assert_eq!(limiter.snapshot().effective_qps, 10.0);
     }
 
     #[test]
