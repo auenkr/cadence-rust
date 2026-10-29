@@ -1741,8 +1741,7 @@ mod tests {
             identity: name.into(),
             grpc_address: String::new(),
         };
-        let membership =
-            crate::matching_membership::Membership::new("self", vec![host("self")]);
+        let membership = crate::matching_membership::Membership::new("self", vec![host("self")]);
         let (drain, receiver) = tokio::sync::watch::channel(false);
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = calls.clone();
@@ -1751,9 +1750,7 @@ mod tests {
             Box::pin(async move {
                 match name.as_slice() {
                     b"missing" => Err(GetShardProcessError::NotFound("missing".into())),
-                    b"failure" => {
-                        Err(GetShardProcessError::Heartbeat("sd lookup failed".into()))
-                    }
+                    b"failure" => Err(GetShardProcessError::Heartbeat("sd lookup failed".into())),
                     _ => Ok(()),
                 }
             })
@@ -1765,14 +1762,10 @@ mod tests {
             receiver,
             lookup.clone(),
         );
-        let missing = check(GoString::from("missing"), false)
-            .await
-            .unwrap_err();
+        let missing = check(GoString::from("missing"), false).await.unwrap_err();
         assert_eq!(missing.code(), tonic::Code::Aborted);
         assert!(missing.message().contains("OwnedBy: not known, Me: self"));
-        let failure = check(GoString::from("failure"), false)
-            .await
-            .unwrap_err();
+        let failure = check(GoString::from("failure"), false).await.unwrap_err();
         assert_eq!(failure.code(), tonic::Code::Internal);
         assert!(failure
             .message()
@@ -1798,9 +1791,7 @@ mod tests {
         assert!(enabled(uuid, false).await.is_ok());
         assert_eq!(calls.load(Ordering::SeqCst), 4);
         drain.send(true).unwrap();
-        let stopped = check(GoString::from("owned"), false)
-            .await
-            .unwrap_err();
+        let stopped = check(GoString::from("owned"), false).await.unwrap_err();
         assert_eq!(stopped.code(), tonic::Code::Aborted);
         assert!(stopped.message().contains("OwnedBy: not known, Me: self"));
         assert_eq!(calls.load(Ordering::SeqCst), 4, "shutdown skips SD");

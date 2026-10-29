@@ -32,16 +32,26 @@ impl OpenFeatureRuntimeProvider {
 }
 
 impl RuntimePropertyProvider for OpenFeatureRuntimeProvider {
-    fn evaluate_domain_bytes(&self, key: &str, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Result<Value, String> {
+    fn evaluate_domain_bytes(
+        &self,
+        key: &str,
+        property_type: RuntimePropertyType,
+        default: Value,
+        domain: &[u8],
+    ) -> Result<Value, String> {
         if property_type != RuntimePropertyType::Integer {
             return Err("byte-valued domain lookup requires an integer property".into());
         }
-        let default = default.as_i64().ok_or_else(|| "integer default required".to_owned())?;
+        let default = default
+            .as_i64()
+            .ok_or_else(|| "integer default required".to_owned())?;
         let mut context = BTreeMap::new();
         if let Some(cluster_name) = &self.cluster_name {
             context.insert("clusterName".into(), Value::String(cluster_name.clone()));
         }
-        let (value, error) = self.client.get_int_value_domain_bytes(key, default, &context, domain);
+        let (value, error) = self
+            .client
+            .get_int_value_domain_bytes(key, default, &context, domain);
         error.map_or_else(|| Ok(Value::from(value)), |error| Err(error.to_string()))
     }
 

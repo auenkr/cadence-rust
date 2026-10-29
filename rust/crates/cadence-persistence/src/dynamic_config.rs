@@ -21,15 +21,21 @@ pub trait RuntimePropertyProvider: Send + Sync + std::fmt::Debug {
     /// Evaluate a byte-valued domain filter without changing existing providers.
     /// Providers that support Go strings override this method.
     fn evaluate_domain_bytes(
-        &self, key: &str, property_type: RuntimePropertyType, default: Value,
+        &self,
+        key: &str,
+        property_type: RuntimePropertyType,
+        default: Value,
         domain: &[u8],
     ) -> Result<Value, String> {
         let domain = std::str::from_utf8(domain)
             .map_err(|_| "provider does not support byte-valued domain filters".to_owned())?;
-        self.evaluate(key, property_type, default,
-            &BTreeMap::from([("domainName".into(), Value::String(domain.into()))]))
+        self.evaluate(
+            key,
+            property_type,
+            default,
+            &BTreeMap::from([("domainName".into(), Value::String(domain.into()))]),
+        )
     }
-
 }
 
 /// Typed Matching getter semantics. Duration remains distinct from string so
@@ -83,10 +89,15 @@ impl RuntimePropertyRead {
         self.provider
             .evaluate(&self.key, property_type, default, filters)
     }
-    fn evaluate_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Result<Value, String> {
-        self.provider.evaluate_domain_bytes(&self.key, property_type, default, domain)
+    fn evaluate_domain_bytes(
+        &self,
+        property_type: RuntimePropertyType,
+        default: Value,
+        domain: &[u8],
+    ) -> Result<Value, String> {
+        self.provider
+            .evaluate_domain_bytes(&self.key, property_type, default, domain)
     }
-
 }
 
 /// An owned snapshot paired with property identity and its optional live
@@ -135,14 +146,21 @@ pub trait PropertyValueSource {
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>>;
-    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
+    fn runtime_domain_bytes(
+        &self,
+        property_type: RuntimePropertyType,
+        default: Value,
+        domain: &[u8],
+    ) -> Option<Result<Value, String>> {
         match std::str::from_utf8(domain) {
-            Ok(domain) => self.runtime_value(property_type, default,
-                &BTreeMap::from([("domainName".into(), Value::String(domain.into()))])),
+            Ok(domain) => self.runtime_value(
+                property_type,
+                default,
+                &BTreeMap::from([("domainName".into(), Value::String(domain.into()))]),
+            ),
             Err(_) => None,
         }
     }
-
 }
 
 impl PropertyValueSource for PropertyValues {
@@ -157,10 +175,16 @@ impl PropertyValueSource for PropertyValues {
     ) -> Option<Result<Value, String>> {
         self.evaluate(property_type, default, filters)
     }
-    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
-        self.runtime.as_ref().map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
+    fn runtime_domain_bytes(
+        &self,
+        property_type: RuntimePropertyType,
+        default: Value,
+        domain: &[u8],
+    ) -> Option<Result<Value, String>> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
     }
-
 }
 impl PropertyValueSource for &PropertyValues {
     fn snapshot_values(&self) -> &[DynamicConfigValue] {
@@ -174,10 +198,16 @@ impl PropertyValueSource for &PropertyValues {
     ) -> Option<Result<Value, String>> {
         self.evaluate(property_type, default, filters)
     }
-    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
-        self.runtime.as_ref().map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
+    fn runtime_domain_bytes(
+        &self,
+        property_type: RuntimePropertyType,
+        default: Value,
+        domain: &[u8],
+    ) -> Option<Result<Value, String>> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
     }
-
 }
 
 impl PropertyValueSource for &[DynamicConfigValue] {
@@ -262,12 +292,17 @@ fn decode(blob: Option<&DataBlob>) -> Option<Value> {
 // Go encoding/json replaces each invalid UTF-8 byte in JSON strings with U+FFFD.
 fn decode_string_filter(blob: Option<&DataBlob>) -> Option<String> {
     let blob = blob?;
-    if blob.encoding_type != Some(EncodingType::JSON) { return None; }
+    if blob.encoding_type != Some(EncodingType::JSON) {
+        return None;
+    }
     let mut input = blob.data.as_slice();
     let mut text = String::new();
     while !input.is_empty() {
         match std::str::from_utf8(input) {
-            Ok(valid) => { text.push_str(valid); break; }
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
             Err(error) => {
                 let valid = error.valid_up_to();
                 text.push_str(std::str::from_utf8(&input[..valid]).ok()?);
@@ -284,10 +319,14 @@ fn decode_string_filter(blob: Option<&DataBlob>) -> Option<String> {
     while i < bytes.len() {
         if bytes[i] == b'\\' && i + 1 < bytes.len() {
             if bytes[i + 1] == b'u' && i + 6 <= bytes.len() {
-                let hex = |part: &[u8]| std::str::from_utf8(part).ok()
-                    .and_then(|s| u16::from_str_radix(s, 16).ok());
+                let hex = |part: &[u8]| {
+                    std::str::from_utf8(part)
+                        .ok()
+                        .and_then(|s| u16::from_str_radix(s, 16).ok())
+                };
                 if let Some(unit) = hex(&bytes[i + 2..i + 6]) {
-                    if (0xd800..=0xdbff).contains(&unit) && i + 12 <= bytes.len()
+                    if (0xd800..=0xdbff).contains(&unit)
+                        && i + 12 <= bytes.len()
                         && &bytes[i + 6..i + 8] == b"\\u"
                         && hex(&bytes[i + 8..i + 12])
                             .is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
@@ -345,9 +384,11 @@ fn filters_match_context_bytes(
             _ => None,
         };
         if filter.name == "domainName" {
-            domain.is_some_and(|actual| decode_string_filter(filter.value.as_ref())
-                .map(|filter| filter.as_bytes() == actual)
-                .unwrap_or(false))
+            domain.is_some_and(|actual| {
+                decode_string_filter(filter.value.as_ref())
+                    .map(|filter| filter.as_bytes() == actual)
+                    .unwrap_or(false)
+            })
         } else if filter.name == "taskListName" {
             task_list.is_some_and(|(actual, _)| {
                 decode(filter.value.as_ref())
@@ -617,11 +658,19 @@ pub fn integer(values: impl PropertyValueSource, domain: Option<&str>, default: 
 /// Domain-scoped integer with Go string byte identity.
 pub fn integer_bytes(values: impl PropertyValueSource, domain: Option<&[u8]>, default: i64) -> i64 {
     let result = match domain {
-        Some(domain) => values.runtime_domain_bytes(RuntimePropertyType::Integer, Value::from(default), domain),
-        None => values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &BTreeMap::new()),
+        Some(domain) => {
+            values.runtime_domain_bytes(RuntimePropertyType::Integer, Value::from(default), domain)
+        }
+        None => values.runtime_value(
+            RuntimePropertyType::Integer,
+            Value::from(default),
+            &BTreeMap::new(),
+        ),
     };
     if let Some(result) = result {
-        return runtime_typed(result, default, "integer").and_then(integer_value).unwrap_or(default);
+        return runtime_typed(result, default, "integer")
+            .and_then(integer_value)
+            .unwrap_or(default);
     }
     match selected_context_bytes(values.snapshot_values(), domain, None).and_then(integer_value) {
         Some(value) => value,

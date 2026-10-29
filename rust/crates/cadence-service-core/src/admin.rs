@@ -83,7 +83,9 @@ impl DynamicConfigOverlay {
                             if let Ok(serde_json::Value::Number(number)) =
                                 serde_json::from_slice::<serde_json::Value>(&blob.data)
                             {
-                                if let Some(n) = number.as_f64().filter(|n| n.is_finite() && n.trunc() == *n) {
+                                if let Some(n) =
+                                    number.as_f64().filter(|n| n.is_finite() && n.trunc() == *n)
+                                {
                                     // Go decodes JSON numbers as float64 before amd64 int conversion.
                                     let integer = if n >= 9_223_372_036_854_775_808.0
                                         || n < -9_223_372_036_854_775_808.0
@@ -1166,7 +1168,10 @@ mod tests {
                 }]),
             };
             cadence_persistence::dynamic_config::integer(
-                DynamicConfigOverlay::from_config_store(&snapshot).property_values("matching.persistenceMaxQPS"), None, 3000,
+                DynamicConfigOverlay::from_config_store(&snapshot)
+                    .property_values("matching.persistenceMaxQPS"),
+                None,
+                3000,
             )
         };
         assert_eq!(read("1.0"), 1);
@@ -1216,16 +1221,19 @@ mod tests {
             "matching.domainrps",
             "matching.domainworkerrps",
         ];
-        let entries = keys.iter().map(|key| cadence_api::admin::DynamicConfigEntry {
-            name: (*key).into(),
-            values: vec![DynamicConfigValue {
-                filters: vec![],
-                value: Some(cadence_api::types::DataBlob::new(
-                    cadence_api::enums::EncodingType::JSON,
-                    b"1.0".to_vec(),
-                )),
-            }],
-        }).collect();
+        let entries = keys
+            .iter()
+            .map(|key| cadence_api::admin::DynamicConfigEntry {
+                name: (*key).into(),
+                values: vec![DynamicConfigValue {
+                    filters: vec![],
+                    value: Some(cadence_api::types::DataBlob::new(
+                        cadence_api::enums::EncodingType::JSON,
+                        b"1.0".to_vec(),
+                    )),
+                }],
+            })
+            .collect();
         let overlay = DynamicConfigOverlay::from_config_store(&Snapshot {
             version: 1,
             schema_version: 0,

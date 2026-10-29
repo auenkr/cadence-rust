@@ -786,8 +786,9 @@ pub async fn run(
             );
             // The Go resolver owns an initially empty ring before its provider
             // starts. Later samples read the refreshed ring, not raw Ringpop.
-            let matching_rate_membership: std::sync::Arc<std::sync::RwLock<Option<crate::matching_membership::Membership>>> =
-                std::sync::Arc::new(std::sync::RwLock::new(None));
+            let matching_rate_membership: std::sync::Arc<
+                std::sync::RwLock<Option<crate::matching_membership::Membership>>,
+            > = std::sync::Arc::new(std::sync::RwLock::new(None));
             let matching_persistence_limiters =
                 if wanted.contains(&service::ServiceName::Matching) && !embedded_development {
                     let membership = matching_rate_membership.clone();
@@ -805,7 +806,8 @@ pub async fn run(
                     std::collections::HashMap::new()
                 };
             let matching_persistence_limiter = matching_persistence_limiters
-                .get(&cfg.persistence.default_store).cloned();
+                .get(&cfg.persistence.default_store)
+                .cloned();
             let mut native_semaphore_store = None;
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
                 // Go constructs semaphore persistence from the configured
@@ -1114,8 +1116,9 @@ pub async fn run(
                     std::sync::Arc::new(crate::matching_metrics::NoopMetricSink)
                 }))
             });
-            *matching_rate_membership.write().expect("Matching rate membership lock") =
-                matching_membership.clone();
+            *matching_rate_membership
+                .write()
+                .expect("Matching rate membership lock") = matching_membership.clone();
             let mut matching_membership_lifecycle = matching_ringpop_provider
                 .as_ref()
                 .zip(matching_membership.clone())
