@@ -109,6 +109,12 @@ fn read_range_size(config: &ReaderConfig) -> i64 {
         None => i64::from(config.read_range_size),
     }
 }
+// Go time.Time.Add accepts an i64 duration without clamping the resulting
+// absolute timestamp to the duration's range.
+fn dispatch_deadline(now: i64, timeout: i64) -> i128 {
+    i128::from(now) + i128::from(timeout)
+}
+
 fn dispatch_timeout_nanos(config: &ReaderConfig) -> i64 {
     match &config.live {
         Some(live) => (live.dispatch_timeout)(),
@@ -648,7 +654,7 @@ impl NativeTaskReader {
                                 timeout_buffer.as_nanos() as i64,
                             );
                             timeout
-                        }).filter(|_| active()).map(|timeout| dispatch_limiter.now().saturating_add(timeout));
+                        }).filter(|_| active()).map(|timeout| dispatch_deadline(dispatch_limiter.now(), timeout));
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
                             match dispatch_limiter
@@ -731,7 +737,7 @@ impl NativeTaskReader {
                                     trace_root, trace_partition, parent_destination, trace_workflow,
                                     trace_run, task.data.schedule_id, task.task_id,
                                     forward_started.elapsed().as_millis(), forward_status,
-                                    deadline.map(|at| at.saturating_sub(dispatch_limiter.now()).max(0) / 1_000_000).unwrap_or(-1),
+                                    deadline.map(|at| at.saturating_sub(i128::from(dispatch_limiter.now())).max(0) / 1_000_000).unwrap_or(-1),
                                 ));
                                 drop(token);
                                 match result {
@@ -774,11 +780,15 @@ impl NativeTaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(dispatch_limiter.now()).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
                                 );
-                                tokio::time::timeout(remaining, attempt)
-                                    .await
-                                    .unwrap_or(Attempt::TimedOut)
+                                if remaining.is_zero() {
+                                    Attempt::TimedOut
+                                } else {
+                                    tokio::time::timeout(remaining, attempt)
+                                        .await
+                                        .unwrap_or(Attempt::TimedOut)
+                                }
                             }
                             None => attempt.await,
                         };
@@ -1145,6 +1155,13 @@ mod tests {
     use uuid::Uuid;
 
     // Go task_reader.go validates each batch read, but keeps signed range values.
+    #[test]
+    fn dispatch_deadline_crosses_signed_nanosecond_boundaries() {
+        assert_eq!(dispatch_deadline(i64::MAX - 1, 10), i128::from(i64::MAX) + 9);
+        assert_eq!(dispatch_deadline(i64::MIN + 1, -10), i128::from(i64::MIN) - 9);
+        assert!(dispatch_deadline(100, -1) < 100);
+    }
+
     #[test]
     fn native_reader_preserves_signed_and_large_live_properties() {
         use std::sync::atomic::AtomicI64;
