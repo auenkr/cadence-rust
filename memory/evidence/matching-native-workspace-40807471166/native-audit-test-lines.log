@@ -1,0 +1,31 @@
+Source log: /mnt/storage/service/ci-evidence/matching-native-workspace-40807471166/downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/test.log
+This is the locally retained downloaded full test.log for Actions run 40807471166; line numbers below refer to that file.
+
+Named native assertions present and passing:
+772:test matching_domain_uuid::tests::cassandra_parser_follows_gocql_nibble_boundaries ... ok
+776:test matching_domain_uuid::tests::raw_bytes_follow_go_parser_and_quoting ... ok
+781:test matching_engine_context_native::source_domain_tests::raw_source_lookup_respects_backend_and_cache_key ... ok
+799:test matching_engine_native::tests::activity_forwarding_preserves_raw_fields_and_domains ... ok
+803:test matching_engine_native::tests::forwarded_activity_sync_dispatch_preserves_cached_raw_source ... ok
+960:test matching_persistence::list_domain_metric_tests::raw_domain_request_metric_is_visible_while_source_is_blocked ... ok
+961:test matching_persistence::list_domain_metric_tests::raw_sql_accepted_non_utf8_wrapper_reaches_source_with_uuid_body ... ok
+962:test matching_persistence::list_domain_metric_tests::raw_sql_miss_rate_limit_precedes_parse_and_panic_only_counts_request ... ok
+1123:test matching_runtime::failover_callback_tests::registered_failover_callback_reaches_native_registry_attached_after_catchup ... ok
+1212:test matching_semaphore::parity_tests::matching_semaphore_acquire_honors_deadline_while_starting ... ok
+1227:test matching_semaphore::parity_tests::matching_semaphore_grant_stops_retrying_at_deadline ... ok
+1240:test matching_semaphore::parity_tests::matching_semaphore_start_skips_malformed_known_rows ... ok
+1258:test matching_semaphore_manager_native::tests::failed_start_releases_waiter_and_next_request_rebuilds_manager ... ok
+1264:test matching_semaphore_service_native::tests::slow_start_keeps_running_after_caller_cancel_and_reuses_manager ... ok
+1265:test matching_service_native::tests::activity_source_cache_failures_reach_handler_without_persistence ... ok
+1275:test matching_service_native::tests::canonical_source_activity_preserves_standby_and_forwarded_persistence_rules ... ok
+1276:test matching_service_native::tests::refresh_rpc_returns_storage_failure_without_replacing_native_cache_or_owner ... ok
+1278:test matching_service_native::tests::query_rpc_propagates_dispatch_forward_failure_and_releases_its_permit ... ok
+1454:test thrift_matching::native_dispatch::tests::every_declared_matching_exception_preserves_raw_fields_and_wire_id ... ok
+1456:test thrift_matching::native_dispatch::tests::every_pinned_thrift_matching_wrapper_returns_internal_error_without_success ... ok
+1500:test result: ok. 972 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 36.10s
+1716:test served_raw_status_normalizes_message_details_and_marker ... ok
+2194:test matching_metrics::inbound_tests::handler_error_categories_use_typed_envelopes_before_transport ... ok
+
+Specific limitation:
+- The referenced audit says the independent 30-second semaphore startup timeout remained unasserted. No passing test line in this run names or demonstrates that timeout. The caller-deadline-during-start test at 1212 and slow-start/cancel/reuse test at 1264 cover different conditions and are not credited as proof of the independent 30-second timeout.
+- The 972-pass summary is one test binary's result in the workspace log; it does not establish overall workspace CI completion, mixed Go/Rust acceptance, or Matching parity completion.
