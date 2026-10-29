@@ -663,15 +663,14 @@ fn read_rate_snapshot(
 ) -> PersistenceRateSnapshot {
     let overlay = overlay.lock().expect("admin dynamic config lock");
     let host_values = overlay.property_values("matching.persistenceMaxQPS");
-    let host_qps = cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT)
-        .max(0) as f64;
+    let host_qps =
+        cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT) as f64;
     let global_values = overlay.property_values("matching.persistenceGlobalMaxQPS");
     let global_qps = cadence_persistence::dynamic_config::integer(
         global_values,
         None,
         GLOBAL_QPS_DEFAULT,
-    )
-    .max(0) as f64;
+    ) as f64;
     let effective_qps = if global_qps > 0.0 && matching_members > 0 {
         (global_qps / matching_members as f64)
             .max(1.0)
@@ -758,6 +757,27 @@ mod tests {
         );
         assert_eq!(limiter.snapshot().host_qps, 3000.0);
         assert_eq!(limiter.snapshot().effective_qps, 3000.0);
+    }
+
+    #[test]
+    fn negative_host_rate_is_preserved_when_an_existing_limiter_refreshes() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.persistenceMaxQPS", 2);
+        let now = Arc::new(AtomicI64::new(0));
+        let clock = now.clone();
+        let limiter = MatchingPersistenceLimiter::with_clock(
+            overlay.clone(),
+            Arc::new(AtomicUsize::new(1)),
+            Arc::new(move || clock.load(Ordering::SeqCst)),
+        );
+        set(&overlay, "matching.persistenceMaxQPS", -1);
+        set(&overlay, "matching.persistenceGlobalMaxQPS", -2);
+        now.store(REFRESH_NANOS, Ordering::SeqCst);
+        // Go's negative rate has a minimum burst of one, unlike zero's burst of zero.
+        assert!(limiter.allow());
+        assert_eq!(limiter.snapshot().effective_qps, -1.0);
+        assert_eq!(limiter.snapshot().global_qps, -2.0);
+        assert!(!limiter.allow());
     }
 
     #[test]
