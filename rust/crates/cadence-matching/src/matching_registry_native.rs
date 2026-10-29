@@ -113,6 +113,14 @@ pub struct NativeBoundTimeouts {
     pub idle: NativeProvider<i64>,
     pub reader: NativeReaderPropertiesProvider,
     pub delete_batch: NativeProvider<crate::matching_reader::LiveInt>,
+    pub partition_count: NativeProvider<i64>,
+    pub cache_enabled: NativeProvider<bool>,
+    pub forward_degree: NativeProvider<i64>,
+    pub forward_polls: NativeProvider<i64>,
+    pub forward_tasks: NativeProvider<i64>,
+    pub forward_rate: NativeProvider<i64>,
+    pub qps_interval: NativeProvider<i64>,
+    pub min_burst: NativeProvider<i64>,
 }
 pub type NativeTimeoutBinder = Arc<dyn Fn(&GoString) -> Result<NativeBoundTimeouts, Status> + Send + Sync>;
 pub type NativeWriterLiveConfig = Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>;
@@ -1381,9 +1389,22 @@ impl NativeQueueRegistry {
         kind: i16,
         now: i64,
     ) -> Result<Arc<Owner>, Status> {
-        let registry = self;
         let domain = gs(key.domain_id);
-        let bound_timeouts = registry.timeout_binder.as_ref().map(|bind| bind(&domain)).transpose()?;
+        let bound_timeouts = self.timeout_binder.as_ref().map(|bind| bind(&domain)).transpose()?;
+        // Manager-scoped providers capture the name resolved by NewManager. Their
+        // values remain live, but subsequent reads must not follow a rename.
+        let mut scoped = self.clone();
+        if let Some(bound) = &bound_timeouts {
+            scoped.partition_count = Some(bound.partition_count.clone());
+            scoped.cache_enabled = Some(bound.cache_enabled.clone());
+            scoped.forward_degree = Some(bound.forward_degree.clone());
+            scoped.forward_polls = Some(bound.forward_polls.clone());
+            scoped.forward_tasks = Some(bound.forward_tasks.clone());
+            scoped.forward_rate = Some(bound.forward_rate.clone());
+            scoped.qps_interval = Some(bound.qps_interval.clone());
+            scoped.min_burst = Some(bound.min_burst.clone());
+        }
+        let registry = &scoped;
         let sync_wait_provider = bound_timeouts.as_ref().map(|bound| bound.task_wait.clone()).or_else(|| registry.sync_wait.clone());
         let poll_wait_provider = bound_timeouts.as_ref().map(|bound| bound.poll_wait.clone()).or_else(|| registry.local_poll_wait.clone());
         let writer_provider = bound_timeouts.as_ref().map(|bound| bound.writer.clone()).or_else(|| registry.writer_live.clone());

@@ -475,6 +475,35 @@ fn timeout_binder(
                 config.property_values("matching.idleTasklistCheckInterval"), Some(&idle_name), task.as_bytes(), task_type, 300_000_000_000,
             )
         });
+        let integer = |key: &'static str, default: i64| {
+            let overlay = overlay.clone();
+            let name = name.clone();
+            Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values(key), Some(&name), task.as_bytes(), task_type, default,
+                )
+            }) as crate::matching_registry_native::NativeProvider<i64>
+        };
+        let cache_overlay = overlay.clone();
+        let cache_name = name.clone();
+        let cache_enabled = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            let config = cache_overlay.lock().expect("admin lock");
+            task_list_boolean(&config, "matching.enableGetNumberOfPartitionsFromCache", Some(&cache_name), task, task_type, false)
+        });
+        let qps_overlay = overlay.clone();
+        let qps_name = name.clone();
+        let qps_interval = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            let config = qps_overlay.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_duration_bytes(
+                config.property_values("matching.qpsTrackerInterval"), Some(&qps_name), task.as_bytes(), task_type,
+                crate::matching_registry_native::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
+            )
+        });
+        let degree = integer("matching.forwarderMaxChildrenPerNode", 20);
+        let forward_degree = Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
+            degree(domain, task, task_type).max(1)
+        });
         Ok(crate::matching_registry_native::NativeBoundTimeouts {
             task_wait: duration("matching.localTaskWaitTime"),
             poll_wait: duration("matching.localPollWaitTime"),
@@ -482,6 +511,14 @@ fn timeout_binder(
             idle,
             reader,
             delete_batch,
+            partition_count: integer("matching.numTasklistReadPartitions", 1),
+            cache_enabled,
+            forward_degree,
+            forward_polls: integer("matching.forwarderMaxOutstandingPolls", 1),
+            forward_tasks: integer("matching.forwarderMaxOutstandingTasks", 1),
+            forward_rate: integer("matching.forwarderMaxRatePerSecond", 10),
+            qps_interval,
+            min_burst: integer("matching.minTaskThrottlingBurstSize", crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE),
         })
     })
 }
@@ -953,6 +990,14 @@ mod tests {
                 overlay.lock().unwrap().update(false, "matching.maxTaskDeleteBatchSize", vec![value(b"41", true)]);
                 assert_eq!((reader.batch_size)(), 37);
                 assert_eq!(delete(), 41);
+                overlay.lock().unwrap().update(false, "matching.numTasklistReadPartitions", vec![value(b"7", true)]);
+                overlay.lock().unwrap().update(false, "matching.forwarderMaxOutstandingTasks", vec![value(b"13", true)]);
+                overlay.lock().unwrap().update(false, "matching.enableGetNumberOfPartitionsFromCache", vec![value(b"true", true)]);
+                assert_eq!((bound.partition_count)(&renamed_id, &task, 0), 7);
+                assert_eq!((bound.forward_tasks)(&renamed_id, &task, 0), 13);
+                assert!((bound.cache_enabled)(&renamed_id, &task, 0));
+                overlay.lock().unwrap().update(false, "matching.numTasklistReadPartitions", vec![value(b"11", true)]);
+                assert_eq!((bound.partition_count)(&renamed_id, &task, 0), 11);
             }
             "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
             _ if case.starts_with("engine_") || case.starts_with("control_") => {
