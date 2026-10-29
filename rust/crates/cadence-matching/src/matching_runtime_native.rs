@@ -604,14 +604,15 @@ mod tests {
         const ENV: &str = "CADENCE_COLD_LOOKUP_CASE";
         let Ok(case) = std::env::var(ENV) else {
             for case in ["integer", "duration", "boolean", "writer", "standby", "engine_duration", "engine_integer", "engine_boolean", "engine_rate", "control_boolean", "control_duration", "control_integer"] {
-                let status = std::process::Command::new("timeout")
-                    .arg("10s")
+                let output = std::process::Command::new("timeout")
+                    .args(["--kill-after=2s", "10s"])
                     .arg(std::env::current_exe().unwrap())
                     .args(["--exact", "matching_runtime_native::tests::cold_lookup_refreshes_limiter_before_locking_config", "--nocapture"])
                     .env(ENV, case)
-                    .status()
+                    .output()
                     .unwrap();
-                assert!(status.success(), "cold lookup case {case} failed or timed out: {status}");
+                assert!(output.status.success(), "cold lookup case {case} failed or timed out: {}; stdout: {}; stderr: {}", output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                assert!(String::from_utf8_lossy(&output.stdout).contains(&format!("cold lookup completed: {case}")), "child did not execute selected case {case}: {}", String::from_utf8_lossy(&output.stdout));
             }
             return;
         };
@@ -718,6 +719,7 @@ mod tests {
             }
             _ => panic!("unknown case"),
         }
+        println!("cold lookup completed: {case}");
     }
 
     #[test]
