@@ -223,20 +223,27 @@ pub(crate) fn cached_domain_active(
     let raw = id.as_utf8().map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
     let domain = cache.get_domain_by_id(raw)
         .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
+    Ok(metadata_domain_active(&domain, cluster))
+}
+
+pub(crate) fn metadata_domain_active(
+    domain: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+    cluster: &str,
+) -> bool {
     if !domain.is_global_domain {
-        return Ok(true);
+        return true;
     }
     if domain.failover_end_time_nanos.is_some() {
-        return Ok(false);
+        return false;
     }
-    Ok(domain.replication.active_cluster_name == cluster || domain.replication.active_clusters
+    domain.replication.active_cluster_name == cluster || domain.replication.active_clusters
         .as_ref()
         .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
         .is_some_and(|scopes| scopes.values().any(|scope| {
             scope.cluster_attributes.as_ref().is_some_and(|attributes| {
                 attributes.values().any(|attribute| attribute.active_cluster_name == cluster)
             })
-        })))
+        }))
 }
 
 impl DecisionAddContext for NativeMatchingEngineContext {

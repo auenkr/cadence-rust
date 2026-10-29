@@ -39,14 +39,15 @@ pub fn native_queue_registry(
         cache.clone(),
         overlay.clone(),
     ));
-    let domains = state.domains.clone();
     let cluster = cluster.into();
 
     let hooks = NativeDomainHooks {
         is_active: {
-            let domains = domains.clone();
+            let cache = cache.clone();
             let cluster = cluster.clone();
-            Arc::new(move |id| domain_is_active(&domains, id, &cluster))
+            // Go taskReader.newDispatchContext assumes active on lookup error
+            // only for its timeout. Dispatch still resolves source metadata.
+            Arc::new(move |id| domain_is_active(&cache, id, &cluster))
         },
         domain_name: {
             let cache = cache.clone();
@@ -54,12 +55,11 @@ pub fn native_queue_registry(
         },
         standby_domains: {
             let cache = cache.clone();
-            let domains = domains.clone();
             let cluster = cluster.clone();
             Arc::new(move |id| {
                 let domain = domain_by_raw_id(&cache, id)?;
                 Ok(crate::matching_standby_native::StandbyDomainNative {
-                    active_in_cluster: domain_is_active(&domains, id, &cluster),
+                    active_in_cluster: crate::matching_engine_context_native::metadata_domain_active(&domain, &cluster),
                     active_active: domain.replication.active_clusters.is_some(),
                     name: GoString::from(domain.info.name),
                 })
@@ -521,14 +521,11 @@ fn record_started_timeout_provider(
 }
 
 fn domain_is_active(
-    domains: &cadence_persistence::InMemoryDomainStore,
+    cache: &MatchingDomainCache,
     id: &GoString,
     cluster: &str,
 ) -> bool {
-    let Ok(id) = std::str::from_utf8(id.as_bytes()) else {
-        return true;
-    };
-    domains.is_active_in(id, cluster).unwrap_or(true)
+    crate::matching_engine_context_native::cached_domain_active(cache, id, cluster).unwrap_or(true)
 }
 
 fn cached_domain_name(cache: &MatchingDomainCache, id: &GoString) -> Option<String> {
@@ -846,15 +843,29 @@ mod tests {
     }
 
     #[test]
+    fn reader_timeout_activity_uses_durable_source_cache() {
+        use crate::matching_engine_context_native::tests::{cache, record};
+        let mut domain = record(0xabc, 0);
+        let id = GoString::from(domain.info.uuid.clone());
+        domain.is_global_domain = true;
+        domain.replication.active_cluster_name = "other".into();
+        assert!(!domain_is_active(&cache(vec![domain.clone()]), &id, "active"));
+        domain.replication.active_cluster_name = "active".into();
+        assert!(domain_is_active(&cache(vec![domain.clone()]), &id, "active"));
+        domain.failover_end_time_nanos = Some(0);
+        assert!(!domain_is_active(&cache(vec![domain]), &id, "active"));
+    }
+
+    #[test]
     fn missing_or_non_utf8_domain_preserves_legacy_active_default() {
-        let domains = cadence_persistence::InMemoryDomainStore::new();
+        let cache = empty_cache();
         assert!(domain_is_active(
-            &domains,
+            &cache,
             &GoString::from("missing"),
             "cluster-a"
         ));
         assert!(domain_is_active(
-            &domains,
+            &cache,
             &GoString::from(&b"\xff"[..]),
             "cluster-a"
         ));
