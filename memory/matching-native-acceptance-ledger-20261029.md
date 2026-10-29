@@ -28,7 +28,7 @@ credits exact-pin workspace CI only, not mixed-lane acceptance. The selected
 predecessor runs failed on compile/test lint issues, now corrected; their compact
 evidence is retained below.
 
-Latest completed whole-workspace pass remains historical:
+Earlier completed whole-workspace pass (historical):
 [40803510954](https://github.com/auenkr/cadence-rust/actions/runs/40803510954)
 at `4d1007f3bdd0a6d667936d53aef6cf6277d98f51`. It predates source-domain changes
 and does not validate this candidate. Earlier results and diagnostics are retained
@@ -44,7 +44,7 @@ change the immutable ref used to build and run the candidate.
 | Requirement | Current native evidence |
 | --- | --- |
 | Fresh uncached workspace Clippy, then workspace tests | Pass at frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`: run40807471166 success, clean runner target, Clippy0 then workspace tests0. `fmt.exit=0`; scoped format checks0; advisory workspace-wide format check `workspace-format.exit=1` for unrelated formatting diffs. Evidence: `evidence/matching-native-workspace-40807471166/`. |
-| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Run [40808334141](https://github.com/auenkr/cadence-rust/actions/runs/40808334141) pending at the same frozen SHA; no credit yet. |
+| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Replacement run [40808511931](https://github.com/auenkr/cadence-rust/actions/runs/40808511931) in progress at the same frozen SHA; no credit yet. Runs40808334141 and40808357056 were cancelled; neither supplies acceptance evidence. |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
 | Configstore live settings + SDK + restart/recovery | Not dispatched |
