@@ -779,9 +779,9 @@ impl TaskReader {
                         let rps = dispatch_limiter.limit();
                         // Go `getDispatchTimeout` re-reads the configured
                         // timeout on every dispatch attempt.
-                        let async_timeout = dispatch_config.dispatch_timeout_nanos();
-                        let deadline = ((isolated.contains_key(&group) || rps > 1e-7) && active())
+                        let deadline = (isolated.contains_key(&group) || rps > 1e-7)
                             .then(|| {
+                                let async_timeout = dispatch_config.dispatch_timeout_nanos();
                                 let timeout = cadence_common::task_isolation::dispatch_timeout(
                                     rps,
                                     buffers,
@@ -789,8 +789,10 @@ impl TaskReader {
                                     isolation_duration,
                                     timeout_buffer.as_nanos() as i64,
                                 );
-                                i128::from(dispatch_limiter.now()) + i128::from(timeout)
-                            });
+                                timeout
+                            })
+                            .filter(|_| active())
+                            .map(|timeout| i128::from(dispatch_limiter.now()) + i128::from(timeout));
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
                             // Go `taskMatcher.ratelimit` maps ErrCannotWait (zero
@@ -925,11 +927,15 @@ impl TaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
                                 );
-                                tokio::time::timeout(remaining, attempt)
-                                    .await
-                                    .unwrap_or(Attempt::TimedOut)
+                                if remaining.is_zero() {
+                                    Attempt::TimedOut
+                                } else {
+                                    tokio::time::timeout(remaining, attempt)
+                                        .await
+                                        .unwrap_or(Attempt::TimedOut)
+                                }
                             }
                             None => attempt.await,
                         };

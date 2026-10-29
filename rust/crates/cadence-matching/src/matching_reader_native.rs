@@ -780,11 +780,15 @@ impl NativeTaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
                                 );
-                                tokio::time::timeout(remaining, attempt)
-                                    .await
-                                    .unwrap_or(Attempt::TimedOut)
+                                if remaining.is_zero() {
+                                    Attempt::TimedOut
+                                } else {
+                                    tokio::time::timeout(remaining, attempt)
+                                        .await
+                                        .unwrap_or(Attempt::TimedOut)
+                                }
                             }
                             None => attempt.await,
                         };

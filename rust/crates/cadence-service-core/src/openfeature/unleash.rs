@@ -1053,6 +1053,17 @@ mod tests {
         assert_eq!(provider.resolve_domain_bytes("unconstrained", FlagValue::Int(1), &context, domain).value, FlagValue::Int(42));
         assert_eq!(provider.resolve_domain_bytes("contains", FlagValue::Int(1), &context, domain).value, FlagValue::Int(17));
         assert_eq!(provider.resolve_domain_bytes("in", FlagValue::Int(1), &context, domain).value, FlagValue::Int(1));
+        // Valid domain bytes must follow exactly the same path as the existing
+        // string API, including conflicting context filter precedence.
+        let mut string_context = FlattenedContext::new();
+        string_context.insert("domainName".into(), serde_json::json!("abc"));
+        for flag in ["unconstrained", "contains", "in", "missing"] {
+            let expected = provider.resolve(flag, FlagValue::Int(1), &string_context);
+            let mut conflicting = FlattenedContext::new();
+            conflicting.insert("domainName".into(), serde_json::json!("other"));
+            let actual = provider.resolve_domain_bytes(flag, FlagValue::Int(1), &conflicting, b"abc");
+            assert_eq!(actual.value, expected.value);
+        }
         provider.shutdown();
     }
 

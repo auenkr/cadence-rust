@@ -490,6 +490,16 @@ mod tests {
         assert_eq!(available_tokens(&limiter, &now).await, 0);
     }
     #[tokio::test]
+    async fn wide_deadline_reaches_limiter_without_narrowing() {
+        let now = Arc::new(AtomicI64::new(i64::MAX - 100));
+        let limiter = limiter(1000.0, &now);
+        drain(&limiter, &now).await;
+        let (_stop, stopped) = watch::channel(false);
+        let deadline = i128::from(now.load(Ordering::SeqCst)) + i128::from(i64::MAX) + 1;
+        assert_eq!(limiter.wait_until(stopped, Some(deadline)).await, WaitOutcome::Acquired);
+    }
+
+    #[tokio::test]
     async fn ratelimit_matrix_sufficient_deadline_waits() {
         let now = Arc::new(AtomicI64::new(0));
         let limiter = limiter(RATE_PER_SECOND, &now);
