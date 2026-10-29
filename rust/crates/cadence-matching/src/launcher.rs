@@ -593,6 +593,9 @@ pub async fn run(
                     None
                 }
                 config::DynamicConfigProvider::ConfigStore(store) => {
+                    // Go configstore.NewConfigStoreClient opens a raw store and
+                    // creates an unwrapped manager, independently of the resource
+                    // persistence factory and its datastore rate limiters.
                     // Go dynamicconfigfx: a client that cannot be created
                     // (store unreachable, first fetch fails) means NOP.
                     eprintln!("initialising ConfigStore dynamic config client");
@@ -781,18 +784,28 @@ pub async fn run(
                     debug_mode,
                 ),
             );
-            let matching_member_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let matching_persistence_limiter =
+            // The Go resolver owns an initially empty ring before its provider
+            // starts. Later samples read the refreshed ring, not raw Ringpop.
+            let matching_rate_membership: std::sync::Arc<std::sync::RwLock<Option<crate::matching_membership::Membership>>> =
+                std::sync::Arc::new(std::sync::RwLock::new(None));
+            let matching_persistence_limiters =
                 if wanted.contains(&service::ServiceName::Matching) && !embedded_development {
-                    Some(
-                        crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
-                            state.admin.dynamic_config.clone(),
-                            matching_member_count.clone(),
-                        ),
+                    let membership = matching_rate_membership.clone();
+                    crate::matching_persistence_limiter::build_datastore_limiters(
+                        cfg.persistence.datastores.keys(),
+                        state.admin.dynamic_config.clone(),
+                        std::sync::Arc::new(move || {
+                            match membership.read().map_err(|_| ())?.as_ref() {
+                                Some(ring) => ring.member_count(),
+                                None => Ok(0),
+                            }
+                        }),
                     )
                 } else {
-                    None
+                    std::collections::HashMap::new()
                 };
+            let matching_persistence_limiter = matching_persistence_limiters
+                .get(&cfg.persistence.default_store).cloned();
             let mut native_semaphore_store = None;
             if let Some(limiter) = matching_persistence_limiter.as_ref() {
                 // Go constructs semaphore persistence from the configured
@@ -1091,24 +1104,6 @@ pub async fn run(
             } else {
                 None
             };
-            if let Some(provider) = matching_ringpop_provider.as_ref() {
-                matching_member_count.store(
-                    provider.service_member_count(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                let provider = provider.clone();
-                let member_count = matching_member_count.clone();
-                tokio::spawn(async move {
-                    let mut refresh = tokio::time::interval(std::time::Duration::from_secs(1));
-                    loop {
-                        refresh.tick().await;
-                        member_count.store(
-                            provider.service_member_count(),
-                            std::sync::atomic::Ordering::Relaxed,
-                        );
-                    }
-                });
-            }
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
                 crate::matching_membership::Membership::new(
                     provider.local_identity().to_owned(),
@@ -1119,6 +1114,8 @@ pub async fn run(
                     std::sync::Arc::new(crate::matching_metrics::NoopMetricSink)
                 }))
             });
+            *matching_rate_membership.write().expect("Matching rate membership lock") =
+                matching_membership.clone();
             let mut matching_membership_lifecycle = matching_ringpop_provider
                 .as_ref()
                 .zip(matching_membership.clone())
