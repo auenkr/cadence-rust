@@ -249,12 +249,9 @@ impl MatchingRpcQuota {
         let overlay = self.overlay.clone();
         let source: RateSource = Arc::new(move || {
             let config = overlay.lock().expect("admin config lock");
-            // An invalid-byte name cannot match a UTF-8 domain filter, but
-            // the unfiltered domain quota still applies. Keep its bucket key
-            // raw and fall back to the host rate when that quota is nonpositive.
-            let primary = dynamic_config::integer(
+            let primary = dynamic_config::integer_bytes(
                 config.property_values(domain_key(class)),
-                std::str::from_utf8(domain.as_bytes()).ok(),
+                Some(domain.as_bytes()),
                 domain_default(class),
             );
             if primary > 0 {
@@ -512,6 +509,43 @@ mod tests {
         assert!(state.domains.contains_key(&(RpcClass::User, ff)));
         assert!(state.domains.contains_key(&(RpcClass::User, fe)));
         assert!(state.domains.contains_key(&(RpcClass::User, replacement)));
+    }
+
+    #[test]
+    fn configured_runtime_domain_quota_preserves_raw_filter_bytes() {
+        use cadence_persistence::dynamic_config::{RuntimePropertyProvider, RuntimePropertyType};
+        use std::collections::BTreeMap;
+
+        #[derive(Debug)]
+        struct ByteProvider;
+        impl RuntimePropertyProvider for ByteProvider {
+            fn evaluate(&self, key: &str, _: RuntimePropertyType, default: serde_json::Value, _: &BTreeMap<String, serde_json::Value>) -> Result<serde_json::Value, String> {
+                Ok(if key == "matching.rps" { json!(1000) } else { default })
+            }
+            fn evaluate_domain_bytes(&self, key: &str, _: RuntimePropertyType, default: serde_json::Value, domain: &[u8]) -> Result<serde_json::Value, String> {
+                assert_eq!(key, "matching.domainrps");
+                Ok(match domain {
+                    b"tenant-\xff" => json!(1),
+                    b"tenant-\xfe" => json!(2),
+                    b"valid" => json!(3),
+                    _ => default,
+                })
+            }
+        }
+        let mut config = DynamicConfigOverlay::default();
+        config.set_runtime_provider(Some(Arc::new(ByteProvider)));
+        let quota = MatchingRpcQuota::with_clock(Arc::new(Mutex::new(config)), Arc::new(|| 10));
+        for (name, allowed) in [(&b"tenant-\xff"[..], 1), (&b"tenant-\xfe"[..], 2), (&b"valid"[..], 3)] {
+            let domain = GoString::from(name);
+            for _ in 0..allowed {
+                assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&domain)));
+            }
+            assert!(!quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&domain)));
+        }
+        let unknown = GoString::from("unknown");
+        assert!(quota.allow_go_string(MatchingRpc::GetTaskListsByDomain, Some(&unknown)));
+        let state = quota.state.lock().unwrap();
+        assert_eq!(state.domains[&(RpcClass::User, unknown)].lock().unwrap().limiter.burst(), 1000);
     }
 
     #[test]

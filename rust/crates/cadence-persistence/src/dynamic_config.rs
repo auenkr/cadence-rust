@@ -18,6 +18,18 @@ pub trait RuntimePropertyProvider: Send + Sync + std::fmt::Debug {
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Result<Value, String>;
+    /// Evaluate a byte-valued domain filter without changing existing providers.
+    /// Providers that support Go strings override this method.
+    fn evaluate_domain_bytes(
+        &self, key: &str, property_type: RuntimePropertyType, default: Value,
+        domain: &[u8],
+    ) -> Result<Value, String> {
+        let domain = std::str::from_utf8(domain)
+            .map_err(|_| "provider does not support byte-valued domain filters".to_owned())?;
+        self.evaluate(key, property_type, default,
+            &BTreeMap::from([("domainName".into(), Value::String(domain.into()))]))
+    }
+
 }
 
 /// Typed Matching getter semantics. Duration remains distinct from string so
@@ -71,6 +83,10 @@ impl RuntimePropertyRead {
         self.provider
             .evaluate(&self.key, property_type, default, filters)
     }
+    fn evaluate_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Result<Value, String> {
+        self.provider.evaluate_domain_bytes(&self.key, property_type, default, domain)
+    }
+
 }
 
 /// An owned snapshot paired with property identity and its optional live
@@ -119,6 +135,14 @@ pub trait PropertyValueSource {
         default: Value,
         filters: &BTreeMap<String, Value>,
     ) -> Option<Result<Value, String>>;
+    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
+        match std::str::from_utf8(domain) {
+            Ok(domain) => self.runtime_value(property_type, default,
+                &BTreeMap::from([("domainName".into(), Value::String(domain.into()))])),
+            Err(_) => None,
+        }
+    }
+
 }
 
 impl PropertyValueSource for PropertyValues {
@@ -133,6 +157,10 @@ impl PropertyValueSource for PropertyValues {
     ) -> Option<Result<Value, String>> {
         self.evaluate(property_type, default, filters)
     }
+    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
+        self.runtime.as_ref().map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
+    }
+
 }
 impl PropertyValueSource for &PropertyValues {
     fn snapshot_values(&self) -> &[DynamicConfigValue] {
@@ -146,6 +174,10 @@ impl PropertyValueSource for &PropertyValues {
     ) -> Option<Result<Value, String>> {
         self.evaluate(property_type, default, filters)
     }
+    fn runtime_domain_bytes(&self, property_type: RuntimePropertyType, default: Value, domain: &[u8]) -> Option<Result<Value, String>> {
+        self.runtime.as_ref().map(|runtime| runtime.evaluate_domain_bytes(property_type, default, domain))
+    }
+
 }
 
 impl PropertyValueSource for &[DynamicConfigValue] {
@@ -227,6 +259,26 @@ fn decode(blob: Option<&DataBlob>) -> Option<Value> {
     serde_json::from_slice(&blob.data).ok()
 }
 
+// Go encoding/json replaces each invalid UTF-8 byte in JSON strings with U+FFFD.
+fn decode_string_filter(blob: Option<&DataBlob>) -> Option<String> {
+    let blob = blob?;
+    if blob.encoding_type != Some(EncodingType::JSON) { return None; }
+    let mut input = blob.data.as_slice();
+    let mut text = String::new();
+    while !input.is_empty() {
+        match std::str::from_utf8(input) {
+            Ok(valid) => { text.push_str(valid); break; }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                text.push_str(std::str::from_utf8(&input[..valid]).ok()?);
+                text.push('�');
+                input = &input[valid + 1..];
+            }
+        }
+    }
+    serde_json::from_str::<String>(&text).ok()
+}
+
 pub fn filters_match(value: &DynamicConfigValue, domain: Option<&str>) -> bool {
     filters_match_context(value, domain, None)
 }
@@ -238,14 +290,14 @@ fn filters_match_context(
 ) -> bool {
     filters_match_context_bytes(
         value,
-        domain,
+        domain.map(str::as_bytes),
         task_list.map(|(name, kind)| (name.as_bytes(), kind)),
     )
 }
 
 fn filters_match_context_bytes(
     value: &DynamicConfigValue,
-    domain: Option<&str>,
+    domain: Option<&[u8]>,
     task_list: Option<(&[u8], i32)>,
 ) -> bool {
     if value.filters.len() > usize::from(domain.is_some()) + 2 * usize::from(task_list.is_some()) {
@@ -253,12 +305,16 @@ fn filters_match_context_bytes(
     }
     value.filters.iter().all(|filter| {
         let expected = match filter.name.as_str() {
-            "domainName" => domain.map(|name| Value::String(name.into())),
+            "domainName" => None,
             "taskListName" => None,
             "taskType" => task_list.map(|(_, kind)| Value::from(kind)),
             _ => None,
         };
-        if filter.name == "taskListName" {
+        if filter.name == "domainName" {
+            domain.is_some_and(|actual| decode_string_filter(filter.value.as_ref())
+                .map(|filter| filter.as_bytes() == actual)
+                .unwrap_or(false))
+        } else if filter.name == "taskListName" {
             task_list.is_some_and(|(actual, _)| {
                 decode(filter.value.as_ref())
                     .and_then(|value| value.as_str().map(|filter| filter.as_bytes() == actual))
@@ -283,14 +339,14 @@ fn selected_context(
 ) -> Option<Value> {
     selected_context_bytes(
         values,
-        domain,
+        domain.map(str::as_bytes),
         task_list.map(|(name, kind)| (name.as_bytes(), kind)),
     )
 }
 
 fn selected_context_bytes(
     values: &[DynamicConfigValue],
-    domain: Option<&str>,
+    domain: Option<&[u8]>,
     task_list: Option<(&[u8], i32)>,
 ) -> Option<Value> {
     let mut fallback = None;
@@ -366,7 +422,7 @@ pub fn task_list_integer_bytes(
     }
     match selected_context_bytes(
         values.snapshot_values(),
-        domain,
+        domain.map(str::as_bytes),
         Some((task_list, task_type)),
     ) {
         Some(value) => integer_value(value).unwrap_or_else(|| {
@@ -409,7 +465,7 @@ pub fn task_list_boolean_bytes(
     }
     match selected_context_bytes(
         values.snapshot_values(),
-        domain,
+        domain.map(str::as_bytes),
         Some((task_list, task_type)),
     )
     .and_then(|value| value.as_bool())
@@ -456,7 +512,7 @@ pub fn task_list_float_bytes(
     }
     match selected_context_bytes(
         values.snapshot_values(),
-        domain,
+        domain.map(str::as_bytes),
         Some((task_list, task_type)),
     )
     .and_then(|value| value.as_f64())
@@ -501,7 +557,7 @@ pub fn task_list_duration_bytes(
     }
     match selected_context_bytes(
         values.snapshot_values(),
-        domain,
+        domain.map(str::as_bytes),
         Some((task_list, task_type)),
     )
     .and_then(|value| {
@@ -521,17 +577,19 @@ pub fn task_list_duration_bytes(
 }
 
 pub fn integer(values: impl PropertyValueSource, domain: Option<&str>, default: i64) -> i64 {
-    let filters = domain
-        .map(|v| BTreeMap::from([("domainName".into(), Value::String(v.into()))]))
-        .unwrap_or_default();
-    if let Some(result) =
-        values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &filters)
-    {
-        return runtime_typed(result, default, "integer")
-            .and_then(integer_value)
-            .unwrap_or(default);
+    integer_bytes(values, domain.map(str::as_bytes), default)
+}
+
+/// Domain-scoped integer with Go string byte identity.
+pub fn integer_bytes(values: impl PropertyValueSource, domain: Option<&[u8]>, default: i64) -> i64 {
+    let result = match domain {
+        Some(domain) => values.runtime_domain_bytes(RuntimePropertyType::Integer, Value::from(default), domain),
+        None => values.runtime_value(RuntimePropertyType::Integer, Value::from(default), &BTreeMap::new()),
+    };
+    if let Some(result) = result {
+        return runtime_typed(result, default, "integer").and_then(integer_value).unwrap_or(default);
     }
-    match selected(values.snapshot_values(), domain).and_then(integer_value) {
+    match selected_context_bytes(values.snapshot_values(), domain, None).and_then(integer_value) {
         Some(value) => value,
         None => {
             report_read_error("integer", "value was missing or had the wrong type");
@@ -737,6 +795,17 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn domain_filter_json_decoding_replaces_invalid_bytes_before_comparison() {
+        let mut constrained = entry(json!(7), &[("domainName", json!("unused"))]);
+        constrained.filters[0].value.as_mut().unwrap().data = b"\"tenant-\xff\xfe\"".to_vec();
+        let values = vec![entry(json!(3), &[]), constrained];
+        assert_eq!(integer_bytes(&values, Some(b"tenant-\xff\xfe"), 9), 3);
+        assert_eq!(integer_bytes(&values, Some("tenant-��".as_bytes()), 9), 7);
+        assert_eq!(integer_bytes(&values, Some(b"valid"), 9), 3);
+        assert_eq!(integer_bytes(&[], Some(b"\xff"), 9), 9);
     }
 
     #[test]
