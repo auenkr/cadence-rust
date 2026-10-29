@@ -1,10 +1,23 @@
-## Matching docs checkpoint — 2026-10-29
+## Matching docs checkpoint — 2026-10-29 (updated)
 
-Shared master was clean at `0e66c62b80064162c5e715048078985d82dcfa91` before this docs-only update. Run [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415) is terminal success on exact expected head `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`. Clippy, named runtime/TLS/query formatting checks, and tests passed with recorded exits of 0; the advisory workspace format capture exited 1 and contains diffs, although its workflow step continued successfully. Matching library binary reports 975 passed, 2 ignored. Direct cold-domain, two-thread, semaphore-service and concurrent-semaphore test results are in `memory/evidence/matching-ci-40842468415.md`.
+Shared master was clean at `bc4e12fef6b97a28688e7fc2693037407952b479` before
+this docs-only update. Current branch states, open parity issues, worker
+ownership, and CI observation are in
+`memory/matching-resume-checkpoint-20261029-ci40853270019.md`; acceptance is
+tracked in `memory/matching-native-acceptance-ledger-20261029.md`.
 
-Current reviewed worker checkpoint: scenario integration `t3/integrate-matching-scenarios` at `74e9f45bd` has a possible startup dropped-handler lifecycle defect, unverified. Persistence/QPS parity `t3/matching-persistence-qps-parity` at `71b7547f5` is partial, with per-datastore, configstore and resolver gaps. RPC quota map/fixes `t3/matching-rpc-quota-map` at `c8f8724ab` is unverified and has an invalid UTF-8 filter limitation. Two Terra workers own semaphore lifetime correction and remaining persistence gaps; do not interfere. Matching remains incomplete, no native mixed lane has passed, all ten lanes remain required, and frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` must not move. See `memory/matching-native-checkpoint-20261029.md` for details.
-
-Earlier run [40841353614](https://github.com/auenkr/cadence-rust/actions/runs/40841353614) remains evidence for exact source `e84e51a` only; its artifact review is in `memory/evidence/matching-ci-recheck-20261029.md`. Neither that earlier run nor focused run 40842468415 establishes a mixed lane pass or service completion. The newer worker state and frozen-source boundary above supersede older ownership notes below. Matching remains incomplete.
+Remote refs verified: raw-byte/deadline `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`,
+lifecycle follow-up `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, and timeout
+parity `18040515dabb2d6fd79ed5b4eba5c933eee25f1f`. They are separate unintegrated
+work; combined validation is outstanding. Semaphore CI run
+[40853270019](https://github.com/auenkr/cadence-rust/actions/runs/40853270019)
+was last observed at exact head `592a0bb03660479c890680d316b58067f3527810`:
+Clippy/format succeeded and tests were still running. No newer result is
+claimed. Focused baseline [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` but predates these changes.
+No native mixed lane has passed; all ten remain required. Frozen candidate
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` remains unchanged. Matching remains
+incomplete and no History migration should begin.
 
 ## DNS accepted; explicit Luna restart — 2026-10-19
 

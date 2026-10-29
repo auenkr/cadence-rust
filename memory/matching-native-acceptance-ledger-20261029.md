@@ -1,5 +1,19 @@
 # Native Matching acceptance ledger — 2026-10-29
 
+## Current resume pointer — 2026-10-29
+
+Latest branch-by-branch status and ownership is recorded in
+`memory/matching-resume-checkpoint-20261029-ci40853270019.md`. Remote refs
+verified: raw-byte/deadline `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`,
+lifecycle follow-up `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, and timeout
+parity `18040515dabb2d6fd79ed5b4eba5c933eee25f1f`. None is integrated or
+validated as a combined candidate. Semaphore run 40853270019's last known exact
+head remains `592a0bb03660479c890680d316b58067f3527810`; Clippy/format were
+successful while tests remained in progress. Do not infer a newer result.
+Focused baseline 40842468415 passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`
+but predates these changes. Native mixed passes remain zero; frozen candidate
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` remains unchanged.
+
 ## Focused semaphore review checkpoint — 2026-10-29
 
 Focused baseline [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)

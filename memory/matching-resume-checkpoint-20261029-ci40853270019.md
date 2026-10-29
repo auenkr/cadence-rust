@@ -1,20 +1,30 @@
-# Matching resume and acceptance checkpoint — 2026-10-29
+# Matching resume and acceptance checkpoint — 2026-10-29 (updated)
 
 This is a documentation/evidence checkpoint only. Matching remains incomplete;
 do not start History migration. No production source was changed here.
 
 ## Current source and ownership
 
-- Latest integrated incomplete candidate: `origin/t3/matching-reader-rawbyte-review`
-  at `fc9552b7a60fd5a410cd59ee0e5aa68577a7a623`.
-- Candidate includes quota changes, native Matching scenarios, semaphore source
-  reviewed at `592a0bb03660479c890680d316b58067f3527810`, and reader changes from
-  `21a051d36`.
-- Additional completed branches are not validated: ack/GC lifecycle
-  `d59eaea1be55bb381f1390fb6006728aa0b410b9` and idle lifecycle
-  `24af0b8e4e853933f56b8f19e05a90e12f66be2e`. Terra integration worker owns
-  merging/reviewing lifecycle branches. Existing Terra worker owns Unleash
-  invalid-UTF-8 provider behavior and wide reader deadline work on `fc9552b7a`.
+- Shared master docs checkpoint begins at `bc4e12fef6b97a28688e7fc2693037407952b479`.
+  Its existing frozen Matching candidate remains
+  `bf9f3d9387a72c4ed26b4be0a85025e65fd485a`; master docs commits do not move it.
+- Raw-byte/wide-deadline review is at
+  `origin/t3/matching-rawbyte-deadline-fix`
+  (`90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`), with reviewed ancestry
+  `894057f8b` / `fc9552b7a`. It is not integrated or accepted.
+- Lifecycle integration is at `a9cb5ed06`; the follow-up
+  `origin/t3/matching-lifecycle-fixes`
+  (`ccb6cb11fd72229499d3eeadb55a0cc96647475e`) logs and continues after final
+  ack and forced-GC errors. Domain-binding fallback, blocked-reader/shutdown
+  race and invalid-ticker semantics, plus injected teardown tests, remain open.
+- Local wait correction is at `origin/t3/matching-timeout-parity`
+  (`18040515dabb2d6fd79ed5b4eba5c933eee25f1f`): backlog now uses
+  `LocalTaskWaitTime`. Domain binding and configured-race behavior remain
+  unverified.
+- An active Terra delegate owns integration of `18040515d` with `90aa741` and
+  closure of timeout binding/coverage. A separate Luna scheduler owns
+  collection for semaphore `40853270019` and conditional focused raw-byte CI
+  dispatch. No newer result is recorded here.
 - Frozen baseline `bf9f3d9387a72c4ed26b4be0a85025e65fd485a` remains immutable.
   Native mixed-cluster passes: zero.
 
@@ -52,6 +62,14 @@ Run: https://github.com/auenkr/cadence-rust/actions/runs/40853270019
   They have no result recorded from this live snapshot; await terminal test logs
   before marking them passed or failed.
 
+The earlier focused baseline run [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`; it predates the latest
+candidate branches and is advisory for current source. Do not attribute its
+pass to those branches. Semaphore run 40853270019 was last observed at exact
+head `592a0bb03660479c890680d316b58067f3527810` with Clippy and formatting
+successful and tests still running; retain that as the last observation and do
+not infer a newer outcome.
+
 ## Acceptance and resume requirements
 
 - Complete integration/review of the lifecycle branches and Terra-owned changes;
@@ -69,6 +87,11 @@ Run: https://github.com/auenkr/cadence-rust/actions/runs/40853270019
 - Resolve the dependency PostgreSQL pool oracle and complete the Matching parity
   audit. There are currently zero native mixed passes; this candidate is not
   service acceptance and does not establish full parity.
+- Finish the remaining configuration/source audit and integrate the timeout,
+  lifecycle and raw-byte candidates into one immutable, reviewed source before
+  final CI. Then obtain exact-head focused CI as warranted, fresh uncached
+  workspace Clippy followed by workspace tests, and all ten mixed lanes with
+  binary SHA evidence and cleanup records.
 - No local Cargo, rustfmt, Go, build, or runtime validation was run. Continue to
   use CI for all such work. Do not claim terminal evidence from the in-progress
   snapshot above.
