@@ -1,5 +1,33 @@
 # Matching native continuation state — 2026-10-29
 
+## Latest evidence-only update — 2026-10-29
+
+Current documentation-only master before this edit was
+`b0d7e54ab728bc4e95bb6094b87aa9d4388757d4`, clean and synchronized with
+`origin/master`. The frozen mixed candidate remains
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`; no native mixed lane has passed and
+all ten are still required.
+
+The focused baseline [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`; scoped formatting exit 0,
+advisory workspace formatting exit 1. The reviewed semaphore source
+`592a0bb03660479c890680d316b58067f3527810` and associated docs `283` remain
+pending. A single read of [focused run 40853270019](https://github.com/auenkr/cadence-rust/actions/runs/40853270019)
+reported expected branch `matching-semaphore-reviewed-592a0bb03` and exact head
+`592a0bb03660479c890680d316b58067f3527810`, `in_progress`; Clippy was running,
+formatting and tests pending. No terminal logs, exit files, or formatting patch
+were available then. No polling or dispatch followed.
+
+Quota scenario integration `530953ac7`, raw-byte work `31ff3eb28`, and reader
+work `21a051d36` remain unverified. Raw-byte caveats: configured provider
+support and JSON unpaired-surrogate handling are under review. Reader
+extreme-value caveats remain under review. Terra is integrating these items;
+Terra's separate audit covers the three ack/delete fields. Do not treat these
+items as proven. Existing named deadline and caller-disconnect regressions are
+listed in `matching-native-checkpoint-20261029.md`; tests are not credited as
+executed by run40853270019. Preserve WIP and other docs. No local Cargo, Go,
+rustfmt, build, or runtime validation was run.
+
 ## Authoritative state
 
 - Review head: `master` = `origin/master` =

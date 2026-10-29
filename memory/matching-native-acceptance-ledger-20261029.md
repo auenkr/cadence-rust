@@ -1,5 +1,31 @@
 # Native Matching acceptance ledger — 2026-10-29
 
+## Focused semaphore review checkpoint — 2026-10-29
+
+Focused baseline [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+is successful at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`; scoped formatting
+exit 0 and advisory workspace formatting exit 1. This is focused CI, not a
+mixed lane pass. The semaphore-reviewed source
+`592a0bb03660479c890680d316b58067f3527810` and docs change `283` are pending.
+
+One authoritative observation of [run 40853270019](https://github.com/auenkr/cadence-rust/actions/runs/40853270019)
+found exact branch `matching-semaphore-reviewed-592a0bb03`, exact head
+`592a0bb03660479c890680d316b58067f3527810`, status `in_progress`; Clippy was
+running and formatting/tests were pending. Oracle and scoped-format steps listed
+in `matching-native-checkpoint-20261029.md` had succeeded, including upload of
+the Matching parity formatting patch. No terminal logs, exits, or artifacts
+were available at that time, and the run was not polled or redispatched. Do not
+credit semaphore tests until the actual test log/exits are available. Relevant
+source test names are recorded in the checkpoint.
+
+Quota scenario integration `530953ac7`, raw-byte work `31ff3eb28`, and reader
+work `21a051d36` remain unverified while Terra integrates them. Configured
+provider support and JSON unpaired-surrogate handling remain raw-byte caveats
+under review; extreme-value caveats remain for reader work. A separate Terra
+audit is reviewing the three ack/delete fields. No native mixed lane has passed;
+all ten remain required. Frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` is
+unchanged.
+
 > Latest state: see `matching-native-checkpoint-20261029.md` and
 > `matching-candidate-source-closure-review-20261029.md`. Scheduler-owned run
 > `40841353614` was last known live with Test in progress at exact source

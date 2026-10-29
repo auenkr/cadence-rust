@@ -10,6 +10,46 @@ workspace-format advisory failure are recorded in
 lane pass. Frozen candidate `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`
 remains unchanged.
 
+## Focused semaphore CI observation — 2026-10-29
+
+One authoritative read of [run 40853270019](https://github.com/auenkr/cadence-rust/actions/runs/40853270019)
+at `2026-10-29T09:54:20Z` found workflow `rust-ci`, branch
+`matching-semaphore-reviewed-592a0bb03`, exact source head
+`592a0bb03660479c890680d316b58067f3527810`, status `in_progress`. The
+`clippy-test` job was live: Clippy step in progress; formatting and tests
+pending. The Go raw-byte and malformed DescribeTaskList oracle steps, Go
+mapped-IPv4 CIDR oracle, reviewed History TChannel fixture, Matching owner
+ordering oracle, Thrift decoder schema check, definitions/rollup audit, Go
+emission formatting check, and focused formatting checks had succeeded at this
+observation. The Matching parity formatting patch upload step succeeded. No
+terminal result, terminal exits/logs, Rust test result, or downloaded artifact
+was available. No further run query or dispatch was made.
+
+The source/docs remain pending review; the formatted-source baseline is focused
+run [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` (success; scoped formatting 0,
+advisory workspace formatting 1), recorded in
+`memory/evidence/matching-ci-40842468415.md`. The reviewed semaphore source
+`592a0bb03660479c890680d316b58067f3527810` and docs change `283` are pending.
+Quota scenario integration `530953ac7` is unverified. Raw-byte work `31ff3eb28`
+is unverified; configured provider support and JSON unpaired-surrogate behavior
+remain caveats under review. Reader work `21a051d36` is unverified; its
+extreme-value caveats remain under review. Terra is integrating these items;
+another Terra audit is separately checking the three ack/delete fields. Do not
+credit any as validated or merged based on this checkpoint.
+
+Relevant existing semaphore regressions include
+`matching_semaphore_acquire_honors_deadline_while_starting`,
+`matching_semaphore_grant_stops_retrying_at_deadline`,
+`matching_rpc_semaphore_expired_deadline_claims_no_slot`, and
+`matching_rpc_semaphore_cancelled_context_is_internal_error`. The current
+master source also has in-process lifecycle/ownership coverage such as
+`matching_rpc_semaphore_rejects_new_buckets_while_shutting_down` and
+`matching_rpc_membership_semaphore_stop_panic_is_contained`. This list is source
+inventory only; run40853270019 had not reached Rust tests at the observation.
+No native mixed lane passed, all ten remain required, and frozen candidate
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` is unchanged.
+
 Reviewed worker state for continuation:
 
 - `t3/integrate-matching-scenarios` at `74e9f45bd` has scenario integration
