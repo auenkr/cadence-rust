@@ -844,7 +844,7 @@ mod tests {
 
     #[test]
     fn reader_timeout_activity_uses_durable_source_cache() {
-        use crate::matching_engine_context_native::tests::{cache, record};
+        use crate::matching_engine_context_native::source_domain_tests::{cache, record};
         let mut domain = record(0xabc, 0);
         let id = GoString::from(domain.info.uuid.clone());
         domain.is_global_domain = true;

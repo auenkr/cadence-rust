@@ -1086,7 +1086,7 @@ mod tests {
     }
     #[tokio::test]
     async fn canonical_source_activity_preserves_standby_and_forwarded_persistence_rules() {
-        use crate::matching_engine_context_native::tests::{cache, record};
+        use crate::matching_engine_context_native::source_domain_tests::{cache, record};
         use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
         for active in [false, true] {
             for forwarded in [false, true] {
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn activity_source_cache_failures_reach_handler_without_persistence() {
-        use crate::matching_engine_context_native::tests::{cache, record};
+        use crate::matching_engine_context_native::source_domain_tests::{cache, record};
         use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
         let (_dir, mut service, _sink, store) = service(false);
         let source = record(0xabc, 0);

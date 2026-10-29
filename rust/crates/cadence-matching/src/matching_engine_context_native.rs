@@ -511,7 +511,7 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) mod source_domain_tests {
     use super::*;
     use cadence_api::types::{DomainInfo, DomainConfiguration, DomainReplicationConfiguration};
     use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
