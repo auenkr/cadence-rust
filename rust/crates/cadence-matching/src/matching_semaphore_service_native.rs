@@ -255,12 +255,26 @@ fn status(error: ManagerError) -> Status {
         ManagerError::Disabled => {
             Status::invalid_argument("distributed semaphore is not enabled for this domain")
         }
-        ManagerError::NotFound(message) => Status::not_found(message),
+        ManagerError::NotFound(error) => crate::grpc::detailed_status(
+            Code::NotFound,
+            error.message,
+            "EntityNotExistsError",
+            cadence_proto::api::EntityNotExistsError {
+                current_cluster: error.current_cluster,
+                active_cluster: error.active_cluster,
+                active_clusters: error.active_clusters,
+            },
+        ),
         ManagerError::Deadline => Status::deadline_exceeded("semaphore acquire deadline exceeded"),
         ManagerError::NotReady => busy("semaphore manager is not ready".into()),
         ManagerError::ServiceBusy(message) => busy(message),
         ManagerError::Internal(message) => Status::internal(message),
         ManagerError::Load(id, source) => {
+            // Both Go mappers use errors.As and serialize the underlying typed
+            // error. Only uncategorized errors retain the load wrapper on wire.
+            if matches!(*source, ManagerError::BadRequest(_) | ManagerError::NotFound(_) | ManagerError::ServiceBusy(_)) {
+                return status(*source);
+            }
             let original = status(*source);
             let mut message = b"load semaphore bucket ".to_vec();
             message.extend_from_slice(id.as_bytes());
@@ -466,7 +480,7 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(false),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(),
+            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let metrics = Arc::new(AtomicUsize::new(0));
@@ -536,10 +550,18 @@ mod tests {
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         // Go also confirms an existing hold even with an ended context, and
         // returns success if the store confirms it successfully.
-        let (cancel, receiver) = tokio::sync::watch::channel(true);
+        store.park_confirm.store(true, Ordering::SeqCst);
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
         let mut confirm = request(b"8:deadline:r:3");
         confirm.extensions_mut().insert(CallerCancel(receiver));
-        assert_eq!(service.acquire(confirm).await.unwrap().into_inner().token_id, acquired.token_id);
+        let confirm = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(confirm).await })
+        };
+        store.entered.notified().await;
+        cancel.send(true).unwrap();
+        store.release.notify_one();
+        assert_eq!(confirm.await.unwrap().unwrap().into_inner().token_id, acquired.token_id);
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         drop(cancel);
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
@@ -564,7 +586,7 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(false),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(),
+            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let metrics = Arc::new(AtomicUsize::new(0));
@@ -674,7 +696,7 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(true),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(),
+            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let service = NativeSemaphoreService::new(
@@ -702,6 +724,28 @@ mod tests {
         store.release.notify_one();
         assert_eq!(service.acquire(request(b"1:z:r:3")).await.unwrap().into_inner().outcome, 1);
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn wrapped_typed_startup_error_uses_underlying_grpc_details() {
+        use prost::Message;
+        let source = cadence_api::errors::EntityNotExistsError {
+            message: "missing".into(), current_cluster: "a".into(),
+            active_cluster: "b".into(), active_clusters: vec!["b".into(), "c".into()],
+        };
+        let error = status(ManagerError::Load(
+            bytes(b"d/s\xff/0"), Box::new(ManagerError::NotFound(source)),
+        ));
+        assert_eq!(error.code(), Code::NotFound);
+        assert_eq!(error.message(), "missing");
+        let envelope = RawEnvelope::decode(error.details()).unwrap();
+        assert!(envelope.details[0].type_url.ends_with(".EntityNotExistsError"));
+        let detail = cadence_proto::api::EntityNotExistsError::decode(envelope.details[0].value.as_slice()).unwrap();
+        assert_eq!(detail.current_cluster, "a");
+        assert_eq!(detail.active_clusters, ["b", "c"]);
+        let wire = error.into_http();
+        assert_eq!(wire.headers()["grpc-status"], "5");
+        assert!(wire.headers().contains_key("grpc-status-details-bin"));
     }
 
     #[test]
