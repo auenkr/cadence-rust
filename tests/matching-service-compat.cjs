@@ -803,6 +803,65 @@ async function run() {
       },
     }, null, 2) + '\n');
 
+    // Real Go History creates the tasks; simultaneous Frontend polls enter the
+    // configured native Matching hosts. Reuse a list name across domains to
+    // expose accidental queue-key sharing, and a second list in one domain.
+    const concurrentDomain = `concurrent-${id}`;
+    await call('DomainAPI', 'RegisterDomain', {
+      name: concurrentDomain, workflowExecutionRetentionPeriod: { seconds: '259200' },
+    });
+    const sharedList = `concurrent-shared-${id}`;
+    const otherList = `concurrent-other-${id}`;
+    const groups = [
+      { domain, list: sharedList },
+      { domain: concurrentDomain, list: sharedList },
+      { domain, list: otherList },
+    ];
+    const expected = new Map();
+    for (const [groupIndex, group] of groups.entries()) {
+      for (let index = 0; index < 2; index++) {
+        const workflowId = `concurrent-${id}-${groupIndex}-${index}`;
+        const started = await call('WorkflowAPI', 'StartWorkflowExecution', {
+          ...startRequest, domain: group.domain, workflowId,
+          taskList: { name: group.list }, requestId: randomUUID(),
+        });
+        expected.set(workflowId, { ...group, runId: started.runId });
+      }
+    }
+    const polls = await Promise.all(groups.flatMap((group, groupIndex) =>
+      [0, 1].map(index => call('WorkerAPI', 'PollForDecisionTask', {
+        domain: group.domain, taskList: { name: group.list },
+        identity: `concurrent-${groupIndex}-${index}`,
+      }).then(task => ({ group, task })) )));
+    const seen = new Set();
+    for (const { group, task } of polls) {
+      assert(task.taskToken?.length, `concurrent poll returned no task for ${group.domain}/${group.list}`);
+      const workflowId = task.workflowExecution?.workflowId;
+      const target = expected.get(workflowId);
+      assert(target, `unexpected workflow ${workflowId} on ${group.domain}/${group.list}`);
+      assert.equal(target.domain, group.domain, 'task crossed domain boundary');
+      assert.equal(target.list, group.list, 'task crossed task-list boundary');
+      assert.equal(task.workflowExecution.runId, target.runId);
+      assert(!seen.has(workflowId), `duplicate decision task for ${workflowId}`);
+      seen.add(workflowId);
+      await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+        taskToken: task.taskToken, identity: 'concurrent-probe',
+        decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('concurrent') } }],
+      });
+    }
+    assert.equal(seen.size, expected.size);
+    for (const [workflowId, target] of expected) {
+      const history = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+        domain: target.domain, workflowExecution: { workflowId, runId: target.runId },
+      });
+      assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+        `workflow ${workflowId} must complete exactly once`);
+    }
+    fs.writeFileSync(path.join(work, 'production-concurrent-native-checkpoint.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend and History', groups,
+      workflows: [...expected.keys()], delivered: [...seen], completionEventsPerWorkflow: 1,
+    }, null, 2) + '\n');
+
     const crashList = `production-crash-${id}`;
     const crashProbeID = `production-crash-owner-probe-${id}`;
     const crashTaskList = { name: crashList };
