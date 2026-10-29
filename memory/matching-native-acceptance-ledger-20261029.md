@@ -10,34 +10,30 @@ proved.
 
 ## Source identity
 
-No final immutable candidate is frozen. Latest fresh whole-workspace run:
-https://github.com/auenkr/cadence-rust/actions/runs/40759246848 at
-`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227` (**success**, reviewed from downloaded artifacts).
-Includes quota correction, typed metrics and duration fixes, runner formatting
-from run40757715608, and the new all-declared-native-Thrift-error matrix.
-Fresh target, sequential Clippy/workspace tests, runner parity formatting and
-original-Go UUID oracle enabled. Inspect any formatting artifact before freeze.
+Current frozen candidate: `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`,
+remote ref `matching-native-final-20261029` (verified with `git ls-remote`).
+Whole-workspace Actions [40807471166](https://github.com/auenkr/cadence-rust/actions/runs/40807471166)
+is running at that exact SHA with fresh target, sequential Clippy then workspace
+tests, original-Go domain/source oracles enabled, and no formatting mutation.
+No terminal result is available yet. The selected predecessor runs failed on
+compile/test lint issues, now corrected; their compact evidence is retained below.
 
-Run40757715608 at `a85e585b9a2e396e247459750398dcf09b612cc5` concluded
-failure: Clippy passed, Matching 955 passed/2 ignored including live duration
-provider, typed metric classifier passed, then service-core 172 passed/one
-failed at the already corrected raw-byte quota regression. Compact evidence:
-`evidence/matching-native-workspace-40757715608/`.
-Run40758347908 at `17523bb3b141e9c5ffea1f23d5ca6c186d19184d` was cancelled
-when the changed source superseded it; it passed Clippy but has no completed
-test result. Compact partial evidence:
-`evidence/matching-native-workspace-40758347908/`.
-Earlier workspace run40756335405 failed the same quota regression. Selected
-Matching run40754945697 passed at
-`fb049c5515d0c940adc86e038bd3b1ef31b84880`; it is not final source evidence.
-No native mixed lane passed. Final gates require one frozen immutable source
-and same-pin successful whole-workspace validation.
+Latest completed whole-workspace pass remains historical:
+[40803510954](https://github.com/auenkr/cadence-rust/actions/runs/40803510954)
+at `4d1007f3bdd0a6d667936d53aef6cf6277d98f51`. It predates source-domain changes
+and does not validate this candidate. Earlier results and diagnostics are retained
+in the continuation checkpoints and `memory/evidence/`.
+
+All ten native mixed lanes remain pending. Final gates must retain this same
+candidate SHA (or a coherently revalidated replacement if fixes are needed).
+Evidence-only commits on master may follow the frozen candidate; they do not
+change the immutable ref used to build and run the candidate.
 
 ## Required evidence
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Run40759246848 passed at c6c8ef1bb (fresh target, Clippy0/test0); subsequent metric corrections need new CI; runs40757715608 and40756335405 failed the raw-byte domain quota regression; run40758347908 was superseded. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Run40807471166 in progress at frozen bf9f3d938; terminal exits and artifacts pending. Historical workspace pass40803510954 predates candidate changes and cannot supply final-pin credit. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
