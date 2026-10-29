@@ -26,6 +26,42 @@ pub struct SemaphoreBucketPageBytes {
     pub next_page_token: Option<Vec<u8>>,
 }
 
+/// Caller lifetime passed to semaphore operations. Backends may use it to
+/// cancel their own I/O, but must return the operation's actual result.
+#[derive(Clone, Default, Debug)]
+pub struct SemaphoreCallContext {
+    pub deadline: Option<tokio::time::Instant>,
+    pub cancelled: Option<tokio::sync::watch::Receiver<bool>>,
+    pub dropped: Option<tokio::sync::watch::Receiver<bool>>,
+}
+
+impl SemaphoreCallContext {
+    pub fn ended(&self) -> bool {
+        self.deadline.is_some_and(|d| tokio::time::Instant::now() >= d)
+            || self.cancelled.as_ref().is_some_and(|c| *c.borrow())
+            || self.dropped.as_ref().is_some_and(|c| *c.borrow())
+    }
+
+    pub async fn wait(&self) {
+        async fn watch(mut receiver: Option<tokio::sync::watch::Receiver<bool>>) {
+            if let Some(receiver) = &mut receiver {
+                while !*receiver.borrow_and_update() {
+                    if receiver.changed().await.is_err() {
+                        break;
+                    }
+                }
+                if *receiver.borrow() { return; }
+            }
+            std::future::pending::<()>().await;
+        }
+        tokio::select! {
+            _ = async { if let Some(d) = self.deadline { tokio::time::sleep_until(d).await } else { std::future::pending::<()>().await } } => {},
+            _ = watch(self.cancelled.clone()) => {},
+            _ = watch(self.dropped.clone()) => {},
+        }
+    }
+}
+
 #[async_trait]
 pub trait SemaphorePersistenceBytes: std::fmt::Debug + Send + Sync {
     async fn create_semaphore(
@@ -70,6 +106,20 @@ pub trait SemaphorePersistenceBytes: std::fmt::Debug + Send + Sync {
         token_id: i32,
         owner_id: &GoString,
     ) -> Result<GrantOutcome, AcquireError>;
+    /// Context-aware adapters may return a cancellation error, or success if
+    /// the operation completed despite cancellation. Never discard that result.
+    async fn confirm_with_context(
+        &self, domain: &GoString, name: &GoString, bucket: i32, token_id: i32,
+        _context: &SemaphoreCallContext,
+    ) -> Result<GoString, AcquireError> {
+        self.get_semaphore_ownership_by_token(domain, name, bucket, token_id).await
+    }
+    async fn grant_with_context(
+        &self, domain: &GoString, name: &GoString, bucket: i32, token_id: i32,
+        owner_id: &GoString, _context: &SemaphoreCallContext,
+    ) -> Result<GrantOutcome, AcquireError> {
+        self.grant_semaphore_token(domain, name, bucket, token_id, owner_id).await
+    }
     async fn release_semaphore_token(
         &self,
         domain: &GoString,

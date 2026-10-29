@@ -154,7 +154,7 @@ impl NativeSemaphoreService {
         r: &n::matching::AcquireSemaphoreRequest,
         deadline: Option<tokio::time::Instant>,
         cancelled: Option<tokio::sync::watch::Receiver<bool>>,
-        mut dropped: tokio::sync::watch::Receiver<bool>,
+        dropped: tokio::sync::watch::Receiver<bool>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         let owner = parse_owner_bytes(r.owner_id.as_bytes())
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
@@ -195,17 +195,12 @@ impl NativeSemaphoreService {
             .map_err(|_| startup_timeout_status(&id))?
             .map_err(status)?
         };
-        if let Some(ended) = caller_ended(deadline, cancelled.as_ref(), &dropped) {
-            return Err(Status::internal(ended));
-        }
-        let acquire = manager.acquire(&r.owner_id, deadline);
-        tokio::pin!(acquire);
-        let result = tokio::select! {
-            result = &mut acquire => result.map_err(status)?,
-            _ = wait_deadline(deadline) => return Err(Status::internal("context deadline exceeded")),
-            _ = wait_cancelled(cancelled) => return Err(Status::internal("context canceled")),
-            _ = wait_for_cancel(&mut dropped) => return Err(Status::internal("context canceled")),
+        let context = cadence_persistence::semaphores_native::SemaphoreCallContext {
+            deadline,
+            cancelled,
+            dropped: Some(dropped),
         };
+        let result = manager.acquire_with_context(&r.owner_id, &context).await.map_err(status)?;
         let outcome = match result.outcome {
             cadence_api::enums::SemaphoreAcquireOutcome::Acquired => 1,
             cadence_api::enums::SemaphoreAcquireOutcome::NoSlot => 2,
@@ -247,29 +242,6 @@ fn caller_ended(
     }
 }
 
-async fn wait_for_cancel(cancel: &mut tokio::sync::watch::Receiver<bool>) {
-    while !*cancel.borrow_and_update() {
-        if cancel.changed().await.is_err() {
-            std::future::pending::<()>().await;
-        }
-    }
-}
-
-async fn wait_deadline(deadline: Option<tokio::time::Instant>) {
-    if let Some(deadline) = deadline {
-        tokio::time::sleep_until(deadline).await;
-    } else {
-        std::future::pending::<()>().await;
-    }
-}
-
-async fn wait_cancelled(mut cancel: Option<tokio::sync::watch::Receiver<bool>>) {
-    if let Some(cancel) = &mut cancel {
-        wait_for_cancel(cancel).await;
-    } else {
-        std::future::pending::<()>().await;
-    }
-}
 fn identifier_status(error: IdentifierError) -> Status {
     status(ManagerError::BadRequest(match error {
         IdentifierError::MissingDomain => "domainID is required".into(),
@@ -295,7 +267,7 @@ fn status(error: ManagerError) -> Status {
             message.extend_from_slice(b": ");
             message.extend_from_slice(original.message().as_bytes());
             crate::matching_native_status::raw_status(
-                original.code(), &GoString::from(message), original.details().into(),
+                original.code(), &GoString::from(message), tonic::codegen::Bytes::copy_from_slice(original.details()),
             )
         },
     }
@@ -547,34 +519,29 @@ mod tests {
         assert_eq!(error.message(), "context canceled");
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         assert!(Arc::ptr_eq(&manager, &registry.all_managers()[0]));
-        // A caller deadline also bounds an in-flight persistence grant, even
-        // when there is no transport task to drop the handler.
+        // A write may apply after cancellation; its successful result must be
+        // observed and cached rather than dropped along with the reservation.
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
         let mut grant_request = request(b"8:deadline:r:3");
-        grant_request.set_timeout(Duration::from_millis(200));
+        grant_request.extensions_mut().insert(CallerCancel(receiver));
         let grant = {
             let service = service.clone();
             tokio::spawn(async move { service.acquire(grant_request).await })
         };
-        tokio::time::timeout(Duration::from_secs(2), store.entered.notified())
-            .await
-            .unwrap();
-        let error = tokio::time::timeout(Duration::from_secs(2), grant)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
-        assert_eq!(error.message(), "context deadline exceeded");
-        assert_eq!(metrics.load(Ordering::SeqCst), 3);
+        store.entered.notified().await;
+        cancel.send(true).unwrap();
         store.release.notify_one();
-        assert_eq!(
-            service
-                .acquire(request(b"1:z:r:3"))
-                .await
-                .unwrap()
-                .into_inner()
-                .outcome,
-            1
-        );
+        let acquired = grant.await.unwrap().unwrap().into_inner();
+        assert_eq!(acquired.outcome, 1);
+        assert_eq!(metrics.load(Ordering::SeqCst), 2);
+        // Go also confirms an existing hold even with an ended context, and
+        // returns success if the store confirms it successfully.
+        let (cancel, receiver) = tokio::sync::watch::channel(true);
+        let mut confirm = request(b"8:deadline:r:3");
+        confirm.extensions_mut().insert(CallerCancel(receiver));
+        assert_eq!(service.acquire(confirm).await.unwrap().into_inner().token_id, acquired.token_id);
+        assert_eq!(metrics.load(Ordering::SeqCst), 2);
+        drop(cancel);
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
         service.stop_all();
     }
@@ -690,6 +657,51 @@ mod tests {
             2
         );
         service.stop_all();
+    }
+
+    #[tokio::test]
+    async fn scan_failure_reports_raw_bucket_and_releases_waiter() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use tokio::sync::Notify;
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner.create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1).await.unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(true),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let service = NativeSemaphoreService::new(
+            registry.clone(),
+            Membership::new("self", vec![Host { address: "self".into(), identity: "self".into(), grpc_address: String::new() }]),
+            Arc::new(|_| Ok(bytes(b"domain"))),
+            Arc::new(|_| (true, 1_000_000_000)),
+            Arc::new(|| false),
+            Arc::new(|_, _, _| {}),
+        );
+        let first = { let service = service.clone(); tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await }) };
+        store.scan_entered.notified().await;
+        let waiter = service.acquire(request(b"1:y:r:2"));
+        tokio::pin!(waiter);
+        tokio::select! {
+            result = &mut waiter => panic!("waiter finished before scan: {result:?}"),
+            _ = tokio::task::yield_now() => {},
+        }
+        store.scan_release.notify_one();
+        let error = first.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), Code::Internal);
+        assert_eq!(error.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).unwrap().to_bytes().unwrap().as_ref(), b"load semaphore bucket d/s\xff/0: injected scan failure");
+        assert_eq!(waiter.await.unwrap_err().code(), Code::ResourceExhausted);
+        assert!(registry.all_managers().is_empty());
+        store.release.notify_one();
+        assert_eq!(service.acquire(request(b"1:z:r:3")).await.unwrap().into_inner().outcome, 1);
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
     }
 
     #[test]
