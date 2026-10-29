@@ -685,13 +685,19 @@ impl DurableTaskQueueBytes {
         max_interval: std::time::Duration,
     ) -> Result<usize> {
         let (_, ack, _) = self.ack.levels();
-        Ok(self.gc.run_with_batch_provider(
+        Ok(self.gc.run_with_signed_batch_provider(
             ack,
             batch_provider,
             max_interval,
             force,
             std::time::Instant::now(),
-            |ack, limit| self.store.complete_tasks_less_than(&self.key, ack, limit),
+            |ack, limit| {
+                let result = self.store.gc_complete_tasks_less_than(&self.key, ack, limit);
+                if let Err(error) = &result {
+                    eprintln!("Matching task garbage collection failed: {error}");
+                }
+                result
+            },
         )?)
     }
     pub fn levels(&self) -> (i64, i64, i64) {
@@ -864,6 +870,23 @@ mod tests {
         assert_eq!(rows(&s, &key(b"q\xff")), 0);
         second.append(&[data(b"wf")], 5).unwrap();
         assert_eq!(rows(&s, &key(b"q\xff")), 1);
+    }
+
+    #[test]
+    fn stale_ack_stops_and_wakes_owner_without_fencing_new_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = store(&dir);
+        let k = key(b"stale-ack");
+        let first = DurableTaskQueueBytes::open(s.clone(), k.clone(), 0, n(100), 1).unwrap();
+        let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = wakes.clone();
+        first.set_stop_waker(Arc::new(move || { seen.fetch_add(1, Ordering::SeqCst); }));
+        let second = DurableTaskQueueBytes::open(s.clone(), k, 0, n(100), 2).unwrap();
+        assert!(matches!(first.persist_ack(3), Err(NativeQueueError::Storage(ref e)) if is_condition_failed(e)));
+        assert!(first.is_stopped());
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        assert!(matches!(first.persist_ack(4), Err(NativeQueueError::Stopped)));
+        second.persist_ack(5).unwrap();
     }
 
     #[test]
