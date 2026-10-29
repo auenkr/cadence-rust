@@ -904,7 +904,9 @@ mod tests {
         }
         fn domain_active(&self, id: &GoString) -> Result<bool, Status> {
             match &self.source_cache {
-                Some(cache) => crate::matching_engine_context_native::cached_domain_active(cache, id, "active"),
+                Some(cache) => {
+                    crate::matching_engine_context_native::cached_domain_active(cache, id, "active")
+                }
                 None => Ok(true),
             }
         }
@@ -1093,31 +1095,58 @@ mod tests {
                 let (_dir, mut service, _sink, store) = service(false);
                 let mut source = record(0xabc, 0);
                 source.is_global_domain = true;
-                source.replication.active_cluster_name = if active { "active" } else { "other" }.into();
+                source.replication.active_cluster_name =
+                    if active { "active" } else { "other" }.into();
                 let source_id = source.info.uuid.clone();
                 service.integration.source_cache = Some(cache(vec![source]));
-                let result = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
-                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
-                    source_domain_id: source_id.into(),
-                    task_list: Some(n::api::TaskList { name: "canonical-source".into(), ..Default::default() }),
-                    workflow_execution: Some(n::api::WorkflowExecution {
-                        workflow_id: "workflow".into(), run_id: uuid::Uuid::from_u128(5).to_string().into(),
-                    }),
-                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
-                    ..Default::default()
-                })).await;
+                let result = service
+                    .add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                        domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                        source_domain_id: source_id.into(),
+                        task_list: Some(n::api::TaskList {
+                            name: "canonical-source".into(),
+                            ..Default::default()
+                        }),
+                        workflow_execution: Some(n::api::WorkflowExecution {
+                            workflow_id: "workflow".into(),
+                            run_id: uuid::Uuid::from_u128(5).to_string().into(),
+                        }),
+                        forwarded_from: if forwarded {
+                            "child".into()
+                        } else {
+                            GoString::default()
+                        },
+                        ..Default::default()
+                    }))
+                    .await;
                 if forwarded {
                     assert_eq!(result.unwrap_err().code(), tonic::Code::Unavailable);
                 } else {
                     result.unwrap();
                 }
                 for domain_id in [uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(0xabc)] {
-                    let key = TaskListKeyBytes { domain_id, name: "canonical-source".into(), task_type: 1 };
-                    let rows = MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap();
-                    let expected = usize::from(!forwarded && domain_id == uuid::Uuid::from_u128(0xabc));
-                    assert_eq!(rows.len(), expected, "active={active}, forwarded={forwarded}");
+                    let key = TaskListKeyBytes {
+                        domain_id,
+                        name: "canonical-source".into(),
+                        task_type: 1,
+                    };
+                    let rows =
+                        MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10)
+                            .unwrap();
+                    let expected =
+                        usize::from(!forwarded && domain_id == uuid::Uuid::from_u128(0xabc));
+                    assert_eq!(
+                        rows.len(),
+                        expected,
+                        "active={active}, forwarded={forwarded}"
+                    );
                 }
-                service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+                service
+                    .engine
+                    .registry
+                    .shutdown(crate::grpc_matching::matching_now())
+                    .await
+                    .unwrap();
             }
         }
     }
@@ -1131,30 +1160,85 @@ mod tests {
         let canonical = source.info.uuid.clone();
         service.integration.source_cache = Some(cache(vec![source]));
         for (source_id, code, message) in [
-            (GoString::from(canonical.to_uppercase()), tonic::Code::Internal, "DefaultDomainCache encounter case where domain exists but cannot be loaded"),
-            (GoString::from(canonical.replace('-', "")), tonic::Code::Internal, "DefaultDomainCache encounter case where domain exists but cannot be loaded"),
-            (GoString::from(uuid::Uuid::from_u128(99).to_string()), tonic::Code::NotFound, "source domain missing"),
-            (GoString::from("malformed"), tonic::Code::InvalidArgument, "UUID is invalid."),
-            (GoString::default(), tonic::Code::InvalidArgument, "DomainID is empty."),
-            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "injected raw backend error"),
+            (
+                GoString::from(canonical.to_uppercase()),
+                tonic::Code::Internal,
+                "DefaultDomainCache encounter case where domain exists but cannot be loaded",
+            ),
+            (
+                GoString::from(canonical.replace('-', "")),
+                tonic::Code::Internal,
+                "DefaultDomainCache encounter case where domain exists but cannot be loaded",
+            ),
+            (
+                GoString::from(uuid::Uuid::from_u128(99).to_string()),
+                tonic::Code::NotFound,
+                "source domain missing",
+            ),
+            (
+                GoString::from("malformed"),
+                tonic::Code::InvalidArgument,
+                "UUID is invalid.",
+            ),
+            (
+                GoString::default(),
+                tonic::Code::InvalidArgument,
+                "DomainID is empty.",
+            ),
+            (
+                GoString::from(&b"\xff"[..]),
+                tonic::Code::InvalidArgument,
+                "injected raw backend error",
+            ),
         ] {
             for forwarded in [false, true] {
-                let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
-                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
-                    source_domain_id: source_id.clone(),
-                    task_list: Some(n::api::TaskList { name: "source-cache".into(), ..Default::default() }),
-                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
-                    ..Default::default()
-                })).await.unwrap_err();
-                assert_eq!(error.code(), code, "source {source_id:?}, forwarded={forwarded}");
+                let error = service
+                    .add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                        domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                        source_domain_id: source_id.clone(),
+                        task_list: Some(n::api::TaskList {
+                            name: "source-cache".into(),
+                            ..Default::default()
+                        }),
+                        forwarded_from: if forwarded {
+                            "child".into()
+                        } else {
+                            GoString::default()
+                        },
+                        ..Default::default()
+                    }))
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    error.code(),
+                    code,
+                    "source {source_id:?}, forwarded={forwarded}"
+                );
                 assert_eq!(error.message(), message);
                 for domain_id in [uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(0xabc)] {
-                    let key = TaskListKeyBytes { domain_id, name: "source-cache".into(), task_type: 1 };
-                    assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
+                    let key = TaskListKeyBytes {
+                        domain_id,
+                        name: "source-cache".into(),
+                        task_type: 1,
+                    };
+                    assert!(MatchingTaskStoreBytes::get_tasks(
+                        store.as_ref(),
+                        &key,
+                        0,
+                        i64::MAX,
+                        10
+                    )
+                    .unwrap()
+                    .is_empty());
                 }
             }
         }
-        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+        service
+            .engine
+            .registry
+            .shutdown(crate::grpc_matching::matching_now())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1163,26 +1247,58 @@ mod tests {
         use crate::matching_engine_context_native::source_domain_tests::{cache_with_mode, record};
         use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
         let (_dir, mut service, _sink, store) = service(false);
-        service.integration.source_cache = Some(cache_with_mode(vec![record(0xabc, 0)], DomainIdParse::GoogleUuidPanic));
+        service.integration.source_cache = Some(cache_with_mode(
+            vec![record(0xabc, 0)],
+            DomainIdParse::GoogleUuidPanic,
+        ));
         for (source, message) in [
-            (&b"malformed"[..], r#"panic object is not error: "uuid: Parse(malformed): invalid UUID length: 9""#),
-            (&b"\xff"[..], r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#),
+            (
+                &b"malformed"[..],
+                r#"panic object is not error: "uuid: Parse(malformed): invalid UUID length: 9""#,
+            ),
+            (
+                &b"\xff"[..],
+                r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#,
+            ),
         ] {
             for forwarded in [false, true] {
-                let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
-                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
-                    source_domain_id: GoString::from(source),
-                    task_list: Some(n::api::TaskList { name: "source-sql".into(), ..Default::default() }),
-                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
-                    ..Default::default()
-                })).await.unwrap_err();
+                let error = service
+                    .add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                        domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                        source_domain_id: GoString::from(source),
+                        task_list: Some(n::api::TaskList {
+                            name: "source-sql".into(),
+                            ..Default::default()
+                        }),
+                        forwarded_from: if forwarded {
+                            "child".into()
+                        } else {
+                            GoString::default()
+                        },
+                        ..Default::default()
+                    }))
+                    .await
+                    .unwrap_err();
                 assert_eq!(error.code(), tonic::Code::Unknown);
                 assert_eq!(error.message(), message);
-                let key = TaskListKeyBytes { domain_id: uuid::Uuid::from_u128(1), name: "source-sql".into(), task_type: 1 };
-                assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
+                let key = TaskListKeyBytes {
+                    domain_id: uuid::Uuid::from_u128(1),
+                    name: "source-sql".into(),
+                    task_type: 1,
+                };
+                assert!(
+                    MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10)
+                        .unwrap()
+                        .is_empty()
+                );
             }
         }
-        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+        service
+            .engine
+            .registry
+            .shutdown(crate::grpc_matching::matching_now())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

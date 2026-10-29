@@ -261,18 +261,25 @@ impl RateLimitedDomainSource {
             self.limiter.record_domain_rejection(operation);
             Err(DomainMetadataSourceError::transient(REJECTED))
         };
-        if !result.as_ref().err().is_some_and(|error| error.class == DomainErrorClass::CapturedPanic) {
+        if !result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.class == DomainErrorClass::CapturedPanic)
+        {
             let class = if admitted {
                 result.as_ref().err().map(|error| match error.class {
                     DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
                     DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
                     DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
-                    DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
+                    DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => {
+                        PersistenceErrorClass::Internal
+                    }
                 })
             } else {
                 Some(PersistenceErrorClass::Busy)
             };
-            self.limiter.record_domain_result(operation, started.elapsed(), class);
+            self.limiter
+                .record_domain_result(operation, started.elapsed(), class);
         }
         result
     }
@@ -295,36 +302,54 @@ pub(crate) fn get_domain_byte_size(
     d: &cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
 ) -> u64 {
     let info = DOMAIN_INFO_SIZEOF
-        + (d.info.uuid.len() + d.info.name.len() + d.info.description.len() + d.info.owner_email.len()) as u64
-        + d.info.data.as_ref().map_or(0, |m| string_map_size(m.iter()));
+        + (d.info.uuid.len()
+            + d.info.name.len()
+            + d.info.description.len()
+            + d.info.owner_email.len()) as u64
+        + d.info
+            .data
+            .as_ref()
+            .map_or(0, |m| string_map_size(m.iter()));
 
     let mut config = DOMAIN_CONFIG_SIZEOF
-        + (d.configuration.history_archival_uri.len() + d.configuration.visibility_archival_uri.len()) as u64
+        + (d.configuration.history_archival_uri.len()
+            + d.configuration.visibility_archival_uri.len()) as u64
         + ASYNC_WORKFLOW_CONFIG_SIZEOF;
     if let Some(a) = &d.decoded_async_workflow_config {
         config += (a.predefined_queue_name.len() + a.queue_type.len()) as u64;
         config += a.queue_config.as_ref().map_or(0, |q| q.data.len() as u64);
     }
-    for (key, value) in d.decoded_bad_binaries.iter().filter_map(|b| b.binaries.as_ref()).flatten() {
+    for (key, value) in d
+        .decoded_bad_binaries
+        .iter()
+        .filter_map(|b| b.binaries.as_ref())
+        .flatten()
+    {
         config += key.len() as u64;
         if let Some(v) = value {
             config += (v.reason.len() + v.operator.len()) as u64;
         }
     }
     // Go adds len(key)+len(value.Name) per group (key == name when decoded).
-    for group in d.decoded_isolation_groups.iter().flat_map(|g| g.isolation_groups.iter()) {
+    for group in d
+        .decoded_isolation_groups
+        .iter()
+        .flat_map(|g| g.isolation_groups.iter())
+    {
         config += (group.name.len() * 2) as u64;
     }
 
     let replication = d.replication.active_cluster_name.len() as u64
-        + d.replication.clusters.iter().map(|c| c.cluster_name.len() as u64).sum::<u64>();
+        + d.replication
+            .clusters
+            .iter()
+            .map(|c| c.cluster_name.len() as u64)
+            .sum::<u64>();
     GET_DOMAIN_RESPONSE_SIZEOF + info + config + replication
 }
 
 /// Go `ListDomainsResponse.ByteSize` (go/common/persistence/metered.go:102).
-pub(crate) fn list_domains_byte_size(
-    page: &DomainMetadataPage,
-) -> u64 {
+pub(crate) fn list_domains_byte_size(page: &DomainMetadataPage) -> u64 {
     LIST_DOMAINS_RESPONSE_SIZEOF
         + page.next_page_token.as_ref().map_or(0, |t| t.len() as u64)
         + page.domains.iter().map(get_domain_byte_size).sum::<u64>()
@@ -343,7 +368,10 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         next_page_token: Option<&[u8]>,
         timeout: std::time::Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
-        let result = self.call("ListDomain", || self.source.list_domains(page_size, next_page_token, timeout));
+        let result = self.call("ListDomain", || {
+            self.source
+                .list_domains(page_size, next_page_token, timeout)
+        });
         if let Ok(page) = &result {
             let payload = list_domains_byte_size(page);
             self.limiter
@@ -367,10 +395,14 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         id: &[u8],
         timeout: std::time::Duration,
         mode: crate::matching_domain_uuid::DomainIdParse,
-    ) -> Result<cadence_persistence::matching_domain_metadata::MatchingDomainMetadata, DomainMetadataSourceError> {
-        self.call("GetDomain", || self.source.get_domain_by_raw_id(id, timeout, mode))
+    ) -> Result<
+        cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
+        DomainMetadataSourceError,
+    > {
+        self.call("GetDomain", || {
+            self.source.get_domain_by_raw_id(id, timeout, mode)
+        })
     }
-
 }
 
 #[derive(Debug)]
@@ -537,23 +569,43 @@ mod list_domain_metric_tests {
 
     #[test]
     fn raw_sql_miss_rate_limit_precedes_parse_and_panic_only_counts_request() {
-        use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
         use crate::matching_domain_cache::MatchingDomainCache;
         use crate::matching_domain_uuid::DomainIdParse;
+        use cadence_api::{admin::DynamicConfigValue, enums::EncodingType, types::DataBlob};
         let overlay = Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default()));
-        overlay.lock().unwrap().update(false, "matching.persistenceMaxQPS", vec![DynamicConfigValue {
-            filters: vec![], value: Some(DataBlob { encoding_type: Some(EncodingType::JSON), data: b"1".to_vec() }),
-        }]);
+        overlay.lock().unwrap().update(
+            false,
+            "matching.persistenceMaxQPS",
+            vec![DynamicConfigValue {
+                filters: vec![],
+                value: Some(DataBlob {
+                    encoding_type: Some(EncodingType::JSON),
+                    data: b"1".to_vec(),
+                }),
+            }],
+        );
         let limiter = MatchingPersistenceLimiter::new(overlay, Arc::new(AtomicUsize::new(1)));
         let sink = Arc::new(RecordingMetricSink::default());
         limiter.with_metric_sink(sink.clone());
-        let cache = MatchingDomainCache::new(limit_domain_source(Arc::new(EmptyDomainList), limiter.clone()))
-            .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
+        let cache = MatchingDomainCache::new(limit_domain_source(
+            Arc::new(EmptyDomainList),
+            limiter.clone(),
+        ))
+        .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
         let panic = cache.get_domain_by_raw_id(&[0xff]).unwrap_err();
         assert!(crate::matching_panic::is_captured_panic(&panic));
         let events = sink.events();
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
-        assert!(!events.iter().any(|e| e.name.starts_with("persistence_errors") || e.name.starts_with("persistence_latency")));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            1
+        );
+        assert!(!events
+            .iter()
+            .any(|e| e.name.starts_with("persistence_errors")
+                || e.name.starts_with("persistence_latency")));
         // The first call used the only token, so even malformed bytes are rejected
         // before the SQL parser is reached on the second call.
         let rejected = cache.get_domain_by_raw_id(b"bad").unwrap_err();
@@ -561,9 +613,27 @@ mod list_domain_metric_tests {
         assert_eq!(rejected.message(), REJECTED);
         assert_eq!(limiter.rejected(), 1);
         let events = sink.events();
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 2);
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_latency").count(), 1);
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors_busy").count(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_latency")
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_errors_busy")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -641,19 +711,48 @@ mod list_domain_metric_tests {
         });
         let cache = MatchingDomainCache::new(limit_domain_source(source, limiter))
             .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
-        let lookup = std::thread::spawn(move || cache.get_domain_by_raw_id(b"01234567890123456789012345678901"));
+        let lookup = std::thread::spawn(move || {
+            cache.get_domain_by_raw_id(b"01234567890123456789012345678901")
+        });
 
         entered_rx.recv().unwrap();
         let events = sink.events();
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
-        assert!(!events.iter().any(|e| e.name.starts_with("persistence_latency") || e.name.starts_with("persistence_errors")));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            1
+        );
+        assert!(!events
+            .iter()
+            .any(|e| e.name.starts_with("persistence_latency")
+                || e.name.starts_with("persistence_errors")));
 
         release_tx.send(()).unwrap();
         assert!(lookup.join().unwrap().is_err());
         let events = sink.events();
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_latency").count(), 1);
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors").count(), 1);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_requests")
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_latency")
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_errors")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -680,7 +779,9 @@ mod list_domain_metric_tests {
         assert_eq!(empty.tags["operation"], "ListDomain");
         assert_eq!(empty.tags["task_category"], "none");
         assert!(!empty.tags.contains_key("domain"));
-        assert!(!events.iter().any(|e| e.name == PERSISTENCE_RESPONSE_ROW_SIZE));
+        assert!(!events
+            .iter()
+            .any(|e| e.name == PERSISTENCE_RESPONSE_ROW_SIZE));
 
         // Go ListDomainsResponse.ByteSize with no domains and no token is Sizeof(48) on 64-bit.
         let payload = events
@@ -749,17 +850,25 @@ mod list_domain_metric_tests {
         full.configuration.history_archival_uri = "URI".into();
         full.configuration.visibility_archival_uri = "URI".into();
         full.decoded_isolation_groups = Some(IsolationGroupConfiguration {
-            isolation_groups: vec![IsolationGroupPartition { name: "abc".into(), state: None }],
+            isolation_groups: vec![IsolationGroupPartition {
+                name: "abc".into(),
+                state: None,
+            }],
         });
         // Go's map key is the partition name when decoded from thrift, so len(key)+len(Name) = 2*len(name).
         full.decoded_async_workflow_config = Some(AsyncWorkflowConfiguration {
             enabled: false,
             predefined_queue_name: "name".into(),
             queue_type: "type".into(),
-            queue_config: Some(DataBlob { encoding_type: None, data: vec![1, 2, 3] }),
+            queue_config: Some(DataBlob {
+                encoding_type: None,
+                data: vec![1, 2, 3],
+            }),
         });
         full.replication.active_cluster_name = "cluster".into();
-        full.replication.clusters = vec![ClusterReplicationConfiguration { cluster_name: "cluster".into() }];
+        full.replication.clusters = vec![ClusterReplicationConfiguration {
+            cluster_name: "cluster".into(),
+        }];
         assert_eq!(get_domain_byte_size(&full), 88 + 103 + 191 + 14);
         let page = DomainMetadataPage {
             domains: vec![empty, full],

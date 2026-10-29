@@ -64,7 +64,11 @@ impl PersistenceErrorClass {
                 "persistence_errors_timeout_per_domain",
                 true,
             ),
-            Self::Busy => (PERSISTENCE_ERRORS_BUSY, PERSISTENCE_ERRORS_BUSY_PER_DOMAIN, true),
+            Self::Busy => (
+                PERSISTENCE_ERRORS_BUSY,
+                PERSISTENCE_ERRORS_BUSY_PER_DOMAIN,
+                true,
+            ),
             Self::DbUnavailable => (
                 PERSISTENCE_ERRORS_DB_UNAVAILABLE,
                 PERSISTENCE_ERRORS_DB_UNAVAILABLE_PER_DOMAIN,
@@ -108,12 +112,18 @@ impl std::fmt::Debug for MatchingPersistenceLimiter {
 /// (go/common/metrics/defs.go:3360-3371).
 fn persistence_error_rollup_name(per_domain_name: &str) -> Option<&'static str> {
     Some(match per_domain_name {
-        "persistence_errors_condition_failed_per_domain" => "persistence_errors_condition_failed_rollup",
+        "persistence_errors_condition_failed_per_domain" => {
+            "persistence_errors_condition_failed_rollup"
+        }
         "persistence_errors_timeout_per_domain" => "persistence_errors_timeout_rollup",
         "persistence_errors_busy_per_domain" => "persistence_errors_busy_rollup",
-        "persistence_errors_entity_not_exists_per_domain" => "persistence_errors_entity_not_exists_rollup",
+        "persistence_errors_entity_not_exists_per_domain" => {
+            "persistence_errors_entity_not_exists_rollup"
+        }
         "persistence_errors_bad_request_per_domain" => "persistence_errors_bad_request_rollup",
-        "persistence_errors_db_unavailable_per_domain" => "persistence_errors_db_unavailable_rollup",
+        "persistence_errors_db_unavailable_per_domain" => {
+            "persistence_errors_db_unavailable_rollup"
+        }
         _ => return None,
     })
 }
@@ -126,11 +136,16 @@ tokio::task_local! {
 
 /// Go `backoff.GetRetryCountFromContext`.
 pub(crate) fn persistence_retry_count() -> usize {
-    PERSISTENCE_RETRY_COUNT.try_with(|count| *count).unwrap_or(0)
+    PERSISTENCE_RETRY_COUNT
+        .try_with(|count| *count)
+        .unwrap_or(0)
 }
 
 /// Go `context.WithValue(ctx, retryCountKey, retryCount)` (retry.go:270).
-pub(crate) async fn with_persistence_retry_count<F: std::future::Future>(count: usize, future: F) -> F::Output {
+pub(crate) async fn with_persistence_retry_count<F: std::future::Future>(
+    count: usize,
+    future: F,
+) -> F::Output {
     PERSISTENCE_RETRY_COUNT.scope(count, future).await
 }
 
@@ -173,7 +188,10 @@ impl MatchingPersistenceLimiter {
     /// Go's metered persistence reads `HostName` from the process (`os.Hostname`);
     /// an empty name disables the per-host series, as in Go.
     pub fn with_host_name(&self, host: &str) {
-        *self.host_name.write().expect("Matching persistence host lock") = host.to_owned();
+        *self
+            .host_name
+            .write()
+            .expect("Matching persistence host lock") = host.to_owned();
     }
 
     /// Go `enablePersistenceLatencyHistogramMetrics`, read once at startup.
@@ -209,16 +227,19 @@ impl MatchingPersistenceLimiter {
 
     pub(crate) fn record_domain_rejection(&self, operation: &'static str) {
         use crate::matching_metrics::*;
-        self.metric_sink.read().expect("Matching metrics sink lock").record(MetricEvent {
-            name: MATCHING_PERSISTENCE_QPS_REJECTIONS,
-            kind: MetricKind::Counter,
-            value: MetricValue::Count(1),
-            tags: std::collections::BTreeMap::from([
-                (OPERATION_TAG.to_owned(), operation.to_owned()),
-                ("persistence_scope".to_owned(), "go".to_owned()),
-            ]),
-            histogram: None,
-        });
+        self.metric_sink
+            .read()
+            .expect("Matching metrics sink lock")
+            .record(MetricEvent {
+                name: MATCHING_PERSISTENCE_QPS_REJECTIONS,
+                kind: MetricKind::Counter,
+                value: MetricValue::Count(1),
+                tags: std::collections::BTreeMap::from([
+                    (OPERATION_TAG.to_owned(), operation.to_owned()),
+                    ("persistence_scope".to_owned(), "go".to_owned()),
+                ]),
+                histogram: None,
+            });
     }
 
     pub fn with_domain_cache(
@@ -261,7 +282,9 @@ impl MatchingPersistenceLimiter {
         use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
         let class = match result {
             Ok(_) => None,
-            Err(MatchingTaskStoreError::ConditionFailed(_)) => Some(PersistenceErrorClass::ConditionFailed),
+            Err(MatchingTaskStoreError::ConditionFailed(_)) => {
+                Some(PersistenceErrorClass::ConditionFailed)
+            }
             Err(MatchingTaskStoreError::NotFound) => Some(PersistenceErrorClass::NotFound),
             Err(MatchingTaskStoreError::Backend { kind, .. }) => Some(match kind {
                 BackendErrorKind::Timeout => PersistenceErrorClass::Timeout,
@@ -314,8 +337,11 @@ impl MatchingPersistenceLimiter {
             Some(_) => Some(PersistenceErrorClass::Internal),
         };
         let domain = domain_id.map(|id| {
-            (self.domain_name.read().expect("Matching metric domain resolver lock"))(id)
-                .unwrap_or_else(|| "_unknown_".into())
+            (self
+                .domain_name
+                .read()
+                .expect("Matching metric domain resolver lock"))(id)
+            .unwrap_or_else(|| "_unknown_".into())
         });
         self.record_call(operation, domain, elapsed, class);
     }
@@ -342,7 +368,10 @@ impl MatchingPersistenceLimiter {
             value: MetricValue::Count(1),
             tags: std::collections::BTreeMap::from([
                 (OPERATION_TAG.to_owned(), operation.to_owned()),
-                (IS_RETRY_TAG.to_owned(), (persistence_retry_count() > 0).to_string()),
+                (
+                    IS_RETRY_TAG.to_owned(),
+                    (persistence_retry_count() > 0).to_string(),
+                ),
                 (TASK_CATEGORY_TAG.to_owned(), "none".into()),
             ]),
             histogram: None,
@@ -380,7 +409,10 @@ impl MatchingPersistenceLimiter {
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
         let mut tags = std::collections::BTreeMap::from([
             (OPERATION_TAG.to_owned(), operation.to_owned()),
-            (IS_RETRY_TAG.to_owned(), (persistence_retry_count() > 0).to_string()),
+            (
+                IS_RETRY_TAG.to_owned(),
+                (persistence_retry_count() > 0).to_string(),
+            ),
         ]);
         let per_domain = domain.is_some();
         match domain {
@@ -401,16 +433,16 @@ impl MatchingPersistenceLimiter {
             })
         };
         if count_request {
-        record(
-            if per_domain {
-                PERSISTENCE_REQUESTS_PER_DOMAIN
-            } else {
-                PERSISTENCE_REQUESTS
-            },
-            MetricKind::Counter,
-            MetricValue::Count(1),
-            None,
-        );
+            record(
+                if per_domain {
+                    PERSISTENCE_REQUESTS_PER_DOMAIN
+                } else {
+                    PERSISTENCE_REQUESTS
+                },
+                MetricKind::Counter,
+                MetricValue::Count(1),
+                None,
+            );
         }
         record(
             if per_domain {
@@ -461,8 +493,16 @@ impl MatchingPersistenceLimiter {
                     histogram: None,
                 })
             };
-            rollup("persistence_requests_rollup", MetricKind::Counter, MetricValue::Count(1));
-            rollup("persistence_latency_rollup", MetricKind::Timer, MetricValue::Duration(elapsed));
+            rollup(
+                "persistence_requests_rollup",
+                MetricKind::Counter,
+                MetricValue::Count(1),
+            );
+            rollup(
+                "persistence_latency_rollup",
+                MetricKind::Timer,
+                MetricValue::Duration(elapsed),
+            );
             // Go scope.go emits the root histogram rollup when the migration
             // policy enables it. The policy sink suppresses this by default.
             sink.record(MetricEvent {
@@ -486,11 +526,18 @@ impl MatchingPersistenceLimiter {
                     rollup(name, MetricKind::Counter, MetricValue::Count(1));
                 }
                 if failure {
-                    rollup("persistence_errors_rollup", MetricKind::Counter, MetricValue::Count(1));
+                    rollup(
+                        "persistence_errors_rollup",
+                        MetricKind::Counter,
+                        MetricValue::Count(1),
+                    );
                 }
             }
         }
-        let host = self.host_name.read().expect("Matching persistence host lock");
+        let host = self
+            .host_name
+            .read()
+            .expect("Matching persistence host lock");
         if !host.is_empty() {
             record_persistence_host_latency(sink.as_ref(), &host, elapsed);
         }
@@ -526,7 +573,12 @@ impl MatchingPersistenceLimiter {
 
     /// Go `emitRowCountMetrics` / `emitPayloadSizeMetrics` for a successful list
     /// call: empty count or row-size histogram, plus payload bytes.
-    pub(crate) fn record_list_response(&self, operation: &'static str, rows: u64, payload_bytes: u64) {
+    pub(crate) fn record_list_response(
+        &self,
+        operation: &'static str,
+        rows: u64,
+        payload_bytes: u64,
+    ) {
         use crate::matching_metrics::*;
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
         if rows == 0 {
@@ -592,12 +644,8 @@ fn read_rate_snapshot(
 ) -> PersistenceRateSnapshot {
     let overlay = overlay.lock().expect("admin dynamic config lock");
     let host_values = overlay.property_values("matching.persistenceMaxQPS");
-    let host_qps = cadence_persistence::dynamic_config::integer(
-        host_values,
-        None,
-        HOST_QPS_DEFAULT,
-    )
-    .max(0) as f64;
+    let host_qps = cadence_persistence::dynamic_config::integer(host_values, None, HOST_QPS_DEFAULT)
+        .max(0) as f64;
     let global_values = overlay.property_values("matching.persistenceGlobalMaxQPS");
     let global_qps = cadence_persistence::dynamic_config::integer(
         global_values,
@@ -778,9 +826,17 @@ mod metered_task_tests {
             .iter()
             .find(|e| e.name == "persistence_response_payload_size")
             .unwrap();
-        assert_eq!(payload.value, crate::matching_metrics::MetricValue::Count(24));
-        assert_eq!(payload.histogram, Some(HistogramSpec::GoResponsePayloadSize));
-        assert!(!events.iter().any(|e| e.name == "persistence_response_row_size"));
+        assert_eq!(
+            payload.value,
+            crate::matching_metrics::MetricValue::Count(24)
+        );
+        assert_eq!(
+            payload.histogram,
+            Some(HistogramSpec::GoResponsePayloadSize)
+        );
+        assert!(!events
+            .iter()
+            .any(|e| e.name == "persistence_response_row_size"));
     }
 
     #[test]
@@ -818,13 +874,18 @@ mod metered_task_tests {
             .unwrap();
         assert_eq!(rows.value, crate::matching_metrics::MetricValue::Count(5));
         assert_eq!(rows.histogram, Some(HistogramSpec::GoResponseRowSize));
-        assert!(!events.iter().any(|e| e.name == "persistence_empty_response"));
+        assert!(!events
+            .iter()
+            .any(|e| e.name == "persistence_empty_response"));
         assert!(events
             .iter()
             .any(|e| e.name == "persistence_errors_db_unavailable"));
         // DBUnavailable also counts the generic failure; BadRequest does not.
         assert_eq!(
-            events.iter().filter(|e| e.name == "persistence_errors").count(),
+            events
+                .iter()
+                .filter(|e| e.name == "persistence_errors")
+                .count(),
             1
         );
         assert!(events
@@ -979,12 +1040,29 @@ mod metered_task_tests {
             &Err::<(), _>(MatchingTaskStoreError::ConditionFailed("x".into())),
         );
         let events = sink.events();
-        let names: Vec<_> = events.iter().filter(|e| e.name.ends_with("_rollup")).map(|e| e.name).collect();
+        let names: Vec<_> = events
+            .iter()
+            .filter(|e| e.name.ends_with("_rollup"))
+            .map(|e| e.name)
+            .collect();
         assert_eq!(
             names,
-            ["persistence_requests_rollup", "persistence_latency_rollup", "persistence_latency_ns_rollup", "persistence_errors_condition_failed_rollup"]
+            [
+                "persistence_requests_rollup",
+                "persistence_latency_rollup",
+                "persistence_latency_ns_rollup",
+                "persistence_errors_condition_failed_rollup"
+            ]
         );
-        assert!(events.iter().filter(|e| e.name.ends_with("_rollup")).all(|e| e.tags.get("operation").is_some_and(|value| value == "GetTasks") && !e.tags.contains_key("domain") && !e.tags.contains_key("is_retry")));
+        assert!(events
+            .iter()
+            .filter(|e| e.name.ends_with("_rollup"))
+            .all(|e| e
+                .tags
+                .get("operation")
+                .is_some_and(|value| value == "GetTasks")
+                && !e.tags.contains_key("domain")
+                && !e.tags.contains_key("is_retry")));
     }
 }
 
@@ -1029,7 +1107,9 @@ mod go_metered_emission_oracle_tests {
         fn get_task_list(
             &self,
             _: &cadence_persistence::matching_task_store::TaskListKey,
-        ) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+        ) -> cadence_persistence::matching_task_store::Result<
+            cadence_persistence::matching_task_store::TaskListRecord,
+        > {
             unreachable!("oracle only exercises get_tasks")
         }
 
@@ -1039,7 +1119,9 @@ mod go_metered_emission_oracle_tests {
             _: i16,
             _: i64,
             _: i64,
-        ) -> cadence_persistence::matching_task_store::Result<cadence_persistence::matching_task_store::TaskListRecord> {
+        ) -> cadence_persistence::matching_task_store::Result<
+            cadence_persistence::matching_task_store::TaskListRecord,
+        > {
             unreachable!("oracle only exercises get_tasks")
         }
 
@@ -1058,7 +1140,10 @@ mod go_metered_emission_oracle_tests {
             _: &cadence_persistence::matching_task_store::TaskListKey,
             _: i64,
             _: i64,
-            _: &[(uuid::Uuid, &cadence_persistence::matching_task_store::AllocatedTask)],
+            _: &[(
+                uuid::Uuid,
+                &cadence_persistence::matching_task_store::AllocatedTask,
+            )],
         ) -> cadence_persistence::matching_task_store::Result<()> {
             unreachable!("oracle only exercises get_tasks")
         }
@@ -1069,14 +1154,20 @@ mod go_metered_emission_oracle_tests {
             _: i64,
             _: i64,
             _: i64,
-        ) -> cadence_persistence::matching_task_store::Result<Vec<cadence_persistence::matching_task_store::AllocatedTask>> {
-            use cadence_persistence::matching_task_store::{BackendErrorKind, MatchingTaskStoreError};
+        ) -> cadence_persistence::matching_task_store::Result<
+            Vec<cadence_persistence::matching_task_store::AllocatedTask>,
+        > {
+            use cadence_persistence::matching_task_store::{
+                BackendErrorKind, MatchingTaskStoreError,
+            };
             match self.0.fetch_add(1, Ordering::SeqCst) {
                 0 => Ok(Vec::new()),
-                1 => Ok(vec![cadence_persistence::matching_task_store::AllocatedTask {
-                    task_id: 1,
-                    data: cadence_persistence::matching_blob::TaskData::default(),
-                }]),
+                1 => Ok(vec![
+                    cadence_persistence::matching_task_store::AllocatedTask {
+                        task_id: 1,
+                        data: cadence_persistence::matching_blob::TaskData::default(),
+                    },
+                ]),
                 _ => Err(MatchingTaskStoreError::Backend {
                     kind: BackendErrorKind::BadRequest,
                     message: "metrics-oracle-failure".into(),

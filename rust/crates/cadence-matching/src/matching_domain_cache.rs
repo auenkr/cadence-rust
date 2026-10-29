@@ -117,7 +117,9 @@ pub trait DomainMetadataSource: Send + Sync + 'static {
             id
         };
         let id = std::str::from_utf8(backend_id).map_err(|_| {
-            DomainMetadataSourceError::permanent("raw non-UTF8 domain ID cannot be passed to this metadata source")
+            DomainMetadataSourceError::permanent(
+                "raw non-UTF8 domain ID cannot be passed to this metadata source",
+            )
         })?;
         self.get_domain(None, Some(id), timeout)
     }
@@ -267,11 +269,18 @@ impl DomainMetadataSource
         _mode: crate::matching_domain_uuid::DomainIdParse,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
         crate::matching_domain_uuid::cassandra_uuid_bytes(id).map_err(|error| {
-            DomainMetadataSourceError::transient(format!("GetDomain operation failed. Error: {error}"))
+            DomainMetadataSourceError::transient(format!(
+                "GetDomain operation failed. Error: {error}"
+            ))
         })?;
         // Accepted gocql UUID spellings contain only ASCII hex and hyphens.
         // Keep that spelling for errors while get_domain normalizes the query bind.
-        <Self as DomainMetadataSource>::get_domain(self, None, Some(std::str::from_utf8(id).expect("validated UUID spelling")), timeout)
+        <Self as DomainMetadataSource>::get_domain(
+            self,
+            None,
+            Some(std::str::from_utf8(id).expect("validated UUID spelling")),
+            timeout,
+        )
     }
 
     fn get_domain(
@@ -283,15 +292,26 @@ impl DomainMetadataSource
         let canonical = match (name, id) {
             (None, Some(id)) if !id.is_empty() => Some(
                 crate::matching_domain_uuid::cassandra_uuid_bytes(id.as_bytes())
-                    .map_err(|error| DomainMetadataSourceError::transient(format!("GetDomain operation failed. Error: {error}")))?
+                    .map_err(|error| {
+                        DomainMetadataSourceError::transient(format!(
+                            "GetDomain operation failed. Error: {error}"
+                        ))
+                    })?
                     .to_string(),
             ),
             _ => None,
         };
         cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(
-            self, name, canonical.as_deref().or(id),
+            self,
+            name,
+            canonical.as_deref().or(id),
         )
-        .map_err(|error| cassandra_metadata_source_error(error, id.filter(|id| !id.is_empty()).or(name).unwrap_or_default()))
+        .map_err(|error| {
+            cassandra_metadata_source_error(
+                error,
+                id.filter(|id| !id.is_empty()).or(name).unwrap_or_default(),
+            )
+        })
     }
 }
 
@@ -300,13 +320,16 @@ fn cassandra_metadata_source_error(
     identity: &str,
 ) -> DomainMetadataSourceError {
     match error {
-        MatchingDomainMetadataError::NotFound(_) => DomainMetadataSourceError::permanent(
-            format!("Domain {identity} does not exist."),
-        ).with_class(DomainErrorClass::NotFound),
+        MatchingDomainMetadataError::NotFound(_) => {
+            DomainMetadataSourceError::permanent(format!("Domain {identity} does not exist."))
+                .with_class(DomainErrorClass::NotFound)
+        }
         MatchingDomainMetadataError::BothIdAndName
         | MatchingDomainMetadataError::EmptyIdentity
-        | MatchingDomainMetadataError::InvalidUuid(_) =>
-            DomainMetadataSourceError::permanent(error.to_string()).with_class(DomainErrorClass::BadRequest),
+        | MatchingDomainMetadataError::InvalidUuid(_) => {
+            DomainMetadataSourceError::permanent(error.to_string())
+                .with_class(DomainErrorClass::BadRequest)
+        }
         _ => DomainMetadataSourceError::transient(error.to_string()),
     }
 }
@@ -846,7 +869,8 @@ impl MatchingDomainCache {
         if let Some(entry) = text.and_then(|key| self.by_id(key)) {
             return Ok(entry);
         }
-        self.source.get_domain_by_raw_id(id, DOMAIN_CACHE_PERSISTENCE_TIMEOUT, self.domain_id_parse)
+        self.source
+            .get_domain_by_raw_id(id, DOMAIN_CACHE_PERSISTENCE_TIMEOUT, self.domain_id_parse)
             .map_err(|error| {
                 if error.class == DomainErrorClass::CapturedPanic {
                     tonic::Status::unknown(error.message)
@@ -854,10 +878,10 @@ impl MatchingDomainCache {
                     cache_source_error(error).into_status()
                 }
             })?;
-        self.refresh_after_miss(None, text).map_err(DomainCacheError::into_status)?;
-        text.and_then(|key| self.by_id(key)).ok_or_else(|| {
-            DomainCacheError::ExistsButNotLoaded(String::new()).into_status()
-        })
+        self.refresh_after_miss(None, text)
+            .map_err(DomainCacheError::into_status)?;
+        text.and_then(|key| self.by_id(key))
+            .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(String::new()).into_status())
     }
 
     pub fn get_domain_id(&self, name: &str) -> Result<String, DomainCacheError> {

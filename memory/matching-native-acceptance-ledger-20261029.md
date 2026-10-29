@@ -287,3 +287,7 @@ Actions [40806302891](https://github.com/auenkr/cadence-rust/actions/runs/408063
 ## Selected CI terminal result — 40806302891
 
 Run failed Clippy with E0061/E0308: Cassandra raw override called the inherent persistence `get_domain` instead of the source trait method. Corrected with explicit `<Self as DomainMetadataSource>::get_domain`; latest adapter still preserves original caller spelling. Tests were skipped, so no runtime/regression pass credited. Compact evidence is in `memory/evidence/matching-native-selected-40806302891/run.txt`. All three finished worker branches and clean worktrees (raw-domain-error-parity, test-raw-lookup-metrics, matching-semaphore-startup-tests) were verified merged and removed locally/remotely. Previous continuation made source progress; no blocked condition exists.
+
+## CI formatting applied — run 40806941617
+
+Downloaded `matching-format-patch` from [40806941617](https://github.com/auenkr/cadence-rust/actions/runs/40806941617), source `fef2b6c3782f8ca0ab95e98d4eb56d66bd09a260`. The exact-source patch passed `git apply --check`, was applied, inspected, and passed `git diff --check`. Ten Matching files are formatted from the runner; no local Cargo or rustfmt ran. The patch is retained at `/mnt/storage/service/ci-evidence/matching-native-format-40806941617/matching-format.patch`. The source run is live at Clippy as last observed. Final workspace run must test the committed formatted source without formatting mutation, then all mixed gates must use that same immutable pin. No final acceptance pass is claimed.

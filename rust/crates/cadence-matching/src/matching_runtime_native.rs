@@ -59,7 +59,10 @@ pub fn native_queue_registry(
             Arc::new(move |id| {
                 let domain = domain_by_raw_id(&cache, id)?;
                 Ok(crate::matching_standby_native::StandbyDomainNative {
-                    active_in_cluster: crate::matching_engine_context_native::metadata_domain_active(&domain, &cluster),
+                    active_in_cluster:
+                        crate::matching_engine_context_native::metadata_domain_active(
+                            &domain, &cluster,
+                        ),
                     active_active: domain.replication.active_clusters.is_some(),
                     name: GoString::from(domain.info.name),
                 })
@@ -520,11 +523,7 @@ fn record_started_timeout_provider(
     })
 }
 
-fn domain_is_active(
-    cache: &MatchingDomainCache,
-    id: &GoString,
-    cluster: &str,
-) -> bool {
+fn domain_is_active(cache: &MatchingDomainCache, id: &GoString, cluster: &str) -> bool {
     crate::matching_engine_context_native::cached_domain_active(cache, id, cluster).unwrap_or(true)
 }
 
@@ -849,9 +848,17 @@ mod tests {
         let id = GoString::from(domain.info.uuid.clone());
         domain.is_global_domain = true;
         domain.replication.active_cluster_name = "other".into();
-        assert!(!domain_is_active(&cache(vec![domain.clone()]), &id, "active"));
+        assert!(!domain_is_active(
+            &cache(vec![domain.clone()]),
+            &id,
+            "active"
+        ));
         domain.replication.active_cluster_name = "active".into();
-        assert!(domain_is_active(&cache(vec![domain.clone()]), &id, "active"));
+        assert!(domain_is_active(
+            &cache(vec![domain.clone()]),
+            &id,
+            "active"
+        ));
         domain.failover_end_time_nanos = Some(0);
         assert!(!domain_is_active(&cache(vec![domain]), &id, "active"));
     }

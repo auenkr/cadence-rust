@@ -73,16 +73,25 @@ pub fn cassandra_uuid_bytes(input: &[u8]) -> Result<uuid::Uuid, String> {
             continue;
         }
         if !byte.is_ascii_hexdigit() || count == digits.len() {
-            return Err(format!("invalid UUID {}", cadence_common::go_string::GoString::from(input).go_quoted_string()));
+            return Err(format!(
+                "invalid UUID {}",
+                cadence_common::go_string::GoString::from(input).go_quoted_string()
+            ));
         }
         digits[count] = byte;
         count += 1;
     }
     if count != digits.len() {
-        return Err(format!("invalid UUID {}", cadence_common::go_string::GoString::from(input).go_quoted_string()));
+        return Err(format!(
+            "invalid UUID {}",
+            cadence_common::go_string::GoString::from(input).go_quoted_string()
+        ));
     }
     // All bytes are ASCII hexadecimal and exactly 32 digits long.
-    Ok(uuid::Uuid::parse_str(std::str::from_utf8(&digits).expect("ASCII hex")).expect("32 hex digits"))
+    Ok(
+        uuid::Uuid::parse_str(std::str::from_utf8(&digits).expect("ASCII hex"))
+            .expect("32 hex digits"),
+    )
 }
 
 /// Pre-handler lookup equivalent. `Err` is the captured-panic status Go returns; `Ok` means
@@ -116,7 +125,9 @@ pub fn raw_sql_lookup_guard(id: &[u8]) -> Result<(), Status> {
         panic.extend_from_slice(id);
         panic.extend_from_slice(format!("): {error}").as_bytes());
         let quoted = cadence_common::go_string::GoString::from(panic.as_slice()).go_quoted_string();
-        return Err(Status::unknown(format!("panic object is not error: {quoted}")));
+        return Err(Status::unknown(format!(
+            "panic object is not error: {quoted}"
+        )));
     }
     Ok(())
 }
@@ -156,32 +167,62 @@ mod tests {
             Some("invalid urn prefix: \"urn:xxxx:\"".to_string())
         );
         let bad_hyphen = GOOD.replacen('-', "x", 1);
-        assert_eq!(go_uuid_parse_error(&bad_hyphen), Some("invalid UUID format".into()));
+        assert_eq!(
+            go_uuid_parse_error(&bad_hyphen),
+            Some("invalid UUID format".into())
+        );
         let bad_hex = GOOD.replacen('0', "g", 1);
-        assert_eq!(go_uuid_parse_error(&bad_hex), Some("invalid UUID format".into()));
-        assert_eq!(go_uuid_parse_error(&"z".repeat(32)), Some("invalid UUID format".into()));
+        assert_eq!(
+            go_uuid_parse_error(&bad_hex),
+            Some("invalid UUID format".into())
+        );
+        assert_eq!(
+            go_uuid_parse_error(&"z".repeat(32)),
+            Some("invalid UUID format".into())
+        );
     }
 
     #[test]
     fn raw_bytes_follow_go_parser_and_quoting() {
-        assert_eq!(go_uuid_parse_error_bytes(&[0xff]), Some("invalid UUID length: 1".into()));
+        assert_eq!(
+            go_uuid_parse_error_bytes(&[0xff]),
+            Some("invalid UUID length: 1".into())
+        );
         let mut bracketed = format!("x{GOOD}y").into_bytes();
         bracketed[0] = 0xff;
         assert_eq!(go_uuid_parse_error_bytes(&bracketed), None);
         let error = raw_sql_lookup_guard(&[0xff]).unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unknown);
-        assert_eq!(error.message(), r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#);
+        assert_eq!(
+            error.message(),
+            r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#
+        );
     }
 
     #[test]
     fn cassandra_parser_follows_gocql_nibble_boundaries() {
         let expected = uuid::Uuid::parse_str(GOOD).unwrap();
-        for raw in [GOOD.to_string(), GOOD.replace('-', ""), format!("--{}--", GOOD), format!("{}-", GOOD)] {
+        for raw in [
+            GOOD.to_string(),
+            GOOD.replace('-', ""),
+            format!("--{}--", GOOD),
+            format!("{}-", GOOD),
+        ] {
             assert_eq!(cassandra_uuid_bytes(raw.as_bytes()).unwrap(), expected);
         }
-        for raw in [&b"\xff"[..], b"0-123abcd-4567-89ef-ABCD-0123456789ab", b"{0123abcd-4567-89ef-ABCD-0123456789ab}"] {
+        for raw in [
+            &b"\xff"[..],
+            b"0-123abcd-4567-89ef-ABCD-0123456789ab",
+            b"{0123abcd-4567-89ef-ABCD-0123456789ab}",
+        ] {
             let error = cassandra_uuid_bytes(raw).unwrap_err();
-            assert_eq!(error, format!("invalid UUID {}", cadence_common::go_string::GoString::from(raw).go_quoted_string()));
+            assert_eq!(
+                error,
+                format!(
+                    "invalid UUID {}",
+                    cadence_common::go_string::GoString::from(raw).go_quoted_string()
+                )
+            );
         }
     }
 

@@ -234,14 +234,21 @@ pub(crate) fn metadata_domain_active(
     if domain.failover_end_time_nanos.is_some() {
         return false;
     }
-    domain.replication.active_cluster_name == cluster || domain.replication.active_clusters
-        .as_ref()
-        .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
-        .is_some_and(|scopes| scopes.values().any(|scope| {
-            scope.cluster_attributes.as_ref().is_some_and(|attributes| {
-                attributes.values().any(|attribute| attribute.active_cluster_name == cluster)
+    domain.replication.active_cluster_name == cluster
+        || domain
+            .replication
+            .active_clusters
+            .as_ref()
+            .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+            .is_some_and(|scopes| {
+                scopes.values().any(|scope| {
+                    scope.cluster_attributes.as_ref().is_some_and(|attributes| {
+                        attributes
+                            .values()
+                            .any(|attribute| attribute.active_cluster_name == cluster)
+                    })
+                })
             })
-        }))
 }
 
 impl DecisionAddContext for NativeMatchingEngineContext {
@@ -511,9 +518,11 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod source_domain_tests {
     use super::*;
-    use cadence_api::types::{DomainInfo, DomainConfiguration, DomainReplicationConfiguration};
+    use crate::matching_domain_cache::{
+        DomainErrorClass, DomainMetadataPage, DomainMetadataSource, DomainMetadataSourceError,
+    };
+    use cadence_api::types::{DomainConfiguration, DomainInfo, DomainReplicationConfiguration};
     use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
-    use crate::matching_domain_cache::{DomainMetadataSource, DomainMetadataSourceError, DomainMetadataPage, DomainErrorClass};
 
     pub(crate) fn record(id: usize, notification_version: i64) -> MatchingDomainMetadata {
         let name = format!("domain-{id}");
@@ -551,16 +560,37 @@ pub(crate) mod source_domain_tests {
 
     struct Source(Vec<MatchingDomainMetadata>);
     impl DomainMetadataSource for Source {
-        fn metadata_version(&self, _: Duration) -> Result<i64, DomainMetadataSourceError> { Ok(1) }
-        fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
-            Ok(DomainMetadataPage { domains: self.0.clone(), next_page_token: None })
+        fn metadata_version(&self, _: Duration) -> Result<i64, DomainMetadataSourceError> {
+            Ok(1)
         }
-        fn get_domain_by_raw_id(&self, id: &[u8], timeout: Duration, mode: crate::matching_domain_uuid::DomainIdParse) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        fn list_domains(
+            &self,
+            _: usize,
+            _: Option<&[u8]>,
+            _: Duration,
+        ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+            Ok(DomainMetadataPage {
+                domains: self.0.clone(),
+                next_page_token: None,
+            })
+        }
+        fn get_domain_by_raw_id(
+            &self,
+            id: &[u8],
+            timeout: Duration,
+            mode: crate::matching_domain_uuid::DomainIdParse,
+        ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
             if mode == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
-                crate::matching_domain_uuid::raw_sql_lookup_guard(id).map_err(|status| DomainMetadataSourceError::permanent(status.message()).with_class(DomainErrorClass::CapturedPanic))?;
+                crate::matching_domain_uuid::raw_sql_lookup_guard(id).map_err(|status| {
+                    DomainMetadataSourceError::permanent(status.message())
+                        .with_class(DomainErrorClass::CapturedPanic)
+                })?;
             } else if std::str::from_utf8(id).is_err() {
                 // Explicit test-backend response, not the trait's conversion fallback.
-                return Err(DomainMetadataSourceError::permanent("injected raw backend error").with_class(DomainErrorClass::BadRequest));
+                return Err(
+                    DomainMetadataSourceError::permanent("injected raw backend error")
+                        .with_class(DomainErrorClass::BadRequest),
+                );
             }
             let backend_id = match (mode, id.len()) {
                 (crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic, 38) => &id[1..37],
@@ -570,18 +600,37 @@ pub(crate) mod source_domain_tests {
             let id = std::str::from_utf8(backend_id).expect("validated fixture ID");
             self.get_domain(None, Some(id), timeout)
         }
-        fn get_domain(&self, _: Option<&str>, id: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        fn get_domain(
+            &self,
+            _: Option<&str>,
+            id: Option<&str>,
+            _: Duration,
+        ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
             let id = id.unwrap_or_default();
-            let parsed = uuid::Uuid::parse_str(id).map_err(|_| DomainMetadataSourceError::permanent("UUID is invalid.").with_class(DomainErrorClass::BadRequest))?;
-            self.0.iter().find(|d| uuid::Uuid::parse_str(&d.info.uuid).ok() == Some(parsed)).cloned()
-                .ok_or_else(|| DomainMetadataSourceError::permanent("source domain missing").with_class(DomainErrorClass::NotFound))
+            let parsed = uuid::Uuid::parse_str(id).map_err(|_| {
+                DomainMetadataSourceError::permanent("UUID is invalid.")
+                    .with_class(DomainErrorClass::BadRequest)
+            })?;
+            self.0
+                .iter()
+                .find(|d| uuid::Uuid::parse_str(&d.info.uuid).ok() == Some(parsed))
+                .cloned()
+                .ok_or_else(|| {
+                    DomainMetadataSourceError::permanent("source domain missing")
+                        .with_class(DomainErrorClass::NotFound)
+                })
         }
     }
     pub(crate) fn cache(records: Vec<MatchingDomainMetadata>) -> Arc<MatchingDomainCache> {
         cache_with_mode(records, crate::matching_domain_uuid::DomainIdParse::Lenient)
     }
-    pub(crate) fn cache_with_mode(records: Vec<MatchingDomainMetadata>, mode: crate::matching_domain_uuid::DomainIdParse) -> Arc<MatchingDomainCache> {
-        let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source(records))).with_domain_id_parse(mode));
+    pub(crate) fn cache_with_mode(
+        records: Vec<MatchingDomainMetadata>,
+        mode: crate::matching_domain_uuid::DomainIdParse,
+    ) -> Arc<MatchingDomainCache> {
+        let cache = Arc::new(
+            MatchingDomainCache::new(Arc::new(Source(records))).with_domain_id_parse(mode),
+        );
         cache.refresh_domains().unwrap();
         cache
     }
@@ -594,15 +643,22 @@ pub(crate) mod source_domain_tests {
             .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
         sql.refresh_domains().unwrap();
         for (raw, expected) in [
-            (&b"bad"[..], r#"panic object is not error: "uuid: Parse(bad): invalid UUID length: 3""#),
-            (&b"\xff"[..], r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#),
+            (
+                &b"bad"[..],
+                r#"panic object is not error: "uuid: Parse(bad): invalid UUID length: 3""#,
+            ),
+            (
+                &b"\xff"[..],
+                r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#,
+            ),
         ] {
             let error = cached_domain_active(&sql, &GoString::from(raw), "active").unwrap_err();
             assert_eq!(error.code(), tonic::Code::Unknown);
             assert_eq!(error.message(), expected);
         }
         let lenient = cache(vec![domain]);
-        let error = cached_domain_active(&lenient, &GoString::from(&b"\xff"[..]), "active").unwrap_err();
+        let error =
+            cached_domain_active(&lenient, &GoString::from(&b"\xff"[..]), "active").unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
         assert_eq!(error.message(), "injected raw backend error");
     }
@@ -616,23 +672,37 @@ pub(crate) mod source_domain_tests {
         domain.replication.active_cluster_name = "active".into();
         assert!(cached_domain_active(&cache(vec![domain.clone()]), &id, "active").unwrap());
         assert!(!cached_domain_active(&cache(vec![domain.clone()]), &id, "other").unwrap());
-        domain.replication.active_clusters = Some(serde_json::from_value(serde_json::json!({
-            "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
-                "r": {"activeClusterName": "other"}
-            }}}
-        })).unwrap());
+        domain.replication.active_clusters = Some(
+            serde_json::from_value(serde_json::json!({
+                "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
+                    "r": {"activeClusterName": "other"}
+                }}}
+            }))
+            .unwrap(),
+        );
         assert!(cached_domain_active(&cache(vec![domain.clone()]), &id, "other").unwrap());
         domain.failover_end_time_nanos = Some(0);
         for cluster in ["active", "other"] {
             assert!(!cached_domain_active(&cache(vec![domain.clone()]), &id, cluster).unwrap());
         }
         let cached = cache(vec![domain]);
-        for alias in [id.as_utf8().unwrap().to_uppercase(), id.as_utf8().unwrap().replace('-', "")] {
+        for alias in [
+            id.as_utf8().unwrap().to_uppercase(),
+            id.as_utf8().unwrap().replace('-', ""),
+        ] {
             let error = cached_domain_active(&cached, &alias.into(), "active").unwrap_err();
             assert_eq!(error.code(), tonic::Code::Internal);
-            assert_eq!(error.message(), "DefaultDomainCache encounter case where domain exists but cannot be loaded");
+            assert_eq!(
+                error.message(),
+                "DefaultDomainCache encounter case where domain exists but cannot be loaded"
+            );
         }
-        let error = cached_domain_active(&cached, &uuid::Uuid::from_u128(99).to_string().into(), "active").unwrap_err();
+        let error = cached_domain_active(
+            &cached,
+            &uuid::Uuid::from_u128(99).to_string().into(),
+            "active",
+        )
+        .unwrap_err();
         assert_eq!(error.code(), tonic::Code::NotFound);
         assert_eq!(error.message(), "source domain missing");
     }

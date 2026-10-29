@@ -749,7 +749,10 @@ pub(crate) mod tests {
         ) -> Result<SemaphoreBucketPageBytes, AcquireError> {
             self.scan_pages
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if self.park_scan.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if self
+                .park_scan
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
                 self.scan_entered.notify_one();
                 self.scan_release.notified().await;
                 if self.fail_scan.load(std::sync::atomic::Ordering::SeqCst) {
@@ -917,7 +920,10 @@ pub(crate) mod tests {
         assert!(!Arc::ptr_eq(&manager, &replacement));
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
         store.release.notify_one();
-        assert_eq!(replacement.acquire(&owner, None).await.unwrap().outcome, SemaphoreAcquireOutcome::Acquired);
+        assert_eq!(
+            replacement.acquire(&owner, None).await.unwrap().outcome,
+            SemaphoreAcquireOutcome::Acquired
+        );
         replacement.stop();
     }
 
