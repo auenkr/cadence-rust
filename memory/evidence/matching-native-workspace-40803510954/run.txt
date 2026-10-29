@@ -1,0 +1,16 @@
+run=40803510954
+url=https://github.com/auenkr/cadence-rust/actions/runs/40803510954
+workflow=rust-ci
+conclusion=success
+head_sha=4d1007f3bdd0a6d667936d53aef6cf6277d98f51
+fresh_target=/home/runner/work/_temp/cargo-target-final
+clippy_exit=0
+test_exit=0
+workspace_format_check=passed
+matching_runtime_format_check=passed
+query_format_check=passed
+tls_format_check=passed
+matching_metrics_emission_comparison=all four configs matched (default 23, name-on 24, name-off 26, both 27 series)
+rust_binary_sha256=7129a6a49df2aeb71b49d47355a7c843b744628a9fc1a75cb6f2a7893e40e170
+artifacts=/mnt/storage/service/ci-evidence/matching-native-workspace-40803510954
+format_patch=matching-raw-string-oracle/go-format.patch (Go oracle source formatting/dependency patch; Rust formatting patch upload skipped)
