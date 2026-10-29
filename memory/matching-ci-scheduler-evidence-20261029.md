@@ -1,3 +1,5 @@
+**Status correction:** The earlier entry below records the then-live observation. Run 40841353614 later completed successfully; see the terminal result and retained-log review at the end of this file and `memory/evidence/matching-ci-recheck-20261029.md`.
+
 
 ## Matching formatting patch application — 2026-10-29
 
@@ -7,3 +9,23 @@
 - One authoritative status check of run 40841353614 returned `in_progress`: Clippy and Formatting were successful; Test was in progress; metric/evidence uploads and identity/log collection were pending. Thus the source gate is not terminal and no intensive validation can start yet. The artifact was applied before waiting for subsequent tests as requested. No new CI was dispatched because this run remains active. Next action after it is terminal and no intensive run is active: dispatch `.github/workflows/rust-ci.yml` on the exact formatted head with `package=cadence-matching`, `clean_target=true`, `format_matching_parity_files=true`.
 - No local Cargo, rustfmt, Go, build, or runtime validation was run. Frozen `matching-native-final-20261029` must remain unchanged at `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
 - Applied and pushed formatted candidate source commit: `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` on `t3/matching-format-ci` (source ancestry is `8cc72372ad605dcdce4f03e86c895dc90115fd38` -> `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`). The CI-dispatch ref should point at this commit or a descendant with identical Rust source; use the exact source SHA in the workflow inputs/evidence.
+
+## Terminal result imported into shared master — 2026-10-29
+
+Run [40841353614](https://github.com/auenkr/cadence-rust/actions/runs/40841353614)
+completed successfully on exact source `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`.
+The retained run artifact was downloaded and inspected: Clippy, formatting and
+test exits are 0; Matching library test binary reports 975 passed, 2 ignored;
+semaphore manager binary reports 14 passed. The native `matching_engine_go_tests_c`
+binary's 30.01-second execution is not a standalone native service no-deadline
+regression result. Detailed exact attribution is in
+`memory/evidence/matching-ci-recheck-20261029.md`.
+
+This gives no validation credit to ownership regression `12c7099c3` or future
+native scenario/config changes. Focused run 40842468415 remains future-scheduler
+owned and untouched. Its exact source is `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`;
+docs HEAD `1228a9e3f5bd05f486aae2e3ca72bede0d0e94a2` is not exact-validated.
+Frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` and the no-native-mixed-lane
+boundary remain. Workers `b07bde6f` (config map) and `baad2545` (native scenarios)
+are active; integrate their work before source freeze and fresh workspace
+validation.

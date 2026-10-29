@@ -1,27 +1,8 @@
 ## Matching docs checkpoint — 2026-10-29
 
-Shared `master` was clean at `1edbe51f85d586994c50756380ad04cae21e7a37` before
-this docs-only update. Matching remains current and incomplete. Scheduler's
-last known state is run `40841353614` live at exact source
-`e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`, Test in progress with no terminal
-result. Do not poll it: Luna scheduler `cdc9c685` owns Actions observation and
-dispatch. `8cc72372ad605dcdce4f03e86c895dc90115fd38` is docs-only after `e84e`;
-formatting commit `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` changes two Rust
-files and receives no CI credit. Preserve frozen ref
-`matching-native-final-20261029` at
-`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
+Shared master was clean at `52c4ec14261257242cab9a0f93a0c3f90cc8298a` before this docs-only update. Run [40841353614](https://github.com/auenkr/cadence-rust/actions/runs/40841353614) is terminal success on exact source `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`: CI Clippy, formatting and tests passed; retained per-command exits are all 0. See `memory/evidence/matching-ci-recheck-20261029.md` for the inspected artifact and exact per-binary totals. In particular, semaphore manager binary = 14 passed; the separate native engine Go tests C binary = 16 passed, 4 ignored, 30.01 seconds. That duration is not evidence of a native service no-deadline 30-second regression; no such standalone native service result appears in this run. The no-deadline Go-handler case passed in its separate 15-test binary.
 
-Source review found no additional concrete defect; ownership error mapping,
-concurrent poll/zero-dispatch/isolation, complete config-map coverage, and
-configured semaphore startup-timeout evidence remain open. Terra `39eccb25` is
-working on these. Required sequence: Terra closure and focused formatted CI;
-integrate source changes; freeze immutable SHA; fresh uncached workspace Clippy
-then tests; PostgreSQL pool dependency oracle; all ten mixed lanes serially;
-close parity/evidence before History. See
-`matching-native-checkpoint-20261029.md`,
-`matching-native-acceptance-ledger-20261029.md`,
-`matching-candidate-source-closure-review-20261029.md`, and
-`matching-ci-scheduler-evidence-20261029.md`.
+This evidence applies only to `e84e51a`. It does not validate later ownership regression `12c7099c3` or future native scenario/config fixes. Focused run [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415) is owned by the future scheduler and is deliberately not inspected here; `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` is its exact source while docs HEAD `1228a9e3f5bd05f486aae2e3ca72bede0d0e94a2` is not exact-validated. Frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` remains unchanged and there are no native mixed-lane passes. Terra workers `b07bde6f` (config-map coverage) and `baad2545` (native scenarios) remain active; wait for integration before source freeze and fresh workspace validation. Matching remains incomplete.
 
 ## DNS accepted; explicit Luna restart — 2026-10-19
 
