@@ -89,6 +89,22 @@ pub trait FeatureProvider: Send + Sync {
     /// Go `Shutdown`, run when the last attached service deregisters.
     fn shutdown(&self) {}
 
+    /// Evaluate a Go byte string domain. Existing providers keep their API and
+    /// explicitly reject unsupported invalid UTF-8 instead of losing a filter.
+    fn resolve_domain_bytes(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext, domain: &[u8]) -> Resolution {
+        match std::str::from_utf8(domain) {
+            Ok(domain) => {
+                let mut ctx = ctx.clone();
+                ctx.insert("domainName".into(), Value::String(domain.into()));
+                self.resolve(flag, default, &ctx)
+            }
+            Err(_) => Resolution { value: default, error: Some(ResolutionError {
+                code: ErrorCode::InvalidContext,
+                message: "provider does not support byte-valued domain filters".into(),
+            }) },
+        }
+    }
+
     /// Evaluate `flag`. The flag type is the variant of `default`.
     fn resolve(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution;
 }
