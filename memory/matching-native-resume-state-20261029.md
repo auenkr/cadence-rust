@@ -70,20 +70,36 @@ and database/resource cleanup. The frozen source ref remains untouched; if fixes
 are needed, create and validate a replacement candidate coherently before
 serial mixed runs.
 
-## Diagnostic instrumentation checkpoint — 2026-10-29
+## Diagnostic instrumentation checkpoint — 2026-10-29 (terminal update)
 
-One authoritative Actions read at `2026-10-29T08:03:46Z` found
-[run 40839466118](https://github.com/auenkr/cadence-rust/actions/runs/40839466118)
-still `in_progress`, workflow `rust-ci`, branch `t3/matching-startup-fix`, head
-`12c3063ea91e0dc5abd552a79140a14690edb8bd`. Local `git rev-parse` confirmed the
-branch still has exactly that head at the time of the check. This branch adds
-startup-stage markers only; it is not a fix. The run's result and retained
-artifacts are pending. Do not dispatch another Actions job while this selected
-run is live. After it becomes terminal, collect exact source identity, exits,
-and failing log evidence, reusing any existing download directory. If it
-succeeds and no other intensive CI or mixed gate is running, dispatch a fresh
-whole-workspace rust-ci at the same unchanged head, `clean_target=true`, with
-`package` empty. Do not start PostgreSQL before that workspace prerequisite.
+The authoritative terminal read of [run 40839466118](https://github.com/auenkr/cadence-rust/actions/runs/40839466118)
+returned workflow `rust-ci`, branch `t3/matching-startup-fix`, head
+`12c3063ea91e0dc5abd552a79140a14690edb8bd`, status `completed`, conclusion
+`failure` (created `08:03:42Z`, completed `08:06:03Z`). Artifact identity
+`rust/commit.txt` matches that exact head. The job `clippy-test` concluded
+failure: setup, checkout, Go oracles, and workspace formatting check succeeded;
+the targeted `Check changed Matching runtime formatting` step failed; Clippy,
+Formatting, and Test were skipped. Exact exit evidence: `matching-runtime-format.exit=1`,
+`workspace-format.exit=1`, `query-format.exit=0`, `tls-format.exit=0`.
+The focused log reports a formatting-only diff at
+`crates/cadence-matching/src/matching_runtime.rs:925`, wrapping the startup
+`eprintln!` in multiple lines. The workspace log also contains formatting diffs.
+This run provides no Clippy or Rust test result and does not locate the startup
+block. Retained artifacts and concise evidence are in
+`memory/evidence/matching-startup-fix-40839466118/` and the original downloaded
+bundle at `/mnt/storage/service/ci-evidence/matching-startup-fix-40839466118/`.
+
+No workspace retry was dispatched because the selected run failed. No
+PostgreSQL dispatch is authorized by this checkpoint. Next step: separately
+review the pending fixes, resolve the formatting issue on the chosen immutable
+candidate, then dispatch fresh-target workspace CI only after review and exact
+head confirmation. The diagnostic branch is not accepted and its run is not a
+mixed-service test. The frozen candidate remains remote ref
+`origin/matching-native-final-20261029` at
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`; do not move it. Fix commits
+`overlay9d3a342d5` on `t3/matching-overlay-lock-order` and `PG9498ee5e1` on
+`t3/fix-postgres-pool-wakeup` await separate review; neither has been tested
+here or proved to cause the prior PostgreSQL startup failure.
 
 The independent source review is retained in
 `memory/matching-native-startup-independent-review-20261029.md`. It proves a

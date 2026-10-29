@@ -342,3 +342,17 @@ must precede PostgreSQL retry. The frozen candidate ref remains at
 `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` and must not be moved. See
 `memory/matching-native-resume-state-20261029.md` for the retained current
 checkpoint.
+
+### Terminal result — run 40839466118
+
+The run is terminal `failure`, exact head
+`12c3063ea91e0dc5abd552a79140a14690edb8bd`. `Check changed Matching runtime
+formatting` failed with exit 1 on a rustfmt diff at `matching_runtime.rs:925`;
+workspace formatting exit was also 1. Query and TLS formatting exits were 0.
+Clippy and Test were skipped, so there is no Rust build/test conclusion. See
+`memory/evidence/matching-startup-fix-40839466118/evidence.md` for the compact
+artifact inventory. A clean-target workspace rerun was not dispatched because
+the selected run failed; PostgreSQL remains undispatched. Pending commits
+`overlay9d3a342d5` (`t3/matching-overlay-lock-order`) and `PG9498ee5e1`
+(`t3/fix-postgres-pool-wakeup`) still require separate review and have no test
+evidence or proven causal link to the previous startup failure.
