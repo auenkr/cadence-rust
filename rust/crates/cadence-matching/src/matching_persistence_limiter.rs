@@ -91,6 +91,8 @@ pub struct MatchingPersistenceLimiter {
     matching_members: Arc<AtomicUsize>,
     clock: Clock,
     state: Mutex<LimiterState>,
+    #[cfg(test)]
+    after_state_lock: Option<Arc<dyn Fn() + Send + Sync>>,
     enabled: bool,
     rejected: AtomicU64,
     metric_sink: RwLock<Arc<dyn crate::matching_metrics::MetricSink>>,
@@ -176,6 +178,8 @@ impl MatchingPersistenceLimiter {
                 last_refresh_nanos: now,
                 snapshot,
             }),
+            #[cfg(test)]
+            after_state_lock: None,
             enabled,
             rejected: AtomicU64::new(0),
             metric_sink: RwLock::new(Arc::new(crate::matching_metrics::NoopMetricSink)),
@@ -183,6 +187,15 @@ impl MatchingPersistenceLimiter {
             host_name: RwLock::new(String::new()),
             manual_latency_histogram: RwLock::new(false),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_after_state_lock_hook(
+        mut self: Arc<Self>,
+        hook: Arc<dyn Fn() + Send + Sync>,
+    ) -> Arc<Self> {
+        Arc::get_mut(&mut self).expect("unshared limiter").after_state_lock = Some(hook);
+        self
     }
 
     /// Go's metered persistence reads `HostName` from the process (`os.Hostname`);
@@ -602,6 +615,10 @@ impl MatchingPersistenceLimiter {
             .state
             .lock()
             .expect("Matching persistence limiter lock");
+        #[cfg(test)]
+        if let Some(hook) = &self.after_state_lock {
+            hook();
+        }
         if now.saturating_sub(state.last_refresh_nanos) >= REFRESH_NANOS {
             let snapshot =
                 read_rate_snapshot(&self.overlay, self.matching_members.load(Ordering::Relaxed));

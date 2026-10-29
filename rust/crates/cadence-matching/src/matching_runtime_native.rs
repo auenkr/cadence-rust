@@ -598,9 +598,6 @@ mod tests {
 
     #[test]
     fn cold_lookup_refreshes_limiter_before_locking_config() {
-        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-        use std::time::Duration;
-        const ID: &str = "00000000-0000-0000-0000-000000000001";
         const ENV: &str = "CADENCE_COLD_LOOKUP_CASE";
         let Ok(case) = std::env::var(ENV) else {
             for case in ["integer", "duration", "boolean", "writer", "standby", "engine_duration", "engine_integer", "engine_boolean", "engine_rate", "control_boolean", "control_duration", "control_integer"] {
@@ -616,6 +613,32 @@ mod tests {
             }
             return;
         };
+        run_cold_lookup_case(&case);
+    }
+
+    #[test]
+    fn two_thread_cold_lookup_does_not_invert_overlay_and_limiter_locks() {
+        const ENV: &str = "CADENCE_TWO_THREAD_LOCK_CASE";
+        if std::env::var_os(ENV).is_some() {
+            run_cold_lookup_case("two_thread");
+            println!("two-thread lock interleaving completed");
+            return;
+        }
+        let output = std::process::Command::new("timeout")
+            .args(["--kill-after=2s", "10s"])
+            .arg(std::env::current_exe().unwrap())
+            .args(["--exact", "matching_runtime_native::tests::two_thread_cold_lookup_does_not_invert_overlay_and_limiter_locks", "--nocapture"])
+            .env(ENV, "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "two-thread interleaving failed or timed out: {}; stdout: {}; stderr: {}", output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("two-thread lock interleaving completed"), "child did not execute interleaving: {}", String::from_utf8_lossy(&output.stdout));
+    }
+
+    fn run_cold_lookup_case(case: &str) {
+        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+        use std::time::Duration;
+        const ID: &str = "00000000-0000-0000-0000-000000000001";
         struct Source(MatchingDomainMetadata);
         impl crate::matching_domain_cache::DomainMetadataSource for Source {
             fn metadata_version(&self, _: Duration) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> { Ok(2) }
@@ -662,14 +685,48 @@ mod tests {
         }
         let clock = Arc::new(AtomicI64::new(0));
         let now = clock.clone();
+        let signaled = std::sync::atomic::AtomicBool::new(false);
+        let (clock_tx, clock_rx) = std::sync::mpsc::sync_channel(0);
+        let (locked_tx, locked_rx) = std::sync::mpsc::sync_channel(0);
+        let clock_rx = Mutex::new(clock_rx);
         let limiter = crate::matching_persistence_limiter::MatchingPersistenceLimiter::with_clock(
-            overlay.clone(), Arc::new(AtomicUsize::new(1)), Arc::new(move || now.load(Ordering::SeqCst)));
-        let source = crate::matching_persistence::limit_domain_source(Arc::new(Source(record)), limiter);
+            overlay.clone(), Arc::new(AtomicUsize::new(1)), Arc::new(move || {
+                if std::thread::current().name() == Some("cold-lookup")
+                    && !signaled.swap(true, Ordering::SeqCst)
+                {
+                    clock_tx.send(()).unwrap();
+                }
+                now.load(Ordering::SeqCst)
+            }));
+        let limiter = if case == "two_thread" {
+            limiter.with_after_state_lock_hook(Arc::new(move || {
+                if std::thread::current().name() == Some("refresh") {
+                    locked_tx.send(()).unwrap();
+                    clock_rx.lock().unwrap().recv().unwrap();
+                }
+            }))
+        } else {
+            limiter
+        };
+        let source = crate::matching_persistence::limit_domain_source(Arc::new(Source(record)), limiter.clone());
         let cache = Arc::new(MatchingDomainCache::new(source));
         clock.store(5_000_000_000, Ordering::SeqCst);
         let domain = GoString::from(ID);
         let task = GoString::from(&b"queue-\xff"[..]);
-        match case.as_str() {
+        match case {
+            "two_thread" => {
+                let refresh_limiter = limiter.clone();
+                let refresh = std::thread::Builder::new().name("refresh".into()).spawn(move || {
+                    assert!(refresh_limiter.allow());
+                }).unwrap();
+                locked_rx.recv().unwrap();
+                let lookup = std::thread::Builder::new().name("cold-lookup".into()).spawn(move || {
+                    integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0)
+                }).unwrap();
+                refresh.join().unwrap();
+                assert_eq!(lookup.join().unwrap(), 17);
+                assert_eq!(limiter.snapshot().host_qps, 3000.0);
+            }
             "integer" => assert_eq!(integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0), 17),
             "duration" => assert_eq!(duration_provider(cache, overlay, "test.duration", 1)(&domain, &task, 0), 250_000_000),
             "boolean" => assert!(!boolean_provider(cache, overlay, "test.boolean", true)(&domain, &task, 0)),
@@ -698,7 +755,7 @@ mod tests {
                     state.clone(), cache.clone(), registry, membership.clone(), None,
                 ));
                 if case.starts_with("control_") {
-                    match case.as_str() {
+                    match case {
                         "control_boolean" => assert!(control.scaler_enabled(&domain, &task, 0)),
                         "control_duration" => assert_eq!(control.poller_window_nanos(&domain, &task, 0), 250_000_000),
                         "control_integer" => assert_eq!(control.write_partition_count(&domain, &task, 0), 17),
@@ -708,7 +765,7 @@ mod tests {
                     let engine = crate::matching_engine_context_native::NativeMatchingEngineContext::with_control(
                         state, cache, control, membership, None, Arc::new(|_, _, _, _| panic!("unexpected poll registration")), None,
                     );
-                    match case.as_str() {
+                    match case {
                         "engine_duration" => assert_eq!(engine.expiration(&domain, &task, 0), Duration::from_millis(250)),
                         "engine_integer" => assert_eq!(engine.forward_degree(uuid::Uuid::parse_str(ID).unwrap(), &task, 0), 17),
                         "engine_boolean" => assert!(engine.auto_config_enabled(&domain, &task, 0)),
