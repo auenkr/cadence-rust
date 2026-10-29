@@ -83,12 +83,9 @@ impl NativePollObserver for NativeMetricsPollObserver {
             ["isolation-group", "original-isolation-group"]
                 .into_iter()
                 .filter_map(|key| {
-                    partition.get(key.as_bytes()).map(|value| {
-                        (
-                            key.to_owned(),
-                            value.go_rune_string(),
-                        )
-                    })
+                    partition
+                        .get(key.as_bytes())
+                        .map(|value| (key.to_owned(), value.go_rune_string()))
                 })
                 .collect()
         });
@@ -420,7 +417,11 @@ pub(crate) fn record_add_request(
         &list.name.go_rune_string(),
         i32::from(crate::matching_handler_native::persistence_kind(list.kind)),
         forwarded,
-        if task_type == 0 { "decision_task" } else { "activity_task" },
+        if task_type == 0 {
+            "decision_task"
+        } else {
+            "activity_task"
+        },
         crate::grpc_matching::matching_host_name(),
     );
 }

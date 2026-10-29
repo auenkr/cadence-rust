@@ -622,7 +622,8 @@ impl NativeTaskReader {
                         ) {
                             reader_metrics.metrics.task_isolation_leak(
                                 &reader_metrics.context,
-                                &GoString::from(original_isolation_group(&task.data)).go_rune_string(),
+                                &GoString::from(original_isolation_group(&task.data))
+                                    .go_rune_string(),
                                 cause,
                             );
                         }

@@ -293,11 +293,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -335,11 +331,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -463,11 +455,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -506,11 +494,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -540,11 +524,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -603,11 +583,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
     ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
         crate::matching_panic::capture("list_task_list_partitions", async move {
             let domain = Some(metric_string(&request.get_ref().domain));
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -663,11 +639,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -699,11 +671,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(metric_task_list);
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -758,7 +726,9 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
 fn metric_task_list(list: &n::api::TaskList) -> (String, Option<i32>) {
     (
         metric_string(&list.name),
-        Some(i32::from(crate::matching_handler_native::persistence_kind(list.kind))),
+        Some(i32::from(crate::matching_handler_native::persistence_kind(
+            list.kind,
+        ))),
     )
 }
 
@@ -923,7 +893,11 @@ mod tests {
         ) -> Result<(), Status> {
             let name = NativePollContext::domain_name(self, domain)?;
             crate::matching_host_native::record_add_request(
-                &self.metrics, &name, list, task_type, forwarded,
+                &self.metrics,
+                &name,
+                list,
+                task_type,
+                forwarded,
             );
             Ok(())
         }
@@ -1120,46 +1094,96 @@ mod tests {
                 (1, false, false, true, 0),
             ] {
                 let (_dir, service, sink, _) = service(reject);
-                service.engine.registry.set_shard_admission(Arc::new(|_, _| {
-                    Box::pin(async { Err(Status::internal("manager unavailable")) })
-                }));
+                service
+                    .engine
+                    .registry
+                    .set_shard_admission(Arc::new(|_, _| {
+                        Box::pin(async { Err(Status::internal("manager unavailable")) })
+                    }));
                 let domain: GoString = uuid::Uuid::from_u128(1).to_string().into();
                 let list = Some(n::api::TaskList {
-                    name: if malformed { "/__cadence_sys/invalid".into() } else { GoString::from(&b"queue-\xe2\x82"[..]) },
+                    name: if malformed {
+                        "/__cadence_sys/invalid".into()
+                    } else {
+                        GoString::from(&b"queue-\xe2\x82"[..])
+                    },
                     kind,
                     ..Default::default()
                 });
-                let forwarded_from = if forwarded { "parent".into() } else { GoString::default() };
-                let status = if activity {
-                    service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
-                        domain_id: domain.clone(),
-                        source_domain_id: domain,
-                        task_list: list,
-                        forwarded_from,
-                        ..Default::default()
-                    })).await.unwrap_err()
+                let forwarded_from = if forwarded {
+                    "parent".into()
                 } else {
-                    service.add_decision_task(Request::new(n::matching::AddDecisionTaskRequest {
-                        domain_id: domain,
-                        task_list: list,
-                        forwarded_from,
-                        ..Default::default()
-                    })).await.unwrap_err()
+                    GoString::default()
                 };
-                assert_eq!(status.code(), if reject { tonic::Code::ResourceExhausted } else { tonic::Code::Internal });
-                let request_events: Vec<_> = sink.events().into_iter().filter(|e| e.name == CADENCE_REQUESTS_PER_TASK_LIST || e.name == FORWARDED_PER_TASK_LIST).collect();
-                let expected_label = if kind == 2 { "__sticky__" } else if kind == 3 { "__ephemeral__" } else if malformed { "___cadence_sys_invalid" } else { "queue___" };
+                let status = if activity {
+                    service
+                        .add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                            domain_id: domain.clone(),
+                            source_domain_id: domain,
+                            task_list: list,
+                            forwarded_from,
+                            ..Default::default()
+                        }))
+                        .await
+                        .unwrap_err()
+                } else {
+                    service
+                        .add_decision_task(Request::new(n::matching::AddDecisionTaskRequest {
+                            domain_id: domain,
+                            task_list: list,
+                            forwarded_from,
+                            ..Default::default()
+                        }))
+                        .await
+                        .unwrap_err()
+                };
+                assert_eq!(
+                    status.code(),
+                    if reject {
+                        tonic::Code::ResourceExhausted
+                    } else {
+                        tonic::Code::Internal
+                    }
+                );
+                let request_events: Vec<_> = sink
+                    .events()
+                    .into_iter()
+                    .filter(|e| {
+                        e.name == CADENCE_REQUESTS_PER_TASK_LIST
+                            || e.name == FORWARDED_PER_TASK_LIST
+                    })
+                    .collect();
+                let expected_label = if kind == 2 {
+                    "__sticky__"
+                } else if kind == 3 {
+                    "__ephemeral__"
+                } else if malformed {
+                    "___cadence_sys_invalid"
+                } else {
+                    "queue___"
+                };
                 assert!(!request_events.is_empty());
                 for event in request_events {
                     assert_eq!(event.tags[TASK_LIST_TAG], expected_label, "kind={kind}");
                 }
-                let events: Vec<_> = sink.events().into_iter().filter(|e| e.name == CADENCE_TASKLIST_REQUEST).collect();
+                let events: Vec<_> = sink
+                    .events()
+                    .into_iter()
+                    .filter(|e| e.name == CADENCE_TASKLIST_REQUEST)
+                    .collect();
                 assert_eq!(events.len(), expected, "activity={activity}, kind={kind}, forwarded={forwarded}, malformed={malformed}, reject={reject}");
                 if let Some(event) = events.first() {
                     assert_eq!(event.tags[OPERATION_TAG], "AddTask");
                     assert_eq!(event.tags[DOMAIN_TAG], "domain");
                     assert_eq!(event.tags[GO_TASK_LIST_TAG], "queue___");
-                    assert_eq!(event.tags[TASK_LIST_TYPE_TAG], if activity { "activity_task" } else { "decision_task" });
+                    assert_eq!(
+                        event.tags[TASK_LIST_TYPE_TAG],
+                        if activity {
+                            "activity_task"
+                        } else {
+                            "decision_task"
+                        }
+                    );
                 }
                 assert_eq!(service.engine.registry.loaded_owner_count(), 0);
             }

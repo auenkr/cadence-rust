@@ -357,3 +357,21 @@ through the workflow concurrency rule; cancellation is due to a concrete
 source correction, not an observation timeout. No local Cargo/Go/rustfmt ran.
 Master synchronization remains pending validated latest source. PR1 is linked
 and watched; its body should be refreshed with the new source and run URL.
+
+## Metric-fix workspace validation and runner formatting
+
+Fresh run https://github.com/auenkr/cadence-rust/actions/runs/40802403212
+is pinned to `7c4e1ee9d5470b424709a20d9a2393274cadb87a`. Confirmed live
+Clippy completed successfully and whole-workspace Test began. Applied its
+three-file formatting artifact from
+`/mnt/storage/service/ci-evidence/matching-native-format-40802403212/matching-format.patch`
+to the native host, reader and request service, matching the runner's formatted
+source. No local Cargo/Go/rustfmt ran. Earlier run40802091633 at e9ac81063
+was superseded/cancelled after the concrete request-kind correction.
+
+New source-domain audit is saved in
+`matching-native-source-domain-audit-20261029.md`; it is an open parity gap,
+not a test result. Latest user instruction: after merging/pushing the saved
+validated progress, switch this work directory to master. Do not call Matching
+complete or start History; raw-source-domain behavior and all native mixed
+SDK/restart/recovery acceptance remain outstanding.
