@@ -401,6 +401,7 @@ impl NativeForwardState {
         source_domain: &GoString,
         task_type: i32,
         kind: i16,
+        deadline: tokio::time::Instant,
     ) -> Result<(), crate::matching_forward::ForwardError> {
         use crate::matching_forward::ForwardError;
         if kind == 1 {
@@ -445,7 +446,6 @@ impl NativeForwardState {
             .collect();
         let schedule_id = task.data.schedule_id;
         let forwarded_from = self.source.clone();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         let task_list = Some(n::api::TaskList {
             name: parent_name.clone(),
             kind: i32::from(kind) + 1,
@@ -501,7 +501,7 @@ impl NativeForwardState {
                 };
                 crate::matching_fault_injection::inject_client_call(operation, async {
                     dispatcher
-                        .accept_forwarded_backlog(task, source_domain, &parent_name, task_type)
+                        .accept_forwarded_backlog(task, source_domain, &parent_name, task_type, deadline)
                         .await
                 })
                 .await
@@ -592,6 +592,7 @@ impl NativeTaskDispatcher {
         source_domain: &GoString,
         parent_name: &GoString,
         task_type: i32,
+        deadline: tokio::time::Instant,
     ) -> Result<(), Status> {
         // Go uuid.Parse on the wire domain: non-UTF-8 is simply invalid.
         source_domain
@@ -607,14 +608,13 @@ impl NativeTaskDispatcher {
             .map_err(|_| Status::invalid_argument("TaskList is not valid."))?
             .is_root();
         let local_wait = if root {
-            Duration::from_secs(2)
+            deadline.saturating_duration_since(tokio::time::Instant::now())
         } else {
             self.forward
                 .as_ref()
                 .map(|forward| Duration::from_nanos((forward.local_task_wait)().max(0) as u64))
                 .unwrap_or(Duration::from_millis(10))
         };
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         let group = task
             .data
             .partition_config
@@ -644,6 +644,7 @@ impl NativeTaskDispatcher {
                         source_domain,
                         task_type,
                         0,
+                        deadline,
                     ))
                     .await
                     .is_ok()
@@ -1674,7 +1675,7 @@ mod tests {
             data: TaskDataBytes::default(),
         };
         let error = dispatcher
-            .accept_forwarded_backlog(task, &gs(b"\xff\xfe"), &gs(b"q"), 0)
+            .accept_forwarded_backlog(task, &gs(b"\xff\xfe"), &gs(b"q"), 0, tokio::time::Instant::now() + Duration::from_secs(2))
             .await
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
@@ -1701,6 +1702,7 @@ mod tests {
         decisions: Mutex<Vec<n::matching::AddDecisionTaskRequest>>,
         activities: Mutex<Vec<n::matching::AddActivityTaskRequest>>,
         fail: bool,
+        deadlines: Mutex<Vec<tokio::time::Instant>>,
     }
     impl NativeMatchingApi for ScriptedApi {
         fn poll_for_decision_task(
@@ -1720,8 +1722,9 @@ mod tests {
         fn add_decision_task(
             &self,
             r: n::matching::AddDecisionTaskRequest,
-            _d: tokio::time::Instant,
+            deadline: tokio::time::Instant,
         ) -> NativeFuture<Result<(), Status>> {
+            self.deadlines.lock().unwrap().push(deadline);
             self.decisions.lock().unwrap().push(r);
             let fail = self.fail;
             Box::pin(async move {
@@ -1790,6 +1793,45 @@ mod tests {
         }
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn backlog_forward_keeps_parent_deadline_after_slow_resolution() {
+        let api = Arc::new(ScriptedApi::default());
+        let state = NativeForwardState::new(
+            {
+                let api = api.clone();
+                move || {
+                    let api = api.clone();
+                    Box::pin(async move {
+                        tokio::time::sleep(Duration::from_millis(80)).await;
+                        Some((NativeParent::Service(api), gs(b"q")))
+                    })
+                }
+            },
+            Arc::new(|| 10),
+            Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 10))),
+            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 100), now())),
+            gs(b"/__cadence_sys/q/1"),
+            Arc::new(|| 0),
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        state.forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0, deadline).await.unwrap();
+        assert_eq!(api.deadlines.lock().unwrap().as_slice(), &[deadline]);
+        assert_eq!(deadline.duration_since(tokio::time::Instant::now()), Duration::from_millis(20));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn in_process_forwarded_backlog_respects_caller_deadline_and_withdraws() {
+        let (_directory, _queue, dispatcher) = fixture(&[]);
+        let (_stop, receiver) = tokio::sync::watch::channel(false);
+        let matcher = Arc::new(NativeSyncMatcher::new(&[], receiver));
+        let dispatcher = dispatcher.with_sync_matcher(matcher.clone());
+        let domain = GoString::from(Uuid::from_u128(1).to_string());
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        assert!(dispatcher.accept_forwarded_backlog(raw_task(b"r"), &domain, &gs(b"q"), 0, deadline).await.is_err());
+        assert_eq!(tokio::time::Instant::now(), deadline);
+        assert!(tokio::time::timeout(Duration::from_millis(1), matcher.poll(&GoString::default())).await.is_err());
+    }
+
     #[tokio::test]
     async fn native_forward_backlog_keeps_raw_run_id_exact_for_decision_and_activity() {
         let source = b"/__cadence_sys/q\xff/1";
@@ -1797,11 +1839,11 @@ mod tests {
             let api = Arc::new(ScriptedApi::default());
             let state = forward_state(api.clone(), source, b"q\xff");
             state
-                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 0, 0)
+                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 0, 0, tokio::time::Instant::now() + Duration::from_secs(2))
                 .await
                 .unwrap();
             state
-                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 1, 0)
+                .forward_backlog_task(raw_task(run), &gs(b"dom"), &gs(b"src"), 1, 0, tokio::time::Instant::now() + Duration::from_secs(2))
                 .await
                 .unwrap();
             let d = api.decisions.lock().unwrap();
@@ -1836,7 +1878,7 @@ mod tests {
         let api = Arc::new(ScriptedApi::default());
         let root = forward_state(api.clone(), b"q\xff", b"q\xff");
         assert!(matches!(
-            root.forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0)
+            root.forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0, tokio::time::Instant::now() + Duration::from_secs(2))
                 .await,
             Err(crate::matching_forward::ForwardError::NoParent)
         ));
@@ -1847,7 +1889,7 @@ mod tests {
         });
         let state = forward_state(failing.clone(), b"/__cadence_sys/q\xff/1", b"q\xff");
         assert!(state
-            .forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0)
+            .forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0, tokio::time::Instant::now() + Duration::from_secs(2))
             .await
             .is_err());
         assert_eq!(failing.decisions.lock().unwrap().len(), 1);
