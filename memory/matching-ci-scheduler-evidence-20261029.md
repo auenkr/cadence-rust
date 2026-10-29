@@ -1,0 +1,10 @@
+# Matching CI scheduler evidence — 2026-10-29
+
+- Read `AGENTS.md`, `memory/matching-native-startup-validation-candidate-20261029.md` from `origin/t3/matching-startup-candidate`, and the scheduler note from `origin/t3/matching-ci-validation`.
+- Queried [run 40841353614](https://github.com/auenkr/cadence-rust/actions/runs/40841353614) once. It remains `in_progress` on exact head `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`; Formatting preflight is successful, Clippy is running, and the Formatting and Test steps are pending. No terminal conclusion, test totals, or cold-provider/two-thread/semaphore outcome is available. No polling or watch was used.
+- The completed `matching-format-patch` artifact was downloaded and reviewed. It changes only formatting in `rust/crates/cadence-matching/src/matching_persistence_limiter.rs` (3 additions, 1 deletion) and `rust/crates/cadence-matching/src/matching_runtime_native.rs` (111 additions, 31 deletions). The diff is line wrapping/indentation in test code and contains no behavior changes. Artifact patch SHA256: `a5b3d531e4a31da663e09e1381ec949b7e4c66b8687d52f3b2c5062b9484a58a`.
+- This patch is not yet applied. Its validated source base is the run's `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`; apply it on an isolated branch only after run 40841353614 is terminal, then run focused clean-target Matching CI on the formatted commit before considering workspace CI.
+- Verified candidate branch head `8cc72372ad605dcdce4f03e86c895dc90115fd38` follows e84 with only `memory/matching-native-startup-validation-candidate-20261029.md` changed. Rust, Go, tests, and workflow sources are identical; 8cc is docs-only and is not the tested source SHA.
+- The frozen ref `matching-native-final-20261029` remains at `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
+- `gh run list` showed only run 40841353614 active; no other intensive CI/mixed gate was active. No new run was dispatched because the focused run has not reached terminal state. No PostgreSQL/dependency/mixed gate was started.
+- No local Cargo, rustfmt, Go validation, build, or runtime command was run.
