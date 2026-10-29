@@ -133,11 +133,8 @@ impl NativeMatchingEngineContext {
             .and_then(|registry| registry.shard_router())
             .or_else(|| self.shard_router.clone())
     }
-    fn active(&self, id: &GoString) -> bool {
-        std::str::from_utf8(id.as_bytes())
-            .ok()
-            .and_then(|id| self.domains.is_active_in(id, &self.cluster).ok())
-            .unwrap_or(true)
+    fn active(&self, id: &GoString) -> Result<bool, Status> {
+        cached_domain_active(&self.cache, id, &self.cluster)
     }
 
     fn dynamic_duration(
@@ -216,10 +213,35 @@ impl NativeMatchingEngineContext {
     }
 }
 
+/// Match Go DomainCacheEntry.IsActiveIn using the exact requested cache key.
+/// A source cache miss must fail AddTask, rather than dispatch work as active.
+pub(crate) fn cached_domain_active(
+    cache: &MatchingDomainCache,
+    id: &GoString,
+    cluster: &str,
+) -> Result<bool, Status> {
+    let raw = id.as_utf8().map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
+    let domain = cache.get_domain_by_id(raw)
+        .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
+    if !domain.is_global_domain {
+        return Ok(true);
+    }
+    if domain.failover_end_time_nanos.is_some() {
+        return Ok(false);
+    }
+    Ok(domain.replication.active_cluster_name == cluster || domain.replication.active_clusters
+        .as_ref()
+        .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+        .is_some_and(|scopes| scopes.values().any(|scope| {
+            scope.cluster_attributes.as_ref().is_some_and(|attributes| {
+                attributes.values().any(|attribute| attribute.active_cluster_name == cluster)
+            })
+        })))
+}
+
 impl DecisionAddContext for NativeMatchingEngineContext {
-    fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status> {
-        let id = GoString::from(domain.to_string());
-        Ok(self.active(&id))
+    fn domain_active(&self, domain: &GoString) -> Result<bool, Status> {
+        self.active(domain)
     }
     fn forward_degree(&self, domain: uuid::Uuid, root: &GoString, task_type: i32) -> i64 {
         self.dynamic_integer(
@@ -266,7 +288,7 @@ impl NativePollContext for NativeMatchingEngineContext {
         self.control.domain_name(id)
     }
     fn domain_active(&self, id: &GoString) -> Result<bool, Status> {
-        Ok(self.active(id))
+        self.active(id)
     }
     fn check_queue(&self, key: &TaskListKeyBytes, queue: &NativeQueueHandle) -> Result<(), Status> {
         self.control.check_queue(key, queue)
@@ -478,5 +500,96 @@ mod tests {
             ),
             17
         );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use cadence_api::types::{DomainInfo, DomainConfiguration, DomainReplicationConfiguration};
+    use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
+    use crate::matching_domain_cache::{DomainMetadataSource, DomainMetadataSourceError, DomainMetadataPage, DomainErrorClass};
+
+    pub(crate) fn record(id: usize, notification_version: i64) -> MatchingDomainMetadata {
+        let name = format!("domain-{id}");
+        MatchingDomainMetadata {
+            info: DomainInfo {
+                name,
+                uuid: format!("00000000-0000-0000-0000-{id:012x}"),
+                ..DomainInfo::default()
+            },
+            configuration: DomainConfiguration::default(),
+            replication: DomainReplicationConfiguration::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: notification_version,
+            notification_version,
+            failover_notification_version: notification_version,
+            failover_version: notification_version,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 0,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        }
+    }
+
+    struct Source(Vec<MatchingDomainMetadata>);
+    impl DomainMetadataSource for Source {
+        fn metadata_version(&self, _: Duration) -> Result<i64, DomainMetadataSourceError> { Ok(1) }
+        fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+            Ok(DomainMetadataPage { domains: self.0.clone(), next_page_token: None })
+        }
+        fn get_domain(&self, _: Option<&str>, id: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+            let id = id.unwrap_or_default();
+            let parsed = uuid::Uuid::parse_str(id).map_err(|_| DomainMetadataSourceError::permanent("UUID is invalid.").with_class(DomainErrorClass::BadRequest))?;
+            self.0.iter().find(|d| uuid::Uuid::parse_str(&d.info.uuid).ok() == Some(parsed)).cloned()
+                .ok_or_else(|| DomainMetadataSourceError::permanent("source domain missing").with_class(DomainErrorClass::NotFound))
+        }
+    }
+    pub(crate) fn cache(records: Vec<MatchingDomainMetadata>) -> Arc<MatchingDomainCache> {
+        let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source(records))));
+        cache.refresh_domains().unwrap();
+        cache
+    }
+
+    #[test]
+    fn activity_uses_exact_live_cache_entry_and_go_failover_rules() {
+        let mut domain = record(0xabc, 0);
+        let id = GoString::from(domain.info.uuid.clone());
+        assert!(cached_domain_active(&cache(vec![domain.clone()]), &id, "other").unwrap());
+        domain.is_global_domain = true;
+        domain.replication.active_cluster_name = "active".into();
+        assert!(cached_domain_active(&cache(vec![domain.clone()]), &id, "active").unwrap());
+        assert!(!cached_domain_active(&cache(vec![domain.clone()]), &id, "other").unwrap());
+        domain.replication.active_clusters = Some(serde_json::from_value(serde_json::json!({
+            "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
+                "r": {"activeClusterName": "other"}
+            }}}
+        })).unwrap());
+        assert!(cached_domain_active(&cache(vec![domain.clone()]), &id, "other").unwrap());
+        domain.failover_end_time_nanos = Some(0);
+        for cluster in ["active", "other"] {
+            assert!(!cached_domain_active(&cache(vec![domain.clone()]), &id, cluster).unwrap());
+        }
+        let cached = cache(vec![domain]);
+        for alias in [id.as_utf8().unwrap().to_uppercase(), id.as_utf8().unwrap().replace('-', "")] {
+            let error = cached_domain_active(&cached, &alias.into(), "active").unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(error.message(), "DefaultDomainCache encounter case where domain exists but cannot be loaded");
+        }
+        let error = cached_domain_active(&cached, &uuid::Uuid::from_u128(99).to_string().into(), "active").unwrap_err();
+        assert_eq!(error.code(), tonic::Code::NotFound);
+        assert_eq!(error.message(), "source domain missing");
     }
 }

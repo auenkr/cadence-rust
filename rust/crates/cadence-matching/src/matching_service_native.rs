@@ -878,6 +878,7 @@ mod tests {
         metrics: crate::matching_metrics::MatchingMetrics,
         reject: bool,
         query_parent: Option<Arc<dyn NativeQueryParent>>,
+        source_cache: Option<Arc<crate::matching_domain_cache::MatchingDomainCache>>,
     }
     use crate::matching_dispatch_native::{NativeFuture, NativeMatchingApi};
     use crate::matching_engine_native::{NativePollRegistration, NativeQueryParent};
@@ -901,8 +902,11 @@ mod tests {
             );
             Ok(())
         }
-        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
-            Ok(true)
+        fn domain_active(&self, id: &GoString) -> Result<bool, Status> {
+            match &self.source_cache {
+                Some(cache) => crate::matching_engine_context_native::cached_domain_active(cache, id, "active"),
+                None => Ok(true),
+            }
         }
         fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
             1
@@ -1071,6 +1075,7 @@ mod tests {
             metrics: crate::matching_metrics::MatchingMetrics::new(sink.clone()),
             reject,
             query_parent: None,
+            source_cache: None,
         };
         (
             dir,
@@ -1079,6 +1084,81 @@ mod tests {
             store,
         )
     }
+    #[tokio::test]
+    async fn canonical_source_activity_preserves_standby_and_forwarded_persistence_rules() {
+        use crate::matching_engine_context_native::tests::{cache, record};
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
+        use cadence_proto::native::matching::matching_service_server::MatchingService;
+        for active in [false, true] {
+            for forwarded in [false, true] {
+                let (_dir, mut service, _sink, store) = service(false);
+                let mut source = record(0xabc, 0);
+                source.is_global_domain = true;
+                source.replication.active_cluster_name = if active { "active" } else { "other" }.into();
+                let source_id = source.info.uuid.clone();
+                service.integration.source_cache = Some(cache(vec![source]));
+                let result = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                    source_domain_id: source_id.into(),
+                    task_list: Some(n::api::TaskList { name: "canonical-source".into(), ..Default::default() }),
+                    workflow_execution: Some(n::api::WorkflowExecution {
+                        workflow_id: "workflow".into(), run_id: uuid::Uuid::from_u128(5).to_string().into(),
+                    }),
+                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
+                    ..Default::default()
+                })).await;
+                if forwarded {
+                    assert_eq!(result.unwrap_err().code(), tonic::Code::Unavailable);
+                } else {
+                    result.unwrap();
+                }
+                for domain_id in [uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(0xabc)] {
+                    let key = TaskListKeyBytes { domain_id, name: "canonical-source".into(), task_type: 1 };
+                    let rows = MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap();
+                    let expected = usize::from(!forwarded && domain_id == uuid::Uuid::from_u128(0xabc));
+                    assert_eq!(rows.len(), expected, "active={active}, forwarded={forwarded}");
+                }
+                service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn activity_source_cache_failures_reach_handler_without_persistence() {
+        use crate::matching_engine_context_native::tests::{cache, record};
+        use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
+        use cadence_proto::native::matching::matching_service_server::MatchingService;
+        let (_dir, mut service, _sink, store) = service(false);
+        let source = record(0xabc, 0);
+        let canonical = source.info.uuid.clone();
+        service.integration.source_cache = Some(cache(vec![source]));
+        for (source_id, code, message) in [
+            (GoString::from(canonical.to_uppercase()), tonic::Code::Internal, "DefaultDomainCache encounter case where domain exists but cannot be loaded"),
+            (GoString::from(canonical.replace('-', "")), tonic::Code::Internal, "DefaultDomainCache encounter case where domain exists but cannot be loaded"),
+            (GoString::from(uuid::Uuid::from_u128(99).to_string()), tonic::Code::NotFound, "source domain missing"),
+            (GoString::from("malformed"), tonic::Code::InvalidArgument, "UUID is invalid."),
+            (GoString::default(), tonic::Code::InvalidArgument, "DomainID is empty."),
+            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "invalid domain UUID"),
+        ] {
+            for forwarded in [false, true] {
+                let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                    domain_id: uuid::Uuid::from_u128(1).to_string().into(),
+                    source_domain_id: source_id.clone(),
+                    task_list: Some(n::api::TaskList { name: "source-cache".into(), ..Default::default() }),
+                    forwarded_from: if forwarded { "child".into() } else { GoString::default() },
+                    ..Default::default()
+                })).await.unwrap_err();
+                assert_eq!(error.code(), code, "source {source_id:?}, forwarded={forwarded}");
+                assert_eq!(error.message(), message);
+                for domain_id in [uuid::Uuid::from_u128(1), uuid::Uuid::from_u128(0xabc)] {
+                    let key = TaskListKeyBytes { domain_id, name: "source-cache".into(), task_type: 1 };
+                    assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &key, 0, i64::MAX, 10).unwrap().is_empty());
+                }
+            }
+        }
+        service.engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+    }
+
     #[tokio::test]
     async fn add_traffic_counts_before_manager_failure_with_go_kind_mapping() {
         use crate::matching_metrics::*;

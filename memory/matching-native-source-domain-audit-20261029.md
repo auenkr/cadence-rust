@@ -40,3 +40,27 @@ live PostgreSQL oracle ignore, now explicitly invoked by the supplemental
 matching dependency-oracles workflow (pending execution). This inventory does
 not excuse historical parity-test exclusions or prove native coverage of all
 Go behavior.
+
+## Correction written, pending Actions validation
+
+Native AddTask now passes the original GoString to its activity dependency,
+sync matcher, History dispatch and remote forwarding. Source UUID conversion
+is deferred until durable enqueue. The concrete engine context resolves the
+exact source key through MatchingDomainCache and preserves typed lookup errors.
+It evaluates IsActiveIn directly from the returned metadata: local domains are
+active, pending global failover is inactive, otherwise the primary or any
+active-active attribute may own work. Poll activity checks use this same cache
+path rather than an in-memory lookup with a default-true fallback.
+
+New public-handler regressions use that concrete cache helper to check uppercase
+and compact aliases, missing, malformed, empty and invalid-UTF8 source IDs,
+including forwarded calls, exact status/messages and absence of persisted rows.
+Canonical active/standby handler cases check persistence in the source domain
+and rejection of forwarded unmatched work. A cache regression covers local,
+global and pending/attribute activity; the existing forwarding fixture now
+requires an uppercase compact source spelling to survive unchanged.
+
+These are unvalidated source changes, not a CI pass or completed parity claim.
+The test source emulates a UUID-parsing backend's canonical stored cache keys;
+it is not a new original-Go oracle. Existing Go spelling oracle and mixed gates
+still supply independent runtime evidence. No local Cargo/Go/rustfmt ran.

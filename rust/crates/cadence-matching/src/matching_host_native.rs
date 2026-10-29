@@ -385,7 +385,7 @@ impl DecisionAddContext for NativeMatchingHost {
         record_add_request(&self.metrics, &name, list, task_type, forwarded);
         Ok(())
     }
-    fn domain_active(&self, id: uuid::Uuid) -> Result<bool, Status> {
+    fn domain_active(&self, id: &GoString) -> Result<bool, Status> {
         DecisionAddContext::domain_active(&self.engine, id)
     }
     fn forward_degree(&self, id: uuid::Uuid, list: &GoString, kind: i32) -> i64 {

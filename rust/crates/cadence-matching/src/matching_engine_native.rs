@@ -53,7 +53,7 @@ pub trait DecisionAddContext: Send + Sync {
     ) -> Result<(), Status> {
         Ok(())
     }
-    fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status>;
+    fn domain_active(&self, domain: &GoString) -> Result<bool, Status>;
     fn forward_degree(&self, domain: uuid::Uuid, root: &GoString, task_type: i32) -> i64;
     fn check_write_partition(
         &self,
@@ -229,11 +229,6 @@ impl NativeMatchingEngine {
             .ok()
             .and_then(|value| uuid::Uuid::parse_str(value).ok())
             .ok_or_else(|| Status::invalid_argument("DomainUUID is not valid."))?;
-        let source_domain = source_id
-            .as_utf8()
-            .ok()
-            .and_then(|value| uuid::Uuid::parse_str(value).ok())
-            .ok_or_else(|| Status::invalid_argument("Source domain UUID is not valid."))?;
         let key = TaskListKeyBytes {
             domain_id: domain,
             name: list.name.clone(),
@@ -288,12 +283,12 @@ impl NativeMatchingEngine {
                     request_deadline.map(|d| d.saturating_duration_since(now_instant)),
                 )
         };
-        let source = GoString::from(source_domain.to_string());
+        let source = source_id.clone();
         let task = AllocatedTaskBytes {
             task_id: 0,
             data: data.clone(),
         };
-        if context.domain_active(source_domain)? {
+        if context.domain_active(&source)? {
             let degree = context
                 .forward_degree(domain, parsed.root(), task_type)
                 .max(1);
@@ -394,6 +389,11 @@ impl NativeMatchingEngine {
         if forwarded {
             return Err(crate::matching_dispatch::remote_sync_match_failed());
         }
+        // UUID conversion belongs to persistence, after Go's exact-key cache
+        // lookup and sync/forward paths have consumed the original source.
+        let source_domain = source.as_utf8().ok()
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .ok_or_else(|| Status::invalid_argument("Source domain UUID is not valid."))?;
         entry
             .enqueue(
                 data,
@@ -436,7 +436,7 @@ mod tests {
 
     struct TestContext;
     impl DecisionAddContext for TestContext {
-        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
+        fn domain_active(&self, _: &GoString) -> Result<bool, Status> {
             Ok(true)
         }
         fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
@@ -544,8 +544,8 @@ mod tests {
 
     struct InactiveSource(uuid::Uuid);
     impl DecisionAddContext for InactiveSource {
-        fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status> {
-            assert_eq!(domain, self.0);
+        fn domain_active(&self, domain: &GoString) -> Result<bool, Status> {
+            assert_eq!(domain.as_bytes(), self.0.to_string().as_bytes());
             Ok(false)
         }
         fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
@@ -716,7 +716,7 @@ mod tests {
     }
     struct CaptureContext(Arc<std::sync::Mutex<Option<matching::AddActivityTaskRequest>>>);
     impl DecisionAddContext for CaptureContext {
-        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
+        fn domain_active(&self, _: &GoString) -> Result<bool, Status> {
             Ok(true)
         }
         fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
@@ -743,12 +743,13 @@ mod tests {
         use cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes;
         let (_dir, engine, store) = fixture();
         let target = uuid::Uuid::from_u128(1);
-        let source = uuid::Uuid::from_u128(2);
+        let source = uuid::Uuid::from_u128(0xabc);
+        let source_alias = source.simple().to_string().to_uppercase();
         let name = GoString::from(&b"/__cadence_sys/\xff/1"[..]);
         let capture = Arc::new(std::sync::Mutex::new(None));
         let request = matching::AddActivityTaskRequest {
             domain_id: target.to_string().into(),
-            source_domain_id: source.to_string().into(),
+            source_domain_id: source_alias.clone().into(),
             task_list: Some(api::TaskList {
                 name: name.clone(),
                 ..Default::default()
@@ -775,7 +776,7 @@ mod tests {
         assert_eq!(sent.domain_id.as_bytes(), target.to_string().as_bytes());
         assert_eq!(
             sent.source_domain_id.as_bytes(),
-            source.to_string().as_bytes()
+            source_alias.as_bytes()
         );
         assert_eq!(sent.forwarded_from, name);
         assert_eq!(sent.task_list.unwrap().name.as_bytes(), &[0xff]);
@@ -808,7 +809,7 @@ mod tests {
 
     struct RoutingFailure;
     impl DecisionAddContext for RoutingFailure {
-        fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
+        fn domain_active(&self, _: &GoString) -> Result<bool, Status> {
             Ok(true)
         }
         fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
