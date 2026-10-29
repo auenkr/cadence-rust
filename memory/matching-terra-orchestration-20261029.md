@@ -52,6 +52,64 @@ their state is unknown, and they are not counted as controlled by this roster.
 Workers must recover existing branch results before duplicating changes and
 must not edit other worktrees.
 
+## Latest orchestration update
+
+Earlier focused runs are now confirmed terminal **failure** by GitHub Actions:
+
+| Run | Exact source head | Observed failure |
+| --- | --- | --- |
+| https://github.com/auenkr/cadence-rust/actions/runs/40910747745 | `a86d7a915a1f64d4fac9c5b260b016b95c9c8d6a` | Configured semaphore launch regression still unwraps Elapsed at line 497; 973 passed, 1 failed, 2 ignored; exit 101 |
+| https://github.com/auenkr/cadence-rust/actions/runs/40910919611 | `96a8dee48df24ffc1c634c73ce82a92a385d9135` | Changed-runtime formatting check, including launcher and persistence dynamic config |
+| https://github.com/auenkr/cadence-rust/actions/runs/40910970647 | `b61ba5d954fb8bc46e816298dbde4101dd3a5ead` | Changed-runtime formatting check |
+| https://github.com/auenkr/cadence-rust/actions/runs/40911406716 | `1e0e70c0ce244a865e456fd79e59d9676b28bf51` | Changed-runtime formatting check |
+
+These supersede the earlier in-progress snapshots of these exact runs. The
+fixture-length correction alone did not fix the configured launch scenario.
+
+Further completed, pushed but unaccepted candidates:
+
+- Combined candidate `origin/t3/matching-lifecycle-timeout-integration`, evidence
+  head `125cb67c6742fbd4623db46325b932af18dabe13`, source `1e0e70c0`.
+  Preserves all three initial histories; drops timed-out offer before checking
+  claim to withdraw an unclaimed handoff.
+- `origin/t3/semaphore-result-parity`, evidence `ed5d4b277`, source
+  `5abd83ef03910cc0a826f82f877198f0588e2d88`; correction `127a9f802` removes
+  extra metadata read and wraps scan errors; `5abd83ef` adds caller lifetime
+  to manager/store interfaces and preserves applied-write success. Production
+  adapters still ignore that context. CI 40911583315 was last observed in
+  progress; no terminal conclusion recorded here.
+- `origin/t3/matching-lifecycle-fixes-1`, evidence
+  `0991e90571f8a3f2243f7fa57ae4497ac4cb1a93`, source
+  `465697d7da6980d22ae1a697bde215b479f3baff`. Corrections `aecc4f65`,
+  `ab7a6353`, `aa7f4259`, `465697d7` bind reader/GC/idle providers and add
+  lookup, eviction and blocked-store/full-buffer shutdown regressions. Invalid
+  ticker startup ordering and complete single-domain binding remain open.
+  CI 40911834316 was dispatched; no conclusion is recorded here.
+- `origin/t3/forwarded-deadline-parity`, evidence `96db32e9b`, source
+  `e981d53e5760f627fc7110b2c820ffabc9b819f1`; corrections `82f03468` and
+  `e981d53e` propagate parent deadline through resolution/remote/in-process
+  forwarding and preserve claimed shutdown/completion behavior. Remote wire
+  observation and boundary races still need coverage. CI 40911874411 was
+  pending in the worker's observation; no terminal result recorded here.
+
+Current replacement roster (three Codex GPT-6.1 Terra, high/default):
+
+- `98472289-6d6f-4cc2-9079-79840168e546`: complete semaphore production
+  persistence context/cancellation, confirm/error race regressions and wrapped
+  typed-error wire classification. This continues the result-parity branch.
+- `80cf9033-2f5d-4428-a639-416006bb0644`: implement invalid-ticker manager
+  startup/publication recovery architecture and bind all remaining manager
+  providers to the one resolved domain name, with live values.
+- `f81de999-c0a7-4e75-8a64-f98293ee2ac5`: reconcile returned lifecycle,
+  forwarding and semaphore followups; repair configured launch failure and CI
+  formatting without local Cargo/rustfmt or weakened checks. Must retain holds
+  for the other two independently owned followups.
+
+For these three short assignment suffixes, full task IDs use prefix
+`node:delegated-task:command%3Amcp%3Af18c299c-79dd-4b96-a532-5d7a80b68d03%3Adelegate-task%3A`.
+The earlier roster below is historical. Follow completion callbacks; do not
+poll delegates, infer liveness from this file, or duplicate their assignments.
+
 ## Acceptance still required
 
 ### Returned candidates and replacement roster
