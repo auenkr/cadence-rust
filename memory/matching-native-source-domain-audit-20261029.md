@@ -64,3 +64,21 @@ These are unvalidated source changes, not a CI pass or completed parity claim.
 The test source emulates a UUID-parsing backend's canonical stored cache keys;
 it is not a new original-Go oracle. Existing Go spelling oracle and mixed gates
 still supply independent runtime evidence. No local Cargo/Go/rustfmt ran.
+
+## Independent review and continuation
+
+Review identified a duplicate test module; corrected in d9ac938ba by naming
+the shared fixture module source_domain_tests. The review also found that
+invalid-UTF8 source lookup still returns a local InvalidArgument before the
+configured backend's typed error/panic behavior. That remains open; a Terra
+worker is implementing the raw-source error boundary, while another adds
+successful sync/History source-identity coverage. A Luna worker is retaining
+terminal whole-workspace evidence from run40803510954 (success at4d1007f3b,
+predating source-domain edits). No pass of the new correction is claimed.
+
+Selected Matching CI run40804502679 tests b72844748 with clean target,
+runner formatting and original-Go UUID spelling oracle enabled:
+https://github.com/auenkr/cadence-rust/actions/runs/40804502679
+It predates the duplicate-module fix and cannot validate the current source.
+Wait for terminal diagnostics/artifacts and apply runner formatting as needed.
+All ten native mixed lanes and source parity closure remain outstanding.
