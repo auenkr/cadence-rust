@@ -200,6 +200,7 @@ impl NativeSemaphoreService {
         tokio::pin!(acquire);
         let result = tokio::select! {
             result = &mut acquire => result.map_err(status)?,
+            _ = wait_deadline(deadline) => return Err(Status::internal("context deadline exceeded")),
             _ = wait_cancelled(cancelled) => return Err(Status::internal("context canceled")),
             _ = wait_for_cancel(&mut dropped) => return Err(Status::internal("context canceled")),
         };
@@ -249,6 +250,14 @@ async fn wait_for_cancel(cancel: &mut tokio::sync::watch::Receiver<bool>) {
         if cancel.changed().await.is_err() {
             std::future::pending::<()>().await;
         }
+    }
+}
+
+async fn wait_deadline(deadline: Option<tokio::time::Instant>) {
+    if let Some(deadline) = deadline {
+        tokio::time::sleep_until(deadline).await;
+    } else {
+        std::future::pending::<()>().await;
     }
 }
 
@@ -526,6 +535,24 @@ mod tests {
         assert_eq!(error.message(), "context canceled");
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         assert!(Arc::ptr_eq(&manager, &registry.all_managers()[0]));
+        // A caller deadline also bounds an in-flight persistence grant, even
+        // when there is no transport task to drop the handler.
+        let mut grant_request = request(b"1:deadline:r:3");
+        grant_request.set_timeout(Duration::from_millis(200));
+        let grant = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(grant_request).await })
+        };
+        tokio::time::timeout(Duration::from_secs(2), store.entered.notified())
+            .await
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), grant)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.message(), "context deadline exceeded");
+        assert_eq!(metrics.load(Ordering::SeqCst), 3);
         store.release.notify_one();
         assert_eq!(
             service
