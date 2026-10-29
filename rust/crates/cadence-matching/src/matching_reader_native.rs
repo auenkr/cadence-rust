@@ -354,7 +354,7 @@ pub type NativeBacklogForwardResult = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>,
 >;
 pub type NativeBacklogForwardCall =
-    Arc<dyn Fn(AllocatedTaskBytes) -> NativeBacklogForwardResult + Send + Sync>;
+    Arc<dyn Fn(AllocatedTaskBytes, tokio::time::Instant) -> NativeBacklogForwardResult + Send + Sync>;
 #[derive(Clone)]
 pub struct NativeBacklogForward {
     /// Go `fwdrAddReqTokenC`: a token is taken before each forward attempt.
@@ -668,6 +668,12 @@ impl NativeTaskReader {
                             );
                             timeout
                         }).filter(|_| active()).map(|timeout| dispatch_deadline(dispatch_limiter.now(), timeout));
+                        let outer_deadline = deadline.map(|at| {
+                            let remaining = Duration::from_nanos(
+                                at.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
+                            );
+                            tokio::time::Instant::now() + remaining
+                        });
                         let attempt_started = std::time::Instant::now();
                         let local_claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
                         let attempt = async {
@@ -736,10 +742,13 @@ impl NativeTaskReader {
                                     None => return Attempt::Stopped,
                                 };
                                 let forward_deadline =
-                                    tokio::time::Instant::now() + Duration::from_secs(2);
+                                    outer_deadline.map_or_else(
+                                        || tokio::time::Instant::now() + Duration::from_secs(2),
+                                        |parent| parent.min(tokio::time::Instant::now() + Duration::from_secs(2)),
+                                    );
                                 let forward_started = std::time::Instant::now();
                                 let result = tokio::select! {
-                                    result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone())) => result,
+                                    result = tokio::time::timeout_at(forward_deadline, (forwarder.forward)(dispatched.clone(), forward_deadline)) => result,
                                     _ = dispatch_stop.changed() => return Attempt::Stopped,
                                 };
                                 let forward_status = match &result {
@@ -794,27 +803,27 @@ impl NativeTaskReader {
                                 attempt = attempt.saturating_add(1);
                             }
                         };
-                        let outcome = match deadline {
+                        let outcome = match outer_deadline {
                             Some(deadline) => {
-                                let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
-                                );
-                                if remaining.is_zero() {
-                                    Attempt::TimedOut
-                                } else {
-                                    // Drop the timed-out offer before checking its claim. Its
-                                    // guard synchronizes with a poller taking the task.
-                                    let result = tokio::time::timeout(remaining, attempt).await;
-                                    result.unwrap_or_else(|_| {
-                                            if local_claimed.load(std::sync::atomic::Ordering::Acquire) {
-                                                Attempt::Offered
-                                            } else {
-                                                Attempt::TimedOut
-                                            }
-                                        })
-                                }
+                                // Drop the timed-out offer before inspecting the claim.
+                                tokio::time::timeout_at(deadline, attempt).await.unwrap_or_else(|_| {
+                                    if local_claimed.load(std::sync::atomic::Ordering::Acquire) {
+                                        Attempt::Offered
+                                    } else {
+                                        Attempt::TimedOut
+                                    }
+                                })
                             }
                             None => attempt.await,
+                        };
+                        // A poller can claim concurrently with shutdown. The offer
+                        // guard has been dropped before this synchronized claim check.
+                        let outcome = if matches!(outcome, Attempt::Stopped)
+                            && local_claimed.load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            Attempt::Offered
+                        } else {
+                            outcome
                         };
                         if let Some(reader_metrics) = dispatch_metrics
                             .lock()

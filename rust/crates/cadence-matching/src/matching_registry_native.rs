@@ -1600,7 +1600,7 @@ impl NativeQueueRegistry {
             );
             NativeBacklogForward {
                 tokens: forward_state.add_tokens(),
-                forward: Arc::new(move |task| {
+                forward: Arc::new(move |task, deadline| {
                     let forward_state = forward_state.clone();
                     let domain = forward_domain.clone();
                     Box::pin(async move {
@@ -1611,6 +1611,7 @@ impl NativeQueueRegistry {
                                 &domain,
                                 forward_task_type,
                                 forward_kind,
+                                deadline,
                             )
                             .await
                     })

@@ -213,7 +213,7 @@ impl NativeSyncMatcher {
             }
         };
         let Some(queued) = queued else {
-            return Self::response(result, stop, deadline).await;
+            return Self::response(result, deadline).await;
         };
         let _guard = Guard {
             matcher: self,
@@ -230,19 +230,22 @@ impl NativeSyncMatcher {
                 let mut state = self.state.lock().expect("Matching native sync matcher lock");
                 if let Some(index) = state.offers.iter().position(|offer| offer.id == queued.0) { state.offers.remove(index); false } else { true }
             }
-            _ = stop.changed() => false,
+            _ = stop.changed() => {
+                // A poller may already have removed the offer before shutdown.
+                // Resolve ownership under the same lock used by poll().
+                let mut state = self.state.lock().expect("Matching native sync matcher lock");
+                if let Some(index) = state.offers.iter().position(|offer| offer.id == queued.0) { state.offers.remove(index); false } else { true }
+            },
         };
-        accepted && Self::response(result, stop, deadline).await
+        accepted && Self::response(result, deadline).await
     }
     async fn response(
         result: oneshot::Receiver<Result<(), Status>>,
-        mut stop: watch::Receiver<bool>,
         deadline: Instant,
     ) -> bool {
         tokio::select! {
             result = result => matches!(result, Ok(Ok(()))),
             _ = tokio::time::sleep_until(deadline) => false,
-            _ = stop.changed() => false,
         }
     }
 }
@@ -324,6 +327,19 @@ mod tests {
         assert_eq!(config[&gs(b"original-isolation-group")], gs(b"a"));
         received.finish(Ok(()));
         assert!(add.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn claimed_forwarded_offer_waits_for_response_after_shutdown() {
+        let (stop, matcher) = fixture(&[]);
+        let add = spawn_offer(&matcher, task(b"w", b""), b"", b"d", Duration::from_secs(1));
+        tokio::task::yield_now().await;
+        let received = matcher.poll(&gs(b"")).await.unwrap();
+        stop.send(true).unwrap();
+        tokio::task::yield_now().await;
+        assert!(!add.is_finished());
+        received.finish(Ok(()));
+        assert!(tokio::time::timeout(Duration::from_secs(1), add).await.unwrap().unwrap());
     }
 
     #[tokio::test]
