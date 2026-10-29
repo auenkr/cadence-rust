@@ -259,8 +259,6 @@ struct Owner {
     scaler: crate::matching_scaler::ScalerDaemon,
     created: i64,
     idle_ttl_nanos: i64,
-    last_update: Mutex<tokio::time::Instant>,
-    next_ack_update: Mutex<Option<tokio::time::Instant>>,
     next_idle_check: Mutex<tokio::time::Instant>,
     liveness: Arc<cadence_common::liveness::Liveness>,
 }
@@ -350,9 +348,8 @@ pub struct NativeQueueRegistry {
     isolation: Option<NativeIsolationProvider>,
     reader_live: Option<NativeReaderPropertiesProvider>,
     min_burst: Option<NativeProvider<i64>>,
-    update_ack_interval: Option<NativeProvider<i64>>,
     idle_tasklist_check_interval: Option<NativeProvider<i64>>,
-    max_task_delete_batch_size: Option<NativeProvider<i64>>,
+    max_task_delete_batch_size: Option<NativeProvider<crate::matching_reader::LiveInt>>,
     writer_live: Option<NativeWriterLiveProvider>,
     fatal: NativeFatalSinks,
     writer_tracker: Arc<crate::matching_writer::WriterTracker>,
@@ -652,7 +649,6 @@ impl NativeQueueRegistry {
             isolation: None,
             reader_live: None,
             min_burst: None,
-            update_ack_interval: None,
             idle_tasklist_check_interval: None,
             max_task_delete_batch_size: None,
             writer_live: None,
@@ -851,15 +847,11 @@ impl NativeQueueRegistry {
         self.history = self.history.clone().with_record_started_timeout(provider);
         self
     }
-    pub fn with_update_ack_interval(mut self, provider: NativeProvider<i64>) -> Self {
-        self.update_ack_interval = Some(provider);
-        self
-    }
     pub fn with_idle_tasklist_check_interval(mut self, provider: NativeProvider<i64>) -> Self {
         self.idle_tasklist_check_interval = Some(provider);
         self
     }
-    pub fn with_max_task_delete_batch_size(mut self, provider: NativeProvider<i64>) -> Self {
+    pub fn with_max_task_delete_batch_size(mut self, provider: NativeProvider<crate::matching_reader::LiveInt>) -> Self {
         self.max_task_delete_batch_size = Some(provider);
         self
     }
@@ -1422,16 +1414,8 @@ impl NativeQueueRegistry {
         queue.set_condition_failed_observer(Arc::new(move || {
             condition_metrics.condition_failed(&condition_context);
         }));
-        {
-            let provider = registry.max_task_delete_batch_size.clone();
-            let domain = domain.clone();
-            let name = lookup.1.clone();
-            let task_type = lookup.2;
-            queue.set_gc_batch_size_provider(Arc::new(move || {
-                provider
-                    .as_ref()
-                    .map_or(100, |p| p(&domain, &name, task_type))
-            }));
+        if let Some(provider) = &registry.max_task_delete_batch_size {
+            queue.set_gc_batch_size_provider(provider(&domain, &lookup.1, lookup.2));
         }
         let partitions =
             match NativePartitionCache::load(registry.store.as_ref(), &queue, key, kind) {
@@ -1479,10 +1463,6 @@ impl NativeQueueRegistry {
             registry_now(),
             idle_ttl_nanos,
         ));
-        let next_ack_update = registry.update_ack_interval.as_ref().map(|provider| {
-            let nanos = provider(&domain, &lookup.1, lookup.2).max(1) as u64;
-            tokio::time::Instant::now() + Duration::from_nanos(nanos)
-        });
         // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
         // cfg.QPSTrackerInterval(domain, taskList, type), ...)`.
         let qps = Arc::new(cadence_common::qps_bytes::EmaQpsBytesTracker::new(
@@ -1699,8 +1679,6 @@ impl NativeQueueRegistry {
             sync_wait,
             created: now,
             idle_ttl_nanos,
-            last_update: Mutex::new(tokio::time::Instant::now()),
-            next_ack_update: Mutex::new(next_ack_update),
             next_idle_check: Mutex::new(tokio::time::Instant::now() + idle_half),
             liveness,
             scaler: Default::default(),
@@ -2084,8 +2062,7 @@ impl NativeQueueRegistry {
     pub async fn shutdown(&self, now: i64) -> Result<(), Status> {
         self.flush(now, true, None).await
     }
-    /// Fixed-interval controller. Reset after each completed update, as Go's
-    /// task reader does; a transient persistence error does not kill the pump.
+    /// Controller for idle and stopped-owner cleanup. Ack updates belong to the reader pump.
     pub async fn maintain_until<F>(&self, interval: Duration, shutdown: F) -> Result<(), Status>
     where
         F: std::future::Future<Output = ()> + Send,
@@ -2104,21 +2081,7 @@ impl NativeQueueRegistry {
                 .expect("Matching registry lock")
                 .owners
                 .values()
-                .map(|owner| {
-                    (*owner
-                        .next_ack_update
-                        .lock()
-                        .expect("Matching ack timer lock"))
-                    .unwrap_or_else(|| {
-                        *owner.last_update.lock().expect("Matching ack timer lock") + interval
-                    })
-                    .min(
-                        *owner
-                            .next_idle_check
-                            .lock()
-                            .expect("Matching idle timer lock"),
-                    )
-                })
+                .map(|owner| *owner.next_idle_check.lock().expect("Matching idle timer lock"))
                 .min()
                 .unwrap_or_else(|| tokio::time::Instant::now() + interval);
             tokio::select! {
@@ -2127,9 +2090,6 @@ impl NativeQueueRegistry {
                 _ = &mut changed => continue,
                 _ = tokio::time::sleep_until(deadline) => {
                     if let Err(error) = self.sweep_idle(registry_now(), true).await { eprintln!("Matching idle cleanup failed: {error}"); }
-                    if let Err(error) = self.flush(registry_now(), false, Some(interval)).await {
-                        eprintln!("Matching acknowledgement update failed: {error}");
-                    }
                 }
             }
         }
@@ -2211,7 +2171,7 @@ impl NativeQueueRegistry {
             false
         }
     }
-    async fn flush(&self, now: i64, stop: bool, due: Option<Duration>) -> Result<(), Status> {
+    async fn flush(&self, now: i64, stop: bool, _due: Option<Duration>) -> Result<(), Status> {
         let registry = self.clone();
         owner_work(move |readers| {
             let owners = {
@@ -2250,26 +2210,6 @@ impl NativeQueueRegistry {
                     }
                     continue;
                 }
-                let live_deadline = *owner
-                    .next_ack_update
-                    .lock()
-                    .expect("Matching ack timer lock");
-                let ack_due = live_deadline.map_or_else(
-                    || {
-                        due.is_none_or(|interval| {
-                            owner
-                                .last_update
-                                .lock()
-                                .expect("Matching ack timer lock")
-                                .elapsed()
-                                >= interval
-                        })
-                    },
-                    |deadline| tokio::time::Instant::now() >= deadline,
-                );
-                if !owner.queue.is_stopped() && !ack_due {
-                    continue;
-                }
                 if let Ok(task_count) = owner.queue.task_list_size() {
                     owner.reader.record_task_count(task_count);
                 }
@@ -2280,16 +2220,6 @@ impl NativeQueueRegistry {
                 if let Err(error) = owner.queue.persist_ack(now) {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
                 }
-                *owner.last_update.lock().expect("Matching ack timer lock") =
-                    tokio::time::Instant::now();
-                *owner
-                    .next_ack_update
-                    .lock()
-                    .expect("Matching ack timer lock") =
-                    registry.update_ack_interval.as_ref().map(|provider| {
-                        let nanos = provider(&gs(key.0), &key.1, key.2).max(1) as u64;
-                        tokio::time::Instant::now() + Duration::from_nanos(nanos)
-                    });
                 if owner.queue.is_stopped() && registry.detach(&key, &owner) {
                     if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
