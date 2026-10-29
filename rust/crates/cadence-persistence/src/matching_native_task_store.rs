@@ -185,6 +185,10 @@ pub trait MatchingTaskStoreBytes: Send + Sync {
         inclusive_task_id: i64,
         limit: i64,
     ) -> Result<usize>;
+    /// Signed Go TasksCompleted, including Cassandra's unknown count (-1).
+    fn gc_complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> Result<i64> {
+        self.complete_tasks_less_than(key, ack, limit).map(|count| count as i64)
+    }
     fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> Result<()>;
 }
 

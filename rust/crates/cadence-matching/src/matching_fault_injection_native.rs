@@ -168,6 +168,9 @@ impl MatchingTaskStoreBytes for InjectingTaskStoreBytes {
                 .complete_tasks_less_than(key, inclusive_task_id, limit)
         })
     }
+    fn gc_complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> TaskBytesResult<i64> {
+        self.run("complete-tasks-less-than", || self.store.gc_complete_tasks_less_than(key, ack, limit))
+    }
     fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> TaskBytesResult<()> {
         self.run("delete-task-list", || {
             self.store.delete_task_list(key, range)

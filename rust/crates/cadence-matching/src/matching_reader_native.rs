@@ -17,7 +17,6 @@ use cadence_persistence::{
 };
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -88,32 +87,47 @@ fn reader_partition_parts(name: &str) -> (&str, &str) {
 
 // `ReaderConfig`'s accessors are private to matching_reader; these mirror them
 // from its public fields and the public `raw_batch_size`.
-fn buffer_batch_size(config: &ReaderConfig) -> u32 {
+fn buffer_batch_size(config: &ReaderConfig) -> usize {
     let value = config.raw_batch_size();
     if value <= 0 {
-        DEFAULT_TASKS_BATCH_SIZE as u32
+        DEFAULT_TASKS_BATCH_SIZE as usize
     } else {
-        u32::try_from(value).unwrap_or(u32::MAX)
+        usize::try_from(value).unwrap_or(usize::MAX)
     }
 }
-fn read_batch_size(config: &ReaderConfig) -> NonZeroU32 {
-    NonZeroU32::new(buffer_batch_size(config)).expect("batch size falls back to a positive default")
+fn read_batch_size(config: &ReaderConfig) -> i64 {
+    let value = config.raw_batch_size();
+    if value <= 0 {
+        DEFAULT_TASKS_BATCH_SIZE
+    } else {
+        value
+    }
 }
-fn read_range_size(config: &ReaderConfig) -> u32 {
+fn read_range_size(config: &ReaderConfig) -> i64 {
     match &config.live {
-        Some(live) => u32::try_from((live.read_range_size)()).unwrap_or(0),
-        None => config.read_range_size,
+        Some(live) => (live.read_range_size)(),
+        None => i64::from(config.read_range_size),
     }
 }
+// Go time.Time.Add accepts an i64 duration without clamping the resulting
+// absolute timestamp to the duration's range.
+fn dispatch_deadline(now: i64, timeout: i64) -> i128 {
+    i128::from(now) + i128::from(timeout)
+}
+
 fn dispatch_timeout_nanos(config: &ReaderConfig) -> i64 {
     match &config.live {
         Some(live) => (live.dispatch_timeout)(),
         None => config.dispatch_timeout.as_nanos() as i64,
     }
 }
+fn ack_interval_duration(nanos: i64) -> Duration {
+    Duration::from_nanos(nanos.max(0) as u64)
+}
+
 fn update_ack_interval(config: &ReaderConfig) -> Duration {
     match &config.live {
-        Some(live) => Duration::from_nanos((live.update_ack_interval)().max(1) as u64),
+        Some(live) => ack_interval_duration((live.update_ack_interval)()),
         None => Duration::from_nanos(DEFAULT_UPDATE_ACK_INTERVAL_NANOS as u64),
     }
 }
@@ -127,6 +141,7 @@ fn now() -> i64 {
 struct Pending<T> {
     item: Mutex<Option<T>>,
     accepted: Notify,
+    claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 struct Rendezvous<T> {
     offers: Mutex<VecDeque<Arc<Pending<T>>>>,
@@ -154,13 +169,14 @@ impl<T> Drop for OfferGuard<'_, T> {
     }
 }
 impl<T> Rendezvous<T> {
-    async fn offer(&self, item: T, mut stop: watch::Receiver<bool>) -> bool {
+    async fn offer(&self, item: T, mut stop: watch::Receiver<bool>, claimed: Option<Arc<std::sync::atomic::AtomicBool>>) -> bool {
         if *stop.borrow() {
             return false;
         }
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -194,6 +210,7 @@ impl<T> Rendezvous<T> {
         item: T,
         mut stop: watch::Receiver<bool>,
         deadline: tokio::time::Instant,
+        claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Option<bool> {
         if *stop.borrow() {
             return None;
@@ -201,6 +218,7 @@ impl<T> Rendezvous<T> {
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -236,6 +254,7 @@ impl<T> Rendezvous<T> {
         item: T,
         mut stop: watch::Receiver<bool>,
         tokens: &crate::matching_forward::RequestTokens,
+        claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Option<Result<tokio::sync::OwnedSemaphorePermit, ()>> {
         if *stop.borrow() {
             return None;
@@ -243,6 +262,7 @@ impl<T> Rendezvous<T> {
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -280,19 +300,22 @@ impl<T> Rendezvous<T> {
             available.as_mut().enable();
             // Ownership moves synchronously during a poll of this future. A
             // cancelled waiting future never owns a task hidden in a oneshot.
-            if let Some(pending) = self
-                .offers
-                .lock()
-                .expect("Matching handoff lock")
-                .pop_front()
             {
-                let item = pending
-                    .item
-                    .lock()
-                    .expect("Matching offered task lock")
-                    .take();
-                pending.accepted.notify_one();
-                return item;
+                let mut offers = self.offers.lock().expect("Matching handoff lock");
+                if let Some(pending) = offers.pop_front() {
+                    let item = pending
+                        .item
+                        .lock()
+                        .expect("Matching offered task lock")
+                        .take();
+                    if item.is_some() {
+                        if let Some(claimed) = &pending.claimed {
+                            claimed.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                    }
+                    pending.accepted.notify_one();
+                    return item;
+                }
             }
             tokio::select! {
                 _ = available => (),
@@ -487,15 +510,16 @@ impl NativeTaskReader {
             backlog_forward: Arc::new(Mutex::new(backlog_forward)),
         });
         let mut buffer_senders: HashMap<GoString, BufferSender> = HashMap::new();
+        let batch_size = buffer_batch_size(&config);
         for buffer_group in std::iter::once(GoString::default()).chain(isolated.keys().cloned()) {
-            let (buffer_send, mut buffer_receive) = if buffer_batch_size(&config) == 1 {
+            let (buffer_send, mut buffer_receive) = if batch_size == 1 {
                 let buffer = Arc::new(Rendezvous::default());
                 (
                     BufferSender::Unbuffered(buffer.clone()),
                     BufferReceiver::Unbuffered(buffer),
                 )
             } else {
-                let (sender, receiver) = mpsc::channel(buffer_batch_size(&config) as usize - 1);
+                let (sender, receiver) = mpsc::channel(batch_size - 1);
                 (
                     BufferSender::Buffered(sender),
                     BufferReceiver::Buffered(receiver),
@@ -633,8 +657,8 @@ impl NativeTaskReader {
                         });
                         let group_known = isolated.contains_key(group.as_bytes());
                         let rps = dispatch_limiter.limit();
-                        let async_timeout = dispatch_timeout_nanos(&dispatch_config);
-                        let deadline = ((group_known || rps > 1e-7) && active()).then(|| {
+                        let deadline = (group_known || rps > 1e-7).then(|| {
+                            let async_timeout = dispatch_timeout_nanos(&dispatch_config);
                             let timeout = cadence_common::task_isolation::dispatch_timeout(
                                 rps,
                                 buffers,
@@ -642,9 +666,10 @@ impl NativeTaskReader {
                                 isolation_duration,
                                 timeout_buffer.as_nanos() as i64,
                             );
-                            dispatch_limiter.now().saturating_add(timeout)
-                        });
+                            timeout
+                        }).filter(|_| active()).map(|timeout| dispatch_deadline(dispatch_limiter.now(), timeout));
                         let attempt_started = std::time::Instant::now();
+                        let local_claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
                         let attempt = async {
                             match dispatch_limiter
                                 .wait_until(dispatch_stop.clone(), deadline)
@@ -669,7 +694,7 @@ impl NativeTaskReader {
                                 .expect("matching reader forwarder lock")
                                 .clone();
                             let Some(forwarder) = forwarder else {
-                                return if target.offer(dispatched, dispatch_stop.clone()).await {
+                                return if target.offer(dispatched, dispatch_stop.clone(), Some(local_claimed.clone())).await {
                                     Attempt::Offered
                                 } else {
                                     Attempt::Stopped
@@ -682,6 +707,7 @@ impl NativeTaskReader {
                                     dispatched.clone(),
                                     dispatch_stop.clone(),
                                     first_deadline,
+                                    Some(local_claimed.clone()),
                                 )
                                 .await
                             {
@@ -699,6 +725,7 @@ impl NativeTaskReader {
                                         dispatched.clone(),
                                         dispatch_stop.clone(),
                                         &forwarder.tokens,
+                                        Some(local_claimed.clone()),
                                     )
                                     .await
                                 {
@@ -726,7 +753,7 @@ impl NativeTaskReader {
                                     trace_root, trace_partition, parent_destination, trace_workflow,
                                     trace_run, task.data.schedule_id, task.task_id,
                                     forward_started.elapsed().as_millis(), forward_status,
-                                    deadline.map(|at| at.saturating_sub(dispatch_limiter.now()).max(0) / 1_000_000).unwrap_or(-1),
+                                    deadline.map(|at| at.saturating_sub(i128::from(dispatch_limiter.now())).max(0) / 1_000_000).unwrap_or(-1),
                                 ));
                                 drop(token);
                                 match result {
@@ -754,6 +781,7 @@ impl NativeTaskReader {
                                         dispatched.clone(),
                                         dispatch_stop.clone(),
                                         forward_deadline,
+                                        Some(local_claimed.clone()),
                                     )
                                     .await
                                 {
@@ -769,11 +797,22 @@ impl NativeTaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(dispatch_limiter.now()).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
                                 );
-                                tokio::time::timeout(remaining, attempt)
-                                    .await
-                                    .unwrap_or(Attempt::TimedOut)
+                                if remaining.is_zero() {
+                                    Attempt::TimedOut
+                                } else {
+                                    // Drop the timed-out offer before checking its claim. Its
+                                    // guard synchronizes with a poller taking the task.
+                                    let result = tokio::time::timeout(remaining, attempt).await;
+                                    result.unwrap_or_else(|_| {
+                                            if local_claimed.load(std::sync::atomic::Ordering::Acquire) {
+                                                Attempt::Offered
+                                            } else {
+                                                Attempt::TimedOut
+                                            }
+                                        })
+                                }
                             }
                             None => attempt.await,
                         };
@@ -901,6 +940,7 @@ impl NativeTaskReader {
         tokio::spawn(async move {
             let _completed = pumped;
             let mut ack_timer = Box::pin(tokio::time::sleep(update_ack_interval(&config)));
+            let mut scan_pending = true;
             'pump: loop {
                 if *pump_stop.borrow() {
                     break;
@@ -920,11 +960,57 @@ impl NativeTaskReader {
                 let notification = wake.notified();
                 tokio::pin!(notification);
                 notification.as_mut().enable();
+                // Arm the scan subscription before selecting: notify_waiters does
+                // not retain a permit in the gap between two subscriptions.
+                let scan_notification = wake.notified();
+                tokio::pin!(scan_notification);
+                scan_notification.as_mut().enable();
+                tokio::select! {
+                    _ = &mut notification => {},
+                    _ = std::future::ready(()), if scan_pending => {},
+                    _ = ack_timer.as_mut() => {
+                        let queue_copy = queue.clone();
+                        let result = crate::matching_blocking::run(move || {
+                            let count = queue_copy.task_list_size();
+                            let lag = queue_copy.task_lag();
+                            let ack = queue_copy.persist_ack(now());
+                            (count, lag, ack)
+                        }).await;
+                        match result {
+                            Ok((count, lag, ack)) => {
+                                if let Some(metrics) = reader_metrics.lock().expect("matching reader metrics lock").as_ref() {
+                                    if let Ok(count) = count {
+                                        metrics.metrics.task_list_gauge(crate::matching_metrics::TASK_COUNT_PER_TASK_LIST, &metrics.context, count as f64);
+                                    }
+                                    if queue.levels().1 >= 0 {
+                                        metrics.metrics.task_list_gauge(crate::matching_metrics::TASK_LAG_PER_TASK_LIST, &metrics.context, lag as f64);
+                                    }
+                                }
+                                if let Err(error) = ack {
+                                    eprintln!("Matching acknowledgement update failed: {error}");
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("Matching acknowledgement worker failed: {error}");
+                                queue.stop();
+                            }
+                        }
+                        if queue.is_stopped() { break; }
+                        scan_pending = true;
+                        ack_timer.as_mut().reset(tokio::time::Instant::now() + update_ack_interval(&config));
+                        continue;
+                    }
+                    _ = pump_stop.changed() => break,
+                }
                 let queue_copy = queue.clone();
-                let (range, batch) = (read_range_size(&config), read_batch_size(&config));
-                let result =
-                    crate::matching_blocking::run(move || queue_copy.reader_turn(range, batch))
-                        .await;
+                let scan_config = config.clone();
+                let result = crate::matching_blocking::run(move || {
+                    queue_copy.reader_turn_live(
+                        || read_range_size(&scan_config),
+                        || read_batch_size(&scan_config),
+                    )
+                })
+                .await;
                 if *pump_stop.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -932,6 +1018,7 @@ impl NativeTaskReader {
                     Ok(Ok(turn)) => turn,
                     Ok(Err(error)) => {
                         eprintln!("Matching backlog read failed: {error}");
+                        scan_pending = true;
                         tokio::task::yield_now().await;
                         continue;
                     }
@@ -1013,7 +1100,7 @@ impl NativeTaskReader {
                             _ = pump_stop.changed() => false,
                         },
                         BufferSender::Unbuffered(buffer) => {
-                            buffer.offer(task, pump_stop.clone()).await
+                            buffer.offer(task, pump_stop.clone(), None).await
                         }
                     };
                     if !sent {
@@ -1033,18 +1120,11 @@ impl NativeTaskReader {
                         queue.levels().2 as f64,
                     );
                 }
-                if pending {
-                    continue;
-                }
+                scan_pending = pending;
                 tokio::select! {
-                    _ = notification => (),
-                    _ = ack_timer.as_mut() => {
-                        // Go re-signals the pump on every ack tick.
-                        ack_timer
-                            .as_mut()
-                            .reset(tokio::time::Instant::now() + update_ack_interval(&config));
-                    }
-                    _ = pump_stop.changed() => break,
+                    biased;
+                    _ = &mut scan_notification => scan_pending = true,
+                    _ = std::future::ready(()) => {},
                 }
             }
         });
@@ -1123,6 +1203,18 @@ impl NativeTaskReader {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ack_interval_nonpositive_is_immediate() {
+        // Go time.NewTimer/Reset fire immediately for nonpositive durations.
+        assert_eq!(super::ack_interval_duration(i64::MIN), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(-1), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(0), Duration::ZERO);
+        assert_eq!(super::ack_interval_duration(1), Duration::from_nanos(1));
+        assert_eq!(
+            super::ack_interval_duration(i64::MAX),
+            Duration::from_nanos(i64::MAX as u64)
+        );
+    }
     use super::*;
     use cadence_persistence::{
         matching_blob::{BlobEncoding, TaskListDataBytes},
@@ -1131,8 +1223,77 @@ mod tests {
         },
         matching_sqlite::SqliteTaskStore,
     };
+    use std::num::NonZeroU32;
     use std::sync::atomic::{AtomicBool, Ordering};
     use uuid::Uuid;
+
+    #[tokio::test(start_paused = true)]
+    async fn claimed_handoff_survives_dispatch_timeout_cancellation() {
+        let channel = Arc::new(Rendezvous::default());
+        let (stop, receiver) = watch::channel(false);
+        let claimed = Arc::new(AtomicBool::new(false));
+        let offer_channel = channel.clone();
+        let offer_claimed = claimed.clone();
+        let offer = tokio::spawn(async move {
+            offer_channel.offer_until(7, receiver, tokio::time::Instant::now() + Duration::from_secs(1), Some(offer_claimed)).await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(channel.poll(stop.subscribe()).await, Some(7));
+        offer.abort();
+        let _ = offer.await;
+        assert!(claimed.load(Ordering::Acquire));
+        assert!(channel.offers.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_unclaimed_handoff_cannot_be_claimed_after_retry() {
+        let channel = Rendezvous::default();
+        let (stop, receiver) = watch::channel(false);
+        let claimed = Arc::new(AtomicBool::new(false));
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            channel.offer(7, receiver, Some(claimed.clone())),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(!claimed.load(Ordering::Acquire));
+        assert!(channel.offers.lock().unwrap().is_empty());
+        assert!(tokio::time::timeout(Duration::from_secs(1), channel.poll(stop.subscribe()))
+            .await
+            .is_err());
+    }
+
+    // Go task_reader.go validates each batch read, but keeps signed range values.
+    #[test]
+    fn dispatch_deadline_crosses_signed_nanosecond_boundaries() {
+        assert_eq!(dispatch_deadline(i64::MAX - 1, 10), i128::from(i64::MAX) + 9);
+        assert_eq!(dispatch_deadline(i64::MIN + 1, -10), i128::from(i64::MIN) - 9);
+        assert!(dispatch_deadline(100, -1) < 100);
+    }
+
+    #[test]
+    fn native_reader_preserves_signed_and_large_live_properties() {
+        use std::sync::atomic::AtomicI64;
+        let value = Arc::new(AtomicI64::new(-5));
+        let current = value.clone();
+        let config = ReaderConfig {
+            live: Some(Arc::new(crate::matching_reader::ReaderLive {
+                batch_size: Arc::new(move || current.load(Ordering::SeqCst)),
+                read_range_size: {
+                    let value = value.clone();
+                    Arc::new(move || value.load(Ordering::SeqCst))
+                },
+                dispatch_timeout: Arc::new(|| 0),
+                update_ack_interval: Arc::new(|| 1),
+            })),
+            ..ReaderConfig::default()
+        };
+        assert_eq!(read_batch_size(&config), DEFAULT_TASKS_BATCH_SIZE);
+        assert_eq!(read_range_size(&config), -5);
+        value.store(i64::from(u32::MAX) + 1, Ordering::SeqCst);
+        assert_eq!(read_batch_size(&config), i64::from(u32::MAX) + 1);
+        assert_eq!(read_range_size(&config), i64::from(u32::MAX) + 1);
+    }
 
     fn n(v: u32) -> NonZeroU32 {
         NonZeroU32::new(v).unwrap()
@@ -1206,6 +1367,33 @@ mod tests {
         }
         reader.stop();
         reader.wait_stopped().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ack_timer_resamples_after_reader_update_and_stops() {
+        use std::sync::atomic::AtomicUsize;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(dir.path().join("ack.db"), BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueueBytes::open(store, key(b"ack"), 0, n(100), 1).unwrap());
+        let samples = Arc::new(AtomicUsize::new(0));
+        let live = crate::matching_reader::ReaderLive {
+            batch_size: Arc::new(|| 10),
+            read_range_size: Arc::new(|| 100),
+            dispatch_timeout: Arc::new(|| 1_000_000_000),
+            update_ack_interval: {
+                let samples = samples.clone();
+                Arc::new(move || { samples.fetch_add(1, Ordering::SeqCst); 10_000_000 })
+            },
+        };
+        let reader = NativeTaskReader::new(queue, Arc::new(Notify::new()), ReaderConfig { live: Some(Arc::new(live)), ..ReaderConfig::default() });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while samples.load(Ordering::SeqCst) < 2 { tokio::task::yield_now().await; }
+        }).await.expect("ack timer resampled");
+        reader.stop();
+        reader.wait_stopped().await;
+        let stopped = samples.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(samples.load(Ordering::SeqCst), stopped);
     }
 
     #[tokio::test(flavor = "multi_thread")]
