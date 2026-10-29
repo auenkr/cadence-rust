@@ -288,6 +288,16 @@ fn status(error: ManagerError) -> Status {
         ManagerError::NotReady => busy("semaphore manager is not ready".into()),
         ManagerError::ServiceBusy(message) => busy(message),
         ManagerError::Internal(message) => Status::internal(message),
+        ManagerError::Load(id, source) => {
+            let original = status(*source);
+            let mut message = b"load semaphore bucket ".to_vec();
+            message.extend_from_slice(id.as_bytes());
+            message.extend_from_slice(b": ");
+            message.extend_from_slice(original.message().as_bytes());
+            crate::matching_native_status::raw_status(
+                original.code(), &GoString::from(message), original.details().into(),
+            )
+        },
     }
 }
 fn busy(message: String) -> Status {

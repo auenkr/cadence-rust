@@ -75,6 +75,8 @@ pub enum ManagerError {
     Internal(String),
     /// `types.ServiceBusyError` returned by the Go persistence limiter.
     ServiceBusy(String),
+    /// Startup scan failure with its original classification and raw identifier.
+    Load(GoString, Box<ManagerError>),
 }
 
 impl From<AcquireError> for ManagerError {
@@ -249,10 +251,9 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
-        self.store
-            .get_semaphore_metadata(&self.id.domain_id, &self.id.semaphore_name)
-            .await?;
-        let rows = self.scan_bucket().await?;
+        let rows = self.scan_bucket().await.map_err(|error| {
+            ManagerError::Load(self.id.to_log_string(), Box::new(error.into()))
+        })?;
         // Go builds the free set only from rows returned by the scan. Metadata
         // does not prove that an absent token row exists or is unheld.
         let mut free: HashMap<i32, ()> = HashMap::new();
@@ -913,7 +914,13 @@ pub(crate) mod tests {
             _ = tokio::task::yield_now() => {}
         }
         store.scan_release.notify_one();
-        assert!(start.await.unwrap().is_err());
+        assert_eq!(
+            start.await.unwrap().err().unwrap(),
+            ManagerError::Load(
+                id.to_log_string(),
+                Box::new(ManagerError::Internal("injected scan failure".into())),
+            )
+        );
         assert_eq!(waiting.await.unwrap_err(), ManagerError::NotReady);
         assert!(registry.by_identifier(&id).is_none());
         let replacement = registry.get_or_create(id).await.unwrap();
