@@ -115,6 +115,12 @@ impl Membership {
         }));
     }
 
+    /// Go resolver MemberCount reads the service ring, including its empty
+    /// initialized and stopped states, rather than the peer provider directly.
+    pub(crate) fn member_count(&self) -> Result<usize, ()> {
+        Ok(self.ring.read().map_err(|_| ())?.hosts().len())
+    }
+
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changed.subscribe()
     }
@@ -386,6 +392,23 @@ pub(crate) fn semaphore_not_owned_status(
 mod tests {
     use super::*;
     use prost::Message;
+    #[test]
+    fn resolver_count_tracks_published_ring_and_empty_lifecycle_states() {
+        let membership = Membership::new("self", vec![]);
+        assert_eq!(membership.member_count(), Ok(0));
+        let host = Host {
+            address: "remote:7935".into(),
+            identity: "remote".into(),
+            grpc_address: "remote:7835".into(),
+        };
+        assert!(membership.replace_if_addresses_changed(vec![host.clone(), host.clone()]));
+        assert_eq!(membership.member_count(), Ok(1));
+        assert!(!membership.replace_if_addresses_changed(vec![host]));
+        assert_eq!(membership.member_count(), Ok(1));
+        membership.replace(vec![]);
+        assert_eq!(membership.member_count(), Ok(0));
+    }
+
     #[test]
     fn native_ownership_error_keeps_raw_name_and_live_ring() {
         use crate::matching_native_status::RAW_MESSAGE_MARKER;

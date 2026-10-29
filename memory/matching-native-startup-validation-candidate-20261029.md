@@ -1,0 +1,9 @@
+# Matching native startup validation candidate — 2026-10-29
+
+Base `90cd85f187bc2228224ef0e6325c7eeeda6da409` includes the earlier formatting source. Integrated `dec8668bc8d8476bc3f18e2719a9d35702533f9b` as `7c0ca1400e8d940cd1e70ce5dbf9bb9cdab65c97`, resolving the native runtime conflict while retaining existing cold-lookup cases and the two-thread case.
+
+Review: the hook field, constructor initialization, builder and invocation are all `cfg(test)`; production limiter behavior is unchanged. Rendezvous channels hold the refresh thread inside the limiter state lock until the cold lookup reaches the limiter clock; with the old overlay-first ordering this creates the actual lock cycle. The exact subprocess selector and completion marker prevent a zero-test success, while GNU `timeout --kill-after=2s 10s` bounds a deadlock. The old single-thread subprocess cases remain. This is source review, not execution evidence; forced timeout and regression behavior still require hosted validation.
+
+Earlier run https://github.com/auenkr/cadence-rust/actions/runs/40840392628 completed successfully on `d4ee53f00d505246dc0b7fbbe353d7e989a91c49` (formatting, clippy and test passed); it does not validate the integrated candidate. The Actions listing showed no active runs at the integration check. No local Cargo, rustfmt, Go, build, or runtime was used. Workspace and mixed-cluster gates remain outstanding.
+
+Dispatched clean-target Matching CI with parity-file formatting: https://github.com/auenkr/cadence-rust/actions/runs/40841353614, head `e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`, observed `in_progress` with no conclusion. The subsequent evidence-only commit records this dispatch; the tested Rust source is unchanged. Do not claim a pass before the run completes, and inspect the uploaded formatting patch before treating the committed source as formatted.
