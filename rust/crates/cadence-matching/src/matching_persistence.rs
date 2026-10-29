@@ -616,6 +616,82 @@ mod list_domain_metric_tests {
     }
 
     #[test]
+    fn raw_domain_request_metric_is_visible_while_source_is_blocked() {
+        use crate::matching_domain_cache::MatchingDomainCache;
+        use crate::matching_domain_uuid::DomainIdParse;
+        use cadence_persistence::matching_domain_metadata::MatchingDomainMetadata;
+        use std::sync::mpsc;
+
+        struct InspectingSource {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl DomainMetadataSource for InspectingSource {
+            fn metadata_version(
+                &self,
+                _: std::time::Duration,
+            ) -> Result<i64, DomainMetadataSourceError> {
+                Ok(0)
+            }
+            fn list_domains(
+                &self,
+                _: usize,
+                _: Option<&[u8]>,
+                _: std::time::Duration,
+            ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
+                unreachable!("not used")
+            }
+            fn get_domain(
+                &self,
+                _: Option<&str>,
+                _: Option<&str>,
+                _: std::time::Duration,
+            ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+                unreachable!("raw lookup override is used")
+            }
+            fn get_domain_by_raw_id(
+                &self,
+                _: &[u8],
+                _: std::time::Duration,
+                _: DomainIdParse,
+            ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                Err(DomainMetadataSourceError::transient("source finished"))
+            }
+        }
+
+        let limiter = MatchingPersistenceLimiter::new(
+            Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let sink = Arc::new(RecordingMetricSink::default());
+        limiter.with_metric_sink(sink.clone());
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let source = Arc::new(InspectingSource {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        });
+        let cache = MatchingDomainCache::new(limit_domain_source(source, limiter))
+            .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
+        let lookup = std::thread::spawn(move || cache.get_domain_by_raw_id(b"01234567890123456789012345678901"));
+
+        entered_rx.recv().unwrap();
+        let events = sink.events();
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
+        assert!(!events.iter().any(|e| e.name.starts_with("persistence_latency") || e.name.starts_with("persistence_errors")));
+
+        release_tx.send(()).unwrap();
+        assert!(lookup.join().unwrap().is_err());
+        let events = sink.events();
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_latency").count(), 1);
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors_db_unavailable").count(), 1);
+    }
+
+    #[test]
     fn empty_list_domains_emits_go_empty_count_and_envelope_payload() {
         let limiter = MatchingPersistenceLimiter::new(
             Arc::new(Mutex::new(crate::admin::DynamicConfigOverlay::default())),
