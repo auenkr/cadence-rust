@@ -652,8 +652,12 @@ impl MatchingPersistenceLimiter {
 fn burst(qps: f64) -> i64 {
     if qps == 0.0 {
         0
+    } else if qps.ceil() >= 9_223_372_036_854_775_808.0 {
+        // On the Go amd64 target, converting this out-of-range float to int
+        // yields MinInt, so the dynamic limiter's minimum burst wins.
+        1
     } else {
-        qps.ceil().max(1.0).min(i64::MAX as f64) as i64
+        (qps.ceil() as i64).max(1)
     }
 }
 
@@ -778,6 +782,20 @@ mod tests {
         assert_eq!(limiter.snapshot().effective_qps, -1.0);
         assert_eq!(limiter.snapshot().global_qps, -2.0);
         assert!(!limiter.allow());
+        now.store(2 * REFRESH_NANOS, Ordering::SeqCst);
+        assert!(!limiter.allow());
+        set(&overlay, "matching.persistenceMaxQPS", 0);
+        now.store(3 * REFRESH_NANOS, Ordering::SeqCst);
+        assert!(!limiter.allow());
+        assert_eq!(limiter.snapshot().effective_qps, 0.0);
+    }
+
+    #[test]
+    fn extreme_host_rate_uses_go_amd64_integer_conversion_for_burst() {
+        assert_eq!(burst(i64::MAX as f64), 1);
+        assert_eq!(burst(-1.0), 1);
+        assert_eq!(burst(0.0), 0);
+        assert_eq!(burst(2.5), 3);
     }
 
     #[test]
