@@ -406,9 +406,18 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(response
-            .task_list_status
-            .unwrap()
+        let status = response.task_list_status.unwrap();
+        assert_eq!(status.read_level, 0);
+        assert_eq!(status.ack_level, 0);
+        assert!(status.empty);
+        assert_eq!(
+            status.task_id_block,
+            Some(api::TaskIdBlock {
+                start_id: 1,
+                end_id: 100,
+            })
+        );
+        assert!(status
             .isolation_group_metrics
             .contains_key(&GoString::from(vec![0xfe])));
         engine

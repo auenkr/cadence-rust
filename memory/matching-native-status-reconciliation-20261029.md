@@ -40,3 +40,7 @@ No Rust test was run locally for this review. I used only source inspection and 
 ## Parent evidence qualification
 
 The production native source constructs both fields, and no source mismatch is proved. However the cited matching_rpc_tests fixture uses the older QueueRegistry/Matching handler; it is not a native RPC regression. The native control test loaded_descriptions_keep_raw_names_and_optional_status checks isolation metrics but does not explicitly assert task_id_block/empty. Preserve this exact assertion gap until a native test or actual mixed status output supplies it. Do not label the legacy fixture as native execution.
+
+## Direct native assertion added
+
+Extended loaded_descriptions_keep_raw_names_and_optional_status to assert untouched read/ack levels0, empty=true and TaskIdBlock[1,100] through NativeMatchingEngine::describe_task_list. This closes the assertion-source gap once CI executes it; it is currently unvalidated and is after the frozen bf9f3d938 candidate. No runtime behavior changed. The original pin remains unchanged; consolidate with the readiness fix before freezing replacement acceptance source. No local Cargo/Go/rustfmt validation ran.
