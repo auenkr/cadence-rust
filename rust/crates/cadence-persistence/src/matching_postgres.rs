@@ -1285,8 +1285,9 @@ mod tests {
             drop(held);
             let result = rx.recv_timeout(Duration::from_secs(3));
             if result.is_err() {
-                // Let a broken unbounded waiter finish before reporting failure.
+                // Best effort only: a stalled database operation must not block this test.
                 pool.available.notify_one();
+                panic!("checkout was not promptly awakened");
             }
             waiter.join().unwrap();
             let new_pid = result.expect("checkout was not promptly awakened").unwrap();

@@ -118,7 +118,12 @@ build_test_exe() { # <label> <package>
 
 # Cargo runs lib tests from the package directory; do the same.
 run_exact_ignored() { # <label> <pkg> <test> <logname>
-  (cd "$ROOT/rust/crates/$2" && "$EXE" --ignored --exact "$3" --nocapture --test-threads=1) \
+  (cd "$ROOT/rust/crates/$2" &&
+    if [ -n "${ORACLE_TIMEOUT:-}" ]; then
+      timeout --kill-after=5s "$ORACLE_TIMEOUT" "$EXE" --ignored --exact "$3" --nocapture --test-threads=1
+    else
+      "$EXE" --ignored --exact "$3" --nocapture --test-threads=1
+    fi) \
     2>&1 | sed "s/$PG_PASSWORD/<redacted>/g" > "$EVIDENCE_DIR/$4.log"
   local rc=${PIPESTATUS[0]}
   record "$4" "$rc"
@@ -237,7 +242,7 @@ if [ "$ready" -eq 0 ] && build_test_exe postgres-tls cadence-persistence; then
 
   log "== Oracle 4: live PostgreSQL pool return wakeup"
   (
-    export CADENCE_POSTGRES_ADDR="127.0.0.1:$PORT" CADENCE_POSTGRES_USER=postgres \
+    export ORACLE_TIMEOUT=30s CADENCE_POSTGRES_ADDR="127.0.0.1:$PORT" CADENCE_POSTGRES_USER=postgres \
       CADENCE_POSTGRES_DATABASE=cadence
     run_exact_ignored postgres-tls cadence-persistence "$PG_POOL_TEST" postgres-pool-wakeup-test
   )

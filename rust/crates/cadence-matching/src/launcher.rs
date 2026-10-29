@@ -1596,7 +1596,7 @@ pub async fn run(
                     );
                 }
             }
-            eprintln!("Matching startup: membership ready; opening admission");
+            eprintln!("Matching startup: opening admission");
             matching_service.mark_started();
             if let Some(runtime) = matching_runtime.as_ref() {
                 runtime.mark_started();
