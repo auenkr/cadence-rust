@@ -695,7 +695,7 @@ impl Registry {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use async_trait::async_trait;
     use cadence_persistence::{
@@ -711,11 +711,15 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct ParkGrant {
-        inner: InMemorySemaphorePersistenceBytes,
-        entered: Notify,
-        release: Notify,
-        scan_pages: std::sync::atomic::AtomicUsize,
+    pub(crate) struct ParkGrant {
+        pub(crate) inner: InMemorySemaphorePersistenceBytes,
+        pub(crate) entered: Notify,
+        pub(crate) release: Notify,
+        pub(crate) scan_pages: std::sync::atomic::AtomicUsize,
+        pub(crate) park_scan: std::sync::atomic::AtomicBool,
+        pub(crate) fail_scan: std::sync::atomic::AtomicBool,
+        pub(crate) scan_entered: Notify,
+        pub(crate) scan_release: Notify,
     }
     #[async_trait]
     impl SemaphorePersistenceBytes for ParkGrant {
@@ -745,6 +749,13 @@ mod tests {
         ) -> Result<SemaphoreBucketPageBytes, AcquireError> {
             self.scan_pages
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.park_scan.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.scan_entered.notify_one();
+                self.scan_release.notified().await;
+                if self.fail_scan.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err(AcquireError::Internal("injected scan failure".into()));
+                }
+            }
             let all = self
                 .inner
                 .scan_semaphore_bucket(d, n, b, usize::MAX, None)
@@ -817,6 +828,10 @@ mod tests {
             entered: Notify::new(),
             release: Notify::new(),
             scan_pages: std::sync::atomic::AtomicUsize::new(0),
+            park_scan: std::sync::atomic::AtomicBool::new(false),
+            fail_scan: std::sync::atomic::AtomicBool::new(false),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
         });
         let registry = Registry::new(store.clone());
         let id = Identifier::new(domain.clone(), name.clone(), 0).unwrap();
@@ -857,6 +872,53 @@ mod tests {
                 .token_id,
             result.token_id
         );
+    }
+
+    #[tokio::test]
+    async fn failed_start_releases_waiter_and_next_request_rebuilds_manager() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        let domain = bytes(b"failure-d");
+        let name = bytes(b"failure-s");
+        inner.create_semaphore(&domain, &name, 1, 1).await.unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(true),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let id = Identifier::new(domain, name, 0).unwrap();
+        let start = {
+            let registry = registry.clone();
+            let id = id.clone();
+            tokio::spawn(async move { registry.get_or_create(id).await })
+        };
+        store.scan_entered.notified().await;
+        let manager = registry.get_or_create(id.clone()).await.unwrap();
+        let owner = bytes(b"1:waiter:r:1");
+        let waiting = manager.acquire(&owner, None);
+        tokio::pin!(waiting);
+        tokio::select! {
+            biased;
+            result = &mut waiting => panic!("waiter finished before startup: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        store.scan_release.notify_one();
+        assert!(start.await.unwrap().is_err());
+        assert_eq!(waiting.await.unwrap_err(), ManagerError::NotReady);
+        assert!(registry.by_identifier(&id).is_none());
+        let replacement = registry.get_or_create(id).await.unwrap();
+        assert!(!Arc::ptr_eq(&manager, &replacement));
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
+        store.release.notify_one();
+        assert_eq!(replacement.acquire(&owner, None).await.unwrap().outcome, SemaphoreAcquireOutcome::Acquired);
+        replacement.stop();
     }
 
     #[tokio::test]
