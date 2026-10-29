@@ -192,8 +192,9 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                     worker.abort();
                     let _ = worker.await;
                 }
+                let result = provider.stop().await;
                 membership.replace(Vec::new());
-                provider.stop().await
+                result
             }));
         }
         let result = self.teardown.as_mut().unwrap().await;
@@ -407,6 +408,7 @@ mod tests {
         let m = Membership::new("self", vec![]);
         let mut lifecycle = MatchingMembershipLifecycle::new("matching", p.clone(), m.clone());
         lifecycle.start().await.unwrap();
+        assert_eq!(m.member_count(), Ok(1));
         let mut changed = m.subscribe();
         p.set(vec![member(
             "two:7",
@@ -433,7 +435,9 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1100)).await;
         assert_eq!(*changed.borrow(), generation);
         assert_eq!(m.owner("key").unwrap().address, "two:7");
+        assert_eq!(m.member_count(), Ok(1));
         lifecycle.shutdown().await.unwrap();
+        assert_eq!(m.member_count(), Ok(0));
     }
 
     #[tokio::test(start_paused = true)]

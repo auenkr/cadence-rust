@@ -152,6 +152,20 @@ pub(crate) async fn with_persistence_retry_count<F: std::future::Future>(
     PERSISTENCE_RETRY_COUNT.scope(count, future).await
 }
 
+/// Go builds a separate limiter for every configured datastore, even those
+/// not used by Matching. Each construction samples the live quota separately.
+pub(crate) fn build_datastore_limiters<'a>(
+    names: impl IntoIterator<Item = &'a String>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+    matching_members: MemberCount,
+) -> std::collections::HashMap<String, Arc<MatchingPersistenceLimiter>> {
+    names.into_iter().map(|name| {
+        (name.clone(), MatchingPersistenceLimiter::with_member_count(
+            overlay.clone(), matching_members.clone(),
+        ))
+    }).collect()
+}
+
 impl MatchingPersistenceLimiter {
     pub fn new(
         overlay: Arc<Mutex<DynamicConfigOverlay>>,
@@ -749,6 +763,28 @@ mod tests {
                 }),
             }],
         );
+    }
+
+    #[test]
+    fn datastore_limiters_construct_and_spend_independently() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.persistenceMaxQPS", 1);
+        set(&overlay, "matching.persistenceGlobalMaxQPS", 1);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let names = ["default".to_string(), "visibility".to_string(), "unused".to_string()];
+        let limiters = build_datastore_limiters(
+            names.iter(), overlay, Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(1)
+            }),
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 6);
+        assert_eq!(limiters.len(), 3);
+        assert!(limiters["default"].allow());
+        assert!(!limiters["default"].allow());
+        assert!(limiters["visibility"].allow());
+        assert!(limiters["unused"].allow());
     }
 
     #[test]
