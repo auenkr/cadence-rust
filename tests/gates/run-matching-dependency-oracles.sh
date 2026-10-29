@@ -9,6 +9,8 @@
 #   3. cadence-persistence matching_postgres::native::tests::
 #      live_native_store_raw_bytes_fencing_and_legacy_cross_read (--ignored)
 #      against that disposable PostgreSQL on the original Go schema.
+#   4. cadence-persistence matching_postgres::tests::
+#      postgres_pool_return_wakes_waiters_live_oracle (--ignored).
 # Not a substitute for the full mixed-cluster lanes.
 #
 # Required env: EVIDENCE_DIR (retained artifact dir), SECRET_DIR (never
@@ -21,6 +23,7 @@ CONTAINER="cadence-dep-oracle-pg-$$"
 GO_TEST=matching_history_tchannel::typed_codec_tests::generated_go_history_server_accepts_native_tchannel_calls
 PG_TEST=matching_postgres::tests::postgres_tls_live_oracle
 PG_NATIVE_TEST=matching_postgres::native::tests::live_native_store_raw_bytes_fencing_and_legacy_cross_read
+PG_POOL_TEST=matching_postgres::tests::postgres_pool_return_wakes_waiters_live_oracle
 OVERALL=0
 
 mkdir -p "$EVIDENCE_DIR" "$SECRET_DIR"
@@ -231,6 +234,14 @@ if [ "$ready" -eq 0 ] && build_test_exe postgres-tls cadence-persistence; then
   pg_case inline-verify-ca   127.0.0.1 verify-ca -     "$CA_INLINE"       true  "$OK"
   pg_case inline-verify-full localhost verify-full -   "$CA_INLINE"       true  "$OK"
   pg_case inline-wrongca     127.0.0.1 verify-ca -     "$WRONG_INLINE"    false "$REJ"
+
+  log "== Oracle 4: live PostgreSQL pool return wakeup"
+  (
+    export CADENCE_POSTGRES_ADDR="127.0.0.1:$PORT" CADENCE_POSTGRES_USER=postgres \
+      CADENCE_POSTGRES_DATABASE=cadence
+    run_exact_ignored postgres-tls cadence-persistence "$PG_POOL_TEST" postgres-pool-wakeup-test
+  )
+  rc=$?; record postgres-pool-wakeup-oracle "$rc"
 
   # The native store test uses a plain connection (the TLS cases above cover
   # connection policy). Seed the original Go schema, without Rust-only DDL.

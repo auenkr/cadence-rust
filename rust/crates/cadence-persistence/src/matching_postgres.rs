@@ -82,6 +82,8 @@ struct IdleConnection {
 struct PoolState {
     idle: Vec<IdleConnection>,
     open: usize,
+    #[cfg(test)]
+    waiters: usize,
 }
 
 pub(crate) struct PostgresConnectionPool {
@@ -186,9 +188,17 @@ impl PostgresConnectionPool {
                     }
                 };
             }
+            #[cfg(test)]
+            {
+                state.waiters += 1;
+            }
             state = if let Some(deadline) = deadline {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
+                    #[cfg(test)]
+                    {
+                        state.waiters -= 1;
+                    }
                     return Err(StorageError::Backend {
                         kind: BackendErrorKind::Timeout,
                         message: "PostgreSQL connection pool checkout timed out".into(),
@@ -198,6 +208,12 @@ impl PostgresConnectionPool {
                     .available
                     .wait_timeout(state, remaining)
                     .expect("PostgreSQL Matching pool lock");
+                #[cfg(test)]
+                let state = {
+                    let mut state = state;
+                    state.waiters -= 1;
+                    state
+                };
                 if timeout.timed_out() && state.open >= self.max_open && state.idle.is_empty() {
                     return Err(StorageError::Backend {
                         kind: BackendErrorKind::Timeout,
@@ -206,9 +222,17 @@ impl PostgresConnectionPool {
                 }
                 state
             } else {
-                self.available
+                let state = self
+                    .available
                     .wait(state)
-                    .expect("PostgreSQL Matching pool lock")
+                    .expect("PostgreSQL Matching pool lock");
+                #[cfg(test)]
+                let state = {
+                    let mut state = state;
+                    state.waiters -= 1;
+                    state
+                };
+                state
             };
             drop(state);
         }
@@ -261,12 +285,13 @@ impl Drop for PostgresLease {
                 client,
                 created_at: self.created_at,
             });
+            drop(state);
         } else {
             state.open -= 1;
             drop(state);
             drop(client);
-            self.pool.available.notify_one();
         }
+        self.pool.available.notify_one();
     }
 }
 
@@ -1207,6 +1232,72 @@ mod tests {
                 .map(|(key, value)| ((*key).into(), (*value).into()))
                 .collect(),
             tls: None,
+        }
+    }
+
+    #[test]
+    #[ignore = "live pool oracle; run against the labelled disposable PostgreSQL instance"]
+    fn postgres_pool_return_wakes_waiters_live_oracle() {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let mut config = shard(&[("sslmode", "disable")]);
+        config.connect_addr =
+            std::env::var("CADENCE_POSTGRES_ADDR").expect("CADENCE_POSTGRES_ADDR is required");
+        config.user = std::env::var("CADENCE_POSTGRES_USER").unwrap_or_else(|_| "postgres".into());
+        config.password = std::env::var("CADENCE_POSTGRES_PASSWORD").unwrap_or_default();
+        config.database_name =
+            std::env::var("CADENCE_POSTGRES_DATABASE").unwrap_or_else(|_| "cadence".into());
+        let (options, tls) = postgres_options(&config).unwrap();
+        let pool = PostgresConnectionPool::new(options, tls, 1, 1, None);
+
+        for (timed, discard) in [(true, false), (false, false), (false, true)] {
+            let mut held = pool.checkout().unwrap();
+            let old_pid: i32 = held
+                .query_one("SELECT pg_backend_pid()", &[])
+                .unwrap()
+                .get(0);
+            let (tx, rx) = mpsc::channel();
+            let waiter_pool = pool.clone();
+            let waiter = thread::spawn(move || {
+                let result = if timed {
+                    waiter_pool.checkout_with_timeout(Duration::from_secs(15))
+                } else {
+                    waiter_pool.checkout()
+                };
+                let result = result.map(|mut lease| {
+                    lease
+                        .query_one("SELECT pg_backend_pid()", &[])
+                        .unwrap()
+                        .get::<_, i32>(0)
+                });
+                tx.send(result).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while pool.state.lock().unwrap().waiters == 0 {
+                assert!(
+                    Instant::now() < deadline,
+                    "checkout did not enter pool wait"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            held.discard = discard;
+            drop(held);
+            let result = rx.recv_timeout(Duration::from_secs(3));
+            if result.is_err() {
+                // Let a broken unbounded waiter finish before reporting failure.
+                pool.available.notify_one();
+            }
+            waiter.join().unwrap();
+            let new_pid = result.expect("checkout was not promptly awakened").unwrap();
+            if discard {
+                assert_ne!(old_pid, new_pid, "discarded connection was reused");
+            } else {
+                assert_eq!(old_pid, new_pid, "healthy idle connection was not reused");
+            }
+            let state = pool.state.lock().unwrap();
+            assert_eq!(state.open, 1);
+            assert_eq!(state.idle.len(), 1);
         }
     }
 
