@@ -807,6 +807,160 @@ mod tests {
             .unwrap();
     }
 
+    // The cache contains the exact metadata spelling, as Go's ID cache requires.
+    struct CachedSource(Arc<crate::matching_domain_cache::MatchingDomainCache>);
+    impl DecisionAddContext for CachedSource {
+        fn domain_active(&self, domain: &GoString) -> Result<bool, Status> {
+            crate::matching_engine_context_native::cached_domain_active(&self.0, domain, "active")
+        }
+        fn forward_degree(&self, _: uuid::Uuid, _: &GoString, _: i32) -> i64 {
+            20
+        }
+        fn check_write_partition(
+            &self,
+            _: &TaskListKeyBytes,
+            _: &NativeQueueHandle,
+        ) -> Result<(), Status> {
+            Ok(())
+        }
+        fn remote_parent(
+            &self,
+            _: GoString,
+        ) -> NativeFuture<Result<Option<Arc<dyn NativeMatchingApi>>, Status>> {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    #[tokio::test]
+    async fn forwarded_activity_sync_dispatch_preserves_cached_raw_source() {
+        use cadence_persistence::{
+            matching_blob::BlobEncoding,
+            matching_native_task_store::MatchingTaskStoreBytes,
+            matching_sqlite::SqliteTaskStore,
+        };
+        use cadence_proto::native as n;
+        use std::{convert::Infallible, pin::Pin, sync::Mutex};
+        use tonic::{Request, Response};
+
+        type Capture = Arc<Mutex<Vec<n::history::RecordActivityTaskStartedRequest>>>;
+        #[derive(Clone)]
+        struct History(Capture);
+        impl tonic::server::NamedService for History {
+            const NAME: &'static str = "uber.cadence.history.v1.HistoryAPI";
+        }
+        impl tower::Service<tonic::codegen::http::Request<tonic::body::BoxBody>> for History {
+            type Response = tonic::codegen::http::Response<tonic::body::BoxBody>;
+            type Error = Infallible;
+            type Future = Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+            fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+                std::task::Poll::Ready(Ok(()))
+            }
+            fn call(&mut self, request: tonic::codegen::http::Request<tonic::body::BoxBody>) -> Self::Future {
+                struct Activity(Capture);
+                impl tonic::server::UnaryService<n::history::RecordActivityTaskStartedRequest> for Activity {
+                    type Response = n::history::RecordActivityTaskStartedResponse;
+                    type Future = Pin<Box<dyn std::future::Future<Output = Result<Response<Self::Response>, Status>> + Send>>;
+                    fn call(&mut self, request: Request<n::history::RecordActivityTaskStartedRequest>) -> Self::Future {
+                        let capture = self.0.clone();
+                        Box::pin(async move {
+                            capture.lock().unwrap().push(request.into_inner());
+                            Ok(Response::new(n::history::RecordActivityTaskStartedResponse {
+                                scheduled_event: Some(n::api::HistoryEvent {
+                                    attributes: Some(n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                                        n::api::ActivityTaskScheduledEventAttributes {
+                                            activity_id: "activity-42".into(),
+                                            ..Default::default()
+                                        },
+                                    )),
+                                    ..Default::default()
+                                }),
+                                attempt: 1,
+                                ..Default::default()
+                            }))
+                        })
+                    }
+                }
+                let capture = self.0.clone();
+                Box::pin(async move {
+                    if request.uri().path() != "/uber.cadence.history.v1.HistoryAPI/RecordActivityTaskStarted" {
+                        return Ok(Status::unimplemented("unexpected path").into_http());
+                    }
+                    let mut grpc = tonic::server::Grpc::new(tonic::codec::ProstCodec::<
+                        n::history::RecordActivityTaskStartedResponse,
+                        n::history::RecordActivityTaskStartedRequest,
+                    >::default());
+                    Ok(grpc.unary(Activity(capture), request).await)
+                })
+            }
+        }
+        struct AbortOnDrop(tokio::task::JoinHandle<Result<(), tonic::transport::Error>>);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) { self.0.abort(); }
+        }
+
+        let captured: Capture = Arc::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _server = AbortOnDrop(tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(History(captured.clone()))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+        ));
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(dir.path().join("tasks.db"), BlobEncoding::ThriftRW).unwrap());
+        let history = crate::matching_history::MatchingHistoryClient::new(
+            tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect_lazy(),
+            Duration::from_secs(5),
+            1 << 20,
+        );
+        let engine = NativeMatchingEngine::new(NativeQueueRegistry::new(
+            store.clone(), history, std::num::NonZeroU32::new(100).unwrap(),
+        ));
+        let target = uuid::Uuid::from_u128(1);
+        let source = uuid::Uuid::from_u128(0xabc);
+        let raw_source = source.to_string().to_uppercase();
+        let mut metadata = crate::matching_engine_context_native::source_domain_tests::record(0xabc, 0);
+        metadata.info.uuid = raw_source.clone();
+        let context = CachedSource(crate::matching_engine_context_native::source_domain_tests::cache(vec![metadata]));
+        let key = TaskListKeyBytes { domain_id: target, name: "activity-queue".into(), task_type: 1 };
+        let handle = engine.registry.get(key.clone(), 0, crate::grpc_matching::matching_now()).await.unwrap();
+        assert_eq!(handle.queue.key().domain_id, target);
+        let request = matching::AddActivityTaskRequest {
+            domain_id: target.to_string().into(),
+            source_domain_id: raw_source.clone().into(),
+            task_list: Some(api::TaskList { name: key.name.clone(), ..Default::default() }),
+            workflow_execution: Some(api::WorkflowExecution {
+                workflow_id: "workflow".into(),
+                run_id: uuid::Uuid::from_u128(3).to_string().into(),
+            }),
+            schedule_id: 42,
+            forwarded_from: "child".into(),
+            ..Default::default()
+        };
+        let timeout = Duration::from_secs(5);
+        let (add, poll) = tokio::time::timeout(Duration::from_secs(8), async {
+            tokio::join!(
+                engine.add_activity_task(request, Some(tokio::time::Instant::now() + timeout), &context),
+                handle.dispatcher.poll_activity(n::api::PollForActivityTaskRequest::default(), timeout),
+            )
+        }).await.unwrap();
+        add.unwrap();
+        let response = poll.unwrap();
+        assert_eq!(response.activity_id.as_bytes(), b"activity-42");
+        assert!(!response.task_token.is_empty());
+        assert_eq!(response.workflow_execution.unwrap().workflow_id.as_bytes(), b"workflow");
+        let requests = captured.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].domain_id.as_bytes(), raw_source.as_bytes());
+        assert_eq!(requests[0].schedule_id, 42);
+        drop(requests);
+        for domain_id in [target, source] {
+            let persisted_key = TaskListKeyBytes { domain_id, ..key.clone() };
+            assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &persisted_key, 0, i64::MAX, 10).unwrap().is_empty());
+        }
+        engine.registry.shutdown(crate::grpc_matching::matching_now()).await.unwrap();
+    }
+
     struct RoutingFailure;
     impl DecisionAddContext for RoutingFailure {
         fn domain_active(&self, _: &GoString) -> Result<bool, Status> {
