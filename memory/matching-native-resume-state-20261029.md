@@ -116,3 +116,17 @@ branches. They have not been reviewed or merged; keep the diagnostic ref and
 head untouched. Reconcile both worker heads/results before choosing a fix
 candidate and revalidating it. The owner of this checkpoint is limited to CI
 and evidence coordination; no Rust or test source was changed locally.
+
+## Documentation-only continuation — latest checkpoint
+
+See `matching-native-checkpoint-20261029.md` for the latest concrete candidate,
+unverified regression branches, unavailable audit-note thread, and ten-lane
+acceptance status. It supersedes earlier expectation that the nine pending
+lanes could proceed directly after the old frozen PostgreSQL attempt: current
+integration candidate `d4ee53f00d505246dc0b7fbbe353d7e989a91c49` is source-reviewed
+but has no validation; formatting run `40840392628` is the last known live run.
+The old `bf9f3d3` PostgreSQL failure had no SDK execution and no native lane has
+passed. Preserve the two-node MySQL lane. Next dependency chain: collect/review
+the formatting artifact, finish Terra's two-branch integration review, freeze a
+single SHA, pass fresh-target workspace CI, then run all ten mixed lanes
+serially and close the parity audit.
