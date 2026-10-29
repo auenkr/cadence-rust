@@ -1,0 +1,6 @@
+PROBE BODY FAILED: Error: Rust Matching before-restart did not become ready through Go Frontend and its primary gRPC endpoint; last readiness error: Call cancelled; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching/rust-server-before-restart.log
+    at waitForRustReady (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:552:11)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:562:5)
+Error: Rust Matching did not stop
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:1766:70)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)

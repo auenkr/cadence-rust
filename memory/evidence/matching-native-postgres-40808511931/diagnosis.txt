@@ -1,0 +1,4 @@
+Run conclusion: failure
+Frozen source: bf9f3d9387a72c4ed26b4be0a85025e65fd485a1
+Rust listeners started but waitForRustReady failed after its 180-second window: last readiness error Call cancelled. Probe cleanup also reports Rust Matching did not stop. shutdown JSON records SIGTERM only. Original Go logs report Not enough hosts to serve the request for Matching. Cause not yet established. PostgreSQL container cleanup records lane-owned container removal. No SDK/restart/recovery scenario success is credited.
+Full artifact already existed locally when download was attempted; duplicate extraction failed on an existing binary.sha256. Inspected existing files and collector verified exact commit and nested failure exits.
