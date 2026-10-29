@@ -1,23 +1,41 @@
-## Matching docs checkpoint — 2026-10-29 (updated)
+## Matching docs checkpoint — 2026-10-29 (latest save)
 
-Shared master was clean at `bc4e12fef6b97a28688e7fc2693037407952b479` before
-this docs-only update. Current branch states, open parity issues, worker
-ownership, and CI observation are in
-`memory/matching-resume-checkpoint-20261029-ci40853270019.md`; acceptance is
-tracked in `memory/matching-native-acceptance-ledger-20261029.md`.
+Saved from shared `master` at `fa82a5b417d793d7e05767b7d5496b1d58150827`;
+the checkout was clean and `origin/master` matched before this docs-only
+update. The previous confirmed checkpoint `fa82a5b417d793d7e05767b7d5496b1d58150827`
+was pushed. No source or runtime validation was performed for this save.
 
-Remote refs verified: raw-byte/deadline `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`,
-lifecycle follow-up `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, and timeout
-parity `18040515dabb2d6fd79ed5b4eba5c933eee25f1f`. They are separate unintegrated
-work; combined validation is outstanding. Semaphore CI run
-[40853270019](https://github.com/auenkr/cadence-rust/actions/runs/40853270019)
-was last observed at exact head `592a0bb03660479c890680d316b58067f3527810`:
-Clippy/format succeeded and tests were still running. No newer result is
-claimed. Focused baseline [40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
-passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` but predates these changes.
-No native mixed lane has passed; all ten remain required. Frozen candidate
-`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` remains unchanged. Matching remains
-incomplete and no History migration should begin.
+Read `memory/matching-resume-checkpoint-20261029-ci40853270019.md` for branch
+ownership and `memory/matching-native-acceptance-ledger-20261029.md` for
+acceptance. Raw-byte/deadline branch `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`
+has been reviewed. Timeout branch `18040515dabb2d6fd79ed5b4eba5c933eee25f1f`
+integration with it belongs to task `34075d70-1b1f-422c-84e2-7cf99a640793`;
+no completion callback exists yet. Lifecycle integration `a9cb5ed06` was
+followed by `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, which logs and continues
+after final-ack/forced-GC errors. Domain-filter binding, ticker semantics,
+blocked-reader/shutdown race, and injected teardown tests remain open. Terra
+task `f5245394-bb12-4e8a-b201-3f3df435dc10` owns the domain lookup-failure and
+rename-stability regression/fix; no completion callback exists yet.
+
+Scheduler task `3ffb29bd-727d-433e-b088-36ffbab15c89` owns collection for CI
+run `40853270019` and conditional reviewed-`90aa741` focused CI. Do not infer a
+current live status: the last known snapshot was exact head
+`592a0bb03660479c890680d316b58067f3527810`, with Clippy/format successful and
+tests still running. Older focused run
+[40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3` only. All newer source is
+unverified until exact-head CI. Frozen candidate
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a` is unchanged; native mixed passes
+remain zero. Matching remains incomplete; do not start History.
+
+Next: receive the outstanding callbacks, integrate and review lifecycle,
+raw-byte, and timeout fixes, complete the Matching config/source audit, run
+fresh uncached workspace Clippy followed by workspace tests on CI, resolve the
+PostgreSQL pool oracle, and execute all ten serial mixed Go/Rust SDK
+failure/restart/recovery lanes with source SHA, Rust binary SHA256, and cleanup
+evidence. Do not claim parity or completion before these gates pass. This save
+performed no local Cargo/rustfmt/Go/runtime validation, Actions reads or
+dispatches, or child status polling.
 
 ## DNS accepted; explicit Luna restart — 2026-10-19
 

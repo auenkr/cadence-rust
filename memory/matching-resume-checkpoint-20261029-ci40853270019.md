@@ -5,6 +5,42 @@ do not start History migration. No production source was changed here.
 
 ## Current source and ownership
 
+### Latest continuation update — 2026-10-29
+
+Documentation-only checkpoint from clean shared master at
+`fa82a5b417d793d7e05767b7d5496b1d58150827`; local and remote master matched
+before the edit. The previous checkpoint is pushed. No source or validation
+work was performed for this save.
+
+- Reviewed raw-byte/deadline candidate: `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`.
+- Timeout integration task `34075d70-1b1f-422c-84e2-7cf99a640793` owns combining
+  `18040515dabb2d6fd79ed5b4eba5c933eee25f1f` with `90aa741`; no completion
+  callback has arrived.
+- Lifecycle candidate `a9cb5ed06` was followed by lifecycle fixes
+  `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, which logs and continues after
+  final-ack and forced-GC errors. Remaining named gaps: domain-filter binding,
+  ticker semantics, blocked-reader/shutdown race, and injected teardown tests.
+- Terra task `f5245394-bb12-4e8a-b201-3f3df435dc10` owns the lifecycle domain
+  lookup-failure/rename-stability regression and fix; no completion callback
+  has arrived.
+- Scheduler task `3ffb29bd-727d-433e-b088-36ffbab15c89` owns evidence collection
+  for semaphore run `40853270019` and conditional reviewed-`90aa741` focused CI;
+  no completion callback has arrived. The only permissible run statement here
+  is the last known observation: head `592a0bb03660479c890680d316b58067f3527810`,
+  Clippy/format passed, tests in progress. Do not represent it as currently live
+  or terminal.
+- Focused run `40842468415` passed at `721e196d31b2cd7876fc09086c8ac4b2a8995ba3`
+  only. Newer source remains unverified until CI. Frozen candidate
+  `bf9f3d9387a72c4ed26b4be0a85025e65fd485a` is unchanged; native mixed passes
+  remain zero and Matching remains incomplete.
+
+Resume by collecting those callbacks, integrating/reviewing the fixes, then
+performing exact immutable fresh-target workspace Clippy and tests on CI,
+PostgreSQL pool oracle, and all ten serial mixed SDK failure/restart/recovery
+lanes with binary SHA and cleanup evidence. Complete the Matching config/source
+audit before considering the next service. No local validation, Actions read or
+dispatch, or child status polling was performed for this checkpoint.
+
 - Shared master docs checkpoint begins at `bc4e12fef6b97a28688e7fc2693037407952b479`.
   Its existing frozen Matching candidate remains
   `bf9f3d9387a72c4ed26b4be0a85025e65fd485a`; master docs commits do not move it.

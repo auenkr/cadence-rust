@@ -2,6 +2,21 @@
 
 ## Current resume pointer — 2026-10-29
 
+Latest continuation save: `fa82a5b417d793d7e05767b7d5496b1d58150827` was the
+clean shared-master checkpoint before a docs-only update. The callback and
+ownership details now appear at the top of
+`memory/matching-resume-checkpoint-20261029-ci40853270019.md`. In brief:
+timeout integration task `34075d70-1b1f-422c-84e2-7cf99a640793`, lifecycle
+domain-binding regression task `f5245394-bb12-4e8a-b201-3f3df435dc10`, and CI
+evidence scheduler task `3ffb29bd-727d-433e-b088-36ffbab15c89` were last
+dispatched and are awaiting callbacks. Their status is not confirmed live or
+complete. Run `40853270019` must remain at its last known observation (head
+`592a0bb03660479c890680d316b58067f3527810`, Clippy/format passed, tests were
+running); do not infer a newer result. Reviewed branch `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`
+and other post-baseline source is unverified until exact-head CI. No local
+validation, Actions inspection/dispatch, or child-status polling occurred for
+this checkpoint.
+
 Latest branch-by-branch status and ownership is recorded in
 `memory/matching-resume-checkpoint-20261029-ci40853270019.md`. Remote refs
 verified: raw-byte/deadline `90aa74112e1c9e4d4c9814f5e1d94a7f6b81176b`,
