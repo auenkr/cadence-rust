@@ -458,6 +458,7 @@ jobs:
           cat query-format.log
           exit 0
       - name: Check changed Matching runtime formatting
+        id: runtime_format
         working-directory: rust
         run: |
           set +e
@@ -466,6 +467,20 @@ jobs:
           echo "$result" > matching-runtime-format.exit
           cat matching-runtime-format.log
           exit "$result"
+      - name: Capture Matching runtime formatting patch on failure
+        if: failure() && steps.runtime_format.outcome == 'failure'
+        working-directory: rust
+        run: |
+          files=(crates/cadence-matching/src/launcher.rs crates/cadence-matching/src/matching_config.rs crates/cadence-matching/src/matching_runtime.rs crates/cadence-matching/src/matching_registry.rs crates/cadence-matching/src/matching_writer.rs crates/cadence-persistence/src/dynamic_config.rs crates/cadence-service-core/src/admin.rs crates/cadence-service-core/src/openfeature/runtime.rs)
+          rustfmt --edition 2021 "${files[@]}"
+          git diff --binary -- "${files[@]}" > "$RUNNER_TEMP/matching-runtime-format.patch"
+      - name: Upload Matching runtime formatting patch
+        if: failure() && steps.runtime_format.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: matching-runtime-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/matching-runtime-format.patch
       - name: Clippy
         working-directory: rust
         run: |

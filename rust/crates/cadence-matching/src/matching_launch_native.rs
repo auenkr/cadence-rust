@@ -310,7 +310,7 @@ mod tests {
                 crate::matching_domain_cache::DomainMetadataSourceError,
             > {
                 Ok(crate::matching_domain_cache::DomainMetadataPage {
-                    domains: vec![],
+                    domains: vec![self.get_domain(None, Some(DOMAIN), Duration::ZERO)?],
                     next_page_token: None,
                 })
             }
@@ -490,11 +490,14 @@ mod tests {
             // The in-process transport adapter gives the waiter a caller deadline.
             let mut first_client = client.clone();
             let first_request = request("sem", "5:first:r:1", None);
-            let first =
+            let mut first =
                 tokio::spawn(async move { first_client.acquire_semaphore(first_request).await });
-            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified())
-                .await
-                .unwrap();
+            tokio::select! {
+                result = &mut first => panic!("initial RPC returned before scan: {result:?}"),
+                result = tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified()) => {
+                    result.expect("initial RPC never reached semaphore scan");
+                }
+            }
             let error = tokio::time::timeout(
                 Duration::from_secs(3),
                 transport.acquire_semaphore(request(
