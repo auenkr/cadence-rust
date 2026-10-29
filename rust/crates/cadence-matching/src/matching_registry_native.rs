@@ -110,6 +110,9 @@ pub struct NativeBoundTimeouts {
     pub task_wait: NativeProvider<i64>,
     pub poll_wait: NativeProvider<i64>,
     pub writer: NativeWriterLiveProvider,
+    pub idle: NativeProvider<i64>,
+    pub reader: NativeReaderPropertiesProvider,
+    pub delete_batch: NativeProvider<crate::matching_reader::LiveInt>,
 }
 pub type NativeTimeoutBinder = Arc<dyn Fn(&GoString) -> Result<NativeBoundTimeouts, Status> + Send + Sync>;
 pub type NativeWriterLiveConfig = Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>;
@@ -1384,8 +1387,9 @@ impl NativeQueueRegistry {
         let sync_wait_provider = bound_timeouts.as_ref().map(|bound| bound.task_wait.clone()).or_else(|| registry.sync_wait.clone());
         let poll_wait_provider = bound_timeouts.as_ref().map(|bound| bound.poll_wait.clone()).or_else(|| registry.local_poll_wait.clone());
         let writer_provider = bound_timeouts.as_ref().map(|bound| bound.writer.clone()).or_else(|| registry.writer_live.clone());
+        let idle_provider = bound_timeouts.as_ref().map(|bound| bound.idle.clone()).or_else(|| registry.idle_tasklist_check_interval.clone());
         let idle_ttl_nanos = Self::provider(
-            &registry.idle_tasklist_check_interval,
+            &idle_provider,
             &domain,
             &lookup.1,
             lookup.2,
@@ -1417,7 +1421,8 @@ impl NativeQueueRegistry {
         queue.set_condition_failed_observer(Arc::new(move || {
             condition_metrics.condition_failed(&condition_context);
         }));
-        if let Some(provider) = &registry.max_task_delete_batch_size {
+        let delete_provider = bound_timeouts.as_ref().map(|bound| bound.delete_batch.clone()).or_else(|| registry.max_task_delete_batch_size.clone());
+        if let Some(provider) = &delete_provider {
             queue.set_gc_batch_size_provider(provider(&domain, &lookup.1, lookup.2));
         }
         let partitions =
@@ -1543,8 +1548,7 @@ impl NativeQueueRegistry {
             })
         };
         let reader_config = ReaderConfig {
-            live: registry
-                .reader_live
+            live: bound_timeouts.as_ref().map(|bound| bound.reader.clone()).or_else(|| registry.reader_live.clone())
                 .as_ref()
                 .map(|provider| Arc::new(provider(&domain, &lookup.1, lookup.2))),
             ..ReaderConfig::default()
@@ -2449,6 +2453,77 @@ mod tests {
         assert_eq!(store.updates.load(Ordering::SeqCst), 2);
         assert_eq!(store.deletes.load(Ordering::SeqCst), 2);
         assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
+    #[tokio::test]
+    async fn domain_binding_failure_precedes_lease() {
+        let (_directory, registry) = fixture();
+        let registry = registry.with_timeout_binder(Arc::new(|_| Err(Status::not_found("missing domain"))));
+        let task_key = key(b"missing-domain");
+        let error = match registry.get(task_key.clone(), 0, 1).await {
+            Ok(_) => panic!("missing domain accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), tonic::Code::NotFound);
+        assert!(registry.store.get_task_list(&task_key).is_err());
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
+    #[tokio::test]
+    async fn full_reader_buffer_cancels_on_shutdown() {
+        let (_directory, registry) = fixture();
+        let registry = registry.with_reader_live(Arc::new(|_, _, _| ReaderLive {
+            batch_size: Arc::new(|| 2),
+            read_range_size: Arc::new(|| 100),
+            dispatch_timeout: Arc::new(|| 60_000_000_000),
+            update_ack_interval: Arc::new(|| 60_000_000_000),
+        }));
+        let handle = registry.get(key(b"full-buffer"), 0, 1).await.unwrap();
+        handle.append((0..8).map(|_| task(b"buffered")).collect(), 2).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while handle.queue.levels().2 < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("reader did not fill its buffer");
+        tokio::time::timeout(Duration::from_secs(3), registry.shutdown(3))
+            .await.expect("shutdown blocked on the full reader buffer").unwrap();
+        assert!(handle.queue.is_stopped());
+    }
+
+    #[tokio::test]
+    async fn periodic_ack_condition_failure_evicts_owner() {
+        use std::sync::atomic::Ordering;
+        let (dir, mut registry) = fixture();
+        let store = Arc::new(TeardownStore {
+            inner: Arc::new(SqliteTaskStore::create(dir.path().join("periodic.db"), BlobEncoding::ThriftRW).unwrap()),
+            fail: std::sync::atomic::AtomicBool::new(false),
+            updates: std::sync::atomic::AtomicUsize::new(0),
+            deletes: std::sync::atomic::AtomicUsize::new(0),
+        });
+        registry.store = store.clone();
+        registry = registry.with_reader_live(Arc::new(|_, _, _| ReaderLive {
+            batch_size: Arc::new(|| 10),
+            read_range_size: Arc::new(|| 100),
+            dispatch_timeout: Arc::new(|| 1_000_000_000),
+            update_ack_interval: Arc::new(|| 10_000_000),
+        }));
+        let task_key = key(b"periodic-condition");
+        let handle = registry.get(task_key.clone(), 0, 1).await.unwrap();
+        store.fail.store(true, Ordering::SeqCst);
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let controller = tokio::spawn({
+            let registry = registry.clone();
+            async move { registry.maintain_until(Duration::from_secs(60), async { let _ = stopped.await; }).await }
+        });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if handle.queue.is_stopped() && registry.state.lock().unwrap().owners.is_empty() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("condition failure did not evict owner");
+        assert!(store.updates.load(Ordering::SeqCst) >= 1);
+        let _ = stop.send(());
+        controller.await.unwrap().unwrap();
     }
 
     #[tokio::test]

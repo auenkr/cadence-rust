@@ -336,6 +336,16 @@ fn reader_properties_provider(
 ) -> crate::matching_registry_native::NativeReaderPropertiesProvider {
     Arc::new(move |domain: &GoString, task: &GoString, task_type| {
         let name = cached_domain_name(&cache, domain);
+        reader_properties_for_name(overlay.clone(), name, task, task_type)
+    })
+}
+
+fn reader_properties_for_name(
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+    name: Option<String>,
+    task: &GoString,
+    task_type: i32,
+) -> ReaderLive {
         let scoped = |key: &'static str, default| {
             let overlay = overlay.clone();
             let name = name.clone();
@@ -398,7 +408,6 @@ fn reader_properties_provider(
                 )
             }),
         }
-    })
 }
 
 fn standby_provider(
@@ -440,10 +449,39 @@ fn timeout_binder(
         let writer = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
             writer_properties(&writer_overlay, Some(&writer_name), task, task_type)
         });
+        let reader_overlay = overlay.clone();
+        let reader_name = name.clone();
+        let reader = Arc::new(move |_: &GoString, task: &GoString, task_type| {
+            reader_properties_for_name(reader_overlay.clone(), Some(reader_name.clone()), task, task_type)
+        });
+        let delete_overlay = overlay.clone();
+        let delete_name = name.clone();
+        let delete_batch = Arc::new(move |_: &GoString, task: &GoString, task_type| {
+            let overlay = delete_overlay.clone();
+            let name = delete_name.clone();
+            let task = task.clone();
+            Arc::new(move || {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values("matching.maxTaskDeleteBatchSize"), Some(&name), task.as_bytes(), task_type, 100,
+                )
+            }) as crate::matching_reader::LiveInt
+        });
+        let idle_overlay = overlay.clone();
+        let idle_name = name.clone();
+        let idle = Arc::new(move |_: &GoString, task: &GoString, task_type| {
+            let config = idle_overlay.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_duration_bytes(
+                config.property_values("matching.idleTasklistCheckInterval"), Some(&idle_name), task.as_bytes(), task_type, 300_000_000_000,
+            )
+        });
         Ok(crate::matching_registry_native::NativeBoundTimeouts {
             task_wait: duration("matching.localTaskWaitTime"),
             poll_wait: duration("matching.localPollWaitTime"),
             writer,
+            idle,
+            reader,
+            delete_batch,
         })
     })
 }
@@ -904,6 +942,17 @@ mod tests {
                 overlay.lock().unwrap().update(false, "matching.localTaskWaitTime", vec![value(br#""99ms""#, true)]);
                 assert_eq!((bound.task_wait)(&domain, &task, 0), 99_000_000);
                 assert_eq!((bound.task_wait)(&GoString::from("different-id"), &task, 0), 99_000_000);
+                overlay.lock().unwrap().update(false, "matching.getTasksBatchSize", vec![value(b"23", true)]);
+                overlay.lock().unwrap().update(false, "matching.maxTaskDeleteBatchSize", vec![value(b"29", true)]);
+                let renamed_id = GoString::from("different-id");
+                let reader = (bound.reader)(&renamed_id, &task, 0);
+                let delete = (bound.delete_batch)(&renamed_id, &task, 0);
+                assert_eq!((reader.batch_size)(), 23);
+                assert_eq!(delete(), 29);
+                overlay.lock().unwrap().update(false, "matching.getTasksBatchSize", vec![value(b"37", true)]);
+                overlay.lock().unwrap().update(false, "matching.maxTaskDeleteBatchSize", vec![value(b"41", true)]);
+                assert_eq!((reader.batch_size)(), 37);
+                assert_eq!(delete(), 41);
             }
             "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
             _ if case.starts_with("engine_") || case.starts_with("control_") => {
