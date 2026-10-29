@@ -2393,6 +2393,13 @@ mod tests {
         fail: std::sync::atomic::AtomicBool,
         updates: std::sync::atomic::AtomicUsize,
         deletes: std::sync::atomic::AtomicUsize,
+        blocked_read: Option<Arc<BlockedRead>>,
+    }
+    struct BlockedRead {
+        entered: tokio::sync::Notify,
+        active: std::sync::atomic::AtomicBool,
+        released: Mutex<bool>,
+        release: std::sync::Condvar,
     }
     impl MatchingTaskStoreBytes for TeardownStore {
         fn get_task_list(&self, key: &TaskListKeyBytes) -> cadence_persistence::matching_native_task_store::Result<cadence_persistence::matching_native_task_store::TaskListRecordBytes> {
@@ -2412,6 +2419,15 @@ mod tests {
             MatchingTaskStoreBytes::create_tasks_with_domains(self.inner.as_ref(), key, range, now, tasks)
         }
         fn get_tasks(&self, key: &TaskListKeyBytes, read: i64, max: i64, batch: i64) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>> {
+            if let Some(gate) = &self.blocked_read {
+                if gate.active.load(std::sync::atomic::Ordering::SeqCst) {
+                    gate.entered.notify_one();
+                    let mut released = gate.released.lock().unwrap();
+                    while !*released {
+                        released = gate.release.wait(released).unwrap();
+                    }
+                }
+            }
             MatchingTaskStoreBytes::get_tasks(self.inner.as_ref(), key, read, max, batch)
         }
         fn task_list_size(&self, key: &TaskListKeyBytes, ack: i64) -> cadence_persistence::matching_native_task_store::Result<i64> {
@@ -2441,6 +2457,7 @@ mod tests {
             fail: std::sync::atomic::AtomicBool::new(false),
             updates: std::sync::atomic::AtomicUsize::new(0),
             deletes: std::sync::atomic::AtomicUsize::new(0),
+            blocked_read: None,
         });
         registry.store = store.clone();
         registry = registry.with_max_task_delete_batch_size(Arc::new(|_, _, _| Arc::new(|| 0)));
@@ -2467,6 +2484,39 @@ mod tests {
         assert_eq!(error.code(), tonic::Code::NotFound);
         assert!(registry.store.get_task_list(&task_key).is_err());
         assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_blocked_store_then_cancels_reader() {
+        use std::sync::atomic::Ordering;
+        let (dir, mut registry) = fixture();
+        let gate = Arc::new(BlockedRead {
+            entered: tokio::sync::Notify::new(),
+            active: std::sync::atomic::AtomicBool::new(false),
+            released: Mutex::new(false),
+            release: std::sync::Condvar::new(),
+        });
+        registry.store = Arc::new(TeardownStore {
+            inner: Arc::new(SqliteTaskStore::create(dir.path().join("blocked.db"), BlobEncoding::ThriftRW).unwrap()),
+            fail: std::sync::atomic::AtomicBool::new(false),
+            updates: std::sync::atomic::AtomicUsize::new(0),
+            deletes: std::sync::atomic::AtomicUsize::new(0),
+            blocked_read: Some(gate.clone()),
+        });
+        let handle = registry.get(key(b"blocked-read"), 0, 1).await.unwrap();
+        gate.active.store(true, Ordering::SeqCst);
+        handle.append(vec![task(b"blocked")], 2).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), gate.entered.notified()).await.expect("store read did not start");
+        let shutdown_registry = registry.clone();
+        let shutdown = tokio::spawn(async move { shutdown_registry.shutdown(3).await });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !handle.queue.is_stopped() { tokio::task::yield_now().await; }
+        }).await.expect("shutdown did not cancel the reader");
+        assert!(!shutdown.is_finished(), "shutdown skipped the in-flight store read");
+        *gate.released.lock().unwrap() = true;
+        gate.release.notify_all();
+        tokio::time::timeout(Duration::from_secs(3), shutdown).await
+            .expect("shutdown deadlocked after store returned").unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -2499,6 +2549,7 @@ mod tests {
             fail: std::sync::atomic::AtomicBool::new(false),
             updates: std::sync::atomic::AtomicUsize::new(0),
             deletes: std::sync::atomic::AtomicUsize::new(0),
+            blocked_read: None,
         });
         registry.store = store.clone();
         registry = registry.with_reader_live(Arc::new(|_, _, _| ReaderLive {
