@@ -89,7 +89,7 @@ async function runNativeIsolationRecovery({ call, domain, domainId, id, startReq
   await registered(1, 0);
   await Promise.all([4, 5, 6, 7].map(add));
   // A zero burst must leave every task undispatched, including sync matching.
-  const early = await Promise.race([Promise.all(zero.map(p => p.promise)).then(() => true), sleep(2000).then(() => false)]);
+  const early = await Promise.race([Promise.race(zero.map(p => p.promise)).then(() => true), sleep(2000).then(() => false)]);
   assert(!early, 'zero-rate pollers unexpectedly received work');
   for (const p of zero) {
     const response = await cancel(p);
