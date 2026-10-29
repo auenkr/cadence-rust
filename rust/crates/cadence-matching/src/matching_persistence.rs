@@ -382,13 +382,26 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         timeout: std::time::Duration,
         mode: crate::matching_domain_uuid::DomainIdParse,
     ) -> Result<cadence_persistence::matching_domain_metadata::MatchingDomainMetadata, DomainMetadataSourceError> {
-        self.permit("GetDomain", None)?;
+        use crate::matching_domain_cache::DomainErrorClass;
+        use crate::matching_persistence_limiter::PersistenceErrorClass;
+        self.limiter.record_domain_request("GetDomain");
         let started = std::time::Instant::now();
-        let result = self.source.get_domain_by_raw_id(id, timeout, mode);
-        if result.as_ref().err().is_some_and(|error| error.class == crate::matching_domain_cache::DomainErrorClass::CapturedPanic) {
-            self.limiter.record_domain_panic_request("GetDomain");
+        let result = if self.limiter.allow() {
+            self.source.get_domain_by_raw_id(id, timeout, mode)
         } else {
-            self.record("GetDomain", started.elapsed(), &result);
+            self.limiter.record_domain_rejection("GetDomain");
+            let result = Err(DomainMetadataSourceError::transient(REJECTED));
+            self.limiter.record_domain_result("GetDomain", started.elapsed(), Some(PersistenceErrorClass::Busy));
+            return result;
+        };
+        if !result.as_ref().err().is_some_and(|error| error.class == DomainErrorClass::CapturedPanic) {
+            let class = result.as_ref().err().map(|error| match error.class {
+                DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
+                DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
+                DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+                DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
+            });
+            self.limiter.record_domain_result("GetDomain", started.elapsed(), class);
         }
         result
     }
@@ -582,6 +595,10 @@ mod list_domain_metric_tests {
         assert_eq!(rejected.code(), tonic::Code::Internal);
         assert_eq!(rejected.message(), REJECTED);
         assert_eq!(limiter.rejected(), 1);
+        let events = sink.events();
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 2);
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_latency").count(), 1);
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors_busy").count(), 1);
     }
 
     #[test]

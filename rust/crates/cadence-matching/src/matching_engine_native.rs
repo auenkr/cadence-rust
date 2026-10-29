@@ -949,11 +949,12 @@ mod tests {
         assert_eq!(response.activity_id.as_bytes(), b"activity-42");
         assert!(!response.task_token.is_empty());
         assert_eq!(response.workflow_execution.unwrap().workflow_id.as_bytes(), b"workflow");
-        let requests = captured.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].domain_id.as_bytes(), raw_source.as_bytes());
-        assert_eq!(requests[0].schedule_id, 42);
-        drop(requests);
+        {
+            let requests = captured.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].domain_id.as_bytes(), raw_source.as_bytes());
+            assert_eq!(requests[0].schedule_id, 42);
+        }
         for domain_id in [target, source] {
             let persisted_key = TaskListKeyBytes { domain_id, ..key.clone() };
             assert!(MatchingTaskStoreBytes::get_tasks(store.as_ref(), &persisted_key, 0, i64::MAX, 10).unwrap().is_empty());

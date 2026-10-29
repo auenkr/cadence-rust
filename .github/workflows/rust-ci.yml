@@ -197,6 +197,14 @@ jobs:
           go test -overlay "$RUNNER_TEMP/source-domain-boundary-overlay.json" ./service/matching/tasklist ./common/persistence/sql \
             -run '^TestSourceDomainBoundary' -count=1 -v > "$evidence/go-oracle.log" 2>&1
           result=$?
+          if [ "$result" -eq 0 ]; then
+            for test in TestSourceDomainBoundaryManagerOracle TestSourceDomainBoundarySQLOracle TestSourceDomainBoundaryCassandraMarshalOracle; do
+              if ! grep -Eq "^--- PASS: $test([[:space:]]|$)" "$evidence/go-oracle.log"; then
+                echo "Required oracle did not pass: $test" >> "$evidence/go-oracle.log"
+                result=1
+              fi
+            done
+          fi
           echo "$result" > "$evidence/go-oracle.exit"
           cat "$evidence/go-oracle.log"
           exit "$result"
@@ -272,6 +280,9 @@ jobs:
             crates/cadence-matching/src/matching_scaler_runtime_native.rs
             crates/cadence-matching/src/matching_service_native.rs
             crates/cadence-matching/src/matching_control_context_native.rs
+            crates/cadence-matching/src/matching_persistence.rs
+            crates/cadence-matching/src/matching_persistence_limiter.rs
+            crates/cadence-matching/src/matching_domain_uuid.rs
             crates/cadence-matching/src/matching_domain_cache.rs
             crates/cadence-matching/src/matching_engine_context_native.rs
             crates/cadence-matching/src/matching_host_native.rs

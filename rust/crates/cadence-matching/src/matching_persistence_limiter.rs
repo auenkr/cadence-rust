@@ -207,6 +207,20 @@ impl MatchingPersistenceLimiter {
         );
     }
 
+    pub(crate) fn record_domain_rejection(&self, operation: &'static str) {
+        use crate::matching_metrics::*;
+        self.metric_sink.read().expect("Matching metrics sink lock").record(MetricEvent {
+            name: MATCHING_PERSISTENCE_QPS_REJECTIONS,
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(1),
+            tags: std::collections::BTreeMap::from([
+                (OPERATION_TAG.to_owned(), operation.to_owned()),
+                ("persistence_scope".to_owned(), "go".to_owned()),
+            ]),
+            histogram: None,
+        });
+    }
+
     pub fn with_domain_cache(
         &self,
         cache: &Arc<crate::matching_domain_cache::MatchingDomainCache>,
@@ -318,7 +332,7 @@ impl MatchingPersistenceLimiter {
     }
 
     // A Go panic unwinds after the request counter and before latency/error metrics.
-    pub(crate) fn record_domain_panic_request(&self, operation: &'static str) {
+    pub(crate) fn record_domain_request(&self, operation: &'static str) {
         use crate::matching_metrics::*;
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
         sink.record(MetricEvent {
@@ -340,6 +354,26 @@ impl MatchingPersistenceLimiter {
         domain: Option<String>,
         elapsed: std::time::Duration,
         class: Option<PersistenceErrorClass>,
+    ) {
+        self.record_call_metrics(operation, domain, elapsed, class, true);
+    }
+
+    pub(crate) fn record_domain_result(
+        &self,
+        operation: &'static str,
+        elapsed: std::time::Duration,
+        class: Option<PersistenceErrorClass>,
+    ) {
+        self.record_call_metrics(operation, None, elapsed, class, false);
+    }
+
+    fn record_call_metrics(
+        &self,
+        operation: &'static str,
+        domain: Option<String>,
+        elapsed: std::time::Duration,
+        class: Option<PersistenceErrorClass>,
+        count_request: bool,
     ) {
         use crate::matching_metrics::*;
         let sink = self.metric_sink.read().expect("Matching metrics sink lock");
@@ -365,6 +399,7 @@ impl MatchingPersistenceLimiter {
                 histogram,
             })
         };
+        if count_request {
         record(
             if per_domain {
                 PERSISTENCE_REQUESTS_PER_DOMAIN
@@ -375,6 +410,7 @@ impl MatchingPersistenceLimiter {
             MetricValue::Count(1),
             None,
         );
+        }
         record(
             if per_domain {
                 "persistence_latency_per_domain"

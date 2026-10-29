@@ -267,3 +267,9 @@ The SQL source-parse versus persistence-limiter order remains an identified
 parity gap under correction; no source-domain completion is claimed yet.
 Separate original-Go source-boundary oracle work is in progress.
 All ten native mixed lanes and final same-pin workspace validation remain open.
+
+## Continuation checkpoint — 2026-10-29, 07:55 IST
+
+Integrated Cassandra raw-domain correction `c9d5b8d57` on master. Selected CI [40804994259](https://github.com/auenkr/cadence-rust/actions/runs/40804994259) failed Clippy at source `e03c37b33fa7836d489cd43f82cb9c3e141ba4ae`: sync History regression held a standard MutexGuard across shutdown await; tests did not run. Full failed log retained at `/mnt/storage/service/ci-evidence/matching-native-selected-40804994259/clippy-failed.log`. Corrected guard lexical scope. Runner formatting artifact is retained but cannot apply cleanly to newer source; next dispatch will regenerate it.
+
+Addressed static review findings: raw-domain request counter precedes limiter/source; timing includes limiter; normal completion emits latency/errors without a duplicate request; captured panic leaves request only. Rejected raw lookup records busy/failure and latency after limiter returns. Extended regression checks for counts. Workflow now requires explicit PASS records for manager, SQL, and Cassandra marshal boundary tests. Added the touched persistence/UUID files to CI formatting artifact. All current changes await Actions; no local Cargo, rustfmt, Go or runtime validation. Ten native mixed lanes remain unproven. Previous goal turn produced source and review evidence (progress).
