@@ -326,7 +326,7 @@ mod tests {
                 scan_entered: Notify::new(), scan_release: Notify::new(),
             });
             let domain = GoString::from(DOMAIN);
-            for name in ["sem", "deadline", "wire-deadline"] {
+            for name in ["sem", "deadline", "wire-deadline", "disconnect"] {
                 store.inner.create_semaphore(&domain, &GoString::from(name), 1, 1).await.unwrap();
             }
             let state = AppState::default();
@@ -421,8 +421,8 @@ mod tests {
             // server timeout to Cancelled (a client-enforced deadline may instead
             // report DeadlineExceeded). Go's background startup
             // remains in flight: a later caller waits for that same scan and can
-            // acquire after it finishes. No server error or metric is observable
-            // through the expired client RPC.
+            // acquire after it finishes. The server records the context metric
+            // after startup completes, independent of the expired client RPC.
             store.park_scan.store(true, Ordering::SeqCst);
             let scans_before = store.scan_pages.load(Ordering::SeqCst);
             let mut wire_client = client.clone();
@@ -441,6 +441,36 @@ mod tests {
             store.release.notify_one();
             let response = tokio::time::timeout(Duration::from_secs(2), waiter).await.unwrap().unwrap().unwrap().into_inner();
             assert_eq!(response.outcome, 1);
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while count() != 3 { tokio::task::yield_now().await; }
+            }).await.expect("wire deadline context metric missing");
+
+            // Drop an active TCP request without a deadline. Startup still owns
+            // the original scan, and its eventual canceled context is counted.
+            store.park_scan.store(true, Ordering::SeqCst);
+            let scans_before = store.scan_pages.load(Ordering::SeqCst);
+            let mut disconnect_client = client.clone();
+            let disconnected = tokio::spawn(async move {
+                disconnect_client.acquire_semaphore(request("disconnect", "1:disconnect:r:8", None)).await
+            });
+            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified()).await.unwrap();
+            disconnected.abort();
+            let _ = disconnected.await;
+            // Wait until the server has received the stream reset before releasing
+            // the scan; a later waiter must still reuse the registered manager.
+            let mut waiter_client = client.clone();
+            let mut waiter = tokio::spawn(async move {
+                waiter_client.acquire_semaphore(request("disconnect", "1:waiter:r:9", Some(Duration::from_secs(3)))).await
+            });
+            assert!(tokio::time::timeout(Duration::from_millis(300), &mut waiter).await.is_err());
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            store.scan_release.notify_one();
+            store.release.notify_one();
+            assert_eq!(tokio::time::timeout(Duration::from_secs(2), waiter).await.unwrap().unwrap().unwrap().into_inner().outcome, 1);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while count() != 4 { tokio::task::yield_now().await; }
+            }).await.expect("disconnect context metric missing");
             assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
             runtime.shutdown().await.unwrap();
             server.abort();
