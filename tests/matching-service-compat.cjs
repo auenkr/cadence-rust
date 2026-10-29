@@ -8,6 +8,7 @@ const { createRequire } = require('node:module');
 const tls = require('node:tls');
 const { createTaskObserver } = require('./matching-task-observer.cjs');
 const { runProbeScenarios } = require('./matching-probe-scenarios.cjs');
+const { runNativeIsolationRecovery, listName: recoveryListName } = require('./matching-native-isolation-recovery.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -803,6 +804,65 @@ async function run() {
       },
     }, null, 2) + '\n');
 
+    // Real Go History creates the tasks; simultaneous Frontend polls enter the
+    // configured native Matching hosts. Reuse a list name across domains to
+    // expose accidental queue-key sharing, and a second list in one domain.
+    const concurrentDomain = `concurrent-${id}`;
+    await call('DomainAPI', 'RegisterDomain', {
+      name: concurrentDomain, workflowExecutionRetentionPeriod: { seconds: '259200' },
+    });
+    const sharedList = `concurrent-shared-${id}`;
+    const otherList = `concurrent-other-${id}`;
+    const groups = [
+      { domain, list: sharedList },
+      { domain: concurrentDomain, list: sharedList },
+      { domain, list: otherList },
+    ];
+    const expected = new Map();
+    for (const [groupIndex, group] of groups.entries()) {
+      for (let index = 0; index < 2; index++) {
+        const workflowId = `concurrent-${id}-${groupIndex}-${index}`;
+        const started = await call('WorkflowAPI', 'StartWorkflowExecution', {
+          ...startRequest, domain: group.domain, workflowId,
+          taskList: { name: group.list }, requestId: randomUUID(),
+        });
+        expected.set(workflowId, { ...group, runId: started.runId });
+      }
+    }
+    const polls = await Promise.all(groups.flatMap((group, groupIndex) =>
+      [0, 1].map(index => call('WorkerAPI', 'PollForDecisionTask', {
+        domain: group.domain, taskList: { name: group.list },
+        identity: `concurrent-${groupIndex}-${index}`,
+      }).then(task => ({ group, task })) )));
+    const seen = new Set();
+    for (const { group, task } of polls) {
+      assert(task.taskToken?.length, `concurrent poll returned no task for ${group.domain}/${group.list}`);
+      const workflowId = task.workflowExecution?.workflowId;
+      const target = expected.get(workflowId);
+      assert(target, `unexpected workflow ${workflowId} on ${group.domain}/${group.list}`);
+      assert.equal(target.domain, group.domain, 'task crossed domain boundary');
+      assert.equal(target.list, group.list, 'task crossed task-list boundary');
+      assert.equal(task.workflowExecution.runId, target.runId);
+      assert(!seen.has(workflowId), `duplicate decision task for ${workflowId}`);
+      seen.add(workflowId);
+      await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
+        taskToken: task.taskToken, identity: 'concurrent-probe',
+        decisions: [{ completeWorkflowExecutionDecisionAttributes: { result: payload('concurrent') } }],
+      });
+    }
+    assert.equal(seen.size, expected.size);
+    for (const [workflowId, target] of expected) {
+      const history = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+        domain: target.domain, workflowExecution: { workflowId, runId: target.runId },
+      });
+      assert.equal(history.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length, 1,
+        `workflow ${workflowId} must complete exactly once`);
+    }
+    fs.writeFileSync(path.join(work, 'production-concurrent-native-checkpoint.json'), JSON.stringify({
+      topology: 'two Rust Matching hosts with Go Frontend and History', groups,
+      workflows: [...expected.keys()], delivered: [...seen], completionEventsPerWorkflow: 1,
+    }, null, 2) + '\n');
+
     const crashList = `production-crash-${id}`;
     const crashProbeID = `production-crash-owner-probe-${id}`;
     const crashTaskList = { name: crashList };
@@ -1528,6 +1588,22 @@ async function run() {
   assert(!cancelledB.error, `cancelled poll must not fail: ${cancelledB.error?.message}`);
   assert(!cancelledB.response?.activityId && !cancelledB.response?.taskToken?.length, 'other isolation group must not consume the isolated activity');
   await call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: isolatedTask.taskToken, result: payload('isolated-ok') });
+  if (productionMode && !process.env.CADENCE_MATCHING_CONFIGSTORE_POLL_MS) {
+    // The direct internal API is needed to attach isolation metadata. In a
+    // two-node ring, select this queue's owner rather than the previous queue's.
+    const isolatedClient = clients.Matching;
+    clients.Matching = directMatchingClient(`127.0.0.1:${rustGrpcPort}`);
+    if (failureRecoveryMode) {
+      try {
+        await call('Matching', 'DescribeTaskList', { domainId, request: { taskList: { name: recoveryListName }, taskListType: 'TASK_LIST_TYPE_ACTIVITY' } });
+      } catch (error) {
+        if (error.code !== grpc.status.ABORTED) throw error;
+        clients.Matching = directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`);
+      }
+    }
+    await runNativeIsolationRecovery({ call, domain, domainId, id, startRequest, payload, work });
+    clients.Matching = isolatedClient;
+  }
   // Empty partition entries must survive Rust -> Go Frontend -> protobufjs.
   // The Go gogo decoder treats an omitted default map value as a nil pointer.
   await call('Matching', 'UpdateTaskListPartitionConfig', {

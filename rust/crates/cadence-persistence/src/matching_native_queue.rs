@@ -195,15 +195,16 @@ fn scan_batch(
     key: &TaskListKeyBytes,
     mut read: i64,
     max: i64,
-    range: u32,
-    batch: NonZeroU32,
+    mut range: impl FnMut() -> i64,
+    mut batch: impl FnMut() -> i64,
 ) -> StoreResult<ScannedBatch> {
     for _ in 0..10 {
         if read >= max {
             break;
         }
-        let upper = read.wrapping_add(i64::from(range)).min(max);
-        let tasks = retry(|| store.get_tasks(key, read, upper, i64::from(batch.get())))?;
+        let upper = read.wrapping_add(range()).min(max);
+        let batch = batch();
+        let tasks = retry(|| store.get_tasks(key, read, upper, batch))?;
         if !tasks.is_empty() {
             return Ok(ScannedBatch {
                 tasks,
@@ -478,7 +479,10 @@ impl DurableTaskQueueBytes {
         mut clock: impl FnMut() -> i64,
         mut admit: impl FnMut(AllocatedTaskBytes) -> bool,
     ) -> Result<bool> {
-        let (_permit, scanned) = self.load_reader_turn(read_range_size, batch_size)?;
+        let (_permit, scanned) = self.load_reader_turn(
+            || i64::from(read_range_size),
+            || i64::from(batch_size.get()),
+        )?;
         let pending = !scanned.tasks.is_empty() || !scanned.finished;
         for task in scanned.tasks {
             if let Some(task) = self.register_read(task, &mut clock)? {
@@ -494,7 +498,15 @@ impl DurableTaskQueueBytes {
         read_range_size: u32,
         batch_size: NonZeroU32,
     ) -> Result<ReaderTurnBytes> {
-        let (permit, scanned) = self.load_reader_turn(read_range_size, batch_size)?;
+        self.reader_turn_live(|| i64::from(read_range_size), || i64::from(batch_size.get()))
+    }
+    /// Sample dynamic properties per scanned range, like Go getTaskBatch.
+    pub fn reader_turn_live(
+        self: &Arc<Self>,
+        range: impl FnMut() -> i64,
+        batch: impl FnMut() -> i64,
+    ) -> Result<ReaderTurnBytes> {
+        let (permit, scanned) = self.load_reader_turn(range, batch)?;
         Ok(ReaderTurnBytes {
             queue: self.clone(),
             _permit: permit,
@@ -505,8 +517,8 @@ impl DurableTaskQueueBytes {
     }
     fn load_reader_turn(
         &self,
-        range: u32,
-        batch: NonZeroU32,
+        range: impl FnMut() -> i64,
+        batch: impl FnMut() -> i64,
     ) -> Result<(ReaderPermit, ScannedBatch)> {
         let permit = self.reader.lock();
         self.active()?;
@@ -760,6 +772,44 @@ mod tests {
         MatchingTaskStoreBytes::get_tasks(s, k, 0, i64::MAX, 1000)
             .unwrap()
             .len()
+    }
+
+    // Go task_reader.go getTaskBatch samples each property on every range.
+    #[test]
+    fn scan_samples_live_properties_per_range_and_keeps_signed_width() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir);
+        let key = key(b"live-scan");
+        let mut ranges = [2, 3, 9].into_iter();
+        let mut batches = [1, 2, 3].into_iter();
+        let scan = scan_batch(
+            store.as_ref(),
+            &key,
+            0,
+            10,
+            || ranges.next().unwrap(),
+            || batches.next().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(scan.read_level, 10);
+        assert!(scan.finished);
+        assert!(ranges.next().is_none());
+        assert!(batches.next().is_none());
+
+        let scan = scan_batch(store.as_ref(), &key, 10, 20, || -1, || 1).unwrap();
+        assert_eq!(scan.read_level, 0);
+        assert!(!scan.finished);
+        let scan = scan_batch(
+            store.as_ref(),
+            &key,
+            0,
+            10,
+            || i64::from(u32::MAX) + 1,
+            || 1,
+        )
+        .unwrap();
+        assert_eq!(scan.read_level, 10);
+        assert!(scan.finished);
     }
 
     #[test]

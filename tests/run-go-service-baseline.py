@@ -545,6 +545,13 @@ if production_matching or args.rust_matching or args.matching_restart or args.ad
         '  - value: true\n'
         'system.allIsolationGroups:\n'
         '  - value: ["zone-a", "zone-b"]\n'
+        # Keep this probe's tasks isolated across the real 60s dispatch-rate TTL.
+        'matching.taskIsolationDuration:\n'
+        '  - value: 180s\n'
+        '    constraints: {taskListName: native-concurrent-isolation-recovery}\n'
+        'matching.taskIsolationPollerWindow:\n'
+        '  - value: 180s\n'
+        '    constraints: {taskListName: native-concurrent-isolation-recovery}\n'
     )
 if args.cassandra:
     dynamic_text += '\nsystem.enableDistributedSemaphore:\n  - value: true\n'

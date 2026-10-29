@@ -17,7 +17,6 @@ use cadence_persistence::{
 };
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    num::NonZeroU32,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -88,23 +87,34 @@ fn reader_partition_parts(name: &str) -> (&str, &str) {
 
 // `ReaderConfig`'s accessors are private to matching_reader; these mirror them
 // from its public fields and the public `raw_batch_size`.
-fn buffer_batch_size(config: &ReaderConfig) -> u32 {
+fn buffer_batch_size(config: &ReaderConfig) -> usize {
     let value = config.raw_batch_size();
     if value <= 0 {
-        DEFAULT_TASKS_BATCH_SIZE as u32
+        DEFAULT_TASKS_BATCH_SIZE as usize
     } else {
-        u32::try_from(value).unwrap_or(u32::MAX)
+        usize::try_from(value).unwrap_or(usize::MAX)
     }
 }
-fn read_batch_size(config: &ReaderConfig) -> NonZeroU32 {
-    NonZeroU32::new(buffer_batch_size(config)).expect("batch size falls back to a positive default")
+fn read_batch_size(config: &ReaderConfig) -> i64 {
+    let value = config.raw_batch_size();
+    if value <= 0 {
+        DEFAULT_TASKS_BATCH_SIZE
+    } else {
+        value
+    }
 }
-fn read_range_size(config: &ReaderConfig) -> u32 {
+fn read_range_size(config: &ReaderConfig) -> i64 {
     match &config.live {
-        Some(live) => u32::try_from((live.read_range_size)()).unwrap_or(0),
-        None => config.read_range_size,
+        Some(live) => (live.read_range_size)(),
+        None => i64::from(config.read_range_size),
     }
 }
+// Go time.Time.Add accepts an i64 duration without clamping the resulting
+// absolute timestamp to the duration's range.
+fn dispatch_deadline(now: i64, timeout: i64) -> i128 {
+    i128::from(now) + i128::from(timeout)
+}
+
 fn dispatch_timeout_nanos(config: &ReaderConfig) -> i64 {
     match &config.live {
         Some(live) => (live.dispatch_timeout)(),
@@ -487,15 +497,16 @@ impl NativeTaskReader {
             backlog_forward: Arc::new(Mutex::new(backlog_forward)),
         });
         let mut buffer_senders: HashMap<GoString, BufferSender> = HashMap::new();
+        let batch_size = buffer_batch_size(&config);
         for buffer_group in std::iter::once(GoString::default()).chain(isolated.keys().cloned()) {
-            let (buffer_send, mut buffer_receive) = if buffer_batch_size(&config) == 1 {
+            let (buffer_send, mut buffer_receive) = if batch_size == 1 {
                 let buffer = Arc::new(Rendezvous::default());
                 (
                     BufferSender::Unbuffered(buffer.clone()),
                     BufferReceiver::Unbuffered(buffer),
                 )
             } else {
-                let (sender, receiver) = mpsc::channel(buffer_batch_size(&config) as usize - 1);
+                let (sender, receiver) = mpsc::channel(batch_size - 1);
                 (
                     BufferSender::Buffered(sender),
                     BufferReceiver::Buffered(receiver),
@@ -633,8 +644,8 @@ impl NativeTaskReader {
                         });
                         let group_known = isolated.contains_key(group.as_bytes());
                         let rps = dispatch_limiter.limit();
-                        let async_timeout = dispatch_timeout_nanos(&dispatch_config);
-                        let deadline = ((group_known || rps > 1e-7) && active()).then(|| {
+                        let deadline = (group_known || rps > 1e-7).then(|| {
+                            let async_timeout = dispatch_timeout_nanos(&dispatch_config);
                             let timeout = cadence_common::task_isolation::dispatch_timeout(
                                 rps,
                                 buffers,
@@ -642,8 +653,8 @@ impl NativeTaskReader {
                                 isolation_duration,
                                 timeout_buffer.as_nanos() as i64,
                             );
-                            dispatch_limiter.now().saturating_add(timeout)
-                        });
+                            timeout
+                        }).filter(|_| active()).map(|timeout| dispatch_deadline(dispatch_limiter.now(), timeout));
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
                             match dispatch_limiter
@@ -726,7 +737,7 @@ impl NativeTaskReader {
                                     trace_root, trace_partition, parent_destination, trace_workflow,
                                     trace_run, task.data.schedule_id, task.task_id,
                                     forward_started.elapsed().as_millis(), forward_status,
-                                    deadline.map(|at| at.saturating_sub(dispatch_limiter.now()).max(0) / 1_000_000).unwrap_or(-1),
+                                    deadline.map(|at| at.saturating_sub(i128::from(dispatch_limiter.now())).max(0) / 1_000_000).unwrap_or(-1),
                                 ));
                                 drop(token);
                                 match result {
@@ -769,11 +780,15 @@ impl NativeTaskReader {
                         let outcome = match deadline {
                             Some(deadline) => {
                                 let remaining = Duration::from_nanos(
-                                    deadline.saturating_sub(dispatch_limiter.now()).max(0) as u64,
+                                    deadline.saturating_sub(i128::from(dispatch_limiter.now())).clamp(0, i128::from(u64::MAX)) as u64,
                                 );
-                                tokio::time::timeout(remaining, attempt)
-                                    .await
-                                    .unwrap_or(Attempt::TimedOut)
+                                if remaining.is_zero() {
+                                    Attempt::TimedOut
+                                } else {
+                                    tokio::time::timeout(remaining, attempt)
+                                        .await
+                                        .unwrap_or(Attempt::TimedOut)
+                                }
                             }
                             None => attempt.await,
                         };
@@ -921,10 +936,14 @@ impl NativeTaskReader {
                 tokio::pin!(notification);
                 notification.as_mut().enable();
                 let queue_copy = queue.clone();
-                let (range, batch) = (read_range_size(&config), read_batch_size(&config));
-                let result =
-                    crate::matching_blocking::run(move || queue_copy.reader_turn(range, batch))
-                        .await;
+                let scan_config = config.clone();
+                let result = crate::matching_blocking::run(move || {
+                    queue_copy.reader_turn_live(
+                        || read_range_size(&scan_config),
+                        || read_batch_size(&scan_config),
+                    )
+                })
+                .await;
                 if *pump_stop.borrow() || queue.is_stopped() {
                     break;
                 }
@@ -1131,8 +1150,41 @@ mod tests {
         },
         matching_sqlite::SqliteTaskStore,
     };
+    use std::num::NonZeroU32;
     use std::sync::atomic::{AtomicBool, Ordering};
     use uuid::Uuid;
+
+    // Go task_reader.go validates each batch read, but keeps signed range values.
+    #[test]
+    fn dispatch_deadline_crosses_signed_nanosecond_boundaries() {
+        assert_eq!(dispatch_deadline(i64::MAX - 1, 10), i128::from(i64::MAX) + 9);
+        assert_eq!(dispatch_deadline(i64::MIN + 1, -10), i128::from(i64::MIN) - 9);
+        assert!(dispatch_deadline(100, -1) < 100);
+    }
+
+    #[test]
+    fn native_reader_preserves_signed_and_large_live_properties() {
+        use std::sync::atomic::AtomicI64;
+        let value = Arc::new(AtomicI64::new(-5));
+        let current = value.clone();
+        let config = ReaderConfig {
+            live: Some(Arc::new(crate::matching_reader::ReaderLive {
+                batch_size: Arc::new(move || current.load(Ordering::SeqCst)),
+                read_range_size: {
+                    let value = value.clone();
+                    Arc::new(move || value.load(Ordering::SeqCst))
+                },
+                dispatch_timeout: Arc::new(|| 0),
+                update_ack_interval: Arc::new(|| 1),
+            })),
+            ..ReaderConfig::default()
+        };
+        assert_eq!(read_batch_size(&config), DEFAULT_TASKS_BATCH_SIZE);
+        assert_eq!(read_range_size(&config), -5);
+        value.store(i64::from(u32::MAX) + 1, Ordering::SeqCst);
+        assert_eq!(read_batch_size(&config), i64::from(u32::MAX) + 1);
+        assert_eq!(read_range_size(&config), i64::from(u32::MAX) + 1);
+    }
 
     fn n(v: u32) -> NonZeroU32 {
         NonZeroU32::new(v).unwrap()

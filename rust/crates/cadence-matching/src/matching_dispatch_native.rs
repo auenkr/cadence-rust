@@ -144,6 +144,7 @@ pub struct NativeForwardState {
     resolve: Arc<ParentResolver>,
     source: GoString,
     local_wait: crate::matching_forward::Count,
+    local_task_wait: crate::matching_forward::Count,
     permits: Arc<crate::matching_forward::RequestTokens>,
     add_permits: Arc<crate::matching_forward::RequestTokens>,
     add_rate: Arc<crate::matching_forward::ForwardRate>,
@@ -371,12 +372,17 @@ impl NativeForwardState {
         Self {
             resolve: Arc::new(resolve),
             source,
+            local_task_wait: local_wait.clone(),
             local_wait,
             permits: Arc::new(crate::matching_forward::RequestTokens::new(max_outstanding)),
             add_permits: max_outstanding_adds,
             add_rate,
             observer: None,
         }
+    }
+    pub fn with_local_task_wait(mut self, provider: crate::matching_forward::Count) -> Self {
+        self.local_task_wait = provider;
+        self
     }
     pub fn with_observer(mut self, observer: Arc<dyn NativePollObserver>) -> Self {
         self.observer = Some(observer);
@@ -605,7 +611,7 @@ impl NativeTaskDispatcher {
         } else {
             self.forward
                 .as_ref()
-                .map(|forward| Duration::from_nanos((forward.local_wait)().max(0) as u64))
+                .map(|forward| Duration::from_nanos((forward.local_task_wait)().max(0) as u64))
                 .unwrap_or(Duration::from_millis(10))
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -1756,6 +1762,21 @@ mod tests {
             Arc::new(|| 0),
         )
     }
+    #[test]
+    fn forward_state_samples_poll_and_task_waits_independently() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        let api = Arc::new(ScriptedApi::default());
+        let task_wait = Arc::new(AtomicI64::new(30_000_000));
+        let live = task_wait.clone();
+        let state = forward_state(api, b"child", b"parent")
+            .with_local_task_wait(Arc::new(move || live.load(Ordering::SeqCst)));
+        assert_eq!((state.local_wait)(), 0);
+        assert_eq!((state.local_task_wait)(), 30_000_000);
+        task_wait.store(-1, Ordering::SeqCst);
+        assert_eq!((state.local_task_wait)(), -1);
+        assert_eq!((state.local_wait)(), 0);
+    }
+
     const RAW_RUNS: [&[u8]; 3] = [b"\xff\xfe", b"a\x00b\xff", b"\"q\\\xfe"];
     fn raw_task(run: &[u8]) -> AllocatedTaskBytes {
         AllocatedTaskBytes {

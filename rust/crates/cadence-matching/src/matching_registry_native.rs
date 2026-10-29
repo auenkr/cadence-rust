@@ -484,10 +484,8 @@ impl NativeQueueHandle {
             return SyncMatchOutcome::Unmatched;
         }
         if limit {
-            let limiter_deadline = self
-                .limiter
-                .now()
-                .saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
+            let limiter_deadline = i128::from(self.limiter.now())
+                + remaining.as_nanos().min(i128::MAX as u128) as i128;
             let stop = self.sync_matcher.stop_signal();
             let acquired = tokio::time::timeout_at(
                 deadline,
@@ -1611,7 +1609,7 @@ impl NativeQueueRegistry {
             let forward_domain = domain.clone();
             let (forward_task_type, forward_kind) = (lookup.2, kind);
             let local_wait = Self::scoped_count(
-                &registry.local_poll_wait,
+                &registry.sync_wait,
                 domain.clone(),
                 lookup.1.clone(),
                 lookup.2,
@@ -1729,6 +1727,13 @@ impl NativeQueueRegistry {
             lookup.2,
             10_000_000,
         );
+        let local_task_wait = Self::scoped_count(
+            &self.sync_wait,
+            domain.clone(),
+            lookup.1.clone(),
+            lookup.2,
+            10_000_000,
+        );
         let child = lookup.1.clone();
         let task_type = lookup.2;
         let domain_id = lookup.0;
@@ -1778,7 +1783,8 @@ impl NativeQueueRegistry {
             forward_rate,
             child,
             local_wait,
-        );
+        )
+        .with_local_task_wait(local_task_wait);
         if let Some(provider) = &self.poll_observer {
             state = state.with_observer(provider(&self.metric_context(lookup, kind)));
         }
