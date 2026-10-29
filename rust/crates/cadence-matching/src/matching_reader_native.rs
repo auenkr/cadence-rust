@@ -905,6 +905,7 @@ impl NativeTaskReader {
         tokio::spawn(async move {
             let _completed = pumped;
             let mut ack_timer = Box::pin(tokio::time::sleep(update_ack_interval(&config)));
+            let mut scan_pending = true;
             'pump: loop {
                 if *pump_stop.borrow() {
                     break;
@@ -924,6 +925,48 @@ impl NativeTaskReader {
                 let notification = wake.notified();
                 tokio::pin!(notification);
                 notification.as_mut().enable();
+                tokio::select! {
+                    _ = &mut notification => {},
+                    _ = std::future::ready(()), if scan_pending => {},
+                    _ = ack_timer.as_mut() => {
+                        let queue_copy = queue.clone();
+                        let result = crate::matching_blocking::run(move || {
+                            let count = queue_copy.task_list_size();
+                            let lag = queue_copy.task_lag();
+                            let ack = queue_copy.persist_ack(now());
+                            (count, lag, ack)
+                        }).await;
+                        match result {
+                            Ok((count, lag, ack)) => {
+                                if let Some(metrics) = reader_metrics.lock().expect("matching reader metrics lock").as_ref() {
+                                    if let Ok(count) = count {
+                                        metrics.metrics.task_list_gauge(crate::matching_metrics::TASK_COUNT_PER_TASK_LIST, &metrics.context, count as f64);
+                                    }
+                                    if queue.levels().1 >= 0 {
+                                        metrics.metrics.task_list_gauge(crate::matching_metrics::TASK_LAG_PER_TASK_LIST, &metrics.context, lag as f64);
+                                    }
+                                }
+                                if let Err(error) = ack {
+                                    eprintln!("Matching acknowledgement update failed: {error}");
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("Matching acknowledgement worker failed: {error}");
+                                queue.stop();
+                            }
+                        }
+                        if queue.is_stopped() { break; }
+                        scan_pending = true;
+                        ack_timer.as_mut().reset(tokio::time::Instant::now() + update_ack_interval(&config));
+                        continue;
+                    }
+                    _ = pump_stop.changed() => break,
+                }
+                // Keep a separate subscription active during the scan and buffer
+                // admission, so a concurrent append is not lost.
+                let scan_notification = wake.notified();
+                tokio::pin!(scan_notification);
+                scan_notification.as_mut().enable();
                 let queue_copy = queue.clone();
                 let (range, batch) = (read_range_size(&config), read_batch_size(&config));
                 let result =
@@ -936,6 +979,7 @@ impl NativeTaskReader {
                     Ok(Ok(turn)) => turn,
                     Ok(Err(error)) => {
                         eprintln!("Matching backlog read failed: {error}");
+                        scan_pending = true;
                         tokio::task::yield_now().await;
                         continue;
                     }
@@ -1037,18 +1081,11 @@ impl NativeTaskReader {
                         queue.levels().2 as f64,
                     );
                 }
-                if pending {
-                    continue;
-                }
+                scan_pending = pending;
                 tokio::select! {
-                    _ = notification => (),
-                    _ = ack_timer.as_mut() => {
-                        // Go re-signals the pump on every ack tick.
-                        ack_timer
-                            .as_mut()
-                            .reset(tokio::time::Instant::now() + update_ack_interval(&config));
-                    }
-                    _ = pump_stop.changed() => break,
+                    biased;
+                    _ = &mut scan_notification => scan_pending = true,
+                    _ = std::future::ready(()) => {},
                 }
             }
         });
@@ -1222,6 +1259,33 @@ mod tests {
         }
         reader.stop();
         reader.wait_stopped().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ack_timer_resamples_after_reader_update_and_stops() {
+        use std::sync::atomic::AtomicUsize;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(SqliteTaskStore::create(dir.path().join("ack.db"), BlobEncoding::ThriftRW).unwrap());
+        let queue = Arc::new(DurableTaskQueueBytes::open(store, key(b"ack"), 0, n(100), 1).unwrap());
+        let samples = Arc::new(AtomicUsize::new(0));
+        let live = crate::matching_reader::ReaderLive {
+            batch_size: Arc::new(|| 10),
+            read_range_size: Arc::new(|| 100),
+            dispatch_timeout: Arc::new(|| 1_000_000_000),
+            update_ack_interval: {
+                let samples = samples.clone();
+                Arc::new(move || { samples.fetch_add(1, Ordering::SeqCst); 10_000_000 })
+            },
+        };
+        let reader = NativeTaskReader::new(queue, Arc::new(Notify::new()), ReaderConfig { live: Some(Arc::new(live)), ..ReaderConfig::default() });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while samples.load(Ordering::SeqCst) < 2 { tokio::task::yield_now().await; }
+        }).await.expect("ack timer resampled");
+        reader.stop();
+        reader.wait_stopped().await;
+        let stopped = samples.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(samples.load(Ordering::SeqCst), stopped);
     }
 
     #[tokio::test(flavor = "multi_thread")]

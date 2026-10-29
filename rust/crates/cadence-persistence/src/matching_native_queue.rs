@@ -673,13 +673,13 @@ impl DurableTaskQueueBytes {
         max_interval: std::time::Duration,
     ) -> Result<usize> {
         let (_, ack, _) = self.ack.levels();
-        Ok(self.gc.run_with_batch_provider(
+        Ok(self.gc.run_with_signed_batch_provider(
             ack,
             batch_provider,
             max_interval,
             force,
             std::time::Instant::now(),
-            |ack, limit| self.store.complete_tasks_less_than(&self.key, ack, limit),
+            |ack, limit| self.store.gc_complete_tasks_less_than(&self.key, ack, limit),
         )?)
     }
     pub fn levels(&self) -> (i64, i64, i64) {

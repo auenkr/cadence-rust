@@ -136,24 +136,28 @@ pub fn native_queue_registry(
         "matching.minTaskThrottlingBurstSize",
         crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE,
     );
-    let update_ack = duration_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.updateAckInterval",
-        60_000_000_000,
-    );
     let idle_check = duration_provider(
         cache.clone(),
         overlay.clone(),
         "matching.idleTasklistCheckInterval",
         300_000_000_000,
     );
-    let delete_batch = integer_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.maxTaskDeleteBatchSize",
-        100,
-    );
+    let delete_batch = {
+        let cache = cache.clone();
+        let overlay = overlay.clone();
+        Arc::new(move |domain: &GoString, task: &GoString, task_type| {
+            let name = cached_domain_name(&cache, domain);
+            let task = task.clone();
+            let overlay = overlay.clone();
+            Arc::new(move || {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values("matching.maxTaskDeleteBatchSize"),
+                    name.as_deref(), task.as_bytes(), task_type, 100,
+                )
+            }) as crate::matching_reader::LiveInt
+        })
+    };
     let writer_live = writer_live_provider(cache.clone(), overlay.clone());
     let reader_live = reader_properties_provider(cache.clone(), overlay.clone());
     let isolation = {
@@ -226,7 +230,6 @@ pub fn native_queue_registry(
         .with_qps_interval(qps_interval)
         .with_reader_live(reader_live)
         .with_min_burst(min_burst)
-        .with_update_ack_interval(update_ack)
         .with_idle_tasklist_check_interval(idle_check)
         .with_max_task_delete_batch_size(delete_batch)
         .with_writer_live(writer_live)
