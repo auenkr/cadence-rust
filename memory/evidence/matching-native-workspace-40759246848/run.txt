@@ -1,0 +1,2 @@
+https://github.com/auenkr/cadence-rust/actions/runs/40759246848
+conclusion=success
