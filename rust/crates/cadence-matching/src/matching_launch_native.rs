@@ -93,7 +93,7 @@ fn semaphore_timeout_metric(
             .ok()
             .and_then(|id| cache.get_domain_by_id(id).ok())
             .map(|domain| domain.info.name);
-        let semaphore = String::from_utf8_lossy(semaphore.as_bytes());
+        let semaphore = semaphore.go_rune_string();
         metrics.semaphore_context_timeout(
             name.as_deref(),
             &semaphore,

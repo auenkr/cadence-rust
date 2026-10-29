@@ -10,36 +10,34 @@ proved.
 
 ## Source identity
 
-Latest quota-corrected whole-workspace run:
-https://github.com/auenkr/cadence-rust/actions/runs/40758347908 at
-`17523bb3b141e9c5ffea1f23d5ca6c186d19184d`, in progress at dispatch review.
-Fresh target, Clippy then workspace tests, runner parity formatting and
-original-Go UUID oracle enabled. Run40757715608 predates the quota correction
-and remains useful diagnostic evidence only. No final pin or mixed pass.
+No final immutable candidate is frozen. Latest fresh whole-workspace run:
+https://github.com/auenkr/cadence-rust/actions/runs/40759246848 at
+`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227` (**success**, reviewed from downloaded artifacts).
+Includes quota correction, typed metrics and duration fixes, runner formatting
+from run40757715608, and the new all-declared-native-Thrift-error matrix.
+Fresh target, sequential Clippy/workspace tests, runner parity formatting and
+original-Go UUID oracle enabled. Inspect any formatting artifact before freeze.
 
-No final immutable candidate is frozen. Current fresh whole-workspace run
-https://github.com/auenkr/cadence-rust/actions/runs/40757715608 targets
-`a85e585b9a2e396e247459750398dcf09b612cc5` on the saved validation ref
-`t3/native-matching-candidate-20261029`. It includes the typed-error metric
-classification and async-reader duration corrections, all integration changes,
-and the native PostgreSQL oracle invocation. Clean target, runner parity
-formatting and original-Go UUID oracle enabled. No outcome yet.
-
-Earlier workspace run40756335405 at
-`58d2887a4a47ec038699ec2c68b317cf7ee6987e` passed Clippy and Matching tests, then failed service-core
-quota regression (171 passed, one failed). Evidence retained under
-`memory/evidence/matching-native-workspace-40756335405/`. The separate ref preserves that run and its evidence;
-neither was restarted because of a timeout. No mixed gate runs concurrently.
-Selected Matching run40754945697 passed at
-`fb049c5515d0c940adc86e038bd3b1ef31b84880`; do not attribute an earlier result
-to changed source. After formatting/fixes, final gates still require one frozen
-immutable source and same-pin successful workspace validation.
+Run40757715608 at `a85e585b9a2e396e247459750398dcf09b612cc5` concluded
+failure: Clippy passed, Matching 955 passed/2 ignored including live duration
+provider, typed metric classifier passed, then service-core 172 passed/one
+failed at the already corrected raw-byte quota regression. Compact evidence:
+`evidence/matching-native-workspace-40757715608/`.
+Run40758347908 at `17523bb3b141e9c5ffea1f23d5ca6c186d19184d` was cancelled
+when the changed source superseded it; it passed Clippy but has no completed
+test result. Compact partial evidence:
+`evidence/matching-native-workspace-40758347908/`.
+Earlier workspace run40756335405 failed the same quota regression. Selected
+Matching run40754945697 passed at
+`fb049c5515d0c940adc86e038bd3b1ef31b84880`; it is not final source evidence.
+No native mixed lane passed. Final gates require one frozen immutable source
+and same-pin successful whole-workspace validation.
 
 ## Required evidence
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Pending run40757715608; earlier run40756335405 failed the raw-byte domain quota regression. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
+| Fresh uncached workspace Clippy, then workspace tests | Run40759246848 passed at c6c8ef1bb (fresh target, Clippy0/test0); subsequent metric corrections need new CI; runs40757715608 and40756335405 failed the raw-byte domain quota regression; run40758347908 was superseded. Selected Matching run40754945697 passed Clippy and enabled tests at fb049c551; this does not establish a whole-workspace pass. |
 | PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
@@ -239,3 +237,12 @@ raw payloads and exact exception field IDs). This postdates run40758347908.
 Applied run40757715608 formatting patch for metrics/duration provider.
 Final immutable candidate remains open; retain current terminal CI evidence
 before dispatching the final formatted source.
+
+Continuation: run40759246848 passed; compact evidence retained. New metric rendering and native AddTask counter corrections postdate that source and remain unvalidated. See latest integration checkpoint; final candidate still open. User requested save/push and master sync after validation.
+
+
+Latest checkpoint: saved native metric corrections are merged into master.
+Run40802403212 at7c4e1ee9d failed one new fixture (missing Tokio reactor),
+after Clippy0 and Matching957 passed. The fixture attribute is corrected on
+master, pending fresh workspace CI. No mixed lane is credited. See
+matching-master-sync-20261029.md and matching-native-source-domain-audit-20261029.md.

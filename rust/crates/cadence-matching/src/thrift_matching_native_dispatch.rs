@@ -461,7 +461,10 @@ mod tests {
                             (2, scalar(&[0xff])),
                             (3, scalar(&[0xfe])),
                             (4, scalar(b"cluster")),
-                            (5, Value::List(vec![scalar(&[0xfd]), scalar("�".as_bytes())])),
+                            (
+                                5,
+                                Value::List(vec![scalar(&[0xfd]), scalar("�".as_bytes())]),
+                            ),
                         ]),
                         "EntityNotExistsError" => fields.extend([
                             (2, scalar(&[0xff])),
@@ -469,20 +472,28 @@ mod tests {
                             (4, Value::List(vec![scalar(b"cluster")])),
                         ]),
                         "ServiceBusyError" => fields.push((2, scalar(&[0xff]))),
-                        "TaskListNotOwnedByHostError" => fields = vec![
-                            (1, scalar(&[0xff])),
-                            (2, scalar(&[0xfe])),
-                            (3, scalar(b"cluster")),
-                        ],
+                        "TaskListNotOwnedByHostError" => {
+                            fields = vec![
+                                (1, scalar(&[0xff])),
+                                (2, scalar(&[0xfe])),
+                                (3, scalar(b"cluster")),
+                            ]
+                        }
                         "RemoteSyncMatchedError" => fields = vec![(10, scalar(message))],
-                        "BadRequestError" | "InternalServiceError" | "LimitExceededError"
-                        | "QueryFailedError" | "StickyWorkerUnavailableError" => {},
+                        "BadRequestError"
+                        | "InternalServiceError"
+                        | "LimitExceededError"
+                        | "QueryFailedError"
+                        | "StickyWorkerUnavailableError" => {}
                         other => panic!("unreviewed Matching exception {other}"),
                     }
                     assert_eq!(
                         result,
-                        Struct { fields: vec![(id, Value::Struct(Struct { fields }))] },
-                        "{} {name} {message:?}", method.method,
+                        Struct {
+                            fields: vec![(id, Value::Struct(Struct { fields }))]
+                        },
+                        "{} {name} {message:?}",
+                        method.method,
                     );
                 }
             }

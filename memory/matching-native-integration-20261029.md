@@ -283,3 +283,95 @@ Existing candidate-ref run40757715608 remains preserved. PR1 linking again
 returned "The calling provider no longer owns an active thread run."
 Next: retain both terminal runs and formatting artifacts; validate final
 formatting/fixes before freezing the same source for ten serial mixed lanes.
+
+## Combined error-matrix candidate CI and recovered terminal evidence
+
+Run40757715608 concluded failure at a85e585b9: Clippy exit0, Matching955
+passed/2 ignored (live duration provider passed), typed metric category matrix
+passed, service-core172 passed/one failed (the known pre-correction quota bug).
+Downloaded and retained compact evidence under
+`memory/evidence/matching-native-workspace-40757715608/`.
+
+Dispatched fresh combined source validation:
+https://github.com/auenkr/cadence-rust/actions/runs/40759246848 at
+`c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227`. Clean target, Clippy then workspace
+tests, parity formatting and Go UUID oracle. This source adds the declared
+Thrift error matrix and applies runner formatting. Same-branch run40758347908
+was cancelled by workflow concurrency because the source changed, not because
+observation timed out; it passed Clippy but did not finish tests. Partial logs
+are retained in `memory/evidence/matching-native-workspace-40758347908/`.
+No mixed gate runs. Final source remains unfrozen until this combined candidate
+and any final formatting are validated. No local Cargo/Go execution.
+
+## Saved continuation: workspace pass and metric parity corrections
+
+Run https://github.com/auenkr/cadence-rust/actions/runs/40759246848 completed
+**success** at `c6c8ef1bb49effb2c6b689ad31b23a9e33bf7227`. Downloaded
+artifacts confirm fresh `/home/runner/work/_temp/cargo-target-final`, Clippy
+exit0 then whole-workspace test exit0; service-core173 passed. Live Go tally
+comparison passed all four modes. Compact source/exit/test-summary/metric
+comparison evidence is retained in `evidence/matching-native-workspace-40759246848/`.
+Full downloads are under `/mnt/storage/service/ci-evidence/`. Applied the
+runner formatting patch for the declared Thrift error matrix. This is the
+first recovered combined workspace pass; it does not establish mixed acceptance.
+
+Subsequent source audit corrected native metric sink rendering: use Go rune
+conversion (one replacement per malformed byte), retain full long task names,
+and avoid diagnostic quotes/truncation in labels. Raw routing/storage identity
+is unchanged. Extended the actual Go tally emission oracle with malformed,
+replacement-rune, non-ASCII and >256-byte names, and matching Rust emissions.
+
+The native engine also omitted Go AddTask traffic counting entirely. Added a
+host callback after identifier validation and domain-name resolution, before
+manager lookup, preserving normal/non-forwarded conditions and protobuf-to-Go
+kind mapping (including normal=1 and unknown/default handling). Restored its
+Info log through the existing configured sink. A handler regression covers
+both task types, normal/default/unknown/sticky/ephemeral kinds, forwarded,
+malformed-name and quota rejection; injected ownership-admission failure
+checks the metric is recorded before manager creation without publishing an
+owner. The regression uses the same emission helper as the production host.
+These changes are UNVALIDATED until the next CI executes them. No local Cargo,
+Go or rustfmt ran; `git diff --check` passed. No replacement agents were started.
+
+User requested progress saving and remote master synchronization. Save/push
+this source and evidence first, dispatch fresh workspace CI with runner
+formatting, retain any patch and terminal logs, then integrate the validated
+source into master and push. Matching remains incomplete: all ten native mixed
+SDK/restart/recovery lanes, supplemental oracles and final parity audit remain.
+
+## Native request metric kind correction
+
+Saved source e9ac81063656fb7be42ceb216b00b268e94cc973 and evidence were
+pushed. Fresh workspace run https://github.com/auenkr/cadence-rust/actions/runs/40802091633
+was confirmed live through Clippy. Follow-up source inspection found native
+request wrappers passed protobuf task-list kind directly into the metric sink,
+which expects Go internal kinds: normal protobuf1 was labeled sticky,
+sticky2 was labeled ephemeral. Poll observers already convert correctly.
+
+Added a shared native request-list metric converter using persistence_kind
+for all eleven wrapper sites. Extended the actual handler matrix to assert
+request and forwarded labels, including nil/default, unknown, normal, sticky
+and ephemeral mapping. This correction is unvalidated. The changed source
+supersedes e9ac81063, so a new branch-head CI run will cancel the older run
+through the workflow concurrency rule; cancellation is due to a concrete
+source correction, not an observation timeout. No local Cargo/Go/rustfmt ran.
+Master synchronization remains pending validated latest source. PR1 is linked
+and watched; its body should be refreshed with the new source and run URL.
+
+## Metric-fix workspace validation and runner formatting
+
+Fresh run https://github.com/auenkr/cadence-rust/actions/runs/40802403212
+is pinned to `7c4e1ee9d5470b424709a20d9a2393274cadb87a`. Confirmed live
+Clippy completed successfully and whole-workspace Test began. Applied its
+three-file formatting artifact from
+`/mnt/storage/service/ci-evidence/matching-native-format-40802403212/matching-format.patch`
+to the native host, reader and request service, matching the runner's formatted
+source. No local Cargo/Go/rustfmt ran. Earlier run40802091633 at e9ac81063
+was superseded/cancelled after the concrete request-kind correction.
+
+New source-domain audit is saved in
+`matching-native-source-domain-audit-20261029.md`; it is an open parity gap,
+not a test result. Latest user instruction: after merging/pushing the saved
+validated progress, switch this work directory to master. Do not call Matching
+complete or start History; raw-source-domain behavior and all native mixed
+SDK/restart/recovery acceptance remain outstanding.

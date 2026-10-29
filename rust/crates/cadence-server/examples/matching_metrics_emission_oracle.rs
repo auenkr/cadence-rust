@@ -47,6 +47,18 @@ fn main() {
         task_type: "decision_task",
         poller_isolation_group: String::new(),
     };
+    // Match Go's actual tally sanitizer, including truncated UTF-8 and long names.
+    for name in [
+        b"raw-\xe2\x82".as_slice(),
+        b"raw-\xff".as_slice(),
+        "raw-�".as_bytes(),
+        "raw-é".as_bytes(),
+        format!("{}tail", "x".repeat(300)).as_bytes(),
+    ] {
+        let mut raw_context = context.clone();
+        raw_context.task_list = cadence_common::go_string::GoString::from(name).go_rune_string();
+        metrics.poll_success(&raw_context, false);
+    }
     metrics.poll_success(&context, false);
     metrics.poll_timeout(&context);
     metrics.condition_failed(&context);

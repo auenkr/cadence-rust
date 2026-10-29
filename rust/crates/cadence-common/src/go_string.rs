@@ -33,6 +33,32 @@ impl GoString {
         String::from_utf8(self.0)
     }
 
+    /// Go `string([]rune(value))`: replace each invalid UTF-8 byte with one
+    /// replacement rune. Unlike Rust's lossy conversion, truncated sequences
+    /// produce one rune per byte. Use only at a text sink, never for identity.
+    pub fn go_rune_string(&self) -> String {
+        let mut out = String::with_capacity(self.len());
+        let mut rest = self.as_bytes();
+        while !rest.is_empty() {
+            match std::str::from_utf8(rest) {
+                Ok(text) => {
+                    out.push_str(text);
+                    break;
+                }
+                Err(error) => {
+                    let (valid, tail) = rest.split_at(error.valid_up_to());
+                    out.push_str(std::str::from_utf8(valid).unwrap());
+                    let invalid = error.error_len().unwrap_or(tail.len());
+                    for _ in 0..invalid {
+                        out.push('�');
+                    }
+                    rest = &tail[invalid..];
+                }
+            }
+        }
+        out
+    }
+
     /// Go's `len(string)` counts bytes, including malformed UTF-8 bytes.
     pub fn len(&self) -> usize {
         self.0.len()
@@ -220,6 +246,21 @@ impl Borrow<[u8]> for GoString {
 mod tests {
     use super::GoString;
     use std::collections::{BTreeSet, HashMap};
+
+    #[test]
+    fn go_runes_preserve_valid_text_and_replace_each_invalid_byte() {
+        for (bytes, expected) in [
+            (b"queue/abc".as_slice(), "queue/abc"),
+            ("queue-�é".as_bytes(), "queue-�é"),
+            (b"queue-\xff\xe2\x82".as_slice(), "queue-���"),
+            (b"\xe1\x80x\xff".as_slice(), "��x�"),
+            (b"\xf0\x90\x80".as_slice(), "���"),
+        ] {
+            let raw = GoString::from(bytes);
+            assert_eq!(raw.go_rune_string(), expected);
+            assert_eq!(raw.as_bytes(), bytes);
+        }
+    }
 
     #[test]
     fn go_quotes_preserve_invalid_bytes_and_go_printable_ranges() {

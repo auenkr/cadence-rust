@@ -1,0 +1,35 @@
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test go_string::tests::go_runes_preserve_valid_text_and_replace_each_invalid_byte ... ok
+test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes ... FAILED
+test matching_service_native::tests::add_traffic_counts_before_manager_failure_with_go_kind_mapping ... ok
+test matching_service_native::tests::metric_bytes_follow_go_runes_without_changing_identity ... ok
+---- matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes stdout ----
+thread 'matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes' (23720) panicked at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hyper-util-0.1.21/src/rt/tokio.rs:127:9:
+    matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes
+test result: FAILED. 957 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 35.54s
+
+failures:
+
+---- matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes stdout ----
+
+thread 'matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes' (23720) panicked at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hyper-util-0.1.21/src/rt/tokio.rs:127:9:
+there is no reactor running, must be called from the context of a Tokio 1.x runtime
+
+
+failures:
+    matching_registry_native::tests::metric_context_keeps_full_name_and_go_invalid_byte_runes
+
+test result: FAILED. 957 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 35.54s
+
+error: test failed, to rerun pass `-p cadence-matching --lib`

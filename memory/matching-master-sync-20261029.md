@@ -28,3 +28,20 @@ in matching-native-source-domain-audit-20261029.md. All ten native mixed
 SDK/restart/recovery lanes, supplemental dependency oracles and final parity
 reconciliation remain outstanding. No History migration work. No local Cargo,
 Go or rustfmt validation ran; no replacement agents were started.
+
+## Latest metric changes integrated, fixture failure fixed
+
+Run40802403212 completed failure: Clippy0, Matching957 passed/1 failed/2
+ignored. The only failure is the new pure metric-context test calling its
+channel-creating fixture outside Tokio. The new production-handler traffic
+counter/kind matrix and Go rune conversion regressions passed. Compact terminal
+evidence is retained in evidence/matching-native-workspace-40802403212/.
+The live Go/Rust emission comparison step did not execute after this failure.
+
+Merged origin/matching-native-integration-20261029 into master as a saved
+checkpoint and corrected the fixture to #[tokio::test] async. This fixes its
+missing reactor; the fixed test itself still requires CI. Latest metric changes
+are now integrated but are NOT claimed as a passing whole-workspace candidate.
+Dispatch fresh whole-workspace CI on master, retain terminal evidence and run
+mixed acceptance after the raw-source-domain gap is corrected. Remain on
+master. No local Cargo/Go/rustfmt ran.

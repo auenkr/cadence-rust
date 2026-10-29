@@ -293,11 +293,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -335,11 +331,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -382,7 +374,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -425,7 +417,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -463,11 +455,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             record_forwarded(
                 self.integration.metrics(),
                 &request.get_ref().forwarded_from,
@@ -506,11 +494,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -540,11 +524,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -579,7 +559,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .request
                 .as_ref()
                 .and_then(|r| r.task_list.as_ref())
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+                .map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -603,11 +583,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
     ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
         crate::matching_panic::capture("list_task_list_partitions", async move {
             let domain = Some(metric_string(&request.get_ref().domain));
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -663,11 +639,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -699,11 +671,7 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
                 .metric_domain_name(&request.get_ref().domain_id)
                 .as_ref()
                 .map(metric_string);
-            let list = request
-                .get_ref()
-                .task_list
-                .as_ref()
-                .map(|t| (metric_string(&t.name), Some(t.kind)));
+            let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
                 request.metadata(),
                 "grpc",
@@ -751,6 +719,17 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         .await
         .unwrap_or_else(|message| Err(Status::unknown(message)))
     }
+}
+
+// The generated native model retains protobuf enum values. Metrics consume
+// Go's internal task-list kinds, including nil/unknown mapping to normal.
+fn metric_task_list(list: &n::api::TaskList) -> (String, Option<i32>) {
+    (
+        metric_string(&list.name),
+        Some(i32::from(crate::matching_handler_native::persistence_kind(
+            list.kind,
+        ))),
+    )
 }
 
 fn record_forwarded(
@@ -809,13 +788,10 @@ where
         .await
 }
 
-// Metrics sinks accept UTF-8 strings. Invalid byte sequences are represented
-// with Go quoting for diagnostics only; these strings never enter routing or storage.
+// Convert only for the text-valued metric sink. Its sanitizer must see one
+// rune per invalid byte, as Go tally does; diagnostic quoting changes labels.
 fn metric_string(value: &GoString) -> String {
-    match std::str::from_utf8(value.as_bytes()) {
-        Ok(value) => value.to_owned(),
-        Err(_) => value.go_quoted_string(),
-    }
+    value.go_rune_string()
 }
 
 #[cfg(test)]
@@ -908,6 +884,23 @@ mod tests {
     use crate::matching_registry_native::NativeQueueHandle;
     use std::{sync::Arc, time::Duration};
     impl DecisionAddContext for Integration {
+        fn observe_add_request(
+            &self,
+            domain: &GoString,
+            list: &n::api::TaskList,
+            task_type: i32,
+            forwarded: bool,
+        ) -> Result<(), Status> {
+            let name = NativePollContext::domain_name(self, domain)?;
+            crate::matching_host_native::record_add_request(
+                &self.metrics,
+                &name,
+                list,
+                task_type,
+                forwarded,
+            );
+            Ok(())
+        }
         fn domain_active(&self, _: uuid::Uuid) -> Result<bool, Status> {
             Ok(true)
         }
@@ -1087,6 +1080,117 @@ mod tests {
         )
     }
     #[tokio::test]
+    async fn add_traffic_counts_before_manager_failure_with_go_kind_mapping() {
+        use crate::matching_metrics::*;
+        for activity in [false, true] {
+            for (kind, forwarded, malformed, reject, expected) in [
+                (0, false, false, false, 1),
+                (1, false, false, false, 1),
+                (99, false, false, false, 1),
+                (2, false, false, false, 0),
+                (3, false, false, false, 0),
+                (1, true, false, false, 0),
+                (1, false, true, false, 0),
+                (1, false, false, true, 0),
+            ] {
+                let (_dir, service, sink, _) = service(reject);
+                service
+                    .engine
+                    .registry
+                    .set_shard_admission(Arc::new(|_, _| {
+                        Box::pin(async { Err(Status::internal("manager unavailable")) })
+                    }));
+                let domain: GoString = uuid::Uuid::from_u128(1).to_string().into();
+                let list = Some(n::api::TaskList {
+                    name: if malformed {
+                        "/__cadence_sys/invalid".into()
+                    } else {
+                        GoString::from(&b"queue-\xe2\x82"[..])
+                    },
+                    kind,
+                    ..Default::default()
+                });
+                let forwarded_from = if forwarded {
+                    "parent".into()
+                } else {
+                    GoString::default()
+                };
+                let status = if activity {
+                    service
+                        .add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
+                            domain_id: domain.clone(),
+                            source_domain_id: domain,
+                            task_list: list,
+                            forwarded_from,
+                            ..Default::default()
+                        }))
+                        .await
+                        .unwrap_err()
+                } else {
+                    service
+                        .add_decision_task(Request::new(n::matching::AddDecisionTaskRequest {
+                            domain_id: domain,
+                            task_list: list,
+                            forwarded_from,
+                            ..Default::default()
+                        }))
+                        .await
+                        .unwrap_err()
+                };
+                assert_eq!(
+                    status.code(),
+                    if reject {
+                        tonic::Code::ResourceExhausted
+                    } else {
+                        tonic::Code::Internal
+                    }
+                );
+                let request_events: Vec<_> = sink
+                    .events()
+                    .into_iter()
+                    .filter(|e| {
+                        e.name == CADENCE_REQUESTS_PER_TASK_LIST
+                            || e.name == FORWARDED_PER_TASK_LIST
+                    })
+                    .collect();
+                let expected_label = if kind == 2 {
+                    "__sticky__"
+                } else if kind == 3 {
+                    "__ephemeral__"
+                } else if malformed {
+                    "___cadence_sys_invalid"
+                } else {
+                    "queue___"
+                };
+                assert!(!request_events.is_empty());
+                for event in request_events {
+                    assert_eq!(event.tags[TASK_LIST_TAG], expected_label, "kind={kind}");
+                }
+                let events: Vec<_> = sink
+                    .events()
+                    .into_iter()
+                    .filter(|e| e.name == CADENCE_TASKLIST_REQUEST)
+                    .collect();
+                assert_eq!(events.len(), expected, "activity={activity}, kind={kind}, forwarded={forwarded}, malformed={malformed}, reject={reject}");
+                if let Some(event) = events.first() {
+                    assert_eq!(event.tags[OPERATION_TAG], "AddTask");
+                    assert_eq!(event.tags[DOMAIN_TAG], "domain");
+                    assert_eq!(event.tags[GO_TASK_LIST_TAG], "queue___");
+                    assert_eq!(
+                        event.tags[TASK_LIST_TYPE_TAG],
+                        if activity {
+                            "activity_task"
+                        } else {
+                            "decision_task"
+                        }
+                    );
+                }
+                assert_eq!(service.engine.registry.loaded_owner_count(), 0);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn actual_handler_counts_forwarded_quota_failure_and_captures_panic() {
         use crate::matching_metrics::FORWARDED_PER_TASK_LIST;
         let (_dir, service, sink, _) = service(true);
@@ -1247,9 +1351,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_metric_bytes_are_diagnostic_only() {
+    fn metric_bytes_follow_go_runes_without_changing_identity() {
         let raw = GoString::from(&b"queue-\xff"[..]);
-        assert_eq!(metric_string(&raw), "\"queue-\\xff\"");
+        assert_eq!(metric_string(&raw), "queue-�");
         assert_eq!(raw.as_bytes(), b"queue-\xff");
     }
 

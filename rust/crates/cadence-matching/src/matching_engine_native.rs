@@ -42,6 +42,17 @@ impl NativeMatchingEngine {
 /// performed handler startup, quota, domain lookup and entry ownership checks.
 /// Parent routing returns None for a local owner; routing errors are returned.
 pub trait DecisionAddContext: Send + Sync {
+    /// Go resolves the domain and emits AddTask traffic after identifier
+    /// validation, before attempting to load a manager.
+    fn observe_add_request(
+        &self,
+        _domain: &GoString,
+        _list: &api::TaskList,
+        _task_type: i32,
+        _forwarded: bool,
+    ) -> Result<(), Status> {
+        Ok(())
+    }
     fn domain_active(&self, domain: uuid::Uuid) -> Result<bool, Status>;
     fn forward_degree(&self, domain: uuid::Uuid, root: &GoString, task_type: i32) -> i64;
     fn check_write_partition(
@@ -194,6 +205,25 @@ impl NativeMatchingEngine {
             );
         }
         let parsed = crate::matching_handler_native::task_list_name(&list.name)?;
+        context.observe_add_request(domain_id, &list, task_type, !forwarded_from.is_empty())?;
+        if crate::matching_handler_native::persistence_kind(list.kind) == 0
+            && forwarded_from.is_empty()
+        {
+            if let Ok(domain) = domain_id.as_utf8() {
+                crate::matching_task_info_log::emit(
+                    domain,
+                    if task_type == 0 {
+                        "Emitting tasklist counter on decision task"
+                    } else {
+                        "Emitting tasklist counter on activity task"
+                    },
+                    &[
+                        ("wf-task-list-name", list.name.go_json_string()),
+                        ("taskListBaseName", parsed.root().go_json_string()),
+                    ],
+                );
+            }
+        }
         let domain = domain_id
             .as_utf8()
             .ok()
