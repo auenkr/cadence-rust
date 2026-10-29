@@ -2531,7 +2531,7 @@ mod tests {
         let shutdown_registry = registry.clone();
         let shutdown = tokio::spawn(async move { shutdown_registry.shutdown(3).await });
         tokio::time::timeout(Duration::from_secs(3), async {
-            while !handle.queue.is_stopped() { tokio::task::yield_now().await; }
+            while !handle.queue.is_stopped() || !buffered.queue.is_stopped() { tokio::task::yield_now().await; }
         }).await.expect("shutdown did not cancel the reader");
         assert!(buffered.queue.is_stopped());
         assert!(!shutdown.is_finished(), "shutdown skipped the in-flight store read");
