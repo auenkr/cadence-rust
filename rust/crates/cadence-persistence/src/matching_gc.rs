@@ -45,6 +45,21 @@ impl TaskGarbageCollector {
         now: Instant,
         mut delete: impl FnMut(i64, i64) -> Result<usize, E>,
     ) -> Result<usize, E> {
+        self.run_with_signed_batch_provider(ack, batch_provider, max_interval, force, now, |ack, batch| {
+            delete(ack, batch).map(|count| count as i64)
+        })
+    }
+
+    /// Preserve the Go Cassandra unknown-row-count sentinel (-1).
+    pub fn run_with_signed_batch_provider<E>(
+        &self,
+        ack: i64,
+        batch_provider: impl FnOnce() -> i64,
+        max_interval: Duration,
+        force: bool,
+        now: Instant,
+        mut delete: impl FnMut(i64, i64) -> Result<i64, E>,
+    ) -> Result<usize, E> {
         let mut state = match self.state.try_lock() {
             Ok(state) => state,
             Err(std::sync::TryLockError::WouldBlock) => return Ok(0),
@@ -68,8 +83,8 @@ impl TaskGarbageCollector {
                 Ok(count) => count,
                 Err(_) => return Ok(deleted),
             };
-            deleted += count;
-            if (count as i128) < i128::from(batch) {
+            deleted += count.max(0) as usize;
+            if count < batch {
                 state.ack = ack;
                 return Ok(deleted);
             }
@@ -83,6 +98,21 @@ impl TaskGarbageCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cassandra_unknown_count_uses_go_signed_comparison() {
+        for (batch, expected_calls, expected_ack) in [(1, 1, 7), (0, 1, 7), (-1, 2, 0), (i64::MIN, 2, 0)] {
+            let gc = TaskGarbageCollector::default();
+            let mut calls = 0;
+            let result = gc.run_with_signed_batch_provider(
+                7, || batch, Duration::from_secs(1), false, Instant::now(),
+                |_, _| { calls += 1; if calls == 2 { Err(()) } else { Ok(-1) } },
+            );
+            assert!(result.is_ok());
+            assert_eq!(calls, expected_calls);
+            assert_eq!(gc.ack_level(), expected_ack);
+        }
+    }
+
     #[test]
     fn matching_gc_original_go_fixtures() {
         let cases: serde_json::Value =

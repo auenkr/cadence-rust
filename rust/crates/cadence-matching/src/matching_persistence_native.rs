@@ -193,6 +193,13 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
         );
         result
     }
+    fn gc_complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> NativeResult<i64> {
+        self.permit("CompleteTasksLessThan", Some(key.domain_id))?;
+        let started = std::time::Instant::now();
+        let result = self.store.gc_complete_tasks_less_than(key, ack, limit);
+        self.limiter.record_native_task_call("CompleteTasksLessThan", Some(key.domain_id), started.elapsed(), &result);
+        result
+    }
     fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> NativeResult<()> {
         self.permit("DeleteTaskList", Some(key.domain_id))?;
         let started = std::time::Instant::now();
