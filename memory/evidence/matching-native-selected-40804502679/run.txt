@@ -1,0 +1,4 @@
+https://github.com/auenkr/cadence-rust/actions/runs/40804502679
+head=b728447489bf81f08c846ba43417be035ecb8538
+conclusion=failure
+Clippy failed duplicate/private tests module; workspace/selected tests did not execute. Fixed by d9ac938ba.

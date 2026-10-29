@@ -246,3 +246,24 @@ Run40802403212 at7c4e1ee9d failed one new fixture (missing Tokio reactor),
 after Clippy0 and Matching957 passed. The fixture attribute is corrected on
 master, pending fresh workspace CI. No mixed lane is credited. See
 matching-master-sync-20261029.md and matching-native-source-domain-audit-20261029.md.
+
+## Current source-domain continuation
+
+Whole-workspace run40803510954 passed at4d1007f3bdd0a6d667936d53aef6cf6277d98f51:
+fresh target, Clippy0/test0 and all four live metric emission comparisons.
+Reviewed compact evidence is retained in evidence/matching-native-workspace-40803510954/.
+This predates subsequent source-domain corrections and is not a final pin.
+
+Selected run40804502679 atb72844748 failed Clippy on the duplicate/private
+tests module. Tests did not run; retained diagnostics are in
+evidence/matching-native-selected-40804502679/. The module naming fix is
+d9ac938ba. Raw source error correction and successful History dispatch test
+are merged into master, including06f4094a8 andeb8b2def8.
+
+Fresh selected validation (clean target, runner formatting, Go UUID oracle):
+https://github.com/auenkr/cadence-rust/actions/runs/40804994259
+at e03c37b33; conclusion pending. It includes the module fix and merged tests.
+The SQL source-parse versus persistence-limiter order remains an identified
+parity gap under correction; no source-domain completion is claimed yet.
+Separate original-Go source-boundary oracle work is in progress.
+All ten native mixed lanes and final same-pin workspace validation remain open.

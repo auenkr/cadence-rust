@@ -1,0 +1,74 @@
+error[E0428]: the name `tests` is defined multiple times
+   --> crates/cadence-matching/src/matching_engine_context_native.rs:524:1
+    |
+418 | mod tests {
+    | --------- previous definition of the module `tests` here
+...
+524 | pub(crate) mod tests {
+    | ^^^^^^^^^^^^^^^^^^^^ `tests` redefined here
+    |
+    = note: `tests` must be defined only once in the type namespace of this module
+
+error[E0432]: unresolved imports `crate::matching_engine_context_native::tests::cache`, `crate::matching_engine_context_native::tests::record`
+   --> crates/cadence-matching/src/matching_runtime_native.rs:846:60
+    |
+846 |         use crate::matching_engine_context_native::tests::{cache, record};
+    |                                                            ^^^^^  ^^^^^^ no `record` in `matching_engine_context_native::tests`
+    |                                                            |
+    |                                                            no `cache` in `matching_engine_context_native::tests`
+
+error[E0432]: unresolved imports `crate::matching_engine_context_native::tests::cache`, `crate::matching_engine_context_native::tests::record`
+    --> crates/cadence-matching/src/matching_service_native.rs:1091:60
+     |
+1091 |         use crate::matching_engine_context_native::tests::{cache, record};
+     |                                                            ^^^^^  ^^^^^^ no `record` in `matching_engine_context_native::tests`
+     |                                                            |
+     |                                                            no `cache` in `matching_engine_context_native::tests`
+
+error[E0432]: unresolved imports `crate::matching_engine_context_native::tests::cache`, `crate::matching_engine_context_native::tests::record`
+    --> crates/cadence-matching/src/matching_service_native.rs:1156:60
+     |
+1156 |         use crate::matching_engine_context_native::tests::{cache, record};
+     |                                                            ^^^^^  ^^^^^^ no `record` in `matching_engine_context_native::tests`
+     |                                                            |
+     |                                                            no `cache` in `matching_engine_context_native::tests`
+
+error[E0603]: module `tests` is private
+   --> crates/cadence-matching/src/matching_runtime_native.rs:846:52
+    |
+846 |         use crate::matching_engine_context_native::tests::{cache, record};
+    |                                                    ^^^^^ private module
+    |
+note: the module `tests` is defined here
+   --> crates/cadence-matching/src/matching_engine_context_native.rs:418:1
+    |
+418 | mod tests {
+    | ^^^^^^^^^
+
+error[E0603]: module `tests` is private
+    --> crates/cadence-matching/src/matching_service_native.rs:1091:52
+     |
+1091 |         use crate::matching_engine_context_native::tests::{cache, record};
+     |                                                    ^^^^^ private module
+     |
+note: the module `tests` is defined here
+    --> crates/cadence-matching/src/matching_engine_context_native.rs:418:1
+     |
+ 418 | mod tests {
+     | ^^^^^^^^^
+
+error[E0603]: module `tests` is private
+    --> crates/cadence-matching/src/matching_service_native.rs:1156:52
+     |
+1156 |         use crate::matching_engine_context_native::tests::{cache, record};
+     |                                                    ^^^^^ private module
+     |
+note: the module `tests` is defined here
+    --> crates/cadence-matching/src/matching_engine_context_native.rs:418:1
+     |
+ 418 | mod tests {
+     | ^^^^^^^^^
+
+Some errors have detailed explanations: E0428, E0432, E0603.
+For more information about an error, try `rustc --explain E0428`.
+error: could not compile `cadence-matching` (lib test) due to 7 previous errors
