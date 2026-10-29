@@ -266,10 +266,12 @@ impl DomainMetadataSource
         timeout: Duration,
         _mode: crate::matching_domain_uuid::DomainIdParse,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
-        let parsed = crate::matching_domain_uuid::cassandra_uuid_bytes(id).map_err(|error| {
+        crate::matching_domain_uuid::cassandra_uuid_bytes(id).map_err(|error| {
             DomainMetadataSourceError::transient(format!("GetDomain operation failed. Error: {error}"))
         })?;
-        self.get_domain(None, Some(&parsed.to_string()), timeout)
+        // Accepted gocql UUID spellings contain only ASCII hex and hyphens.
+        // Keep that spelling for errors while get_domain normalizes the query bind.
+        self.get_domain(None, Some(std::str::from_utf8(id).expect("validated UUID spelling")), timeout)
     }
 
     fn get_domain(
@@ -289,20 +291,23 @@ impl DomainMetadataSource
         cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::get_domain(
             self, name, canonical.as_deref().or(id),
         )
-        .map_err(|error| match error {
-            MatchingDomainMetadataError::NotFound(_)
-            | MatchingDomainMetadataError::BothIdAndName
-            | MatchingDomainMetadataError::EmptyIdentity
-            | MatchingDomainMetadataError::InvalidUuid(_) => {
-                let class = if matches!(error, MatchingDomainMetadataError::NotFound(_)) {
-                    DomainErrorClass::NotFound
-                } else {
-                    DomainErrorClass::BadRequest
-                };
-                DomainMetadataSourceError::permanent(error.to_string()).with_class(class)
-            }
-            _ => DomainMetadataSourceError::transient(error.to_string()),
-        })
+        .map_err(|error| cassandra_metadata_source_error(error, id.filter(|id| !id.is_empty()).or(name).unwrap_or_default()))
+    }
+}
+
+fn cassandra_metadata_source_error(
+    error: MatchingDomainMetadataError,
+    identity: &str,
+) -> DomainMetadataSourceError {
+    match error {
+        MatchingDomainMetadataError::NotFound(_) => DomainMetadataSourceError::permanent(
+            format!("Domain {identity} does not exist."),
+        ).with_class(DomainErrorClass::NotFound),
+        MatchingDomainMetadataError::BothIdAndName
+        | MatchingDomainMetadataError::EmptyIdentity
+        | MatchingDomainMetadataError::InvalidUuid(_) =>
+            DomainMetadataSourceError::permanent(error.to_string()).with_class(DomainErrorClass::BadRequest),
+        _ => DomainMetadataSourceError::transient(error.to_string()),
     }
 }
 

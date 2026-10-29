@@ -245,37 +245,36 @@ struct RateLimitedDomainSource {
 }
 
 impl RateLimitedDomainSource {
-    fn permit(
+    fn call<T>(
         &self,
         operation: &'static str,
-        domain: Option<&str>,
-    ) -> Result<(), DomainMetadataSourceError> {
-        if self.limiter.allow() {
-            Ok(())
-        } else {
-            self.limiter
-                .record_rejection(operation, domain, Some(operation));
-            Err(DomainMetadataSourceError::transient(REJECTED))
-        }
-    }
-}
-
-impl RateLimitedDomainSource {
-    fn record<T>(
-        &self,
-        operation: &'static str,
-        elapsed: std::time::Duration,
-        result: &Result<T, DomainMetadataSourceError>,
-    ) {
+        lookup: impl FnOnce() -> Result<T, DomainMetadataSourceError>,
+    ) -> Result<T, DomainMetadataSourceError> {
         use crate::matching_domain_cache::DomainErrorClass;
         use crate::matching_persistence_limiter::PersistenceErrorClass;
-        let class = result.as_ref().err().map(|error| match error.class {
-            DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
-            DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
-            DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
-            DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
-        });
-        self.limiter.record_domain_call(operation, elapsed, class);
+        self.limiter.record_domain_request(operation);
+        let started = std::time::Instant::now();
+        let admitted = self.limiter.allow();
+        let result = if admitted {
+            lookup()
+        } else {
+            self.limiter.record_domain_rejection(operation);
+            Err(DomainMetadataSourceError::transient(REJECTED))
+        };
+        if !result.as_ref().err().is_some_and(|error| error.class == DomainErrorClass::CapturedPanic) {
+            let class = if admitted {
+                result.as_ref().err().map(|error| match error.class {
+                    DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
+                    DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
+                    DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
+                    DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
+                })
+            } else {
+                Some(PersistenceErrorClass::Busy)
+            };
+            self.limiter.record_domain_result(operation, started.elapsed(), class);
+        }
+        result
     }
 }
 
@@ -336,11 +335,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         &self,
         timeout: std::time::Duration,
     ) -> Result<i64, DomainMetadataSourceError> {
-        self.permit("GetMetadata", None)?;
-        let started = std::time::Instant::now();
-        let result = self.source.metadata_version(timeout);
-        self.record("GetMetadata", started.elapsed(), &result);
-        result
+        self.call("GetMetadata", || self.source.metadata_version(timeout))
     }
     fn list_domains(
         &self,
@@ -348,12 +343,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         next_page_token: Option<&[u8]>,
         timeout: std::time::Duration,
     ) -> Result<DomainMetadataPage, DomainMetadataSourceError> {
-        self.permit("ListDomain", None)?;
-        let started = std::time::Instant::now();
-        let result = self
-            .source
-            .list_domains(page_size, next_page_token, timeout);
-        self.record("ListDomain", started.elapsed(), &result);
+        let result = self.call("ListDomain", || self.source.list_domains(page_size, next_page_token, timeout));
         if let Ok(page) = &result {
             let payload = list_domains_byte_size(page);
             self.limiter
@@ -370,11 +360,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         cadence_persistence::matching_domain_metadata::MatchingDomainMetadata,
         DomainMetadataSourceError,
     > {
-        self.permit("GetDomain", name)?;
-        let started = std::time::Instant::now();
-        let result = self.source.get_domain(name, id, timeout);
-        self.record("GetDomain", started.elapsed(), &result);
-        result
+        self.call("GetDomain", || self.source.get_domain(name, id, timeout))
     }
     fn get_domain_by_raw_id(
         &self,
@@ -382,28 +368,7 @@ impl DomainMetadataSource for RateLimitedDomainSource {
         timeout: std::time::Duration,
         mode: crate::matching_domain_uuid::DomainIdParse,
     ) -> Result<cadence_persistence::matching_domain_metadata::MatchingDomainMetadata, DomainMetadataSourceError> {
-        use crate::matching_domain_cache::DomainErrorClass;
-        use crate::matching_persistence_limiter::PersistenceErrorClass;
-        self.limiter.record_domain_request("GetDomain");
-        let started = std::time::Instant::now();
-        let result = if self.limiter.allow() {
-            self.source.get_domain_by_raw_id(id, timeout, mode)
-        } else {
-            self.limiter.record_domain_rejection("GetDomain");
-            let result = Err(DomainMetadataSourceError::transient(REJECTED));
-            self.limiter.record_domain_result("GetDomain", started.elapsed(), Some(PersistenceErrorClass::Busy));
-            return result;
-        };
-        if !result.as_ref().err().is_some_and(|error| error.class == DomainErrorClass::CapturedPanic) {
-            let class = result.as_ref().err().map(|error| match error.class {
-                DomainErrorClass::NotFound => PersistenceErrorClass::NotFound,
-                DomainErrorClass::BadRequest => PersistenceErrorClass::BadRequest,
-                DomainErrorClass::DbUnavailable => PersistenceErrorClass::DbUnavailable,
-                DomainErrorClass::Internal | DomainErrorClass::CapturedPanic => PersistenceErrorClass::Internal,
-            });
-            self.limiter.record_domain_result("GetDomain", started.elapsed(), class);
-        }
-        result
+        self.call("GetDomain", || self.source.get_domain_by_raw_id(id, timeout, mode))
     }
 
 }
@@ -688,7 +653,7 @@ mod list_domain_metric_tests {
         let events = sink.events();
         assert_eq!(events.iter().filter(|e| e.name == "persistence_requests").count(), 1);
         assert_eq!(events.iter().filter(|e| e.name == "persistence_latency").count(), 1);
-        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors_db_unavailable").count(), 1);
+        assert_eq!(events.iter().filter(|e| e.name == "persistence_errors").count(), 1);
     }
 
     #[test]

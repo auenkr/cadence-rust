@@ -76,10 +76,11 @@ func TestSourceDomainBoundarySQLOracle(t *testing.T) {
 func TestSourceDomainBoundaryCassandraMarshalOracle(t *testing.T) {
     info := gocql.NewNativeType(4, gocql.TypeUUID, "")
     good := "0123abcd-4567-89ef-ABCD-0123456789ab"
+    expected := []byte{0x01, 0x23, 0xab, 0xcd, 0x45, 0x67, 0x89, 0xef, 0xab, 0xcd, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab}
     for _, id := range []string{good, "0123abcd456789efABCD0123456789ab", "--" + good + "--", good + "-"} {
         bytes, err := gocql.Marshal(info, &id)
         require.NoError(t, err)
-        require.Len(t, bytes, 16)
+        require.Equal(t, expected, bytes)
         t.Logf("accepted %q: %x", id, bytes)
     }
     for _, id := range []string{"\xff", "0-123abcd-4567-89ef-ABCD-0123456789ab", "{" + good + "}"} {

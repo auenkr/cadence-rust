@@ -322,6 +322,7 @@ impl MatchingPersistenceLimiter {
 
     /// Go `metered.base.call` for the domain manager (no domain tag on its
     /// requests, so the overall family with `task_category=none`).
+    #[cfg(test)]
     pub(crate) fn record_domain_call(
         &self,
         operation: &'static str,
