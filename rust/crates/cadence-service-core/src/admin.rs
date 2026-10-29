@@ -1206,6 +1206,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn all_matching_quota_keys_normalize_config_store_numbers() {
+        use cadence_persistence::{config_store::Snapshot, dynamic_config::integer};
+        let keys = [
+            "matching.persistenceMaxQPS",
+            "matching.persistenceGlobalMaxQPS",
+            "matching.rps",
+            "matching.workerrps",
+            "matching.domainrps",
+            "matching.domainworkerrps",
+        ];
+        let entries = keys.iter().map(|key| cadence_api::admin::DynamicConfigEntry {
+            name: (*key).into(),
+            values: vec![DynamicConfigValue {
+                filters: vec![],
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"1.0".to_vec(),
+                )),
+            }],
+        }).collect();
+        let overlay = DynamicConfigOverlay::from_config_store(&Snapshot {
+            version: 1,
+            schema_version: 0,
+            entries: Some(entries),
+        });
+        for key in keys {
+            assert_eq!(integer(overlay.property_values(key), None, 42), 1, "{key}");
+        }
+    }
+
+    #[test]
     fn matching_rpc_quota_store_integers_follow_go_json_conversion() {
         use cadence_persistence::{config_store::Snapshot, dynamic_config::integer};
         let value = |n: &str| DynamicConfigValue {
