@@ -2404,9 +2404,9 @@ mod tests {
     #[tokio::test]
     async fn shutdown_continues_after_final_ack_and_gc_failures_for_all_owners() {
         use std::sync::atomic::Ordering;
-        let (_dir, mut registry) = fixture();
+        let (dir, mut registry) = fixture();
         let store = Arc::new(TeardownStore {
-            inner: Arc::new(SqliteTaskStore::create(_dir.path().join("fail.db"), BlobEncoding::ThriftRW).unwrap()),
+            inner: Arc::new(SqliteTaskStore::create(dir.path().join("fail.db"), BlobEncoding::ThriftRW).unwrap()),
             fail: std::sync::atomic::AtomicBool::new(false),
             updates: std::sync::atomic::AtomicUsize::new(0),
             deletes: std::sync::atomic::AtomicUsize::new(0),

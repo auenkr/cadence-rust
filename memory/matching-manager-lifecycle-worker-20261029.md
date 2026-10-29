@@ -1,0 +1,9 @@
+# Matching manager lifecycle worker — 2026-10-29
+
+Branch `t3/matching-manager-lifecycle` merges `origin/t3/matching-lifecycle-fixes` at `ccb6cb11fd72229499d3eeadb55a0cc96647475e`, including lifecycle integration `a9cb5ed06` and their shared reader, raw-byte and semaphore ancestry. This overlaps the other workers' integration and requires reconciliation; it does not establish acceptance.
+
+Go `task_reader.go:169-180` cancels, attempts final ack, forces GC and waits for the reader even after errors. `task_gc.go` stops deletion on error and `db.go` logs that error. The recovered owner logs final ack errors and continues. The native GC collector swallowed the delete error before owner logging; the queue now logs at the store call. Added a two-owner injected condition-failure shutdown regression for final ack and forced GC, checking both owners are stopped and both calls attempted. This is source-only until CI passes; no result is assumed.
+
+Focused run https://github.com/auenkr/cadence-rust/actions/runs/40910826351 dispatched at `67b31e01890438fc49b33fd03ac922399f9e428e`, observed in progress with no conclusion. This head predates a minor test binding rename; it cannot validate later source. No local Cargo, Go, formatting or runtime validation was performed.
+
+Open: bind a successfully resolved domain name once at manager construction; propagate lookup failure before lease and cover rename stability. Go liveness starts `NewTicker(ttl/2)` after registration and lease; Rust currently rejects invalid period before lease, so panic/recovery and side effects remain different. Blocked store/full buffer versus shutdown, lock ordering, periodic condition-failure eviction, and detailed injected failure behavior require additional bounded regressions. Final uncached workspace CI, database oracle and mixed SDK failure/restart/recovery lanes remain required; Matching remains incomplete.
