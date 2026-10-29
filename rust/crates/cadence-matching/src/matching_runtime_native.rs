@@ -603,7 +603,7 @@ mod tests {
         const ID: &str = "00000000-0000-0000-0000-000000000001";
         const ENV: &str = "CADENCE_COLD_LOOKUP_CASE";
         let Ok(case) = std::env::var(ENV) else {
-            for case in ["integer", "duration", "boolean", "writer", "standby"] {
+            for case in ["integer", "duration", "boolean", "writer", "standby", "engine_duration", "engine_integer", "engine_boolean", "engine_rate", "control_boolean", "control_duration", "control_integer"] {
                 let status = std::process::Command::new("timeout")
                     .arg("10s")
                     .arg(std::env::current_exe().unwrap())
@@ -650,6 +650,13 @@ mod tests {
                 ("test.boolean", b"false".as_slice()), ("matching.enableStandbyTaskCompletion", b"false".as_slice()),
                 ("matching.maxTaskBatchSize", b"17".as_slice()), ("matching.appendTaskTimeout", br#""250ms""#.as_slice()),
                 ("matching.outstandingTaskAppendsThreshold", b"19".as_slice()),
+                ("matching.longPollExpirationInterval", br#""250ms""#.as_slice()),
+                ("matching.forwarderMaxChildrenPerNode", b"17".as_slice()),
+                ("matching.enableClientAutoConfig", b"true".as_slice()),
+                ("matching.overrideTaskListRps", b"17.5".as_slice()),
+                ("matching.enableAdaptiveScaler", b"true".as_slice()),
+                ("matching.taskIsolationPollerWindow", br#""250ms""#.as_slice()),
+                ("matching.numTasklistWritePartitions", b"17".as_slice()),
             ] { config.update(false, key, vec![value(data, true)]); }
         }
         let clock = Arc::new(AtomicI64::new(0));
@@ -667,6 +674,48 @@ mod tests {
             "boolean" => assert!(!boolean_provider(cache, overlay, "test.boolean", true)(&domain, &task, 0)),
             "writer" => assert_eq!(writer_live_provider(cache, overlay)(&domain, &task, 0), (17, 250_000_000, 19)),
             "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
+            _ if case.starts_with("engine_") || case.starts_with("control_") => {
+                use crate::matching_engine_native::{DecisionAddContext, NativeControlContext, NativePollContext};
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                let _guard = runtime.enter();
+                let mut state = crate::handlers::AppState::default();
+                state.admin.dynamic_config = overlay;
+                let directory = tempfile::tempdir().unwrap();
+                let store = Arc::new(cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                    directory.path().join("adapter.db"),
+                    cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+                ).unwrap());
+                let history = crate::matching_history::MatchingHistoryClient::new(
+                    tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+                    Duration::from_secs(1), 1024,
+                );
+                let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+                    store, history, std::num::NonZeroU32::new(100).unwrap(),
+                );
+                let membership = crate::matching_membership::Membership::new("local", vec![]);
+                let control = Arc::new(crate::matching_control_context_native::NativeMatchingControlContext::new(
+                    state.clone(), cache.clone(), registry, membership.clone(), None,
+                ));
+                if case.starts_with("control_") {
+                    match case.as_str() {
+                        "control_boolean" => assert!(control.scaler_enabled(&domain, &task, 0)),
+                        "control_duration" => assert_eq!(control.poller_window_nanos(&domain, &task, 0), 250_000_000),
+                        "control_integer" => assert_eq!(control.write_partition_count(&domain, &task, 0), 17),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let engine = crate::matching_engine_context_native::NativeMatchingEngineContext::with_control(
+                        state, cache, control, membership, None, Arc::new(|_, _, _, _| panic!("unexpected poll registration")), None,
+                    );
+                    match case.as_str() {
+                        "engine_duration" => assert_eq!(engine.expiration(&domain, &task, 0), Duration::from_millis(250)),
+                        "engine_integer" => assert_eq!(engine.forward_degree(uuid::Uuid::parse_str(ID).unwrap(), &task, 0), 17),
+                        "engine_boolean" => assert!(engine.auto_config_enabled(&domain, &task, 0)),
+                        "engine_rate" => assert_eq!(engine.override_rate(&domain, &task, 0), 17.5),
+                        _ => unreachable!(),
+                    }
+                }
+            }
             _ => panic!("unknown case"),
         }
     }
