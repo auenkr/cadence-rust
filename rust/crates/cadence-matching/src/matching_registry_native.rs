@@ -35,12 +35,10 @@ use crate::{
 use cadence_common::{go_string::GoString, task_list::TaskListNameBytes};
 use cadence_persistence::{
     matching_blob::TaskDataBytes,
-    matching_native_queue::{DurableTaskQueueBytes, NativeQueueError, PendingTaskBytes},
+    matching_native_queue::{DurableTaskQueueBytes, PendingTaskBytes},
     matching_native_task_store::{
-        AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError as StoreError,
-        TaskListKeyBytes,
+        AllocatedTaskBytes, MatchingTaskStoreBytes, TaskListKeyBytes,
     },
-    matching_task_store::MatchingTaskStoreError as LegacyStoreError,
 };
 use std::{
     collections::HashMap,
@@ -273,30 +271,13 @@ impl Owner {
         self.scaler.stop();
         self.stop();
         readers.push(self.reader.clone());
-        let ack = self.queue.persist_final_ack(now);
-        let garbage = self.queue.run_garbage_collection(true);
-        tolerate_lost_ownership(ack.and(garbage.map(|_| ())))
-            .map_err(|error| Status::unavailable(error.to_string()))
-    }
-}
-/// Go's task list Stop logs and ignores a final-update failure. Losing the
-/// lease to a peer (ConditionFailed) during shutdown is expected, not fatal.
-fn tolerate_lost_ownership(result: Result<(), NativeQueueError>) -> Result<(), NativeQueueError> {
-    match result {
-        Err(NativeQueueError::Storage(StoreError::ConditionFailed { message })) => {
-            eprintln!(
-                "Matching task list lost ownership during shutdown: {}",
-                diag(message.as_bytes())
-            );
-            Ok(())
+        if let Err(error) = self.queue.persist_final_ack(now) {
+            eprintln!("Matching final ack persistence failed: {error}");
         }
-        Err(NativeQueueError::Storage(StoreError::Legacy(LegacyStoreError::ConditionFailed(
-            reason,
-        )))) => {
-            eprintln!("Matching task list lost ownership during shutdown: {reason}");
-            Ok(())
+        if let Err(error) = self.queue.run_garbage_collection(true) {
+            eprintln!("Matching task garbage collection failed: {error}");
         }
-        other => other,
+        Ok(())
     }
 }
 impl Drop for Owner {
@@ -2056,8 +2037,8 @@ impl NativeQueueRegistry {
     pub async fn persist_acks(&self, now: i64) -> Result<(), Status> {
         self.flush(now, false, None).await
     }
-    /// All handles become unusable after shutdown. Persist every owner even if
-    /// another owner fails, and return the first failure.
+    /// All handles become unusable after shutdown. Final ack and GC failures
+    /// are logged while every owner is stopped, as in Go taskReader.Stop.
     pub async fn shutdown(&self, now: i64) -> Result<(), Status> {
         self.flush(now, true, None).await
     }
