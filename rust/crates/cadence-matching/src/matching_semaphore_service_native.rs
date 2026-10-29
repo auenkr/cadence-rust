@@ -134,7 +134,9 @@ impl NativeSemaphoreService {
             .get::<CallerCancel>()
             .map(|c| c.0.clone());
         let r = request.get_ref();
-        let result = self.acquire_inner(r, deadline, cancelled.clone(), dropped.clone()).await;
+        let result = self
+            .acquire_inner(r, deadline, cancelled.clone(), dropped.clone())
+            .await;
         match result {
             Err(error) => match caller_ended(deadline, cancelled.as_ref(), &dropped) {
                 Some(ended) => {
@@ -537,7 +539,7 @@ mod tests {
         assert!(Arc::ptr_eq(&manager, &registry.all_managers()[0]));
         // A caller deadline also bounds an in-flight persistence grant, even
         // when there is no transport task to drop the handler.
-        let mut grant_request = request(b"1:deadline:r:3");
+        let mut grant_request = request(b"8:deadline:r:3");
         grant_request.set_timeout(Duration::from_millis(200));
         let grant = {
             let service = service.clone();
