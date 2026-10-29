@@ -1729,6 +1729,83 @@ mod tests {
         );
     }
 
+    // Go handler/engine_test.go TestErrIfShardOwnershipLost, exercised through
+    // the native admission callback installed by MatchingRuntime.
+    #[tokio::test]
+    async fn native_admission_go_ownership_cases() {
+        use crate::matching_shard_distributor::GetShardProcessError;
+        use cadence_common::{go_string::GoString, membership::Host};
+
+        let host = |name: &str| Host {
+            address: name.into(),
+            identity: name.into(),
+            grpc_address: String::new(),
+        };
+        let membership =
+            crate::matching_membership::Membership::new("self", vec![host("self")]);
+        let (drain, receiver) = tokio::sync::watch::channel(false);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let lookup: NativeShardLookup = Arc::new(move |name| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                match name.as_slice() {
+                    b"missing" => Err(GetShardProcessError::NotFound("missing".into())),
+                    b"failure" => {
+                        Err(GetShardProcessError::Heartbeat("sd lookup failed".into()))
+                    }
+                    _ => Ok(()),
+                }
+            })
+        });
+        let check = native_shard_ownership_check(
+            membership.clone(),
+            Arc::new(|| 100),
+            Arc::new(|| true),
+            receiver,
+            lookup.clone(),
+        );
+        let missing = check(GoString::from("missing"), false)
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code(), tonic::Code::Aborted);
+        assert!(missing.message().contains("OwnedBy: not known, Me: self"));
+        let failure = check(GoString::from("failure"), false)
+            .await
+            .unwrap_err();
+        assert_eq!(failure.code(), tonic::Code::Internal);
+        assert!(failure
+            .message()
+            .contains("failed to lookup ownership in SD: sd lookup failed"));
+        assert!(check(GoString::from("owned"), false).await.is_ok());
+
+        let uuid = GoString::from("tasklist-550e8400-e29b-41d4-a716-446655440000");
+        assert!(check(uuid.clone(), false).await.is_ok());
+        membership.replace(vec![host("owner")]);
+        let changed = check(uuid.clone(), false).await.unwrap_err();
+        assert_eq!(changed.code(), tonic::Code::Aborted);
+        assert!(changed.message().contains("OwnedBy: owner, Me: self"));
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "excluded names bypass SD");
+
+        let (_other_drain, other_receiver) = tokio::sync::watch::channel(false);
+        let enabled = native_shard_ownership_check(
+            membership,
+            Arc::new(|| 100),
+            Arc::new(|| false),
+            other_receiver,
+            lookup,
+        );
+        assert!(enabled(uuid, false).await.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        drain.send(true).unwrap();
+        let stopped = check(GoString::from("owned"), false)
+            .await
+            .unwrap_err();
+        assert_eq!(stopped.code(), tonic::Code::Aborted);
+        assert!(stopped.message().contains("OwnedBy: not known, Me: self"));
+        assert_eq!(calls.load(Ordering::SeqCst), 4, "shutdown skips SD");
+    }
+
     #[test]
     fn shutdown_drain_provider_reads_live_unfiltered_value() {
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
