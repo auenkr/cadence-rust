@@ -1,0 +1,14 @@
+# Native Matching follow-up source audit — 2026-10-29
+
+Audited source at `b728447489bf81f08c846ba43417be035ecb8538`, independently of the source-domain correction. No additional concrete handler, deadline, startup, shutdown, or production-assembly difference was proved in this bounded review. This is not a parity certification.
+
+Production trace: `launcher.rs:1320` selects configured stores, cache, membership, quota and History for `matching_launch_native.rs:46`; that constructs the byte-store registry and attaches live routing/scaler before `NativeMatchingHost` and its service slot (`matching_runtime_native.rs:283`, `matching_launch_native.rs:163`). Runtime drain and shutdown are in `matching_runtime.rs:1020` and `:1053`; native registry shutdown and writer joins, plus semaphore stop, are explicitly wired. Go's handler starts the engine before releasing the startup wait (`go/service/matching/handler/handler.go:95`); source inventory alone does not prove equivalent listener timing under failures.
+
+Semaphore startup comparison: Go `go/service/matching/handler/engine.go:447` resolves domain/config and ownership only on a registry miss, always calls Start with a 30-second background context, and a concurrent Starting manager returns immediately from Start (`go/service/matching/semaphore/semaphore_manager.go:170`). Native `matching_semaphore_service_native.rs:109` and `:153`, and `matching_semaphore_manager_native.rs:203`, follow those visible boundaries; caller cancellation/deadline error precedence still needs real configured-path evidence, not an inference from this comparison.
+
+Actionable **missing evidence**, not proved defects:
+
+1. Exercise configured production startup and listener failures, drain, active owner/writer and semaphore shutdown, and restart/recovery against Go peers. Assert listener admission timing, persisted acknowledgements, released ownership and no stranded operations. `matching_runtime.rs:1036`, `:1116`, `:1127`, `:1142` and `matching_registry_native.rs:2084` are the relevant paths. Existing component tests do not substitute for the mixed cluster.
+2. Inject slow/failing semaphore startup and concurrent acquire cancellation/deadlines through configured native transports, checking Go-visible error and timeout metrics plus subsequent manager reuse/recovery. Compare `matching_semaphore_service_native.rs:109-194` with Go `handler.go:526` and `engine.go:447`; retain both caller-expiry and independent startup-timeout observations. This is a test request, not a claim of a difference.
+
+All ten native mixed SDK/restart/recovery lanes remain outstanding per `matching-native-acceptance-ledger-20261029.md`. The source-domain identity issue is separately owned by the parent. No Cargo, Go, rustfmt, build, tests, CI dispatch, or runtime changes were performed.
