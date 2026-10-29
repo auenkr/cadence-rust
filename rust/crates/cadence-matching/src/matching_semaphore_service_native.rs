@@ -106,15 +106,39 @@ impl NativeSemaphoreService {
         &self,
         request: Request<n::matching::AcquireSemaphoreRequest>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
+        // Tonic drops the handler future on a wire deadline or disconnect. Go's
+        // handler keeps running while Start uses its background timeout, then
+        // observes the canceled caller and records the context-error metric.
+        struct CancelOnDrop(tokio::sync::watch::Sender<bool>);
+        impl Drop for CancelOnDrop {
+            fn drop(&mut self) {
+                self.0.send_replace(true);
+            }
+        }
+        let (cancel_sender, dropped) = tokio::sync::watch::channel(false);
+        let _cancel_on_drop = CancelOnDrop(cancel_sender);
+        let service = self.clone();
+        tokio::spawn(async move { service.acquire_owned(request, dropped).await })
+            .await
+            .map_err(|_| Status::internal("semaphore handler task failed"))?
+    }
+
+    async fn acquire_owned(
+        &self,
+        request: Request<n::matching::AcquireSemaphoreRequest>,
+        dropped: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         let deadline = crate::matching_sync::request_deadline(&request);
         let cancelled = request
             .extensions()
             .get::<CallerCancel>()
             .map(|c| c.0.clone());
         let r = request.get_ref();
-        let result = self.acquire_inner(r, deadline, cancelled.clone()).await;
+        let result = self
+            .acquire_inner(r, deadline, cancelled.clone(), dropped.clone())
+            .await;
         match result {
-            Err(error) => match caller_ended(deadline, cancelled.as_ref()) {
+            Err(error) => match caller_ended(deadline, cancelled.as_ref(), &dropped) {
                 Some(ended) => {
                     // The host resolves the metric domain using its handler cache.
                     (self.context_timeout)(&r.domain_id, &r.semaphore_name, request.metadata());
@@ -130,6 +154,7 @@ impl NativeSemaphoreService {
         r: &n::matching::AcquireSemaphoreRequest,
         deadline: Option<tokio::time::Instant>,
         cancelled: Option<tokio::sync::watch::Receiver<bool>>,
+        dropped: tokio::sync::watch::Receiver<bool>,
     ) -> Result<Response<n::matching::AcquireSemaphoreResponse>, Status> {
         let owner = parse_owner_bytes(r.owner_id.as_bytes())
             .map_err(|e| Status::invalid_argument(format!("invalid owner id: {e}")))?;
@@ -152,7 +177,7 @@ impl NativeSemaphoreService {
         let manager = if let Some(manager) = self.registry.by_identifier(&id) {
             tokio::time::timeout(Duration::from_secs(30), manager.start())
                 .await
-                .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+                .map_err(|_| startup_timeout_status(&id))?
                 .map_err(status)?;
             manager
         } else {
@@ -164,25 +189,18 @@ impl NativeSemaphoreService {
             self.check_ownership(&id)?;
             tokio::time::timeout(
                 Duration::from_secs(30),
-                self.registry.get_or_create_with_idle_ttl(id, ttl),
+                self.registry.get_or_create_with_idle_ttl(id.clone(), ttl),
             )
             .await
-            .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+            .map_err(|_| startup_timeout_status(&id))?
             .map_err(status)?
         };
-        if let Some(ended) = caller_ended(deadline, cancelled.as_ref()) {
-            return Err(Status::internal(ended));
-        }
-        let acquire = manager.acquire(&r.owner_id, deadline);
-        tokio::pin!(acquire);
-        let result = if let Some(mut cancel) = cancelled {
-            tokio::select! {
-                result = &mut acquire => result.map_err(status)?,
-                _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { std::future::pending::<()>().await; } } } => return Err(Status::internal("context canceled")),
-            }
-        } else {
-            acquire.await.map_err(status)?
+        let context = cadence_persistence::semaphores_native::SemaphoreCallContext {
+            deadline,
+            cancelled,
+            dropped: Some(dropped),
         };
+        let result = manager.acquire_with_context(&r.owner_id, &context).await.map_err(status)?;
         let outcome = match result.outcome {
             cadence_api::enums::SemaphoreAcquireOutcome::Acquired => 1,
             cadence_api::enums::SemaphoreAcquireOutcome::NoSlot => 2,
@@ -195,18 +213,35 @@ impl NativeSemaphoreService {
     }
 }
 
+fn startup_timeout_status(id: &IdentifierBytes) -> Status {
+    // Go wraps the scan error in load, then handleErr makes the live caller's
+    // uncategorized error an InternalServiceError. The identifier can contain raw bytes.
+    let mut message = b"load semaphore bucket ".to_vec();
+    message.extend_from_slice(id.to_log_string().as_bytes());
+    message.extend_from_slice(b": context deadline exceeded");
+    crate::matching_native_status::raw_status(
+        Code::Internal,
+        &GoString::from(message),
+        Default::default(),
+    )
+}
+
 fn caller_ended(
     deadline: Option<tokio::time::Instant>,
     cancelled: Option<&tokio::sync::watch::Receiver<bool>>,
+    dropped: &tokio::sync::watch::Receiver<bool>,
 ) -> Option<&'static str> {
     if cancelled.is_some_and(|c| *c.borrow()) {
         Some("context canceled")
     } else if deadline.is_some_and(|d| tokio::time::Instant::now() >= d) {
         Some("context deadline exceeded")
+    } else if *dropped.borrow() {
+        Some("context canceled")
     } else {
         None
     }
 }
+
 fn identifier_status(error: IdentifierError) -> Status {
     status(ManagerError::BadRequest(match error {
         IdentifierError::MissingDomain => "domainID is required".into(),
@@ -225,6 +260,16 @@ fn status(error: ManagerError) -> Status {
         ManagerError::NotReady => busy("semaphore manager is not ready".into()),
         ManagerError::ServiceBusy(message) => busy(message),
         ManagerError::Internal(message) => Status::internal(message),
+        ManagerError::Load(id, source) => {
+            let original = status(*source);
+            let mut message = b"load semaphore bucket ".to_vec();
+            message.extend_from_slice(id.as_bytes());
+            message.extend_from_slice(b": ");
+            message.extend_from_slice(original.message().as_bytes());
+            crate::matching_native_status::raw_status(
+                original.code(), &GoString::from(message), tonic::codegen::Bytes::copy_from_slice(original.details()),
+            )
+        },
     }
 }
 fn busy(message: String) -> Status {
@@ -474,18 +519,189 @@ mod tests {
         assert_eq!(error.message(), "context canceled");
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         assert!(Arc::ptr_eq(&manager, &registry.all_managers()[0]));
+        // A write may apply after cancellation; its successful result must be
+        // observed and cached rather than dropped along with the reservation.
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let mut grant_request = request(b"8:deadline:r:3");
+        grant_request.extensions_mut().insert(CallerCancel(receiver));
+        let grant = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(grant_request).await })
+        };
+        store.entered.notified().await;
+        cancel.send(true).unwrap();
         store.release.notify_one();
+        let acquired = grant.await.unwrap().unwrap().into_inner();
+        assert_eq!(acquired.outcome, 1);
+        assert_eq!(metrics.load(Ordering::SeqCst), 2);
+        // Go also confirms an existing hold even with an ended context, and
+        // returns success if the store confirms it successfully.
+        let (cancel, receiver) = tokio::sync::watch::channel(true);
+        let mut confirm = request(b"8:deadline:r:3");
+        confirm.extensions_mut().insert(CallerCancel(receiver));
+        assert_eq!(service.acquire(confirm).await.unwrap().into_inner().token_id, acquired.token_id);
+        assert_eq!(metrics.load(Ordering::SeqCst), 2);
+        drop(cancel);
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+        service.stop_all();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn independent_startup_timeout_stops_manager_and_allows_fresh_acquire() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use tokio::sync::Notify;
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner
+            .create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1)
+            .await
+            .unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(false),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let metrics = Arc::new(AtomicUsize::new(0));
+        let service = NativeSemaphoreService::new(
+            registry.clone(),
+            Membership::new(
+                "self",
+                vec![Host {
+                    address: "self".into(),
+                    identity: "self".into(),
+                    grpc_address: String::new(),
+                }],
+            ),
+            Arc::new(|_| Ok(bytes(b"domain"))),
+            Arc::new(|_| (true, 1_000_000_000)),
+            Arc::new(|| false),
+            {
+                let metrics = metrics.clone();
+                Arc::new(move |_, _, _| {
+                    metrics.fetch_add(1, Ordering::SeqCst);
+                })
+            },
+        );
+        // Neither request has a caller deadline; only the loader's clock can expire.
+        let first = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await })
+        };
+        store.scan_entered.notified().await;
+        let old = registry.all_managers().pop().unwrap();
+        let waiter = service.acquire(request(b"1:y:r:2"));
+        tokio::pin!(waiter);
+        tokio::select! {
+            result = &mut waiter => panic!("waiter finished during startup: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        tokio::time::advance(Duration::from_secs(29)).await;
+        assert!(!first.is_finished());
+        assert!(Arc::ptr_eq(&old, &registry.all_managers()[0]));
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = first.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), Code::Internal);
+        assert_eq!(
+            error
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+                .unwrap()
+                .to_bytes()
+                .unwrap()
+                .as_ref(),
+            b"load semaphore bucket d/s\xff/0: context deadline exceeded"
+        );
+        let error = waiter.await.unwrap_err();
+        assert_eq!(error.code(), Code::ResourceExhausted);
+        assert_eq!(error.message(), "semaphore manager is not ready");
+        assert!(registry.all_managers().is_empty());
+        assert_eq!(metrics.load(Ordering::SeqCst), 0);
+
+        store.release.notify_one();
+        let acquired = service
+            .acquire(request(b"1:z:r:3"))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(acquired.outcome, 1);
+        assert!(!Arc::ptr_eq(&old, &registry.all_managers()[0]));
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(
+                    &bytes(b"d"),
+                    &bytes(b"s\xff"),
+                    0,
+                    acquired.token_id,
+                )
+                .await
+                .unwrap()
+                .as_bytes(),
+            b"1:z:r:3"
+        );
         assert_eq!(
             service
-                .acquire(request(b"1:z:r:3"))
+                .acquire(request(b"1:w:r:4"))
                 .await
                 .unwrap()
                 .into_inner()
                 .outcome,
-            1
+            2
         );
-        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
         service.stop_all();
+    }
+
+    #[tokio::test]
+    async fn scan_failure_reports_raw_bucket_and_releases_waiter() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use tokio::sync::Notify;
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner.create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1).await.unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(true),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let service = NativeSemaphoreService::new(
+            registry.clone(),
+            Membership::new("self", vec![Host { address: "self".into(), identity: "self".into(), grpc_address: String::new() }]),
+            Arc::new(|_| Ok(bytes(b"domain"))),
+            Arc::new(|_| (true, 1_000_000_000)),
+            Arc::new(|| false),
+            Arc::new(|_, _, _| {}),
+        );
+        let first = { let service = service.clone(); tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await }) };
+        store.scan_entered.notified().await;
+        let waiter = service.acquire(request(b"1:y:r:2"));
+        tokio::pin!(waiter);
+        tokio::select! {
+            result = &mut waiter => panic!("waiter finished before scan: {result:?}"),
+            _ = tokio::task::yield_now() => {},
+        }
+        store.scan_release.notify_one();
+        let error = first.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), Code::Internal);
+        assert_eq!(error.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).unwrap().to_bytes().unwrap().as_ref(), b"load semaphore bucket d/s\xff/0: injected scan failure");
+        assert_eq!(waiter.await.unwrap_err().code(), Code::ResourceExhausted);
+        assert!(registry.all_managers().is_empty());
+        store.release.notify_one();
+        assert_eq!(service.acquire(request(b"1:z:r:3")).await.unwrap().into_inner().outcome, 1);
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
     }
 
     #[test]

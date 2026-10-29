@@ -17,7 +17,7 @@ use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::go_string::GoString;
 use cadence_common::liveness::Liveness;
 use cadence_persistence::{
-    semaphores_native::{SemaphorePersistenceBytes, SemaphoreRowBytes},
+    semaphores_native::{SemaphoreCallContext, SemaphorePersistenceBytes, SemaphoreRowBytes},
     AcquireError, GrantOutcome,
 };
 pub type Identifier = IdentifierBytes;
@@ -75,6 +75,8 @@ pub enum ManagerError {
     Internal(String),
     /// `types.ServiceBusyError` returned by the Go persistence limiter.
     ServiceBusy(String),
+    /// Startup scan failure with its original classification and raw identifier.
+    Load(GoString, Box<ManagerError>),
 }
 
 impl From<AcquireError> for ManagerError {
@@ -249,10 +251,9 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
-        self.store
-            .get_semaphore_metadata(&self.id.domain_id, &self.id.semaphore_name)
-            .await?;
-        let rows = self.scan_bucket().await?;
+        let rows = self.scan_bucket().await.map_err(|error| {
+            ManagerError::Load(self.id.to_log_string(), Box::new(error.into()))
+        })?;
         // Go builds the free set only from rows returned by the scan. Metadata
         // does not prove that an absent token row exists or is unheld.
         let mut free: HashMap<i32, ()> = HashMap::new();
@@ -335,6 +336,17 @@ impl Manager {
         owner_id: &GoString,
         deadline: Option<tokio::time::Instant>,
     ) -> Result<AcquireResult, ManagerError> {
+        self.acquire_with_context(owner_id, &SemaphoreCallContext {
+            deadline,
+            ..Default::default()
+        }).await
+    }
+
+    pub async fn acquire_with_context(
+        &self,
+        owner_id: &GoString,
+        context: &SemaphoreCallContext,
+    ) -> Result<AcquireResult, ManagerError> {
         if owner_id.is_empty() {
             return Err(ManagerError::BadRequest("ownerID is required".into()));
         }
@@ -347,17 +359,15 @@ impl Manager {
         if starting {
             let mut done = self.startup_done.subscribe();
             let finished = done.wait_for(|finished| *finished);
-            let _ = match deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, finished)
-                    .await
-                    .map_err(|_| ManagerError::Deadline)?,
-                None => finished.await,
-            };
+            tokio::select! {
+                _ = finished => {},
+                _ = context.wait() => return Err(ManagerError::Deadline),
+            }
         }
         if !self.is_running() {
             return Err(ManagerError::NotReady);
         }
-        self.grant(owner_id, deadline).await
+        self.grant(owner_id, context).await
     }
 
     /// Go `grant`: confirm an existing hold, else draw a free id and settle it
@@ -365,7 +375,7 @@ impl Manager {
     async fn grant(
         &self,
         owner_id: &GoString,
-        deadline: Option<tokio::time::Instant>,
+        context: &SemaphoreCallContext,
     ) -> Result<AcquireResult, ManagerError> {
         let existing = self
             .index
@@ -375,7 +385,7 @@ impl Manager {
             .get(owner_id)
             .copied();
         if let Some(token_id) = existing {
-            if self.confirm_hold(owner_id, token_id).await? {
+            if self.confirm_hold(owner_id, token_id, context).await? {
                 return Ok(AcquireResult {
                     outcome: SemaphoreAcquireOutcome::Acquired,
                     token_id,
@@ -385,7 +395,7 @@ impl Manager {
         for _ in 0..MAX_GRANT_ATTEMPTS {
             // Go checks ctx before each write: a caller that gave up stops here
             // instead of letting the write fail as a store timeout.
-            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            if context.ended() {
                 return Err(ManagerError::Deadline);
             }
             let Some(token_id) = self.reserve() else {
@@ -398,12 +408,13 @@ impl Manager {
             };
             let outcome = self
                 .store
-                .grant_semaphore_token(
+                .grant_with_context(
                     &self.id.domain_id,
                     &self.id.semaphore_name,
                     self.id.bucket,
                     token_id,
                     owner_id,
+                    context,
                 )
                 .await;
             let outcome = match outcome {
@@ -460,14 +471,15 @@ impl Manager {
     }
 
     /// Go `confirmHold`: verify the reverse-index entry against the token row.
-    async fn confirm_hold(&self, owner_id: &GoString, token_id: i32) -> Result<bool, ManagerError> {
+    async fn confirm_hold(&self, owner_id: &GoString, token_id: i32, context: &SemaphoreCallContext) -> Result<bool, ManagerError> {
         match self
             .store
-            .get_semaphore_ownership_by_token(
+            .confirm_with_context(
                 &self.id.domain_id,
                 &self.id.semaphore_name,
                 self.id.bucket,
                 token_id,
+                context,
             )
             .await
         {
@@ -913,7 +925,13 @@ pub(crate) mod tests {
             _ = tokio::task::yield_now() => {}
         }
         store.scan_release.notify_one();
-        assert!(start.await.unwrap().is_err());
+        assert_eq!(
+            start.await.unwrap().err().unwrap(),
+            ManagerError::Load(
+                id.to_log_string(),
+                Box::new(ManagerError::Internal("injected scan failure".into())),
+            )
+        );
         assert_eq!(waiting.await.unwrap_err(), ManagerError::NotReady);
         assert!(registry.by_identifier(&id).is_none());
         let replacement = registry.get_or_create(id).await.unwrap();
