@@ -51,10 +51,12 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         if self.worker.is_some() || self.stopped.load(Ordering::Acquire) {
             return Ok(());
         }
+        eprintln!("Matching startup: starting membership provider");
         if let Err(error) = self.provider.start().await {
             let _ = self.provider.stop().await;
             return Err(error);
         }
+        eprintln!("Matching startup: membership provider started; subscribing");
         let events = match self.provider.subscribe(&self.service).await {
             Ok(events) => events,
             Err(error) => {
@@ -62,6 +64,7 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                 return Err(error);
             }
         };
+        eprintln!("Matching startup: membership subscribed; fetching initial snapshot");
         let initial_changed = match self.refresh().await {
             Ok(changed) => changed,
             Err(e) => {
@@ -69,6 +72,7 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                 return Err(e);
             }
         };
+        eprintln!("Matching startup: membership initial snapshot complete");
         let (tx, mut stop) = watch::channel(false);
         self.shutdown = Some(tx);
         let provider = self.provider.clone();
