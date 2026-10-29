@@ -92,6 +92,18 @@ pub trait DomainMetadataSource: Send + Sync + 'static {
         id: Option<&str>,
         timeout: Duration,
     ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError>;
+    /// Raw Go string lookup. Sources supporting arbitrary bytes may override this.
+    fn get_domain_by_raw_id(
+        &self,
+        id: &[u8],
+        timeout: Duration,
+    ) -> Result<MatchingDomainMetadata, DomainMetadataSourceError> {
+        let id = std::str::from_utf8(id).map_err(|_| {
+            DomainMetadataSourceError::permanent("UUID is invalid.")
+                .with_class(DomainErrorClass::BadRequest)
+        })?;
+        self.get_domain(None, Some(id), timeout)
+    }
 }
 
 fn metadata_source_error(error: MatchingDomainMetadataError) -> DomainMetadataSourceError {
@@ -780,6 +792,37 @@ impl MatchingDomainCache {
         self.refresh_after_miss(None, Some(id))?;
         self.by_id(id)
             .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(id.to_string()))
+    }
+
+    /// Lookup using the exact Go string key, deferring SQL parsing until a miss.
+    #[allow(clippy::result_large_err)]
+    pub fn get_domain_by_raw_id(&self, id: &[u8]) -> Result<MatchingDomainMetadata, tonic::Status> {
+        if id.is_empty() {
+            return Err(DomainCacheError::EmptyId.into_status());
+        }
+        let text = std::str::from_utf8(id).ok();
+        if let Some(entry) = text.and_then(|key| self.by_id(key)) {
+            return Ok(entry);
+        }
+        if self.domain_id_parse == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic {
+            crate::matching_domain_uuid::raw_sql_lookup_guard(id)?;
+        }
+        // google/uuid accepts arbitrary first and last bytes in its 38-byte form.
+        // Only the persistence query is normalized; cache identity stays raw.
+        let backend_id = if text.is_none() && id.len() == 38
+            && self.domain_id_parse == crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic
+        {
+            &id[1..37]
+        } else {
+            id
+        };
+        self.source.get_domain_by_raw_id(backend_id, DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
+            .map_err(cache_source_error)
+            .map_err(DomainCacheError::into_status)?;
+        self.refresh_after_miss(None, text).map_err(DomainCacheError::into_status)?;
+        text.and_then(|key| self.by_id(key)).ok_or_else(|| {
+            DomainCacheError::ExistsButNotLoaded(String::new()).into_status()
+        })
     }
 
     pub fn get_domain_id(&self, name: &str) -> Result<String, DomainCacheError> {

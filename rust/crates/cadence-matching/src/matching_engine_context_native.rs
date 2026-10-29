@@ -220,9 +220,7 @@ pub(crate) fn cached_domain_active(
     id: &GoString,
     cluster: &str,
 ) -> Result<bool, Status> {
-    let raw = id.as_utf8().map_err(|_| Status::invalid_argument("invalid domain UUID"))?;
-    let domain = cache.get_domain_by_id(raw)
-        .map_err(crate::matching_domain_cache::DomainCacheError::into_status)?;
+    let domain = cache.get_domain_by_raw_id(id.as_bytes())?;
     Ok(metadata_domain_active(&domain, cluster))
 }
 
@@ -565,9 +563,33 @@ pub(crate) mod source_domain_tests {
         }
     }
     pub(crate) fn cache(records: Vec<MatchingDomainMetadata>) -> Arc<MatchingDomainCache> {
-        let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source(records))));
+        cache_with_mode(records, crate::matching_domain_uuid::DomainIdParse::Lenient)
+    }
+    pub(crate) fn cache_with_mode(records: Vec<MatchingDomainMetadata>, mode: crate::matching_domain_uuid::DomainIdParse) -> Arc<MatchingDomainCache> {
+        let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source(records))).with_domain_id_parse(mode));
         cache.refresh_domains().unwrap();
         cache
+    }
+
+    #[test]
+    fn raw_source_lookup_respects_backend_and_cache_key() {
+        use crate::matching_domain_uuid::DomainIdParse;
+        let domain = record(0xabc, 0);
+        let sql = MatchingDomainCache::new(Arc::new(Source(vec![domain.clone()])))
+            .with_domain_id_parse(DomainIdParse::GoogleUuidPanic);
+        sql.refresh_domains().unwrap();
+        for (raw, expected) in [
+            (&b"bad"[..], r#"panic object is not error: "uuid: Parse(bad): invalid UUID length: 3""#),
+            (&b"\xff"[..], r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#),
+        ] {
+            let error = cached_domain_active(&sql, &GoString::from(raw), "active").unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Unknown);
+            assert_eq!(error.message(), expected);
+        }
+        let lenient = cache(vec![domain]);
+        let error = cached_domain_active(&lenient, &GoString::from(&b"\xff"[..]), "active").unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(error.message(), "UUID is invalid.");
     }
 
     #[test]
