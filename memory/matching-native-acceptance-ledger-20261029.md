@@ -34,8 +34,11 @@ at `4d1007f3bdd0a6d667936d53aef6cf6277d98f51`. It predates source-domain changes
 and does not validate this candidate. Earlier results and diagnostics are retained
 in the continuation checkpoints and `memory/evidence/`.
 
-PostgreSQL is dispatched; the other nine native mixed lanes remain undispatched. Final gates must retain this same
-candidate SHA (or a coherently revalidated replacement if fixes are needed).
+PostgreSQL was attempted and failed before SDK execution; the other nine native
+mixed lanes remain undispatched. Exact failure evidence and limits are recorded
+below and in `memory/matching-native-resume-state-20261029.md`. Final gates must
+retain this same candidate SHA (or a coherently revalidated replacement if
+fixes are needed).
 Evidence-only commits on master may follow the frozen candidate; they do not
 change the immutable ref used to build and run the candidate.
 
@@ -44,7 +47,7 @@ change the immutable ref used to build and run the candidate.
 | Requirement | Current native evidence |
 | --- | --- |
 | Fresh uncached workspace Clippy, then workspace tests | Pass at frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`: run40807471166 success, clean runner target, Clippy0 then workspace tests0. `fmt.exit=0`; scoped format checks0; advisory workspace-wide format check `workspace-format.exit=1` for unrelated formatting diffs. Evidence: `evidence/matching-native-workspace-40807471166/`. |
-| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Replacement run [40808511931](https://github.com/auenkr/cadence-rust/actions/runs/40808511931) failed at the same frozen SHA: Rust readiness never completed, shutdown timed out. Build0, gate/probe/runtime1; no SDK or recovery credit. Compact artifact retained in evidence/matching-native-postgres-40808511931/. Runs40808334141 and40808357056 were cancelled; neither supplies acceptance evidence. |
+| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Run [40808511931](https://github.com/auenkr/cadence-rust/actions/runs/40808511931) failed at frozen SHA `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`. Artifact `/mnt/storage/service/ci-evidence/matching-native-postgres-40808511931/`: binary SHA256 `54771ed458f78f0ea7a5b87678c3f0cd8b9b72e563e378a70bb8d13266d87b57`; build0, gate1, nested run1, lane1. Go Frontend never discovered Rust Matching: probe readiness ended with `Call cancelled` / `Not enough hosts to serve the request`; Rust log confirms gRPC `127.0.0.1:14329` and Thrift/TChannel `127.0.0.1:12973` bound. Probe reports `Rust Matching did not stop` after SIGTERM; shutdown record contains signal/time only. No SDK or recovery scenario ran. Go Frontend/History/Worker were configured and worker readiness was observed; result records no Go Matching. PostgreSQL container id is retained, but the retained cleanup file has only the id and does not prove removal; cleanup must be verified. Runs40808334141 and40808357056 were cancelled and supply no acceptance evidence. |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
 | Configstore live settings + SDK + restart/recovery | Not dispatched |
@@ -307,3 +310,35 @@ Selected run40806941617 failed solely on `clippy::result_large_err` in the new b
 Retained all four original-Go oracle artifacts from40807471166 under `memory/evidence/matching-native-workspace-40807471166/go-oracles/`, including content SHA256 inventory. Each artifact source SHA equals frozen `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` and exit0. Source manager, SQL and Cassandra marshal tests have explicit PASS records; Cassandra accepted spellings assert exact decoded UUID bytes. Original cache UUID-spelling, malformed/optional handler payload and raw-string oracles also exited0. This proves those Go assertions only; Rust workspace tests and mixed runtime are separately required.
 
 Integrated bounded final source notes: `matching-entrypoint-source-reconciliation-20261029.md`, `matching-source-cache-persistence-reconciliation-20261029.md`, and `matching-configured-assembly-final-reconciliation-20261029.md`. No new proved production mismatch was found. Notes map named Go behavior to actual native implementation/assertions and explicitly preserve limits: transport error coverage boundaries, configured failure/admission timing, independent semaphore startup timeout, unusual raw-source backend cases, and actual mixed recovery outcomes. These notes do not certify runtime parity. Workspace CI advanced past Clippy to Test at last inspection; terminal result still pending.
+
+
+## Current handoff reconciliation — 2026-10-29
+
+At review time `master` and `origin/master` both point to
+`9a79103bb8cdeb191850452b10b965a02962b3dc`, clean worktree. Latest Actions
+include `rust-ci` run [40809425330](https://github.com/auenkr/cadence-rust/actions/runs/40809425330), success at that current head (Clippy/test job). This is newer than the frozen candidate and is not mixed-service evidence; it does not change the pin or complete Matching acceptance.
+
+On current master the native task-list status assertion was added in
+`9a79103bb`. Rust CI succeeded at that head, but this review did not confirm its
+package/test selection; keep the historical frozen-pin assertion caveat above
+distinct from newer-head source state. The configured
+semaphore startup fixed-timeout behavior remains unverified in a mixed runtime;
+the PostgreSQL readiness failure does not establish a new source defect in it.
+
+## Diagnostic startup instrumentation run — 2026-10-29
+
+The selected fresh-target diagnostic run
+[40839466118](https://github.com/auenkr/cadence-rust/actions/runs/40839466118)
+was authoritatively observed `in_progress` at `2026-10-29T08:03:46Z`, on
+`t3/matching-startup-fix` head
+`12c3063ea91e0dc5abd552a79140a14690edb8bd`. This is the diagnostic-only
+instrumentation commit; it does not contain a source fix and cannot establish
+Matching acceptance. No artifact or terminal conclusion is available yet.
+Because it remained live, no additional workspace run was dispatched. When it
+is terminal, review its exact logs/exits. If successful, and no intensive CI or
+mixed job is running, dispatch whole-workspace `rust-ci.yml` at the same
+unchanged head with `clean_target=true` and empty `package`; this prerequisite
+must precede PostgreSQL retry. The frozen candidate ref remains at
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` and must not be moved. See
+`memory/matching-native-resume-state-20261029.md` for the retained current
+checkpoint.

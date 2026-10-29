@@ -1,0 +1,15 @@
+run_id=40839466118
+url=https://github.com/auenkr/cadence-rust/actions/runs/40839466118
+workflow=rust-ci
+branch=t3/matching-startup-fix
+head_sha=12c3063ea91e0dc5abd552a79140a14690edb8bd
+status=in_progress
+conclusion=
+authoritative_observed_at=2026-10-29T08:03:46Z
+source_identity_checked_with=git rev-parse t3/matching-startup-fix
+source_identity_result=12c3063ea91e0dc5abd552a79140a14690edb8bd
+classification=diagnostic startup instrumentation only; not a fix and not acceptance evidence
+artifact_state=pending until terminal
+next=after terminal collect source identity, exact exits and failing log evidence; if success and no intensive CI/mixed job is running, dispatch whole-workspace rust-ci at the same unchanged head with clean_target=true and empty package; do not start PostgreSQL before that prerequisite
+cause_of_40808511931=unproved
+frozen_candidate=matching-native-final-20261029@bf9f3d9387a72c4ed26b4be0a85025e65fd485a1
