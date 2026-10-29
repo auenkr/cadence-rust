@@ -276,7 +276,41 @@ fn decode_string_filter(blob: Option<&DataBlob>) -> Option<String> {
             }
         }
     }
-    serde_json::from_str::<String>(&text).ok()
+    // encoding/json accepts lone UTF-16 surrogates and replaces each with
+    // U+FFFD. Preserve paired escapes and escaped backslashes for serde.
+    let bytes = text.as_bytes();
+    let mut normalized = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            if bytes[i + 1] == b'u' && i + 6 <= bytes.len() {
+                let hex = |part: &[u8]| std::str::from_utf8(part).ok()
+                    .and_then(|s| u16::from_str_radix(s, 16).ok());
+                if let Some(unit) = hex(&bytes[i + 2..i + 6]) {
+                    if (0xd800..=0xdbff).contains(&unit) && i + 12 <= bytes.len()
+                        && &bytes[i + 6..i + 8] == b"\\u"
+                        && hex(&bytes[i + 8..i + 12])
+                            .is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
+                    {
+                        normalized.extend_from_slice(&bytes[i..i + 12]);
+                        i += 12;
+                        continue;
+                    }
+                    if (0xd800..=0xdfff).contains(&unit) {
+                        normalized.extend_from_slice(b"\\ufffd");
+                        i += 6;
+                        continue;
+                    }
+                }
+            }
+            normalized.extend_from_slice(&bytes[i..i + 2]);
+            i += 2;
+        } else {
+            normalized.push(bytes[i]);
+            i += 1;
+        }
+    }
+    serde_json::from_slice::<String>(&normalized).ok()
 }
 
 pub fn filters_match(value: &DynamicConfigValue, domain: Option<&str>) -> bool {
@@ -806,6 +840,22 @@ mod tests {
         assert_eq!(integer_bytes(&values, Some("tenant-��".as_bytes()), 9), 7);
         assert_eq!(integer_bytes(&values, Some(b"valid"), 9), 3);
         assert_eq!(integer_bytes(&[], Some(b"\xff"), 9), 9);
+    }
+
+    #[test]
+    fn domain_filter_json_surrogates_follow_go_replacement() {
+        let mut constrained = entry(json!(7), &[("domainName", json!("unused"))]);
+        for (encoded, expected) in [
+            (r#""\ud800""#, "�"),
+            (r#""\udc00""#, "�"),
+            (r#""\ud800\ud800""#, "��"),
+            (r#""\ud83d\ude00""#, "😀"),
+            (r#""\\ud800""#, r"\ud800"),
+        ] {
+            constrained.filters[0].value.as_mut().unwrap().data = encoded.as_bytes().to_vec();
+            let values = vec![entry(json!(3), &[]), constrained.clone()];
+            assert_eq!(integer_bytes(&values, Some(expected.as_bytes()), 9), 7);
+        }
     }
 
     #[test]

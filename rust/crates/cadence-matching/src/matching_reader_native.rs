@@ -638,8 +638,8 @@ impl NativeTaskReader {
                         });
                         let group_known = isolated.contains_key(group.as_bytes());
                         let rps = dispatch_limiter.limit();
-                        let async_timeout = dispatch_timeout_nanos(&dispatch_config);
-                        let deadline = ((group_known || rps > 1e-7) && active()).then(|| {
+                        let deadline = (group_known || rps > 1e-7).then(|| {
+                            let async_timeout = dispatch_timeout_nanos(&dispatch_config);
                             let timeout = cadence_common::task_isolation::dispatch_timeout(
                                 rps,
                                 buffers,
@@ -647,8 +647,8 @@ impl NativeTaskReader {
                                 isolation_duration,
                                 timeout_buffer.as_nanos() as i64,
                             );
-                            dispatch_limiter.now().saturating_add(timeout)
-                        });
+                            timeout
+                        }).filter(|_| active()).map(|timeout| dispatch_limiter.now().saturating_add(timeout));
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
                             match dispatch_limiter
