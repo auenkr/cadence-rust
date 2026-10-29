@@ -146,8 +146,8 @@ impl NativeMatchingEngineContext {
         default: i64,
     ) -> Duration {
         let overlay = self.state_overlay();
-        let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
+        let config = overlay.lock().expect("admin lock");
         Duration::from_nanos(
             cadence_persistence::dynamic_config::task_list_duration_bytes(
                 config.property_values(key),
@@ -169,8 +169,8 @@ impl NativeMatchingEngineContext {
         default: i64,
     ) -> i64 {
         let overlay = self.state_overlay();
-        let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
+        let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_integer_bytes(
             config.property_values(key),
             domain_name.as_deref(),
@@ -189,8 +189,8 @@ impl NativeMatchingEngineContext {
         default: bool,
     ) -> bool {
         let overlay = self.state_overlay();
-        let config = overlay.lock().expect("admin lock");
         let domain_name = self.cached_domain_name(domain);
+        let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_boolean_bytes(
             config.property_values(key),
             domain_name.as_deref(),
@@ -334,10 +334,11 @@ impl NativePollContext for NativeMatchingEngineContext {
         )
     }
     fn override_rate(&self, domain: &GoString, list: &GoString, task_type: i32) -> f64 {
+        let domain_name = self.cached_domain_name(domain);
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_float_bytes(
             config.property_values("matching.overrideTaskListRps"),
-            self.cached_domain_name(domain).as_deref(),
+            domain_name.as_deref(),
             list.as_bytes(),
             task_type,
             0.0,

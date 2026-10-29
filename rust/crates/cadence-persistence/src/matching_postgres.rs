@@ -82,6 +82,8 @@ struct IdleConnection {
 struct PoolState {
     idle: Vec<IdleConnection>,
     open: usize,
+    #[cfg(test)]
+    waiters: usize,
 }
 
 pub(crate) struct PostgresConnectionPool {
@@ -186,9 +188,17 @@ impl PostgresConnectionPool {
                     }
                 };
             }
+            #[cfg(test)]
+            {
+                state.waiters += 1;
+            }
             state = if let Some(deadline) = deadline {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if remaining.is_zero() {
+                    #[cfg(test)]
+                    {
+                        state.waiters -= 1;
+                    }
                     return Err(StorageError::Backend {
                         kind: BackendErrorKind::Timeout,
                         message: "PostgreSQL connection pool checkout timed out".into(),
@@ -198,6 +208,12 @@ impl PostgresConnectionPool {
                     .available
                     .wait_timeout(state, remaining)
                     .expect("PostgreSQL Matching pool lock");
+                #[cfg(test)]
+                let state = {
+                    let mut state = state;
+                    state.waiters -= 1;
+                    state
+                };
                 if timeout.timed_out() && state.open >= self.max_open && state.idle.is_empty() {
                     return Err(StorageError::Backend {
                         kind: BackendErrorKind::Timeout,
@@ -206,9 +222,17 @@ impl PostgresConnectionPool {
                 }
                 state
             } else {
-                self.available
+                let state = self
+                    .available
                     .wait(state)
-                    .expect("PostgreSQL Matching pool lock")
+                    .expect("PostgreSQL Matching pool lock");
+                #[cfg(test)]
+                let state = {
+                    let mut state = state;
+                    state.waiters -= 1;
+                    state
+                };
+                state
             };
             drop(state);
         }
@@ -261,12 +285,13 @@ impl Drop for PostgresLease {
                 client,
                 created_at: self.created_at,
             });
+            drop(state);
         } else {
             state.open -= 1;
             drop(state);
             drop(client);
-            self.pool.available.notify_one();
         }
+        self.pool.available.notify_one();
     }
 }
 
@@ -385,10 +410,7 @@ impl PostgresTaskStore {
             &key.name,
             &task_type,
         ];
-        match client.query_opt(
-            SELECT_TASK_LIST,
-            params,
-        ) {
+        match client.query_opt(SELECT_TASK_LIST, params) {
             Ok(row) => row
                 .map(|row| {
                     // Columns: domain_id, range_id, name, task_type, data, data_encoding.
@@ -437,10 +459,7 @@ impl PostgresTaskStore {
             &task_type,
         ];
         let actual: Option<i64> = transaction
-            .query_opt(
-                LOCK_TASK_LIST,
-                params,
-            )
+            .query_opt(LOCK_TASK_LIST, params)
             .map_err(normalize_postgres_error)?
             .map(|row| row.get(0));
         let Some(actual) = actual else {
@@ -520,15 +539,10 @@ impl MatchingTaskStore for PostgresTaskStore {
                     &bytes,
                     &encoding,
                 ];
-                client
-                    .execute(
-                        INSERT_TASK_LIST,
-                        params,
-                    )
-                    .map_err(|error| {
-                        client.poison_if_closed(&error);
-                        normalize_postgres_error(error)
-                    })?;
+                client.execute(INSERT_TASK_LIST, params).map_err(|error| {
+                    client.poison_if_closed(&error);
+                    normalize_postgres_error(error)
+                })?;
                 TaskListRecord { range_id: 0, data }
             }
         };
@@ -550,10 +564,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
         ];
         let affected = transaction
-            .execute(
-                UPDATE_TASK_LIST,
-                params,
-            )
+            .execute(UPDATE_TASK_LIST, params)
             .map_err(normalize_postgres_error)?;
         if affected != 1 {
             return Err(StorageError::Backend {
@@ -595,10 +606,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
         ];
         let affected = transaction
-            .execute(
-                UPDATE_TASK_LIST,
-                params,
-            )
+            .execute(UPDATE_TASK_LIST, params)
             .map_err(normalize_postgres_error)?;
         if affected != 1 {
             return Err(StorageError::Backend {
@@ -621,9 +629,13 @@ impl MatchingTaskStore for PostgresTaskStore {
         let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         let write_encoding = self.write_encoding()?;
         for (domain, task) in tasks {
-            let mut data = task.data.for_sql().map_err(StorageError::MalformedSqlMatchingRunId)?;
+            let mut data = task
+                .data
+                .for_sql()
+                .map_err(StorageError::MalformedSqlMatchingRunId)?;
             data.created_nanos = now_nanos;
-            let bytes = write_encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
+            let bytes = write_encoding
+                .encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             let encoding = write_encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
                 &domain.as_bytes().as_slice(),
@@ -634,10 +646,7 @@ impl MatchingTaskStore for PostgresTaskStore {
                 &encoding,
             ];
             transaction
-                .execute(
-                    INSERT_TASK,
-                    params,
-                )
+                .execute(INSERT_TASK, params)
                 .map_err(normalize_postgres_error)?;
         }
         self.lock_and_check(&mut transaction, key, range)?;
@@ -661,15 +670,10 @@ impl MatchingTaskStore for PostgresTaskStore {
             &max_read_level,
             &batch_size,
         ];
-        let rows = client
-            .query(
-                SELECT_TASKS,
-                params,
-            )
-            .map_err(|error| {
-                client.poison_if_closed(&error);
-                normalize_postgres_error(error)
-            })?;
+        let rows = client.query(SELECT_TASKS, params).map_err(|error| {
+            client.poison_if_closed(&error);
+            normalize_postgres_error(error)
+        })?;
         rows.into_iter()
             .map(|row| {
                 let task_id: i64 = row.try_get(0).map_err(normalize_postgres_error)?;
@@ -694,10 +698,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &ack_level,
         ];
         client
-            .query_one(
-                COUNT_TASKS,
-                params,
-            )
+            .query_one(COUNT_TASKS, params)
             .and_then(|row| row.try_get(0))
             .map_err(|error| {
                 client.poison_if_closed(&error);
@@ -715,10 +716,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_id,
         ];
         client
-            .execute(
-                DELETE_TASK,
-                params,
-            )
+            .execute(DELETE_TASK, params)
             .map(|_| ())
             .map_err(|error| {
                 client.poison_if_closed(&error);
@@ -745,10 +743,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &limit,
         ];
         let affected = client
-            .execute(
-                RANGE_DELETE_TASKS,
-                params,
-            )
+            .execute(RANGE_DELETE_TASKS, params)
             .map_err(|error| {
                 client.poison_if_closed(&error);
                 normalize_postgres_error(error)
@@ -770,15 +765,10 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
             &range,
         ];
-        let affected = client
-            .execute(
-                DELETE_TASK_LIST,
-                params,
-            )
-            .map_err(|error| {
-                client.poison_if_closed(&error);
-                normalize_postgres_error(error)
-            })?;
+        let affected = client.execute(DELETE_TASK_LIST, params).map_err(|error| {
+            client.poison_if_closed(&error);
+            normalize_postgres_error(error)
+        })?;
         if affected != 1 {
             return Err(StorageError::DeleteCount(affected as usize));
         }
@@ -791,7 +781,9 @@ mod native;
 
 impl std::fmt::Debug for PostgresTaskStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("PostgresTaskStore").finish_non_exhaustive()
+        formatter
+            .debug_struct("PostgresTaskStore")
+            .finish_non_exhaustive()
     }
 }
 
@@ -804,12 +796,9 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         size: i32,
         bucket_size: i32,
     ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
-        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
-            domain,
-            name,
-            size,
-            bucket_size,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .create_semaphore(domain, name, size, bucket_size)
+            .await
     }
 
     async fn get_semaphore_metadata(
@@ -842,9 +831,9 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         bucket: i32,
         token_id: i32,
     ) -> std::result::Result<String, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
-            domain_id, name, bucket, token_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
+            .await
     }
 
     async fn grant_semaphore_token(
@@ -855,12 +844,11 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         token_id: i32,
         owner_id: &str,
     ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
-            domain_id, name, bucket, token_id, owner_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
     }
 }
-
 
 fn postgres_options(
     shard: &PostgresShardConfig,
@@ -1207,6 +1195,73 @@ mod tests {
                 .map(|(key, value)| ((*key).into(), (*value).into()))
                 .collect(),
             tls: None,
+        }
+    }
+
+    #[test]
+    #[ignore = "live pool oracle; run against the labelled disposable PostgreSQL instance"]
+    fn postgres_pool_return_wakes_waiters_live_oracle() {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let mut config = shard(&[("sslmode", "disable")]);
+        config.connect_addr =
+            std::env::var("CADENCE_POSTGRES_ADDR").expect("CADENCE_POSTGRES_ADDR is required");
+        config.user = std::env::var("CADENCE_POSTGRES_USER").unwrap_or_else(|_| "postgres".into());
+        config.password = std::env::var("CADENCE_POSTGRES_PASSWORD").unwrap_or_default();
+        config.database_name =
+            std::env::var("CADENCE_POSTGRES_DATABASE").unwrap_or_else(|_| "cadence".into());
+        let (options, tls) = postgres_options(&config).unwrap();
+        let pool = PostgresConnectionPool::new(options, tls, 1, 1, None);
+
+        for (timed, discard) in [(true, false), (false, false), (false, true)] {
+            let mut held = pool.checkout().unwrap();
+            let old_pid: i32 = held
+                .query_one("SELECT pg_backend_pid()", &[])
+                .unwrap()
+                .get(0);
+            let (tx, rx) = mpsc::channel();
+            let waiter_pool = pool.clone();
+            let waiter = thread::spawn(move || {
+                let result = if timed {
+                    waiter_pool.checkout_with_timeout(Duration::from_secs(15))
+                } else {
+                    waiter_pool.checkout()
+                };
+                let result = result.map(|mut lease| {
+                    lease
+                        .query_one("SELECT pg_backend_pid()", &[])
+                        .unwrap()
+                        .get::<_, i32>(0)
+                });
+                tx.send(result).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while pool.state.lock().unwrap().waiters == 0 {
+                assert!(
+                    Instant::now() < deadline,
+                    "checkout did not enter pool wait"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            held.discard = discard;
+            drop(held);
+            let result = rx.recv_timeout(Duration::from_secs(3));
+            if result.is_err() {
+                // Best effort only: a stalled database operation must not block this test.
+                pool.available.notify_one();
+                panic!("checkout was not promptly awakened");
+            }
+            waiter.join().unwrap();
+            let new_pid = result.expect("checkout was not promptly awakened").unwrap();
+            if discard {
+                assert_ne!(old_pid, new_pid, "discarded connection was reused");
+            } else {
+                assert_eq!(old_pid, new_pid, "healthy idle connection was not reused");
+            }
+            let state = pool.state.lock().unwrap();
+            assert_eq!(state.open, 1);
+            assert_eq!(state.idle.len(), 1);
         }
     }
 

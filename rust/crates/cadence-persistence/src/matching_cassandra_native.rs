@@ -629,6 +629,11 @@ impl MatchingTaskStoreBytes for Store {
         Ok(0)
     }
 
+    fn gc_complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> Result<i64> {
+        self.complete_tasks_less_than(key, ack, limit)?;
+        Ok(-1)
+    }
+
     fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> Result<()> {
         let values = || -> BoundValues {
             let mut v = key_values(key, LIST_ROW, LIST_SENTINEL);

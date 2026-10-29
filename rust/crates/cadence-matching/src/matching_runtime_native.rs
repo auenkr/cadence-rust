@@ -70,22 +70,7 @@ pub fn native_queue_registry(
         },
     };
 
-    let standby: crate::matching_standby_native::EnabledNative = {
-        let overlay = overlay.clone();
-        let cache = cache.clone();
-        Arc::new(move |domain_id, task_list, task_type| {
-            let config = overlay.lock().expect("admin lock");
-            task_list_boolean(
-                &config,
-                "matching.enableStandbyTaskCompletion",
-                &cache,
-                domain_id,
-                task_list,
-                task_type,
-                true,
-            )
-        })
-    };
+    let standby = standby_provider(cache.clone(), overlay.clone());
     let partition_count = integer_provider(
         cache.clone(),
         overlay.clone(),
@@ -151,54 +136,29 @@ pub fn native_queue_registry(
         "matching.minTaskThrottlingBurstSize",
         crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE,
     );
-    let update_ack = duration_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.updateAckInterval",
-        60_000_000_000,
-    );
     let idle_check = duration_provider(
         cache.clone(),
         overlay.clone(),
         "matching.idleTasklistCheckInterval",
         300_000_000_000,
     );
-    let delete_batch = integer_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.maxTaskDeleteBatchSize",
-        100,
-    );
-    let writer_live = {
+    let delete_batch = {
         let cache = cache.clone();
         let overlay = overlay.clone();
-        Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
-            let config = overlay.lock().expect("admin lock");
+        Arc::new(move |domain: &GoString, task: &GoString, task_type| {
             let name = cached_domain_name(&cache, domain);
-            let batch = cadence_persistence::dynamic_config::task_list_integer_bytes(
-                config.property_values("matching.maxTaskBatchSize"),
-                name.as_deref(),
-                task.as_bytes(),
-                task_type,
-                100,
-            );
-            let timeout = cadence_persistence::dynamic_config::task_list_duration_bytes(
-                config.property_values("matching.appendTaskTimeout"),
-                name.as_deref(),
-                task.as_bytes(),
-                task_type,
-                5_000_000_000,
-            );
-            let capacity = cadence_persistence::dynamic_config::task_list_integer_bytes(
-                config.property_values("matching.outstandingTaskAppendsThreshold"),
-                name.as_deref(),
-                task.as_bytes(),
-                task_type,
-                250,
-            );
-            (batch, timeout, capacity)
+            let task = task.clone();
+            let overlay = overlay.clone();
+            Arc::new(move || {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values("matching.maxTaskDeleteBatchSize"),
+                    name.as_deref(), task.as_bytes(), task_type, 100,
+                )
+            }) as crate::matching_reader::LiveInt
         })
     };
+    let writer_live = writer_live_provider(cache.clone(), overlay.clone());
     let reader_live = reader_properties_provider(cache.clone(), overlay.clone());
     let isolation = {
         let cache = cache.clone();
@@ -270,7 +230,6 @@ pub fn native_queue_registry(
         .with_qps_interval(qps_interval)
         .with_reader_live(reader_live)
         .with_min_burst(min_burst)
-        .with_update_ack_interval(update_ack)
         .with_idle_tasklist_check_interval(idle_check)
         .with_max_task_delete_batch_size(delete_batch)
         .with_writer_live(writer_live)
@@ -374,12 +333,6 @@ fn reader_properties_provider(
     cache: Arc<MatchingDomainCache>,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
 ) -> crate::matching_registry_native::NativeReaderPropertiesProvider {
-    let dispatch_timeout = duration_provider(
-        cache.clone(),
-        overlay.clone(),
-        "matching.asyncTaskDispatchTimeout",
-        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
-    );
     Arc::new(move |domain: &GoString, task: &GoString, task_type| {
         let name = cached_domain_name(&cache, domain);
         let scoped = |key: &'static str, default| {
@@ -408,6 +361,9 @@ fn reader_properties_provider(
                 )
             }) as crate::matching_reader::LiveInt
         };
+        let timeout_overlay = overlay.clone();
+        let timeout_name = name.clone();
+        let timeout_task = task.clone();
         let ack_overlay = overlay.clone();
         let ack_name = name.clone();
         let ack_task = task.clone();
@@ -420,12 +376,16 @@ fn reader_properties_provider(
                 "matching.readRangeSize",
                 crate::matching_reader::DEFAULT_READ_RANGE_SIZE,
             ),
-            dispatch_timeout: {
-                let provider = dispatch_timeout.clone();
-                let domain = domain.clone();
-                let task = task.clone();
-                Arc::new(move || provider(&domain, &task, task_type))
-            },
+            dispatch_timeout: Arc::new(move || {
+                let config = timeout_overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration_bytes(
+                    config.property_values("matching.asyncTaskDispatchTimeout"),
+                    timeout_name.as_deref(),
+                    timeout_task.as_bytes(),
+                    task_type,
+                    crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+                )
+            }),
             update_ack_interval: Arc::new(move || {
                 let config = ack_overlay.lock().expect("admin lock");
                 cadence_persistence::dynamic_config::task_list_duration_bytes(
@@ -440,18 +400,67 @@ fn reader_properties_provider(
     })
 }
 
+fn standby_provider(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_standby_native::EnabledNative {
+    Arc::new(move |domain_id, task_list, task_type| {
+        let name = cached_domain_name(&cache, domain_id);
+        let config = overlay.lock().expect("admin lock");
+        task_list_boolean(
+            &config,
+            "matching.enableStandbyTaskCompletion",
+            name.as_deref(),
+            task_list,
+            task_type,
+            true,
+        )
+    })
+}
+
+fn writer_live_provider(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_registry_native::NativeWriterLiveProvider {
+    Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
+        let name = cached_domain_name(&cache, domain);
+        let config = overlay.lock().expect("admin lock");
+        let batch = cadence_persistence::dynamic_config::task_list_integer_bytes(
+            config.property_values("matching.maxTaskBatchSize"),
+            name.as_deref(),
+            task.as_bytes(),
+            task_type,
+            100,
+        );
+        let timeout = cadence_persistence::dynamic_config::task_list_duration_bytes(
+            config.property_values("matching.appendTaskTimeout"),
+            name.as_deref(),
+            task.as_bytes(),
+            task_type,
+            5_000_000_000,
+        );
+        let capacity = cadence_persistence::dynamic_config::task_list_integer_bytes(
+            config.property_values("matching.outstandingTaskAppendsThreshold"),
+            name.as_deref(),
+            task.as_bytes(),
+            task_type,
+            250,
+        );
+        (batch, timeout, capacity)
+    })
+}
+
 fn task_list_boolean(
     overlay: &DynamicConfigOverlay,
     key: &str,
-    cache: &MatchingDomainCache,
-    domain: &GoString,
+    name: Option<&str>,
     task: &GoString,
     task_type: i32,
     default: bool,
 ) -> bool {
     cadence_persistence::dynamic_config::task_list_boolean_bytes(
         overlay.property_values(key),
-        cached_domain_name(cache, domain).as_deref(),
+        name,
         task.as_bytes(),
         task_type,
         default,
@@ -465,10 +474,11 @@ fn integer_provider(
     default: i64,
 ) -> crate::matching_registry_native::NativeProvider<i64> {
     Arc::new(move |domain, task, task_type| {
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_integer_bytes(
             config.property_values(key),
-            cached_domain_name(&cache, domain).as_deref(),
+            name.as_deref(),
             task.as_bytes(),
             task_type,
             default,
@@ -483,10 +493,11 @@ fn duration_provider(
     default: i64,
 ) -> crate::matching_registry_native::NativeProvider<i64> {
     Arc::new(move |domain, task, task_type| {
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_duration_bytes(
             config.property_values(key),
-            cached_domain_name(&cache, domain).as_deref(),
+            name.as_deref(),
             task.as_bytes(),
             task_type,
             default,
@@ -501,8 +512,9 @@ fn boolean_provider(
     default: bool,
 ) -> crate::matching_registry_native::NativeProvider<bool> {
     Arc::new(move |domain, task, task_type| {
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
-        task_list_boolean(&config, key, &cache, domain, task, task_type, default)
+        task_list_boolean(&config, key, name.as_deref(), task, task_type, default)
     })
 }
 
@@ -589,6 +601,345 @@ mod tests {
     }
 
     #[test]
+    fn cold_lookup_refreshes_limiter_before_locking_config() {
+        const ENV: &str = "CADENCE_COLD_LOOKUP_CASE";
+        let Ok(case) = std::env::var(ENV) else {
+            for case in [
+                "integer",
+                "duration",
+                "boolean",
+                "writer",
+                "standby",
+                "engine_duration",
+                "engine_integer",
+                "engine_boolean",
+                "engine_rate",
+                "control_boolean",
+                "control_duration",
+                "control_integer",
+            ] {
+                let output = std::process::Command::new("timeout")
+                    .args(["--kill-after=2s", "10s"])
+                    .arg(std::env::current_exe().unwrap())
+                    .args(["--exact", "matching_runtime_native::tests::cold_lookup_refreshes_limiter_before_locking_config", "--nocapture"])
+                    .env(ENV, case)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "cold lookup case {case} failed or timed out: {}; stdout: {}; stderr: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stdout)
+                        .contains(&format!("cold lookup completed: {case}")),
+                    "child did not execute selected case {case}: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
+            return;
+        };
+        run_cold_lookup_case(&case);
+    }
+
+    #[test]
+    fn two_thread_cold_lookup_does_not_invert_overlay_and_limiter_locks() {
+        const ENV: &str = "CADENCE_TWO_THREAD_LOCK_CASE";
+        if std::env::var_os(ENV).is_some() {
+            run_cold_lookup_case("two_thread");
+            println!("two-thread lock interleaving completed");
+            return;
+        }
+        let output = std::process::Command::new("timeout")
+            .args(["--kill-after=2s", "10s"])
+            .arg(std::env::current_exe().unwrap())
+            .args(["--exact", "matching_runtime_native::tests::two_thread_cold_lookup_does_not_invert_overlay_and_limiter_locks", "--nocapture"])
+            .env(ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "two-thread interleaving failed or timed out: {}; stdout: {}; stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("two-thread lock interleaving completed"),
+            "child did not execute interleaving: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    fn run_cold_lookup_case(case: &str) {
+        use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+        use std::time::Duration;
+        const ID: &str = "00000000-0000-0000-0000-000000000001";
+        struct Source(MatchingDomainMetadata);
+        impl crate::matching_domain_cache::DomainMetadataSource for Source {
+            fn metadata_version(
+                &self,
+                _: Duration,
+            ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(2)
+            }
+            fn list_domains(
+                &self,
+                _: usize,
+                _: Option<&[u8]>,
+                _: Duration,
+            ) -> Result<
+                crate::matching_domain_cache::DomainMetadataPage,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
+                Ok(crate::matching_domain_cache::DomainMetadataPage {
+                    domains: vec![self.0.clone()],
+                    next_page_token: None,
+                })
+            }
+            fn get_domain(
+                &self,
+                _: Option<&str>,
+                id: Option<&str>,
+                _: Duration,
+            ) -> Result<
+                MatchingDomainMetadata,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
+                assert_eq!(id, Some(ID));
+                Ok(self.0.clone())
+            }
+        }
+        let record = MatchingDomainMetadata {
+            info: cadence_api::types::DomainInfo {
+                name: "cold-domain".into(),
+                uuid: ID.into(),
+                ..Default::default()
+            },
+            configuration: Default::default(),
+            replication: Default::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 1,
+            notification_version: 1,
+            failover_notification_version: 1,
+            failover_version: 1,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 0,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        let value = |data: &[u8], filtered: bool| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: data.to_vec(),
+            }),
+            filters: if filtered {
+                vec![DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: br#""cold-domain""#.to_vec(),
+                    }),
+                }]
+            } else {
+                vec![]
+            },
+        };
+        {
+            let mut config = overlay.lock().unwrap();
+            config.update(
+                false,
+                "matching.persistenceMaxQPS",
+                vec![value(b"3000", false)],
+            );
+            for (key, data) in [
+                ("test.integer", b"17".as_slice()),
+                ("test.duration", br#""250ms""#.as_slice()),
+                ("test.boolean", b"false".as_slice()),
+                ("matching.enableStandbyTaskCompletion", b"false".as_slice()),
+                ("matching.maxTaskBatchSize", b"17".as_slice()),
+                ("matching.appendTaskTimeout", br#""250ms""#.as_slice()),
+                ("matching.outstandingTaskAppendsThreshold", b"19".as_slice()),
+                (
+                    "matching.longPollExpirationInterval",
+                    br#""250ms""#.as_slice(),
+                ),
+                ("matching.forwarderMaxChildrenPerNode", b"17".as_slice()),
+                ("matching.enableClientAutoConfig", b"true".as_slice()),
+                ("matching.overrideTaskListRps", b"17.5".as_slice()),
+                ("matching.enableAdaptiveScaler", b"true".as_slice()),
+                (
+                    "matching.taskIsolationPollerWindow",
+                    br#""250ms""#.as_slice(),
+                ),
+                ("matching.numTasklistWritePartitions", b"17".as_slice()),
+            ] {
+                config.update(false, key, vec![value(data, true)]);
+            }
+        }
+        let clock = Arc::new(AtomicI64::new(0));
+        let now = clock.clone();
+        let signaled = std::sync::atomic::AtomicBool::new(false);
+        let (clock_tx, clock_rx) = std::sync::mpsc::sync_channel(0);
+        let (locked_tx, locked_rx) = std::sync::mpsc::sync_channel(0);
+        let clock_rx = Mutex::new(clock_rx);
+        let limiter = crate::matching_persistence_limiter::MatchingPersistenceLimiter::with_clock(
+            overlay.clone(),
+            Arc::new(AtomicUsize::new(1)),
+            Arc::new(move || {
+                if std::thread::current().name() == Some("cold-lookup")
+                    && !signaled.swap(true, Ordering::SeqCst)
+                {
+                    clock_tx.send(()).unwrap();
+                }
+                now.load(Ordering::SeqCst)
+            }),
+        );
+        let limiter = if case == "two_thread" {
+            limiter.with_after_state_lock_hook(Arc::new(move || {
+                if std::thread::current().name() == Some("refresh") {
+                    locked_tx.send(()).unwrap();
+                    clock_rx.lock().unwrap().recv().unwrap();
+                }
+            }))
+        } else {
+            limiter
+        };
+        let source = crate::matching_persistence::limit_domain_source(
+            Arc::new(Source(record)),
+            limiter.clone(),
+        );
+        let cache = Arc::new(MatchingDomainCache::new(source));
+        clock.store(5_000_000_000, Ordering::SeqCst);
+        let domain = GoString::from(ID);
+        let task = GoString::from(&b"queue-\xff"[..]);
+        match case {
+            "two_thread" => {
+                let refresh_limiter = limiter.clone();
+                let refresh = std::thread::Builder::new()
+                    .name("refresh".into())
+                    .spawn(move || {
+                        assert!(refresh_limiter.allow());
+                    })
+                    .unwrap();
+                locked_rx.recv().unwrap();
+                let lookup = std::thread::Builder::new()
+                    .name("cold-lookup".into())
+                    .spawn(move || {
+                        integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0)
+                    })
+                    .unwrap();
+                refresh.join().unwrap();
+                assert_eq!(lookup.join().unwrap(), 17);
+                assert_eq!(limiter.snapshot().host_qps, 3000.0);
+            }
+            "integer" => assert_eq!(
+                integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0),
+                17
+            ),
+            "duration" => assert_eq!(
+                duration_provider(cache, overlay, "test.duration", 1)(&domain, &task, 0),
+                250_000_000
+            ),
+            "boolean" => assert!(!boolean_provider(cache, overlay, "test.boolean", true)(
+                &domain, &task, 0
+            )),
+            "writer" => assert_eq!(
+                writer_live_provider(cache, overlay)(&domain, &task, 0),
+                (17, 250_000_000, 19)
+            ),
+            "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
+            _ if case.starts_with("engine_") || case.starts_with("control_") => {
+                use crate::matching_engine_native::{
+                    DecisionAddContext, NativeControlContext, NativePollContext,
+                };
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let _guard = runtime.enter();
+                let mut state = crate::handlers::AppState::default();
+                state.admin.dynamic_config = overlay;
+                let directory = tempfile::tempdir().unwrap();
+                let store = Arc::new(
+                    cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                        directory.path().join("adapter.db"),
+                        cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+                    )
+                    .unwrap(),
+                );
+                let history = crate::matching_history::MatchingHistoryClient::new(
+                    tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+                    Duration::from_secs(1),
+                    1024,
+                );
+                let registry = crate::matching_registry_native::NativeQueueRegistry::new(
+                    store,
+                    history,
+                    std::num::NonZeroU32::new(100).unwrap(),
+                );
+                let membership = crate::matching_membership::Membership::new("local", vec![]);
+                let control = Arc::new(
+                    crate::matching_control_context_native::NativeMatchingControlContext::new(
+                        state.clone(),
+                        cache.clone(),
+                        registry,
+                        membership.clone(),
+                        None,
+                    ),
+                );
+                if case.starts_with("control_") {
+                    match case {
+                        "control_boolean" => assert!(control.scaler_enabled(&domain, &task, 0)),
+                        "control_duration" => {
+                            assert_eq!(control.poller_window_nanos(&domain, &task, 0), 250_000_000)
+                        }
+                        "control_integer" => {
+                            assert_eq!(control.write_partition_count(&domain, &task, 0), 17)
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let engine = crate::matching_engine_context_native::NativeMatchingEngineContext::with_control(
+                        state, cache, control, membership, None, Arc::new(|_, _, _, _| panic!("unexpected poll registration")), None,
+                    );
+                    match case {
+                        "engine_duration" => assert_eq!(
+                            engine.expiration(&domain, &task, 0),
+                            Duration::from_millis(250)
+                        ),
+                        "engine_integer" => assert_eq!(
+                            engine.forward_degree(uuid::Uuid::parse_str(ID).unwrap(), &task, 0),
+                            17
+                        ),
+                        "engine_boolean" => assert!(engine.auto_config_enabled(&domain, &task, 0)),
+                        "engine_rate" => assert_eq!(engine.override_rate(&domain, &task, 0), 17.5),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            _ => panic!("unknown case"),
+        }
+        println!("cold lookup completed: {case}");
+    }
+
+    #[test]
     fn native_config_filter_preserves_invalid_task_list_bytes() {
         let value = DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
@@ -609,8 +960,7 @@ mod tests {
         let invalid = task_list_boolean(
             &overlay,
             "native.boolean",
-            &cache,
-            &GoString::from("unknown"),
+            cached_domain_name(&cache, &GoString::from("unknown")).as_deref(),
             &GoString::from(&b"\xff"[..]),
             0,
             true,
@@ -618,8 +968,7 @@ mod tests {
         let replacement = task_list_boolean(
             &overlay,
             "native.boolean",
-            &cache,
-            &GoString::from("unknown"),
+            cached_domain_name(&cache, &GoString::from("unknown")).as_deref(),
             &GoString::from("\u{fffd}"),
             0,
             true,

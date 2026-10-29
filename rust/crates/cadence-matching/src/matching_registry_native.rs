@@ -35,12 +35,10 @@ use crate::{
 use cadence_common::{go_string::GoString, task_list::TaskListNameBytes};
 use cadence_persistence::{
     matching_blob::TaskDataBytes,
-    matching_native_queue::{DurableTaskQueueBytes, NativeQueueError, PendingTaskBytes},
+    matching_native_queue::{DurableTaskQueueBytes, PendingTaskBytes},
     matching_native_task_store::{
-        AllocatedTaskBytes, MatchingTaskStoreBytes, MatchingTaskStoreBytesError as StoreError,
-        TaskListKeyBytes,
+        AllocatedTaskBytes, MatchingTaskStoreBytes, TaskListKeyBytes,
     },
-    matching_task_store::MatchingTaskStoreError as LegacyStoreError,
 };
 use std::{
     collections::HashMap,
@@ -259,8 +257,6 @@ struct Owner {
     scaler: crate::matching_scaler::ScalerDaemon,
     created: i64,
     idle_ttl_nanos: i64,
-    last_update: Mutex<tokio::time::Instant>,
-    next_ack_update: Mutex<Option<tokio::time::Instant>>,
     next_idle_check: Mutex<tokio::time::Instant>,
     liveness: Arc<cadence_common::liveness::Liveness>,
 }
@@ -275,30 +271,13 @@ impl Owner {
         self.scaler.stop();
         self.stop();
         readers.push(self.reader.clone());
-        let ack = self.queue.persist_final_ack(now);
-        let garbage = self.queue.run_garbage_collection(true);
-        tolerate_lost_ownership(ack.and(garbage.map(|_| ())))
-            .map_err(|error| Status::unavailable(error.to_string()))
-    }
-}
-/// Go's task list Stop logs and ignores a final-update failure. Losing the
-/// lease to a peer (ConditionFailed) during shutdown is expected, not fatal.
-fn tolerate_lost_ownership(result: Result<(), NativeQueueError>) -> Result<(), NativeQueueError> {
-    match result {
-        Err(NativeQueueError::Storage(StoreError::ConditionFailed { message })) => {
-            eprintln!(
-                "Matching task list lost ownership during shutdown: {}",
-                diag(message.as_bytes())
-            );
-            Ok(())
+        if let Err(error) = self.queue.persist_final_ack(now) {
+            eprintln!("Matching final ack persistence failed: {error}");
         }
-        Err(NativeQueueError::Storage(StoreError::Legacy(LegacyStoreError::ConditionFailed(
-            reason,
-        )))) => {
-            eprintln!("Matching task list lost ownership during shutdown: {reason}");
-            Ok(())
+        if let Err(error) = self.queue.run_garbage_collection(true) {
+            eprintln!("Matching task garbage collection failed: {error}");
         }
-        other => other,
+        Ok(())
     }
 }
 impl Drop for Owner {
@@ -350,9 +329,8 @@ pub struct NativeQueueRegistry {
     isolation: Option<NativeIsolationProvider>,
     reader_live: Option<NativeReaderPropertiesProvider>,
     min_burst: Option<NativeProvider<i64>>,
-    update_ack_interval: Option<NativeProvider<i64>>,
     idle_tasklist_check_interval: Option<NativeProvider<i64>>,
-    max_task_delete_batch_size: Option<NativeProvider<i64>>,
+    max_task_delete_batch_size: Option<NativeProvider<crate::matching_reader::LiveInt>>,
     writer_live: Option<NativeWriterLiveProvider>,
     fatal: NativeFatalSinks,
     writer_tracker: Arc<crate::matching_writer::WriterTracker>,
@@ -652,7 +630,6 @@ impl NativeQueueRegistry {
             isolation: None,
             reader_live: None,
             min_burst: None,
-            update_ack_interval: None,
             idle_tasklist_check_interval: None,
             max_task_delete_batch_size: None,
             writer_live: None,
@@ -851,15 +828,11 @@ impl NativeQueueRegistry {
         self.history = self.history.clone().with_record_started_timeout(provider);
         self
     }
-    pub fn with_update_ack_interval(mut self, provider: NativeProvider<i64>) -> Self {
-        self.update_ack_interval = Some(provider);
-        self
-    }
     pub fn with_idle_tasklist_check_interval(mut self, provider: NativeProvider<i64>) -> Self {
         self.idle_tasklist_check_interval = Some(provider);
         self
     }
-    pub fn with_max_task_delete_batch_size(mut self, provider: NativeProvider<i64>) -> Self {
+    pub fn with_max_task_delete_batch_size(mut self, provider: NativeProvider<crate::matching_reader::LiveInt>) -> Self {
         self.max_task_delete_batch_size = Some(provider);
         self
     }
@@ -1397,6 +1370,14 @@ impl NativeQueueRegistry {
     ) -> Result<Arc<Owner>, Status> {
         let registry = self;
         let domain = gs(key.domain_id);
+        let idle_ttl_nanos = Self::provider(
+            &registry.idle_tasklist_check_interval,
+            &domain,
+            &lookup.1,
+            lookup.2,
+            300_000_000_000,
+        );
+        let idle_half = crate::matching_registry::idle_check_interval(idle_ttl_nanos)?;
         let metric_context = registry.metric_context(lookup, kind);
         registry.metrics.lease_request(&metric_context);
         let queue = match DurableTaskQueueBytes::open(
@@ -1422,16 +1403,8 @@ impl NativeQueueRegistry {
         queue.set_condition_failed_observer(Arc::new(move || {
             condition_metrics.condition_failed(&condition_context);
         }));
-        {
-            let provider = registry.max_task_delete_batch_size.clone();
-            let domain = domain.clone();
-            let name = lookup.1.clone();
-            let task_type = lookup.2;
-            queue.set_gc_batch_size_provider(Arc::new(move || {
-                provider
-                    .as_ref()
-                    .map_or(100, |p| p(&domain, &name, task_type))
-            }));
+        if let Some(provider) = &registry.max_task_delete_batch_size {
+            queue.set_gc_batch_size_provider(provider(&domain, &lookup.1, lookup.2));
         }
         let partitions =
             match NativePartitionCache::load(registry.store.as_ref(), &queue, key, kind) {
@@ -1467,22 +1440,10 @@ impl NativeQueueRegistry {
                     .max(1)
             })
         };
-        let idle_ttl_nanos = Self::provider(
-            &registry.idle_tasklist_check_interval,
-            &domain,
-            &lookup.1,
-            lookup.2,
-            300_000_000_000,
-        )
-        .max(1);
         let liveness = Arc::new(cadence_common::liveness::Liveness::new(
             registry_now(),
             idle_ttl_nanos,
         ));
-        let next_ack_update = registry.update_ack_interval.as_ref().map(|provider| {
-            let nanos = provider(&domain, &lookup.1, lookup.2).max(1) as u64;
-            tokio::time::Instant::now() + Duration::from_nanos(nanos)
-        });
         // Go `stats.NewEmaFixedWindowQPSTracker(timeSource, 0.5,
         // cfg.QPSTrackerInterval(domain, taskList, type), ...)`.
         let qps = Arc::new(cadence_common::qps_bytes::EmaQpsBytesTracker::new(
@@ -1681,7 +1642,6 @@ impl NativeQueueRegistry {
         if let Some(forward) = forward {
             dispatcher = dispatcher.with_forward(forward);
         }
-        let idle_half = Duration::from_nanos((idle_ttl_nanos / 2).max(1) as u64);
         Ok(Arc::new(Owner {
             forward_tasks,
             forward_rate,
@@ -1699,8 +1659,6 @@ impl NativeQueueRegistry {
             sync_wait,
             created: now,
             idle_ttl_nanos,
-            last_update: Mutex::new(tokio::time::Instant::now()),
-            next_ack_update: Mutex::new(next_ack_update),
             next_idle_check: Mutex::new(tokio::time::Instant::now() + idle_half),
             liveness,
             scaler: Default::default(),
@@ -2079,13 +2037,12 @@ impl NativeQueueRegistry {
     pub async fn persist_acks(&self, now: i64) -> Result<(), Status> {
         self.flush(now, false, None).await
     }
-    /// All handles become unusable after shutdown. Persist every owner even if
-    /// another owner fails, and return the first failure.
+    /// All handles become unusable after shutdown. Final ack and GC failures
+    /// are logged while every owner is stopped, as in Go taskReader.Stop.
     pub async fn shutdown(&self, now: i64) -> Result<(), Status> {
         self.flush(now, true, None).await
     }
-    /// Fixed-interval controller. Reset after each completed update, as Go's
-    /// task reader does; a transient persistence error does not kill the pump.
+    /// Controller for idle and stopped-owner cleanup. Ack updates belong to the reader pump.
     pub async fn maintain_until<F>(&self, interval: Duration, shutdown: F) -> Result<(), Status>
     where
         F: std::future::Future<Output = ()> + Send,
@@ -2104,21 +2061,7 @@ impl NativeQueueRegistry {
                 .expect("Matching registry lock")
                 .owners
                 .values()
-                .map(|owner| {
-                    (*owner
-                        .next_ack_update
-                        .lock()
-                        .expect("Matching ack timer lock"))
-                    .unwrap_or_else(|| {
-                        *owner.last_update.lock().expect("Matching ack timer lock") + interval
-                    })
-                    .min(
-                        *owner
-                            .next_idle_check
-                            .lock()
-                            .expect("Matching idle timer lock"),
-                    )
-                })
+                .map(|owner| *owner.next_idle_check.lock().expect("Matching idle timer lock"))
                 .min()
                 .unwrap_or_else(|| tokio::time::Instant::now() + interval);
             tokio::select! {
@@ -2127,9 +2070,6 @@ impl NativeQueueRegistry {
                 _ = &mut changed => continue,
                 _ = tokio::time::sleep_until(deadline) => {
                     if let Err(error) = self.sweep_idle(registry_now(), true).await { eprintln!("Matching idle cleanup failed: {error}"); }
-                    if let Err(error) = self.flush(registry_now(), false, Some(interval)).await {
-                        eprintln!("Matching acknowledgement update failed: {error}");
-                    }
                 }
             }
         }
@@ -2177,10 +2117,11 @@ impl NativeQueueRegistry {
                             return None;
                         }
                         // Go uses a ticker at TTL/2; retain its cadence after delayed ticks.
-                        let ttl = owner.idle_ttl_nanos.max(2);
-                        let interval = Duration::from_nanos((ttl / 2) as u64);
-                        let lag = tokio::time::Instant::now().saturating_duration_since(*next);
-                        *next += interval * ((lag.as_nanos() / interval.as_nanos() + 1) as u32);
+                        let interval = crate::matching_registry::idle_check_interval(owner.idle_ttl_nanos)
+                            .expect("validated idle ticker interval");
+                        *next = crate::matching_registry::next_idle_tick(
+                            *next, tokio::time::Instant::now(), interval,
+                        );
                         (!owner.liveness.is_alive(now)).then(|| (key.clone(), owner.clone()))
                     })
                     .collect::<Vec<_>>()
@@ -2211,7 +2152,7 @@ impl NativeQueueRegistry {
             false
         }
     }
-    async fn flush(&self, now: i64, stop: bool, due: Option<Duration>) -> Result<(), Status> {
+    async fn flush(&self, now: i64, stop: bool, _due: Option<Duration>) -> Result<(), Status> {
         let registry = self.clone();
         owner_work(move |readers| {
             let owners = {
@@ -2250,26 +2191,6 @@ impl NativeQueueRegistry {
                     }
                     continue;
                 }
-                let live_deadline = *owner
-                    .next_ack_update
-                    .lock()
-                    .expect("Matching ack timer lock");
-                let ack_due = live_deadline.map_or_else(
-                    || {
-                        due.is_none_or(|interval| {
-                            owner
-                                .last_update
-                                .lock()
-                                .expect("Matching ack timer lock")
-                                .elapsed()
-                                >= interval
-                        })
-                    },
-                    |deadline| tokio::time::Instant::now() >= deadline,
-                );
-                if !owner.queue.is_stopped() && !ack_due {
-                    continue;
-                }
                 if let Ok(task_count) = owner.queue.task_list_size() {
                     owner.reader.record_task_count(task_count);
                 }
@@ -2280,16 +2201,6 @@ impl NativeQueueRegistry {
                 if let Err(error) = owner.queue.persist_ack(now) {
                     failure.get_or_insert_with(|| Status::unavailable(error.to_string()));
                 }
-                *owner.last_update.lock().expect("Matching ack timer lock") =
-                    tokio::time::Instant::now();
-                *owner
-                    .next_ack_update
-                    .lock()
-                    .expect("Matching ack timer lock") =
-                    registry.update_ack_interval.as_ref().map(|provider| {
-                        let nanos = provider(&gs(key.0), &key.1, key.2).max(1) as u64;
-                        tokio::time::Instant::now() + Duration::from_nanos(nanos)
-                    });
                 if owner.queue.is_stopped() && registry.detach(&key, &owner) {
                     if let Err(error) = owner.finish(now, readers) {
                         failure.get_or_insert(error);
@@ -2443,6 +2354,88 @@ mod tests {
             created_nanos: 0,
             partition_config: None,
         }
+    }
+
+    // Exercise the real owner shutdown path with failures only after startup.
+    struct TeardownStore {
+        inner: Arc<SqliteTaskStore>,
+        fail: std::sync::atomic::AtomicBool,
+        updates: std::sync::atomic::AtomicUsize,
+        deletes: std::sync::atomic::AtomicUsize,
+    }
+    impl MatchingTaskStoreBytes for TeardownStore {
+        fn get_task_list(&self, key: &TaskListKeyBytes) -> cadence_persistence::matching_native_task_store::Result<cadence_persistence::matching_native_task_store::TaskListRecordBytes> {
+            MatchingTaskStoreBytes::get_task_list(self.inner.as_ref(), key)
+        }
+        fn lease(&self, key: &TaskListKeyBytes, kind: i16, range: i64, now: i64) -> cadence_persistence::matching_native_task_store::Result<cadence_persistence::matching_native_task_store::TaskListRecordBytes> {
+            MatchingTaskStoreBytes::lease(self.inner.as_ref(), key, kind, range, now)
+        }
+        fn update_task_list(&self, key: &TaskListKeyBytes, range: i64, data: cadence_persistence::matching_blob::TaskListDataBytes, now: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                self.updates.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(cadence_persistence::matching_native_task_store::MatchingTaskStoreBytesError::ConditionFailed { message: GoString::from("injected final ack") });
+            }
+            MatchingTaskStoreBytes::update_task_list(self.inner.as_ref(), key, range, data, now)
+        }
+        fn create_tasks_with_domains(&self, key: &TaskListKeyBytes, range: i64, now: i64, tasks: &[(Uuid, &AllocatedTaskBytes)]) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::create_tasks_with_domains(self.inner.as_ref(), key, range, now, tasks)
+        }
+        fn get_tasks(&self, key: &TaskListKeyBytes, read: i64, max: i64, batch: i64) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>> {
+            MatchingTaskStoreBytes::get_tasks(self.inner.as_ref(), key, read, max, batch)
+        }
+        fn task_list_size(&self, key: &TaskListKeyBytes, ack: i64) -> cadence_persistence::matching_native_task_store::Result<i64> {
+            MatchingTaskStoreBytes::task_list_size(self.inner.as_ref(), key, ack)
+        }
+        fn complete_task(&self, key: &TaskListKeyBytes, id: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::complete_task(self.inner.as_ref(), key, id)
+        }
+        fn complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> cadence_persistence::matching_native_task_store::Result<usize> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                self.deletes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(cadence_persistence::matching_native_task_store::MatchingTaskStoreBytesError::ConditionFailed { message: GoString::from("injected gc") });
+            }
+            MatchingTaskStoreBytes::complete_tasks_less_than(self.inner.as_ref(), key, ack, limit)
+        }
+        fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::delete_task_list(self.inner.as_ref(), key, range)
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_continues_after_final_ack_and_gc_failures_for_all_owners() {
+        use std::sync::atomic::Ordering;
+        let (dir, mut registry) = fixture();
+        let store = Arc::new(TeardownStore {
+            inner: Arc::new(SqliteTaskStore::create(dir.path().join("fail.db"), BlobEncoding::ThriftRW).unwrap()),
+            fail: std::sync::atomic::AtomicBool::new(false),
+            updates: std::sync::atomic::AtomicUsize::new(0),
+            deletes: std::sync::atomic::AtomicUsize::new(0),
+        });
+        registry.store = store.clone();
+        registry = registry.with_max_task_delete_batch_size(Arc::new(|_, _, _| Arc::new(|| 0)));
+        let first = registry.get(key(b"teardown-a"), 0, 1).await.unwrap();
+        let second = registry.get(key(b"teardown-b"), 0, 1).await.unwrap();
+        store.fail.store(true, Ordering::SeqCst);
+        registry.shutdown(2).await.unwrap();
+        assert!(first.queue.is_stopped());
+        assert!(second.queue.is_stopped());
+        assert_eq!(store.updates.load(Ordering::SeqCst), 2);
+        assert_eq!(store.deletes.load(Ordering::SeqCst), 2);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
+    #[tokio::test]
+    async fn native_invalid_idle_interval_rejects_owner_before_lease() {
+        let (_directory, registry) = fixture();
+        let registry = registry.with_idle_tasklist_check_interval(Arc::new(|_, _, _| 1));
+        let task_key = key(b"invalid-idle");
+        let lookup = (task_key.domain_id, task_key.name.clone(), task_key.task_type);
+        let error = match registry.build_owner(&task_key, &lookup, 0, 1) {
+            Ok(_) => panic!("invalid ticker period accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
     }
 
     #[tokio::test]

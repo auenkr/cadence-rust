@@ -67,9 +67,39 @@ impl DynamicConfigOverlay {
     pub fn from_config_store(snapshot: &cadence_persistence::config_store::Snapshot) -> Self {
         let mut overlay = Self::default();
         for entry in snapshot.entries.iter().flatten() {
-            overlay
-                .normal
-                .insert(entry.name.clone(), entry.values.clone());
+            let mut values = entry.values.clone();
+            if matches!(
+                entry.name.as_str(),
+                "matching.persistenceMaxQPS"
+                    | "matching.persistenceGlobalMaxQPS"
+                    | "matching.rps"
+                    | "matching.workerrps"
+                    | "matching.domainrps"
+                    | "matching.domainworkerrps"
+            ) {
+                for value in &mut values {
+                    if let Some(blob) = value.value.as_mut() {
+                        if blob.encoding_type == Some(cadence_api::enums::EncodingType::JSON) {
+                            if let Ok(serde_json::Value::Number(number)) =
+                                serde_json::from_slice::<serde_json::Value>(&blob.data)
+                            {
+                                if let Some(n) = number.as_f64().filter(|n| n.is_finite() && n.trunc() == *n) {
+                                    // Go decodes JSON numbers as float64 before amd64 int conversion.
+                                    let integer = if n >= 9_223_372_036_854_775_808.0
+                                        || n < -9_223_372_036_854_775_808.0
+                                    {
+                                        i64::MIN
+                                    } else {
+                                        n as i64
+                                    };
+                                    blob.data = integer.to_string().into_bytes();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            overlay.normal.insert(entry.name.clone(), values);
         }
         overlay
     }
@@ -1118,6 +1148,34 @@ pub async fn update_domain_async_workflow_configuration(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn persistence_qps_config_store_decodes_go_float64_integers() {
+        use cadence_persistence::config_store::Snapshot;
+        let read = |raw: &str| {
+            let snapshot = Snapshot {
+                version: 1,
+                schema_version: 0,
+                entries: Some(vec![cadence_api::admin::DynamicConfigEntry {
+                    name: "matching.persistenceMaxQPS".into(),
+                    values: vec![DynamicConfigValue {
+                        filters: vec![],
+                        value: Some(cadence_api::types::DataBlob::new(
+                            cadence_api::enums::EncodingType::JSON,
+                            raw.as_bytes().to_vec(),
+                        )),
+                    }],
+                }]),
+            };
+            cadence_persistence::dynamic_config::integer(
+                DynamicConfigOverlay::from_config_store(&snapshot).property_values("matching.persistenceMaxQPS"), None, 3000,
+            )
+        };
+        assert_eq!(read("1.0"), 1);
+        assert_eq!(read("1.5"), 3000);
+        assert_eq!(read("9007199254740993"), 9007199254740992);
+        assert_eq!(read("9223372036854775807"), i64::MIN);
+    }
+
+    #[test]
     fn config_store_snapshot_keeps_entry_value_order() {
         use cadence_persistence::config_store::Snapshot;
         let value = |n: &str| DynamicConfigValue {
@@ -1146,6 +1204,64 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn all_matching_quota_keys_normalize_config_store_numbers() {
+        use cadence_persistence::{config_store::Snapshot, dynamic_config::integer};
+        let keys = [
+            "matching.persistenceMaxQPS",
+            "matching.persistenceGlobalMaxQPS",
+            "matching.rps",
+            "matching.workerrps",
+            "matching.domainrps",
+            "matching.domainworkerrps",
+        ];
+        let entries = keys.iter().map(|key| cadence_api::admin::DynamicConfigEntry {
+            name: (*key).into(),
+            values: vec![DynamicConfigValue {
+                filters: vec![],
+                value: Some(cadence_api::types::DataBlob::new(
+                    cadence_api::enums::EncodingType::JSON,
+                    b"1.0".to_vec(),
+                )),
+            }],
+        }).collect();
+        let overlay = DynamicConfigOverlay::from_config_store(&Snapshot {
+            version: 1,
+            schema_version: 0,
+            entries: Some(entries),
+        });
+        for key in keys {
+            assert_eq!(integer(overlay.property_values(key), None, 42), 1, "{key}");
+        }
+    }
+
+    #[test]
+    fn matching_rpc_quota_store_integers_follow_go_json_conversion() {
+        use cadence_persistence::{config_store::Snapshot, dynamic_config::integer};
+        let value = |n: &str| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob::new(
+                cadence_api::enums::EncodingType::JSON,
+                n.as_bytes().to_vec(),
+            )),
+            filters: vec![],
+        };
+        for (input, expected) in [("1.0", 1), ("1.5", 42), ("9223372036854775807", i64::MIN)] {
+            let snapshot = Snapshot {
+                version: 1,
+                schema_version: 0,
+                entries: Some(vec![cadence_api::admin::DynamicConfigEntry {
+                    name: "matching.workerrps".into(),
+                    values: vec![value(input)],
+                }]),
+            };
+            let overlay = DynamicConfigOverlay::from_config_store(&snapshot);
+            assert_eq!(
+                integer(overlay.property_values("matching.workerrps"), None, 42),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn overlay_get_update_restore_list() {

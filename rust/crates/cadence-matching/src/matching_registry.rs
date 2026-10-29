@@ -536,6 +536,32 @@ impl QueueHandle {
             .has_after(after)
     }
 }
+// Go starts liveness with time.NewTicker(ttl / 2), which rejects a
+// nonpositive period. Do not turn invalid settings into a busy idle timer.
+pub(crate) fn idle_check_interval(ttl_nanos: i64) -> Result<std::time::Duration, Status> {
+    let half = ttl_nanos / 2;
+    if half <= 0 {
+        return Err(Status::internal(
+            "Matching idle liveness ticker period must be positive",
+        ));
+    }
+    Ok(std::time::Duration::from_nanos(half as u64))
+}
+
+// Advance to the next ticker boundary without narrowing the missed tick count.
+pub(crate) fn next_idle_tick(
+    deadline: tokio::time::Instant,
+    now: tokio::time::Instant,
+    interval: std::time::Duration,
+) -> tokio::time::Instant {
+    if now < deadline {
+        return deadline + interval;
+    }
+    let lag = now.saturating_duration_since(deadline);
+    let remaining = interval.as_nanos() - lag.as_nanos() % interval.as_nanos();
+    now + std::time::Duration::from_nanos(remaining as u64)
+}
+
 // SQL cleanup runs on the blocking pool; joining async loops must release that
 // worker first, so simultaneous owner unloads cannot starve their own readers.
 async fn owner_work<T: Send + 'static>(
@@ -1204,8 +1230,8 @@ impl QueueRegistry {
                             .idle_tasklist_check_interval
                             .as_ref()
                             .map(|provider| provider(&domain, &lookup.1, lookup.2))
-                            .unwrap_or(300_000_000_000)
-                            .max(1);
+                            .unwrap_or(300_000_000_000);
+                        let idle_interval = idle_check_interval(idle_ttl_nanos)?;
                         let liveness = Arc::new(cadence_common::liveness::Liveness::new(
                             registry_now(),
                             idle_ttl_nanos,
@@ -1600,10 +1626,7 @@ impl QueueRegistry {
                             last_update: Mutex::new(tokio::time::Instant::now()),
                             next_ack_update: Mutex::new(next_ack_update),
                             next_idle_check: Mutex::new(
-                                tokio::time::Instant::now()
-                                    + std::time::Duration::from_nanos(
-                                        (idle_ttl_nanos / 2).max(1) as u64
-                                    ),
+                                tokio::time::Instant::now() + idle_interval,
                             ),
                             liveness,
                             scaler: Default::default(),
@@ -2467,10 +2490,9 @@ impl QueueRegistry {
                             return None;
                         }
                         // Go uses a ticker at TTL/2; retain its cadence after delayed ticks.
-                        let ttl = owner.idle_ttl_nanos.max(2);
-                        let interval = std::time::Duration::from_nanos((ttl / 2) as u64);
-                        let lag = tokio::time::Instant::now().saturating_duration_since(*next);
-                        *next += interval * ((lag.as_nanos() / interval.as_nanos() + 1) as u32);
+                        let interval = idle_check_interval(owner.idle_ttl_nanos)
+                            .expect("validated idle ticker interval");
+                        *next = next_idle_tick(*next, tokio::time::Instant::now(), interval);
                         (!owner.liveness.is_alive(now)).then(|| (key.clone(), owner.clone()))
                     })
                     .collect::<Vec<_>>()
@@ -3279,6 +3301,31 @@ mod tests {
             100
         );
         registry.shutdown(101).await.unwrap();
+    }
+
+    #[test]
+    fn idle_ticker_rejects_nonpositive_go_period_and_handles_extremes() {
+        for ttl in [i64::MIN, -1, 0, 1] {
+            assert!(idle_check_interval(ttl).is_err());
+        }
+        assert_eq!(idle_check_interval(2).unwrap(), Duration::from_nanos(1));
+        assert_eq!(
+            idle_check_interval(i64::MAX).unwrap(),
+            Duration::from_nanos((i64::MAX / 2) as u64)
+        );
+        let now = tokio::time::Instant::now();
+        let interval = Duration::from_nanos(1);
+        let old = now - Duration::from_secs(5);
+        assert_eq!(next_idle_tick(old, now, interval), now + interval);
+    }
+
+    #[tokio::test]
+    async fn invalid_idle_interval_does_not_create_an_owner() {
+        let (_dir, _store, mut registry, key) = fixture();
+        registry.idle_tasklist_check_interval = Some(Arc::new(|_, _, _| 0));
+        let error = registry.get(key, 0, 1).await.err().unwrap();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
     }
 
     #[tokio::test]
