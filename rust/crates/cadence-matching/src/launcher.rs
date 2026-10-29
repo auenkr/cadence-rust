@@ -1236,6 +1236,7 @@ pub async fn run(
                             "thriftrw",
                         )
                     });
+                eprintln!("Matching startup: opening configured stores");
                 let mut stores = tokio::task::spawn_blocking(move || {
                     crate::matching_task_store::open_configured_default_store(
                         &persistence,
@@ -1246,6 +1247,7 @@ pub async fn run(
                 })
                 .await
                 .map_err(|error| anyhow::anyhow!("joining Matching store startup: {error}"))??;
+                eprintln!("Matching startup: configured stores opened");
                 // Go wraps the raw TaskManager with the error injector before
                 // the rate limiter (persistence/client/factory.go:195-203).
                 stores.task_store = crate::matching_fault_injection::inject_task_store_errors(
@@ -1338,7 +1340,8 @@ pub async fn run(
                         let poll_observer = crate::matching_engine_context_native::metrics_poll_observer_factory(
                             metrics.clone(), cache.clone(),
                         );
-                        crate::matching_launch_native::assemble_configured(
+                        eprintln!("Matching startup: assembling native runtime");
+                        let runtime = crate::matching_launch_native::assemble_configured(
                             state.clone(),
                             crate::matching_launch_native::ConfiguredNativeAssembly {
                                 task_store: stores.native_task_store.clone(),
@@ -1353,7 +1356,9 @@ pub async fn run(
                                 metrics,
                                 poll_observer,
                             },
-                        ).await?
+                        ).await?;
+                        eprintln!("Matching startup: native runtime assembled");
+                        runtime
                     }
                     crate::matching_task_store::MatchingTaskStoreSource::EmbeddedDataDir(dir) => {
                         let path = std::path::PathBuf::from(dir).join("matching.db");
@@ -1546,6 +1551,7 @@ pub async fn run(
             };
             let mut shutdown_during_start = false;
             if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                eprintln!("Matching startup: starting Ringpop membership");
                 let start_result = tokio::select! {
                     result = lifecycle.start() => result.map_err(anyhow::Error::new),
                     signal = shutdown_signal() => { shutdown_during_start = signal.is_ok(); Err(signal.err().unwrap_or_else(|| anyhow::anyhow!("shutdown requested during Matching Ringpop bootstrap"))) },
@@ -1590,6 +1596,7 @@ pub async fn run(
                     );
                 }
             }
+            eprintln!("Matching startup: membership ready; opening admission");
             matching_service.mark_started();
             if let Some(runtime) = matching_runtime.as_ref() {
                 runtime.mark_started();
