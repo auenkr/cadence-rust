@@ -64,6 +64,27 @@ pub fn go_uuid_parse_error_bytes(bytes: &[u8]) -> Option<String> {
     None
 }
 
+/// gocql ParseUUID accepts hyphens at any even hex-digit boundary.
+pub fn cassandra_uuid_bytes(input: &[u8]) -> Result<uuid::Uuid, String> {
+    let mut digits = [0u8; 32];
+    let mut count = 0;
+    for &byte in input {
+        if byte == b'-' && count % 2 == 0 {
+            continue;
+        }
+        if !byte.is_ascii_hexdigit() || count == digits.len() {
+            return Err(format!("invalid UUID {}", cadence_common::go_string::GoString::from(input).go_quoted_string()));
+        }
+        digits[count] = byte;
+        count += 1;
+    }
+    if count != digits.len() {
+        return Err(format!("invalid UUID {}", cadence_common::go_string::GoString::from(input).go_quoted_string()));
+    }
+    // All bytes are ASCII hexadecimal and exactly 32 digits long.
+    Ok(uuid::Uuid::parse_str(std::str::from_utf8(&digits).expect("ASCII hex")).expect("32 hex digits"))
+}
+
 /// Pre-handler lookup equivalent. `Err` is the captured-panic status Go returns; `Ok` means
 #[allow(clippy::result_large_err)]
 /// continue (empty, valid, or lenient backend). It performs no lookup and has no side effects.
@@ -150,6 +171,18 @@ mod tests {
         let error = raw_sql_lookup_guard(&[0xff]).unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unknown);
         assert_eq!(error.message(), r#"panic object is not error: "uuid: Parse(\xff): invalid UUID length: 1""#);
+    }
+
+    #[test]
+    fn cassandra_parser_follows_gocql_nibble_boundaries() {
+        let expected = uuid::Uuid::parse_str(GOOD).unwrap();
+        for raw in [GOOD.to_string(), GOOD.replace('-', ""), format!("--{}--", GOOD), format!("{}-", GOOD)] {
+            assert_eq!(cassandra_uuid_bytes(raw.as_bytes()).unwrap(), expected);
+        }
+        for raw in [&b"\xff"[..], b"0-123abcd-4567-89ef-ABCD-0123456789ab", b"{0123abcd-4567-89ef-ABCD-0123456789ab}"] {
+            let error = cassandra_uuid_bytes(raw).unwrap_err();
+            assert_eq!(error, format!("invalid UUID {}", cadence_common::go_string::GoString::from(raw).go_quoted_string()));
+        }
     }
 
     #[test]

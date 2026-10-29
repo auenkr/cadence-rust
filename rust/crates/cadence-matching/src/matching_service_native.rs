@@ -1136,7 +1136,7 @@ mod tests {
             (GoString::from(uuid::Uuid::from_u128(99).to_string()), tonic::Code::NotFound, "source domain missing"),
             (GoString::from("malformed"), tonic::Code::InvalidArgument, "UUID is invalid."),
             (GoString::default(), tonic::Code::InvalidArgument, "DomainID is empty."),
-            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "UUID is invalid."),
+            (GoString::from(&b"\xff"[..]), tonic::Code::InvalidArgument, "injected raw backend error"),
         ] {
             for forwarded in [false, true] {
                 let error = service.add_activity_task(Request::new(n::matching::AddActivityTaskRequest {
