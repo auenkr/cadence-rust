@@ -403,6 +403,68 @@ mod tests {
             Code::InvalidArgument
         );
     }
+    #[tokio::test]
+    async fn slow_start_keeps_running_after_caller_cancel_and_reuses_manager() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use tokio::sync::Notify;
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner.create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1).await.unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(false),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let metrics = Arc::new(AtomicUsize::new(0));
+        let service = NativeSemaphoreService::new(
+            registry.clone(),
+            Membership::new("self", vec![Host {
+                address: "self".into(), identity: "self".into(), grpc_address: String::new(),
+            }]),
+            Arc::new(|_| Ok(bytes(b"domain"))),
+            Arc::new(|_| (true, 1_000_000_000)),
+            Arc::new(|| false),
+            {
+                let metrics = metrics.clone();
+                Arc::new(move |_, _, _| { metrics.fetch_add(1, Ordering::SeqCst); })
+            },
+        );
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let mut first = request(b"1:x:r:1");
+        first.extensions_mut().insert(CallerCancel(receiver));
+        let first = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(first).await })
+        };
+        store.scan_entered.notified().await;
+        let manager = registry.all_managers().pop().unwrap();
+        cancel.send(true).unwrap();
+        assert!(!first.is_finished(), "the initiating load is independent of caller cancellation");
+
+        let mut expired = request(b"1:y:r:2");
+        expired.metadata_mut().insert("grpc-timeout", "0n".parse().unwrap());
+        let error = service.acquire(expired).await.unwrap_err();
+        assert_eq!(error.message(), "context deadline exceeded");
+        assert_eq!(metrics.load(Ordering::SeqCst), 1);
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+
+        store.scan_release.notify_one();
+        let error = first.await.unwrap().unwrap_err();
+        assert_eq!(error.message(), "context canceled");
+        assert_eq!(metrics.load(Ordering::SeqCst), 2);
+        assert!(Arc::ptr_eq(&manager, &registry.all_managers()[0]));
+        store.release.notify_one();
+        assert_eq!(service.acquire(request(b"1:z:r:3")).await.unwrap().into_inner().outcome, 1);
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+        service.stop_all();
+    }
+
     #[test]
     fn ownership_error_retains_raw_bucket_detail() {
         let id = IdentifierBytes::new(bytes(b"d"), bytes(b"s\xff"), 3).unwrap();
