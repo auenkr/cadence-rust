@@ -1,0 +1,8 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40806302891
+Source: 7828475bc224f507cbb3769a125638c0edc759d5
+Conclusion: failure
+Clippy: exit101; Cassandra raw adapter self.get_domain resolved inherent persistence method instead of DomainMetadataSource trait (E0061/E0308). Fixed with explicit trait qualification.
+Tests: skipped
+Go source boundary oracle: exit0, explicit PASS for manager, SQL and Cassandra marshal tests. Predates strengthened Cassandra byte equality assertion.
+Full artifacts/logs: /mnt/storage/service/ci-evidence/matching-native-selected-40806302891
+Formatting patch: /mnt/storage/service/ci-evidence/matching-native-format-40806302891/matching-format.patch; not applied to newer source.

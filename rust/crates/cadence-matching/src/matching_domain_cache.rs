@@ -271,7 +271,7 @@ impl DomainMetadataSource
         })?;
         // Accepted gocql UUID spellings contain only ASCII hex and hyphens.
         // Keep that spelling for errors while get_domain normalizes the query bind.
-        self.get_domain(None, Some(std::str::from_utf8(id).expect("validated UUID spelling")), timeout)
+        <Self as DomainMetadataSource>::get_domain(self, None, Some(std::str::from_utf8(id).expect("validated UUID spelling")), timeout)
     }
 
     fn get_domain(
