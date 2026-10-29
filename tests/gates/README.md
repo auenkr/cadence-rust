@@ -68,8 +68,10 @@ gate ends.
 | `--postgres` | PostgreSQL, Go-configured schema, one shared database | `CADENCE_POSTGRES_ADDR` (`127.0.0.1:5432`), `CADENCE_POSTGRES_USER` (`postgres`), `CADENCE_POSTGRES_PASSWORD` (`cadence`), `CADENCE_POSTGRES_DATABASE`, `CADENCE_POSTGRES_VISIBILITY_DATABASE`, optional `CADENCE_POSTGRES_SSLMODE` and `_CA_FILE`/`_CERT_FILE`/`_KEY_FILE` |
 
 `--mysql` and `--postgres` require `--rust-services matching`. They are mutually
-exclusive. The GC and domain-metadata SQL observations are MySQL-only, so PostgreSQL
-runs record `productionDatabaseEvidence` as not collected.
+exclusive. PostgreSQL's production lane enables `--probe-pg-gc-domain`, which
+asserts task GC and domain metadata using the shared observation helpers with
+PostgreSQL SQL translation. Its probe evidence is separate from the MySQL
+`productionDatabaseEvidence` summary, which PostgreSQL records as not collected.
 
 `--mysql` also checks that the database holds exactly the Go schema plus the setup
 tables (`goSchemaOnly` in `results.json`).
