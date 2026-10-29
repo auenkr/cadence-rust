@@ -691,7 +691,13 @@ impl DurableTaskQueueBytes {
             max_interval,
             force,
             std::time::Instant::now(),
-            |ack, limit| self.store.gc_complete_tasks_less_than(&self.key, ack, limit),
+            |ack, limit| {
+                let result = self.store.gc_complete_tasks_less_than(&self.key, ack, limit);
+                if let Err(error) = &result {
+                    eprintln!("Matching task garbage collection failed: {error}");
+                }
+                result
+            },
         )?)
     }
     pub fn levels(&self) -> (i64, i64, i64) {

@@ -2356,6 +2356,74 @@ mod tests {
         }
     }
 
+    // Exercise the real owner shutdown path with failures only after startup.
+    struct TeardownStore {
+        inner: Arc<SqliteTaskStore>,
+        fail: std::sync::atomic::AtomicBool,
+        updates: std::sync::atomic::AtomicUsize,
+        deletes: std::sync::atomic::AtomicUsize,
+    }
+    impl MatchingTaskStoreBytes for TeardownStore {
+        fn get_task_list(&self, key: &TaskListKeyBytes) -> cadence_persistence::matching_native_task_store::Result<cadence_persistence::matching_native_task_store::TaskListRecordBytes> {
+            MatchingTaskStoreBytes::get_task_list(self.inner.as_ref(), key)
+        }
+        fn lease(&self, key: &TaskListKeyBytes, kind: i16, range: i64, now: i64) -> cadence_persistence::matching_native_task_store::Result<cadence_persistence::matching_native_task_store::TaskListRecordBytes> {
+            MatchingTaskStoreBytes::lease(self.inner.as_ref(), key, kind, range, now)
+        }
+        fn update_task_list(&self, key: &TaskListKeyBytes, range: i64, data: cadence_persistence::matching_blob::TaskListDataBytes, now: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                self.updates.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(cadence_persistence::matching_native_task_store::MatchingTaskStoreBytesError::ConditionFailed { message: GoString::from("injected final ack") });
+            }
+            MatchingTaskStoreBytes::update_task_list(self.inner.as_ref(), key, range, data, now)
+        }
+        fn create_tasks_with_domains(&self, key: &TaskListKeyBytes, range: i64, now: i64, tasks: &[(Uuid, &AllocatedTaskBytes)]) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::create_tasks_with_domains(self.inner.as_ref(), key, range, now, tasks)
+        }
+        fn get_tasks(&self, key: &TaskListKeyBytes, read: i64, max: i64, batch: i64) -> cadence_persistence::matching_native_task_store::Result<Vec<AllocatedTaskBytes>> {
+            MatchingTaskStoreBytes::get_tasks(self.inner.as_ref(), key, read, max, batch)
+        }
+        fn task_list_size(&self, key: &TaskListKeyBytes, ack: i64) -> cadence_persistence::matching_native_task_store::Result<i64> {
+            MatchingTaskStoreBytes::task_list_size(self.inner.as_ref(), key, ack)
+        }
+        fn complete_task(&self, key: &TaskListKeyBytes, id: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::complete_task(self.inner.as_ref(), key, id)
+        }
+        fn complete_tasks_less_than(&self, key: &TaskListKeyBytes, ack: i64, limit: i64) -> cadence_persistence::matching_native_task_store::Result<usize> {
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                self.deletes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Err(cadence_persistence::matching_native_task_store::MatchingTaskStoreBytesError::ConditionFailed { message: GoString::from("injected gc") });
+            }
+            MatchingTaskStoreBytes::complete_tasks_less_than(self.inner.as_ref(), key, ack, limit)
+        }
+        fn delete_task_list(&self, key: &TaskListKeyBytes, range: i64) -> cadence_persistence::matching_native_task_store::Result<()> {
+            MatchingTaskStoreBytes::delete_task_list(self.inner.as_ref(), key, range)
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_continues_after_final_ack_and_gc_failures_for_all_owners() {
+        use std::sync::atomic::Ordering;
+        let (_dir, mut registry) = fixture();
+        let store = Arc::new(TeardownStore {
+            inner: Arc::new(SqliteTaskStore::create(_dir.path().join("fail.db"), BlobEncoding::ThriftRW).unwrap()),
+            fail: std::sync::atomic::AtomicBool::new(false),
+            updates: std::sync::atomic::AtomicUsize::new(0),
+            deletes: std::sync::atomic::AtomicUsize::new(0),
+        });
+        registry.store = store.clone();
+        registry = registry.with_max_task_delete_batch_size(Arc::new(|_, _, _| Arc::new(|| 0)));
+        let first = registry.get(key(b"teardown-a"), 0, 1).await.unwrap();
+        let second = registry.get(key(b"teardown-b"), 0, 1).await.unwrap();
+        store.fail.store(true, Ordering::SeqCst);
+        registry.shutdown(2).await.unwrap();
+        assert!(first.queue.is_stopped());
+        assert!(second.queue.is_stopped());
+        assert_eq!(store.updates.load(Ordering::SeqCst), 2);
+        assert_eq!(store.deletes.load(Ordering::SeqCst), 2);
+        assert!(registry.state.lock().unwrap().owners.is_empty());
+    }
+
     #[tokio::test]
     async fn native_invalid_idle_interval_rejects_owner_before_lease() {
         let (_directory, registry) = fixture();
