@@ -1723,6 +1723,7 @@ impl NativeQueueRegistry {
         }))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn forward_state(
         &self,
         lookup: &Key,
