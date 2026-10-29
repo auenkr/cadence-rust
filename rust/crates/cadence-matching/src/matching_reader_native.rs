@@ -137,6 +137,7 @@ fn now() -> i64 {
 struct Pending<T> {
     item: Mutex<Option<T>>,
     accepted: Notify,
+    claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 struct Rendezvous<T> {
     offers: Mutex<VecDeque<Arc<Pending<T>>>>,
@@ -164,13 +165,14 @@ impl<T> Drop for OfferGuard<'_, T> {
     }
 }
 impl<T> Rendezvous<T> {
-    async fn offer(&self, item: T, mut stop: watch::Receiver<bool>) -> bool {
+    async fn offer(&self, item: T, mut stop: watch::Receiver<bool>, claimed: Option<Arc<std::sync::atomic::AtomicBool>>) -> bool {
         if *stop.borrow() {
             return false;
         }
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -204,6 +206,7 @@ impl<T> Rendezvous<T> {
         item: T,
         mut stop: watch::Receiver<bool>,
         deadline: tokio::time::Instant,
+        claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Option<bool> {
         if *stop.borrow() {
             return None;
@@ -211,6 +214,7 @@ impl<T> Rendezvous<T> {
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -246,6 +250,7 @@ impl<T> Rendezvous<T> {
         item: T,
         mut stop: watch::Receiver<bool>,
         tokens: &crate::matching_forward::RequestTokens,
+        claimed: Option<Arc<std::sync::atomic::AtomicBool>>,
     ) -> Option<Result<tokio::sync::OwnedSemaphorePermit, ()>> {
         if *stop.borrow() {
             return None;
@@ -253,6 +258,7 @@ impl<T> Rendezvous<T> {
         let pending = Arc::new(Pending {
             item: Mutex::new(Some(item)),
             accepted: Notify::new(),
+            claimed,
         });
         let _guard = OfferGuard {
             channel: self,
@@ -301,6 +307,11 @@ impl<T> Rendezvous<T> {
                     .lock()
                     .expect("Matching offered task lock")
                     .take();
+                if item.is_some() {
+                    if let Some(claimed) = &pending.claimed {
+                        claimed.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                }
                 pending.accepted.notify_one();
                 return item;
             }
@@ -656,6 +667,7 @@ impl NativeTaskReader {
                             timeout
                         }).filter(|_| active()).map(|timeout| dispatch_deadline(dispatch_limiter.now(), timeout));
                         let attempt_started = std::time::Instant::now();
+                        let local_claimed = Arc::new(std::sync::atomic::AtomicBool::new(false));
                         let attempt = async {
                             match dispatch_limiter
                                 .wait_until(dispatch_stop.clone(), deadline)
@@ -680,7 +692,7 @@ impl NativeTaskReader {
                                 .expect("matching reader forwarder lock")
                                 .clone();
                             let Some(forwarder) = forwarder else {
-                                return if target.offer(dispatched, dispatch_stop.clone()).await {
+                                return if target.offer(dispatched, dispatch_stop.clone(), Some(local_claimed.clone())).await {
                                     Attempt::Offered
                                 } else {
                                     Attempt::Stopped
@@ -693,6 +705,7 @@ impl NativeTaskReader {
                                     dispatched.clone(),
                                     dispatch_stop.clone(),
                                     first_deadline,
+                                    Some(local_claimed.clone()),
                                 )
                                 .await
                             {
@@ -710,6 +723,7 @@ impl NativeTaskReader {
                                         dispatched.clone(),
                                         dispatch_stop.clone(),
                                         &forwarder.tokens,
+                                        Some(local_claimed.clone()),
                                     )
                                     .await
                                 {
@@ -765,6 +779,7 @@ impl NativeTaskReader {
                                         dispatched.clone(),
                                         dispatch_stop.clone(),
                                         forward_deadline,
+                                        Some(local_claimed.clone()),
                                     )
                                     .await
                                 {
@@ -787,7 +802,13 @@ impl NativeTaskReader {
                                 } else {
                                     tokio::time::timeout(remaining, attempt)
                                         .await
-                                        .unwrap_or(Attempt::TimedOut)
+                                        .unwrap_or_else(|_| {
+                                            if local_claimed.load(std::sync::atomic::Ordering::Acquire) {
+                                                Attempt::Offered
+                                            } else {
+                                                Attempt::TimedOut
+                                            }
+                                        })
                                 }
                             }
                             None => attempt.await,
@@ -1032,7 +1053,7 @@ impl NativeTaskReader {
                             _ = pump_stop.changed() => false,
                         },
                         BufferSender::Unbuffered(buffer) => {
-                            buffer.offer(task, pump_stop.clone()).await
+                            buffer.offer(task, pump_stop.clone(), None).await
                         }
                     };
                     if !sent {
@@ -1153,6 +1174,24 @@ mod tests {
     use std::num::NonZeroU32;
     use std::sync::atomic::{AtomicBool, Ordering};
     use uuid::Uuid;
+
+    #[tokio::test(start_paused = true)]
+    async fn claimed_handoff_survives_dispatch_timeout_cancellation() {
+        let channel = Arc::new(Rendezvous::default());
+        let (stop, receiver) = watch::channel(false);
+        let claimed = Arc::new(AtomicBool::new(false));
+        let offer_channel = channel.clone();
+        let offer_claimed = claimed.clone();
+        let offer = tokio::spawn(async move {
+            offer_channel.offer_until(7, receiver, tokio::time::Instant::now() + Duration::from_secs(1), Some(offer_claimed)).await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(channel.poll(stop.subscribe()).await, Some(7));
+        offer.abort();
+        let _ = offer.await;
+        assert!(claimed.load(Ordering::Acquire));
+        assert!(channel.offers.lock().unwrap().is_empty());
+    }
 
     // Go task_reader.go validates each batch read, but keeps signed range values.
     #[test]

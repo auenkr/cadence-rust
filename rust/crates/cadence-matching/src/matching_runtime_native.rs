@@ -218,6 +218,7 @@ pub fn native_queue_registry(
         .with_standby_enabled(standby)
         .with_partition_count(partition_count)
         .with_partition_cache_enabled(cache_enabled)
+        .with_timeout_binder(timeout_binder(cache.clone(), overlay.clone()))
         .with_sync_wait(sync_wait)
         .with_local_poll_wait(local_poll_wait)
         .with_forward_degree(forward_degree)
@@ -415,35 +416,58 @@ fn standby_provider(
     })
 }
 
+fn timeout_binder(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_registry_native::NativeTimeoutBinder {
+    Arc::new(move |domain| {
+        let name = domain_by_raw_id(&cache, domain)?.info.name;
+        let duration = |key: &'static str| {
+            let overlay = overlay.clone();
+            let name = name.clone();
+            Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration_bytes(
+                    config.property_values(key), Some(&name), task.as_bytes(), task_type, 10_000_000,
+                )
+            }) as crate::matching_registry_native::NativeProvider<i64>
+        };
+        let writer_overlay = overlay.clone();
+        let writer_name = name.clone();
+        let writer = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            writer_properties(&writer_overlay, Some(&writer_name), task, task_type)
+        });
+        Ok(crate::matching_registry_native::NativeBoundTimeouts {
+            task_wait: duration("matching.localTaskWaitTime"),
+            poll_wait: duration("matching.localPollWaitTime"),
+            writer,
+        })
+    })
+}
+
+fn writer_properties(
+    overlay: &Mutex<DynamicConfigOverlay>,
+    name: Option<&str>,
+    task: &GoString,
+    task_type: i32,
+) -> (i64, i64, i64) {
+    let config = overlay.lock().expect("admin lock");
+    let integer = |key, default| cadence_persistence::dynamic_config::task_list_integer_bytes(
+        config.property_values(key), name, task.as_bytes(), task_type, default,
+    );
+    let timeout = cadence_persistence::dynamic_config::task_list_duration_bytes(
+        config.property_values("matching.appendTaskTimeout"), name, task.as_bytes(), task_type, 5_000_000_000,
+    );
+    (integer("matching.maxTaskBatchSize", 100), timeout, integer("matching.outstandingTaskAppendsThreshold", 250))
+}
+
 fn writer_live_provider(
     cache: Arc<MatchingDomainCache>,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
 ) -> crate::matching_registry_native::NativeWriterLiveProvider {
     Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
         let name = cached_domain_name(&cache, domain);
-        let config = overlay.lock().expect("admin lock");
-        let batch = cadence_persistence::dynamic_config::task_list_integer_bytes(
-            config.property_values("matching.maxTaskBatchSize"),
-            name.as_deref(),
-            task.as_bytes(),
-            task_type,
-            100,
-        );
-        let timeout = cadence_persistence::dynamic_config::task_list_duration_bytes(
-            config.property_values("matching.appendTaskTimeout"),
-            name.as_deref(),
-            task.as_bytes(),
-            task_type,
-            5_000_000_000,
-        );
-        let capacity = cadence_persistence::dynamic_config::task_list_integer_bytes(
-            config.property_values("matching.outstandingTaskAppendsThreshold"),
-            name.as_deref(),
-            task.as_bytes(),
-            task_type,
-            250,
-        );
-        (batch, timeout, capacity)
+        writer_properties(&overlay, name.as_deref(), task, task_type)
     })
 }
 
@@ -606,6 +630,7 @@ mod tests {
                 "duration",
                 "boolean",
                 "writer",
+                "binding",
                 "standby",
                 "engine_duration",
                 "engine_integer",
@@ -861,6 +886,22 @@ mod tests {
                 writer_live_provider(cache, overlay)(&domain, &task, 0),
                 (17, 250_000_000, 19)
             ),
+            "binding" => {
+                let bound = timeout_binder(cache, overlay.clone())(&domain).unwrap();
+                for (key, data) in [
+                    ("matching.localTaskWaitTime", br#""31ms""#.as_slice()),
+                    ("matching.localPollWaitTime", br#""47ms""#.as_slice()),
+                    ("matching.appendTaskTimeout", br#""83ms""#.as_slice()),
+                ] {
+                    overlay.lock().unwrap().update(false, key, vec![value(data, true)]);
+                }
+                assert_eq!((bound.task_wait)(&domain, &task, 0), 31_000_000);
+                assert_eq!((bound.poll_wait)(&domain, &task, 0), 47_000_000);
+                assert_eq!((bound.writer)(&domain, &task, 0).1, 83_000_000);
+                overlay.lock().unwrap().update(false, "matching.localTaskWaitTime", vec![value(br#""99ms""#, true)]);
+                assert_eq!((bound.task_wait)(&domain, &task, 0), 99_000_000);
+                assert_eq!((bound.task_wait)(&GoString::from("different-id"), &task, 0), 99_000_000);
+            }
             "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
             _ if case.starts_with("engine_") || case.starts_with("control_") => {
                 use crate::matching_engine_native::{
