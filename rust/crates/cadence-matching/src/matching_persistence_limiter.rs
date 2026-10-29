@@ -157,7 +157,7 @@ impl MatchingPersistenceLimiter {
         Self::with_clock(overlay, matching_members, Arc::new(monotonic_nanos))
     }
 
-    fn with_clock(
+    pub(crate) fn with_clock(
         overlay: Arc<Mutex<DynamicConfigOverlay>>,
         matching_members: Arc<AtomicUsize>,
         clock: Clock,
