@@ -2487,7 +2487,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_waits_for_blocked_store_then_cancels_reader() {
+    async fn shutdown_cancels_full_buffer_and_waits_for_blocked_store() {
         use std::sync::atomic::Ordering;
         let (dir, mut registry) = fixture();
         let gate = Arc::new(BlockedRead {
@@ -2503,7 +2503,28 @@ mod tests {
             deletes: std::sync::atomic::AtomicUsize::new(0),
             blocked_read: Some(gate.clone()),
         });
+        struct ReleaseOnDrop(Arc<BlockedRead>);
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                *self.0.released.lock().unwrap() = true;
+                self.0.release.notify_all();
+            }
+        }
+        let _release = ReleaseOnDrop(gate.clone());
+        registry = registry.with_reader_live(Arc::new(|_, _, _| ReaderLive {
+            batch_size: Arc::new(|| 2),
+            read_range_size: Arc::new(|| 100),
+            dispatch_timeout: Arc::new(|| 60_000_000_000),
+            update_ack_interval: Arc::new(|| 60_000_000_000),
+        }));
+        let buffered = registry.get(key(b"full-buffer-with-blocked-store"), 0, 1).await.unwrap();
         let handle = registry.get(key(b"blocked-read"), 0, 1).await.unwrap();
+        buffered.append((0..8).map(|_| task(b"buffered")).collect(), 2).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while buffered.queue.levels().2 < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("reader did not fill its buffer");
         gate.active.store(true, Ordering::SeqCst);
         handle.append(vec![task(b"blocked")], 2).await.unwrap();
         tokio::time::timeout(Duration::from_secs(3), gate.entered.notified()).await.expect("store read did not start");
@@ -2512,6 +2533,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(3), async {
             while !handle.queue.is_stopped() { tokio::task::yield_now().await; }
         }).await.expect("shutdown did not cancel the reader");
+        assert!(buffered.queue.is_stopped());
         assert!(!shutdown.is_finished(), "shutdown skipped the in-flight store read");
         *gate.released.lock().unwrap() = true;
         gate.release.notify_all();
