@@ -73,6 +73,10 @@ pub enum ManagerError {
     NotFound(cadence_api::errors::EntityNotExistsError),
     /// `types.InternalServiceError`.
     Internal(String),
+    /// A typed internal error, distinct from an untyped persistence failure.
+    TypedInternal(String),
+    /// ServiceBusy with its original reason.
+    ServiceBusyReason { message: String, reason: String },
     /// `types.ServiceBusyError` returned by the Go persistence limiter.
     ServiceBusy(String),
     /// Startup scan failure with its original classification and raw identifier.
@@ -85,6 +89,8 @@ impl From<AcquireError> for ManagerError {
             AcquireError::NotFound(error) => ManagerError::NotFound(error),
             AcquireError::Invalid(message) => ManagerError::BadRequest(message),
             AcquireError::Internal(message) => ManagerError::Internal(message),
+            AcquireError::TypedInternal(message) => ManagerError::TypedInternal(message),
+            AcquireError::ServiceBusy { message, reason } => ManagerError::ServiceBusyReason { message, reason },
             AcquireError::Throttled(message) => ManagerError::ServiceBusy(message),
         }
     }

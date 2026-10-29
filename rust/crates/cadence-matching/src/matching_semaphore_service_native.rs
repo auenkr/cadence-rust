@@ -266,13 +266,14 @@ fn status(error: ManagerError) -> Status {
             },
         ),
         ManagerError::Deadline => Status::deadline_exceeded("semaphore acquire deadline exceeded"),
-        ManagerError::NotReady => busy("semaphore manager is not ready".into()),
-        ManagerError::ServiceBusy(message) => busy(message),
-        ManagerError::Internal(message) => Status::internal(message),
+        ManagerError::NotReady => busy("semaphore manager is not ready".into(), String::new()),
+        ManagerError::ServiceBusy(message) => busy(message, String::new()),
+        ManagerError::ServiceBusyReason { message, reason } => busy(message, reason),
+        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => Status::internal(message),
         ManagerError::Load(id, source) => {
             // Both Go mappers use errors.As and serialize the underlying typed
             // error. Only uncategorized errors retain the load wrapper on wire.
-            if matches!(*source, ManagerError::BadRequest(_) | ManagerError::NotFound(_) | ManagerError::ServiceBusy(_)) {
+            if matches!(*source, ManagerError::BadRequest(_) | ManagerError::NotFound(_) | ManagerError::ServiceBusy(_) | ManagerError::ServiceBusyReason { .. } | ManagerError::TypedInternal(_)) {
                 return status(*source);
             }
             let original = status(*source);
@@ -286,13 +287,13 @@ fn status(error: ManagerError) -> Status {
         },
     }
 }
-fn busy(message: String) -> Status {
+fn busy(message: String, reason: String) -> Status {
     crate::grpc::detailed_status(
         Code::ResourceExhausted,
         message,
         "ServiceBusyError",
         cadence_proto::api::ServiceBusyError {
-            reason: String::new(),
+            reason,
         },
     )
 }
@@ -746,6 +747,36 @@ mod tests {
         let wire = error.into_http();
         assert_eq!(wire.headers()["grpc-status"], "5");
         assert!(wire.headers().contains_key("grpc-status-details-bin"));
+    }
+
+    #[test]
+    fn typed_and_untyped_startup_errors_preserve_go_wire_semantics() {
+        let id = bytes(b"d/s\xff/0");
+        let typed = status(ManagerError::Load(
+            id.clone(),
+            Box::new(cadence_persistence::semaphores::AcquireError::TypedInternal("typed failure".into()).into()),
+        ));
+        assert_eq!(typed.code(), Code::Internal);
+        assert_eq!(typed.message(), "typed failure");
+        assert!(typed.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).is_none());
+
+        let untyped = status(ManagerError::Load(
+            id.clone(),
+            Box::new(cadence_persistence::semaphores::AcquireError::Internal("store timeout".into()).into()),
+        ));
+        assert_eq!(untyped.code(), Code::Internal);
+        assert_eq!(untyped.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+            .unwrap().to_bytes().unwrap().as_ref(), b"load semaphore bucket d/s\xff/0: store timeout");
+
+        let busy = status(ManagerError::Load(
+            id,
+            Box::new(cadence_persistence::semaphores::AcquireError::ServiceBusy { message: "busy".into(), reason: "overloaded".into() }.into()),
+        ));
+        assert_eq!(busy.code(), Code::ResourceExhausted);
+        assert_eq!(busy.message(), "busy");
+        let envelope = RawEnvelope::decode(busy.details()).unwrap();
+        let detail = cadence_proto::api::ServiceBusyError::decode(envelope.details[0].value.as_slice()).unwrap();
+        assert_eq!(detail.reason, "overloaded");
     }
 
     #[test]
