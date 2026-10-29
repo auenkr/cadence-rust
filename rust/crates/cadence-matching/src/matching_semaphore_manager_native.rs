@@ -926,7 +926,11 @@ pub(crate) mod tests {
             scan_release: Notify::new(), park_confirm: AtomicBool::new(false),
             cancel_grant: AtomicBool::new(true),
         });
-        let registry = Registry::new(store.clone());
+        let limiter = crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+            Arc::new(std::sync::Mutex::new(crate::admin::DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let registry = Registry::new(crate::matching_persistence::limit_semaphore_store_bytes(store.clone(), limiter));
         let manager = registry.get_or_create(Identifier::new(domain, name, 0).unwrap()).await.unwrap();
         let (cancel, receiver) = tokio::sync::watch::channel(false);
         let pending = {
