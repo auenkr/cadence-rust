@@ -203,6 +203,17 @@ impl OpenFeatureClient {
         }
     }
 
+    /// Integer evaluation with the original Go string domain bytes.
+    pub fn get_int_value_domain_bytes(&self, name: &str, default: i64, filters: &FlattenedContext, domain: &[u8]) -> (i64, Option<ClientError>) {
+        let Some(provider) = current_provider() else { return (default, None); };
+        let resolution = provider.resolve_domain_bytes(name, FlagValue::Int(default), filters, domain);
+        if let Some(error) = resolution.error { return (default, Some(translate_err(&error))); }
+        match resolution.value {
+            FlagValue::Int(value) => (value, None),
+            other => (default, Some(type_error("int", &other))),
+        }
+    }
+
     /// Go `GetFloatValue`.
     pub fn get_float_value(
         &self,
@@ -740,6 +751,41 @@ mod tests {
         );
         assert!(err.is_none());
         assert_eq!(value, "my-domain");
+        deregister_provider();
+    }
+
+    #[test]
+    fn configured_openfeature_domain_bytes_reach_provider() {
+        use cadence_persistence::dynamic_config;
+        use crate::admin::DynamicConfigOverlay;
+        use crate::openfeature::runtime::OpenFeatureRuntimeProvider;
+
+        struct RawProvider;
+        impl FeatureProvider for RawProvider {
+            fn resolve(&self, _: &str, default: FlagValue, _: &FlattenedContext) -> Resolution {
+                Resolution { value: default, error: None }
+            }
+            fn resolve_domain_bytes(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext, domain: &[u8]) -> Resolution {
+                assert_eq!(flag, "matching.domainrps");
+                assert_eq!(ctx.get("clusterName"), Some(&Value::from("cluster")));
+                let value = match domain {
+                    b"\xff" => FlagValue::Int(1),
+                    b"\xfe" => FlagValue::Int(2),
+                    b"valid" => FlagValue::Int(3),
+                    _ => default,
+                };
+                Resolution { value, error: None }
+            }
+        }
+        let _guard = test_lock();
+        reset_registration();
+        provider::register("test-domain-raw", Arc::new(|_| Ok(Arc::new(RawProvider)))).unwrap();
+        register_provider("test-domain-raw", None).unwrap();
+        let mut overlay = DynamicConfigOverlay::default();
+        overlay.set_runtime_provider(Some(OpenFeatureRuntimeProvider::with_cluster_name("cluster")));
+        for (domain, expected) in [(&b"\xff"[..], 1), (&b"\xfe"[..], 2), (&b"valid"[..], 3), (&b"unknown"[..], 9)] {
+            assert_eq!(dynamic_config::integer_bytes(overlay.property_values("matching.domainrps"), Some(domain), 9), expected);
+        }
         deregister_provider();
     }
 

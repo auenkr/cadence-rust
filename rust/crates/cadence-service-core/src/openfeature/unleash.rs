@@ -568,7 +568,17 @@ impl FeatureProvider for UnleashProvider {
         self.ready.store(false, Ordering::Release);
         self.repository.shutdown();
     }
+    fn resolve_domain_bytes(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext, domain: &[u8]) -> Resolution {
+        self.resolve_inner(flag, default, ctx, Some(domain))
+    }
+
     fn resolve(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext) -> Resolution {
+        self.resolve_inner(flag, default, ctx, None)
+    }
+}
+
+impl UnleashProvider {
+    fn resolve_inner(&self, flag: &str, default: FlagValue, ctx: &FlattenedContext, domain: Option<&[u8]>) -> Resolution {
         if !self.ready.load(Ordering::Acquire) {
             return failure(default, ErrorCode::ProviderNotReady, "Provider not ready");
         }
@@ -583,7 +593,10 @@ impl FeatureProvider for UnleashProvider {
                 return failure(default, code, error);
             }
         };
-        let context = merge_context(self.repository.static_context.clone(), context);
+        let mut context = merge_context(self.repository.static_context.clone(), context);
+        if let Some(domain) = domain {
+            context.domain_bytes = Some(domain.to_vec());
+        }
         let snapshot = match evaluation_snapshot(self.repository.snapshot()) {
             Ok(snapshot) => snapshot,
             Err(error) => return failure(default, ErrorCode::General, error.to_string()),
@@ -1021,6 +1034,37 @@ mod tests {
         let provider = new_provider(Some(&yaml(&config)));
         assert!(provider.is_ok());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn byte_domain_is_evaluated_by_real_unleash_provider() {
+        let repository = UnleashRepository::new(
+            UnleashConfig { url: "http://127.0.0.1:1/api".into(), app_name: "test".into(), ..Default::default() },
+            Some(serde_json::json!({"features": [
+                {"name":"unconstrained","enabled":true,"variants":[{"name":"v","weight":100,"payload":{"value":"42"}}]},
+                {"name":"contains","enabled":true,"strategies":[{"name":"default","constraints":[{"contextName":"domainName","operator":"STR_CONTAINS","values":["ABC"],"caseInsensitive":true}]}],"variants":[{"name":"v","weight":100,"stickiness":"domainName","payload":{"value":"17"}}]},
+                {"name":"in","enabled":true,"strategies":[{"name":"default","constraints":[{"contextName":"domainName","operator":"IN","values":["�abc"]}]}],"variants":[{"name":"v","weight":100,"payload":{"value":"9"}}]}
+            ]})),
+        ).unwrap();
+        let provider = UnleashProvider { repository, ready: AtomicBool::new(false) };
+        provider.init().unwrap();
+        let context = FlattenedContext::new();
+        let domain = b"\xffabc";
+        assert_eq!(provider.resolve_domain_bytes("unconstrained", FlagValue::Int(1), &context, domain).value, FlagValue::Int(42));
+        assert_eq!(provider.resolve_domain_bytes("contains", FlagValue::Int(1), &context, domain).value, FlagValue::Int(17));
+        assert_eq!(provider.resolve_domain_bytes("in", FlagValue::Int(1), &context, domain).value, FlagValue::Int(1));
+        // Valid domain bytes must follow exactly the same path as the existing
+        // string API, including conflicting context filter precedence.
+        let mut string_context = FlattenedContext::new();
+        string_context.insert("domainName".into(), serde_json::json!("abc"));
+        for flag in ["unconstrained", "contains", "in", "missing"] {
+            let expected = provider.resolve(flag, FlagValue::Int(1), &string_context);
+            let mut conflicting = FlattenedContext::new();
+            conflicting.insert("domainName".into(), serde_json::json!("other"));
+            let actual = provider.resolve_domain_bytes(flag, FlagValue::Int(1), &conflicting, b"abc");
+            assert_eq!(actual.value, expected.value);
+        }
+        provider.shutdown();
     }
 
     #[test]
