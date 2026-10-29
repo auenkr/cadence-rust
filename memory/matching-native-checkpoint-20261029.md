@@ -1,10 +1,29 @@
 # Matching native checkpoint — 2026-10-29
 
 Documentation-only state on shared `master`. Matching remains incomplete; no
-native mixed lane has passed. Current scheduler observation (from the user): run
-`40841353614` is live, with Test in progress, at exact source
-`e84e51a1c5a08cc89df0a04ccf69a77e284bd1c4`; it has no terminal result yet. Do
-not report an outcome or dispatch/poll Actions from this checkpoint.
+native mixed lane has passed. Run
+[40842468415](https://github.com/auenkr/cadence-rust/actions/runs/40842468415)
+is terminal success on exact head
+`721e196d31b2cd7876fc09086c8ac4b2a8995ba3`; its retained evidence and the
+workspace-format advisory failure are recorded in
+`memory/evidence/matching-ci-40842468415.md`. This CI result is not a mixed
+lane pass. Frozen candidate `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`
+remains unchanged.
+
+Reviewed worker state for continuation:
+
+- `t3/integrate-matching-scenarios` at `74e9f45bd` has scenario integration
+  review; a possible startup dropped-handler lifecycle defect remains
+  unverified.
+- `t3/matching-persistence-qps-parity` at `71b7547f5` is partial. Per-datastore,
+  configstore, and resolver parity gaps remain.
+- `t3/matching-rpc-quota-map` at `c8f8724ab` contains quota-map/fix work but is
+  unverified; its invalid UTF-8 filter limitation remains.
+- Two Terra workers now own semaphore lifetime correction and the remaining
+  persistence gaps. Do not overlap or interfere with those tasks.
+
+No native mixed lane has passed. All ten required mixed lanes remain due.
+No source/workflow changes or runtime validation are included in this update.
 
 Current docs record the source closure review in
 `matching-candidate-source-closure-review-20261029.md` and the formatting
@@ -16,13 +35,8 @@ files and has no CI credit. The formatting patch SHA256 is
 Frozen `matching-native-final-20261029` remains
 `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`.
 
-Bounded source closure review found no additional concrete defect. Open parity
-coverage remains ownership error cases, concurrent poll/zero-dispatch/isolation,
-full config map, and configured semaphore startup timeout. Terra worker
-`39eccb25` is actively addressing those. Luna scheduler `cdc9c685` owns all run
-checks and dispatch; do not poll Actions/delegate status or dispatch. No Cargo,
-rustfmt, Go or validation ran. No source/workflow edit or mixed native pass is
-claimed.
+Historical state below predates the terminal run and worker assignments above.
+It remains useful background but does not override the current owners or status.
 
 Next chain: Terra gap closure and focused formatted CI; integrate any source
 changes; freeze one immutable SHA; fresh uncached workspace Clippy then tests;
