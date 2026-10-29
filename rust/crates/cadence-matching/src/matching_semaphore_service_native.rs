@@ -152,7 +152,7 @@ impl NativeSemaphoreService {
         let manager = if let Some(manager) = self.registry.by_identifier(&id) {
             tokio::time::timeout(Duration::from_secs(30), manager.start())
                 .await
-                .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+                .map_err(|_| startup_timeout_status(&id))?
                 .map_err(status)?;
             manager
         } else {
@@ -164,10 +164,10 @@ impl NativeSemaphoreService {
             self.check_ownership(&id)?;
             tokio::time::timeout(
                 Duration::from_secs(30),
-                self.registry.get_or_create_with_idle_ttl(id, ttl),
+                self.registry.get_or_create_with_idle_ttl(id.clone(), ttl),
             )
             .await
-            .map_err(|_| Status::deadline_exceeded("context deadline exceeded"))?
+            .map_err(|_| startup_timeout_status(&id))?
             .map_err(status)?
         };
         if let Some(ended) = caller_ended(deadline, cancelled.as_ref()) {
@@ -193,6 +193,19 @@ impl NativeSemaphoreService {
             token_id: result.token_id,
         }))
     }
+}
+
+fn startup_timeout_status(id: &IdentifierBytes) -> Status {
+    // Go wraps the scan error in load, then handleErr makes the live caller's
+    // uncategorized error an InternalServiceError. The identifier can contain raw bytes.
+    let mut message = b"load semaphore bucket ".to_vec();
+    message.extend_from_slice(id.to_log_string().as_bytes());
+    message.extend_from_slice(b": context deadline exceeded");
+    crate::matching_native_status::raw_status(
+        Code::Internal,
+        &GoString::from(message),
+        Default::default(),
+    )
 }
 
 fn caller_ended(
@@ -485,6 +498,119 @@ mod tests {
             1
         );
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+        service.stop_all();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn independent_startup_timeout_stops_manager_and_allows_fresh_acquire() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use tokio::sync::Notify;
+
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner
+            .create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1)
+            .await
+            .unwrap();
+        let store = Arc::new(ParkGrant {
+            inner,
+            entered: Notify::new(),
+            release: Notify::new(),
+            scan_pages: AtomicUsize::new(0),
+            park_scan: AtomicBool::new(true),
+            fail_scan: AtomicBool::new(false),
+            scan_entered: Notify::new(),
+            scan_release: Notify::new(),
+        });
+        let registry = Registry::new(store.clone());
+        let metrics = Arc::new(AtomicUsize::new(0));
+        let service = NativeSemaphoreService::new(
+            registry.clone(),
+            Membership::new(
+                "self",
+                vec![Host {
+                    address: "self".into(),
+                    identity: "self".into(),
+                    grpc_address: String::new(),
+                }],
+            ),
+            Arc::new(|_| Ok(bytes(b"domain"))),
+            Arc::new(|_| (true, 1_000_000_000)),
+            Arc::new(|| false),
+            {
+                let metrics = metrics.clone();
+                Arc::new(move |_, _, _| {
+                    metrics.fetch_add(1, Ordering::SeqCst);
+                })
+            },
+        );
+        // Neither request has a caller deadline; only the loader's clock can expire.
+        let first = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await })
+        };
+        store.scan_entered.notified().await;
+        let old = registry.all_managers().pop().unwrap();
+        let waiter = service.acquire(request(b"1:y:r:2"));
+        tokio::pin!(waiter);
+        tokio::select! {
+            result = &mut waiter => panic!("waiter finished during startup: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        tokio::time::advance(Duration::from_secs(29)).await;
+        assert!(!first.is_finished());
+        assert!(Arc::ptr_eq(&old, &registry.all_managers()[0]));
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = first.await.unwrap().unwrap_err();
+        assert_eq!(error.code(), Code::Internal);
+        assert_eq!(
+            error
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+                .unwrap()
+                .to_bytes()
+                .unwrap()
+                .as_ref(),
+            b"load semaphore bucket d/s\xff/0: context deadline exceeded"
+        );
+        let error = waiter.await.unwrap_err();
+        assert_eq!(error.code(), Code::ResourceExhausted);
+        assert_eq!(error.message(), "semaphore manager is not ready");
+        assert!(registry.all_managers().is_empty());
+        assert_eq!(metrics.load(Ordering::SeqCst), 0);
+
+        store.release.notify_one();
+        let acquired = service
+            .acquire(request(b"1:z:r:3"))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(acquired.outcome, 1);
+        assert!(!Arc::ptr_eq(&old, &registry.all_managers()[0]));
+        assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            store
+                .get_semaphore_ownership_by_token(
+                    &bytes(b"d"),
+                    &bytes(b"s\xff"),
+                    0,
+                    acquired.token_id,
+                )
+                .await
+                .unwrap()
+                .as_bytes(),
+            b"1:z:r:3"
+        );
+        assert_eq!(
+            service
+                .acquire(request(b"1:w:r:4"))
+                .await
+                .unwrap()
+                .into_inner()
+                .outcome,
+            2
+        );
         service.stop_all();
     }
 

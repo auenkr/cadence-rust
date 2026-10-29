@@ -247,6 +247,7 @@ jobs:
             crates/cadence-api/src/lib.rs
             crates/cadence-thrift/src/value.rs
             crates/cadence-persistence/src/matching_task_store.rs
+            crates/cadence-persistence/src/matching_postgres.rs
             crates/cadence-persistence/src/matching_native_task_store.rs
             crates/cadence-persistence/src/matching_native_queue.rs
             crates/cadence-persistence/src/semaphores_native.rs
@@ -298,6 +299,7 @@ jobs:
             crates/cadence-matching/src/matching_persistence_native.rs
             crates/cadence-common/src/membership.rs
             crates/cadence-matching/src/matching_membership.rs
+            crates/cadence-matching/src/matching_membership_lifecycle.rs
             crates/cadence-matching/src/matching_fault_injection_native.rs
             crates/cadence-matching/src/matching_fatal.rs
             crates/cadence-matching/src/matching_scaler_native.rs
