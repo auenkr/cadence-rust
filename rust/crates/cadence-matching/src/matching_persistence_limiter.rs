@@ -194,7 +194,9 @@ impl MatchingPersistenceLimiter {
         mut self: Arc<Self>,
         hook: Arc<dyn Fn() + Send + Sync>,
     ) -> Arc<Self> {
-        Arc::get_mut(&mut self).expect("unshared limiter").after_state_lock = Some(hook);
+        Arc::get_mut(&mut self)
+            .expect("unshared limiter")
+            .after_state_lock = Some(hook);
         self
     }
 
