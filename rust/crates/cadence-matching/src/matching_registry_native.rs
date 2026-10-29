@@ -106,6 +106,12 @@ pub type NativeIsolationProvider = Arc<
         + Sync,
 >;
 pub type NativeWriterLiveProvider = NativeProvider<(i64, i64, i64)>;
+pub struct NativeBoundTimeouts {
+    pub task_wait: NativeProvider<i64>,
+    pub poll_wait: NativeProvider<i64>,
+    pub writer: NativeWriterLiveProvider,
+}
+pub type NativeTimeoutBinder = Arc<dyn Fn(&GoString) -> Result<NativeBoundTimeouts, Status> + Send + Sync>;
 pub type NativeWriterLiveConfig = Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>;
 pub type NativeReaderPropertiesProvider = NativeProvider<ReaderLive>;
 pub type NativePollObserverProvider =
@@ -318,6 +324,7 @@ pub struct NativeQueueRegistry {
     poll_observer: Option<NativePollObserverProvider>,
     partition_count: Option<NativeProvider<i64>>,
     cache_enabled: Option<NativeProvider<bool>>,
+    timeout_binder: Option<NativeTimeoutBinder>,
     sync_wait: Option<NativeProvider<i64>>,
     local_poll_wait: Option<NativeProvider<i64>>,
     forward_degree: Option<NativeProvider<i64>>,
@@ -462,10 +469,8 @@ impl NativeQueueHandle {
             return SyncMatchOutcome::Unmatched;
         }
         if limit {
-            let limiter_deadline = self
-                .limiter
-                .now()
-                .saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
+            let limiter_deadline = i128::from(self.limiter.now())
+                + remaining.as_nanos().min(i128::MAX as u128) as i128;
             let stop = self.sync_matcher.stop_signal();
             let acquired = tokio::time::timeout_at(
                 deadline,
@@ -619,6 +624,7 @@ impl NativeQueueRegistry {
             poll_observer: None,
             partition_count: None,
             cache_enabled: None,
+            timeout_binder: None,
             sync_wait: None,
             local_poll_wait: None,
             forward_degree: None,
@@ -778,6 +784,10 @@ impl NativeQueueRegistry {
     }
     pub fn with_partition_cache_enabled(mut self, provider: NativeProvider<bool>) -> Self {
         self.cache_enabled = Some(provider);
+        self
+    }
+    pub fn with_timeout_binder(mut self, binder: NativeTimeoutBinder) -> Self {
+        self.timeout_binder = Some(binder);
         self
     }
     pub fn with_sync_wait(mut self, provider: NativeProvider<i64>) -> Self {
@@ -1370,6 +1380,10 @@ impl NativeQueueRegistry {
     ) -> Result<Arc<Owner>, Status> {
         let registry = self;
         let domain = gs(key.domain_id);
+        let bound_timeouts = registry.timeout_binder.as_ref().map(|bind| bind(&domain)).transpose()?;
+        let sync_wait_provider = bound_timeouts.as_ref().map(|bound| bound.task_wait.clone()).or_else(|| registry.sync_wait.clone());
+        let poll_wait_provider = bound_timeouts.as_ref().map(|bound| bound.poll_wait.clone()).or_else(|| registry.local_poll_wait.clone());
+        let writer_provider = bound_timeouts.as_ref().map(|bound| bound.writer.clone()).or_else(|| registry.writer_live.clone());
         let idle_ttl_nanos = Self::provider(
             &registry.idle_tasklist_check_interval,
             &domain,
@@ -1473,7 +1487,7 @@ impl NativeQueueRegistry {
             NativeTaskDispatcher::new(queue.clone(), registry.history.clone(), domain.clone())
                 .with_liveness(liveness.clone());
         let writer_live: Option<NativeWriterLiveConfig> =
-            registry.writer_live.as_ref().map(|provider| {
+            writer_provider.as_ref().map(|provider| {
                 let provider = provider.clone();
                 let (domain, task_list, task_type) = (domain.clone(), lookup.1.clone(), lookup.2);
                 Arc::new(move || provider(&domain, &task_list, task_type)) as NativeWriterLiveConfig
@@ -1517,7 +1531,7 @@ impl NativeQueueRegistry {
         let sync_groups = isolation.groups.clone();
         let isolation_select = isolation.select.clone();
         let sync_wait: Arc<dyn Fn() -> Duration + Send + Sync> = {
-            let provider = registry.sync_wait.clone();
+            let provider = sync_wait_provider.clone();
             let (domain, name, task_type) = (domain.clone(), lookup.1.clone(), lookup.2);
             Arc::new(move || {
                 Duration::from_nanos(
@@ -1566,13 +1580,15 @@ impl NativeQueueRegistry {
                 &domain,
                 forward_tasks.clone(),
                 forward_rate.clone(),
+                &sync_wait_provider,
+                &poll_wait_provider,
             ))
         };
         let backlog_forward = forward.clone().map(|forward_state| {
             let forward_domain = domain.clone();
             let (forward_task_type, forward_kind) = (lookup.2, kind);
             let local_wait = Self::scoped_count(
-                &registry.local_poll_wait,
+                &sync_wait_provider,
                 domain.clone(),
                 lookup.1.clone(),
                 lookup.2,
@@ -1665,6 +1681,7 @@ impl NativeQueueRegistry {
         }))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn forward_state(
         &self,
         lookup: &Key,
@@ -1672,6 +1689,8 @@ impl NativeQueueRegistry {
         domain: &GoString,
         forward_tasks: Arc<crate::matching_forward::RequestTokens>,
         forward_rate: Arc<crate::matching_forward::ForwardRate>,
+        sync_wait_provider: &Option<NativeProvider<i64>>,
+        poll_wait_provider: &Option<NativeProvider<i64>>,
     ) -> crate::matching_dispatch_native::NativeForwardState {
         let max_outstanding = Self::scoped_count(
             &self.forward_polls,
@@ -1681,7 +1700,14 @@ impl NativeQueueRegistry {
             1,
         );
         let local_wait = Self::scoped_count(
-            &self.local_poll_wait,
+            poll_wait_provider,
+            domain.clone(),
+            lookup.1.clone(),
+            lookup.2,
+            10_000_000,
+        );
+        let local_task_wait = Self::scoped_count(
+            sync_wait_provider,
             domain.clone(),
             lookup.1.clone(),
             lookup.2,
@@ -1736,7 +1762,8 @@ impl NativeQueueRegistry {
             forward_rate,
             child,
             local_wait,
-        );
+        )
+        .with_local_task_wait(local_task_wait);
         if let Some(provider) = &self.poll_observer {
             state = state.with_observer(provider(&self.metric_context(lookup, kind)));
         }

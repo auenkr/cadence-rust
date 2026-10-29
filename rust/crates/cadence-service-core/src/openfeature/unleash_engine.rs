@@ -51,9 +51,19 @@ pub struct Context {
     pub current_time: String,
     #[serde(default, deserialize_with = "null_default")]
     pub properties: HashMap<String, String>,
+    /// Raw domainName from Go string filters, when supplied through the byte API.
+    #[serde(skip)]
+    pub domain_bytes: Option<Vec<u8>>,
 }
 
 impl Context {
+    pub fn field_bytes(&self, name: &str) -> &[u8] {
+        if name == "domainName" {
+            if let Some(bytes) = &self.domain_bytes { return bytes; }
+        }
+        self.field(name).as_bytes()
+    }
+
     pub fn field(&self, name: &str) -> &str {
         match name {
             "userId" => &self.user_id,
@@ -339,11 +349,14 @@ fn strategy_enabled(name: &str, p: &Map<String, Value>, c: &Context) -> bool {
             .is_some_and(|group| rollout(&c.session_id, group, pct("percentage"))),
         "flexibleRollout" => {
             let st = string("stickiness");
+            if !matches!(st, "" | "default" | "random") {
+                return rollout_bytes(c.field_bytes(st), string("groupId"), pct("rollout"));
+            }
             let id = match st {
                 "" | "default" if !c.user_id.is_empty() => c.user_id.clone(),
                 "" | "default" if !c.session_id.is_empty() => c.session_id.clone(),
                 "" | "default" | "random" => (rand::random::<u32>() % 10_000 + 1).to_string(),
-                other => c.field(other).to_owned(),
+                other => String::from_utf8_lossy(c.field_bytes(other)).into_owned(),
             };
             rollout(&id, string("groupId"), pct("rollout"))
         }
@@ -356,16 +369,25 @@ fn strategy_enabled(name: &str, p: &Map<String, Value>, c: &Context) -> bool {
 }
 
 fn rollout(id: &str, group: &str, percentage: Option<f64>) -> bool {
-    if id.is_empty() {
-        return false;
-    }
-    let bucket = normalized(&format!("{group}:{id}"), 0) % 100 + 1;
+    rollout_bytes(id.as_bytes(), group, percentage)
+}
+
+fn rollout_bytes(id: &[u8], group: &str, percentage: Option<f64>) -> bool {
+    if id.is_empty() { return false; }
+    let mut key = group.as_bytes().to_vec();
+    key.push(b':');
+    key.extend_from_slice(id);
+    let bucket = normalized_bytes(&key, 0) % 100 + 1;
     percentage.is_some_and(|p| p > 0.0 && f64::from(bucket) <= p)
 }
 
 /// MurmurHash3 x86 32-bit, matching github.com/twmb/murmur3 SeedNew32.
+#[cfg(test)]
 fn normalized(data: &str, seed: u32) -> u32 {
-    let b = data.as_bytes();
+    normalized_bytes(data.as_bytes(), seed)
+}
+
+fn normalized_bytes(b: &[u8], seed: u32) -> u32 {
     let mut h = seed;
     let mut i = 0;
     while i + 4 <= b.len() {
@@ -476,30 +498,53 @@ fn ipv6_in_subnet(address: std::net::Ipv6Addr, network: std::net::Ipv6Addr, bits
     u128::from(address) & mask == u128::from(network) & mask
 }
 
+// Go range decodes each invalid byte as RuneError; unicode.ToLower maps one
+// rune to one rune (unlike Rust's full, potentially expanding lowercase).
+fn go_lower(mut bytes: &[u8]) -> Vec<u8> {
+    let mut output = String::new();
+    while !bytes.is_empty() {
+        match std::str::from_utf8(bytes) {
+            Ok(valid) => {
+                output.extend(valid.chars().map(|c| c.to_lowercase().next().unwrap_or(c)));
+                break;
+            }
+            Err(error) => {
+                let valid = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
+                output.extend(valid.chars().map(|c| c.to_lowercase().next().unwrap_or(c)));
+                output.push('\u{fffd}');
+                bytes = &bytes[error.valid_up_to() + 1..];
+            }
+        }
+    }
+    output.into_bytes()
+}
+
 fn constraints(ctx: &Context, cs: &[Constraint]) -> bool {
     cs.iter().all(|c| {
-        let actual = ctx.field(&c.context_name);
+        let bytes = ctx.field_bytes(&c.context_name);
+        let actual = std::str::from_utf8(bytes).unwrap_or("\0");
         let a = if c.case_insensitive {
-            actual.to_lowercase()
+            go_lower(bytes)
         } else {
-            actual.to_owned()
+            bytes.to_vec()
         };
         let found = match c.operator.as_str() {
-            "IN" => Some(c.values.iter().any(|value| value == actual)),
-            "NOT_IN" => Some(!c.values.iter().any(|value| value == actual)),
+            "IN" => Some(c.values.iter().any(|value| value.as_bytes() == bytes)),
+            "NOT_IN" => Some(!c.values.iter().any(|value| value.as_bytes() == bytes)),
             "STR_CONTAINS" | "STR_STARTS_WITH" | "STR_ENDS_WITH" => c
                 .values
                 .iter()
                 .any(|value| {
                     let value = if c.case_insensitive {
-                        value.to_lowercase()
+                        go_lower(value.as_bytes())
                     } else {
-                        value.clone()
+                        value.as_bytes().to_vec()
                     };
+                    let value = value.as_slice();
                     match c.operator.as_str() {
-                        "STR_CONTAINS" => a.contains(&value),
-                        "STR_STARTS_WITH" => a.starts_with(&value),
-                        _ => a.ends_with(&value),
+                        "STR_CONTAINS" => value.is_empty() || a.windows(value.len()).any(|window| window == value),
+                        "STR_STARTS_WITH" => a.starts_with(value),
+                        _ => a.ends_with(value),
                     }
                 })
                 .into(),
@@ -574,7 +619,7 @@ pub fn get_variant(snapshot: &FeatureResponse, name: &str, ctx: &Context, depth:
 fn choose_variant(vs: &[VariantInternal], group: &str, c: &Context) -> Option<Variant> {
     for v in vs {
         for o in &v.overrides {
-            if o.values.iter().any(|x| x == c.field(&o.context_name)) {
+            if o.values.iter().any(|x| x.as_bytes() == c.field_bytes(&o.context_name)) {
                 let mut out = Variant::from(v);
                 out.enabled = true;
                 out.feature_enabled = true;
@@ -588,20 +633,23 @@ fn choose_variant(vs: &[VariantInternal], group: &str, c: &Context) -> Option<Va
     }
     let stick = vs.first().map(|v| v.stickiness.as_str()).unwrap_or("");
     let mut id = if !stick.is_empty() && stick != "default" {
-        c.field(stick).to_owned()
+        c.field_bytes(stick).to_vec()
     } else if !c.user_id.is_empty() {
-        c.user_id.clone()
+        c.user_id.as_bytes().to_vec()
     } else if !c.session_id.is_empty() {
-        c.session_id.clone()
+        c.session_id.as_bytes().to_vec()
     } else if !c.remote_address.is_empty() {
-        c.remote_address.clone()
+        c.remote_address.as_bytes().to_vec()
     } else {
-        String::new()
+        Vec::new()
     };
     if id.is_empty() {
-        id = (rand::random::<u32>() % 10_000 + 1).to_string();
+        id = (rand::random::<u32>() % 10_000 + 1).to_string().into_bytes();
     }
-    let target = normalized(&format!("{group}:{id}"), 86_028_157) % total as u32 + 1;
+    let mut key = group.as_bytes().to_vec();
+    key.push(b':');
+    key.extend_from_slice(&id);
+    let target = normalized_bytes(&key, 86_028_157) % total as u32 + 1;
     let mut sum = 0u32;
     for v in vs {
         sum = sum.saturating_add(v.weight.max(0) as u32);
@@ -618,6 +666,26 @@ fn choose_variant(vs: &[VariantInternal], group: &str, c: &Context) -> Option<Va
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn raw_stickiness_hashes_original_bytes() {
+        let mut context = Context::default();
+        context.domain_bytes = Some(vec![0xff, b'a']);
+        let group = (0..100).map(|n| format!("group{n}"))
+            .find(|group| {
+                let mut raw = group.as_bytes().to_vec();
+                raw.extend_from_slice(b":\xffa");
+                normalized_bytes(&raw, 86_028_157) % 100 != normalized(&format!("{group}:�a"), 86_028_157) % 100
+            }).unwrap();
+        let mut raw = group.as_bytes().to_vec();
+        raw.extend_from_slice(b":\xffa");
+        let bucket = normalized_bytes(&raw, 86_028_157) % 100 + 1;
+        let variants = vec![
+            VariantInternal { name: "first".into(), weight: i64::from(bucket), stickiness: "domainName".into(), ..Default::default() },
+            VariantInternal { name: "second".into(), weight: i64::from(100 - bucket), ..Default::default() },
+        ];
+        assert_eq!(choose_variant(&variants, &group, &context).unwrap().name, "first");
+    }
+
     #[test]
     fn go_hash_rollout_fixture() {
         assert_eq!(normalized("gr1:123", 86_028_157) % 100 + 1, 96);

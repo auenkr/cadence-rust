@@ -424,10 +424,8 @@ impl QueueHandle {
             return SyncMatchOutcome::Unmatched;
         }
         if limit {
-            let limiter_deadline = self
-                .limiter
-                .now()
-                .saturating_add(remaining.as_nanos().min(i64::MAX as u128) as i64);
+            let limiter_deadline = i128::from(self.limiter.now())
+                + remaining.as_nanos().min(i128::MAX as u128) as i128;
             let stop = self.sync_matcher.stop_signal();
             let acquired = tokio::time::timeout_at(
                 deadline,
