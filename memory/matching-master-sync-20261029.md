@@ -45,3 +45,19 @@ are now integrated but are NOT claimed as a passing whole-workspace candidate.
 Dispatch fresh whole-workspace CI on master, retain terminal evidence and run
 mixed acceptance after the raw-source-domain gap is corrected. Remain on
 master. No local Cargo/Go/rustfmt ran.
+
+## Handoff verification after workspace switch
+
+Verified this workspace is already on master, clean and synchronized with
+origin/master at `4d1007f3bdd0a6d667936d53aef6cf6277d98f51` after fetching origin.
+The metric integration and Tokio fixture fix are saved remotely. Fresh CI is
+running at that exact source:
+https://github.com/auenkr/cadence-rust/actions/runs/40803510954
+At inspection it was in progress in the Go prerequisite oracles; Clippy and
+workspace tests had not run yet. Its conclusion is pending, not a pass.
+This checkpoint is documentation only and preserves the running source pin.
+
+Next continuation: retain and review that run's terminal logs/artifacts, fix
+the source-domain parity gap documented above, then freeze and validate one
+candidate through fresh workspace CI and all native mixed acceptance lanes.
+Matching remains incomplete. No local Cargo/Go validation ran in this handoff.
