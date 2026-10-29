@@ -720,17 +720,22 @@ Whole Matching remains incomplete; production discovery/runtime wiring and other
 listed parity gaps remain. Next focused operational config gap: Go's
 matching.overrideTaskListRPS, read on each poll in task_list_manager.go:715.
 
-## CI status — 2026-10-29
-One read-only query of [run 40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
-confirmed live `in_progress` at exact head `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`
-(`t3/matching-startup-integration-review`). At 08:15:01Z workspace formatting,
-changed Matching runtime formatting, and Clippy had succeeded; Test was in
-progress and later evidence uploads/identity were pending. No terminal
-conclusion, test totals, or exit files were available. This head predates the
-semaphore/adapter regressions later being integrated by Terra and cannot validate
-them. See `matching-native-checkpoint-20261029.md` and
-`evidence/matching-format-ci-40840392628.md`. Matching remains incomplete;
-`bf9f3d3` remains frozen/unchanged, no native mixed lane has passed, and all ten
-mixed gates remain required. Next dependency is Terra's regression integration
-and review, followed by freezing one coherent candidate and running fresh-target
-CI before serial mixed gates.
+## CI status — 2026-10-29 (terminal update)
+
+Run [40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+completed `success` at exact expected head
+`d4ee53f00d505246dc0b7fbbe353d7e989a91c49`. Selected `cadence-matching`
+Clippy/test exits are 0/0; the library suite reports 973 passed and 2 ignored.
+The advisory workspace-format exit is 1 due to an unrelated diff in
+`rust/crates/cadence-api/src/admin.rs:371`; scoped Matching runtime/query/TLS
+formatting checks passed. The run restored a Rust cache, so it is not a fresh
+uncached workspace gate. Compact evidence is in
+`memory/evidence/matching-startup-candidate-ci-40840392628/`. This candidate's
+log contains initial cold-domain/runtime startup coverage, but no later
+semaphore startup-timeout, expanded adapter/lock, or two-thread regressions.
+Do not attribute candidates `25e`, `90cd`, `e84e`, or `8cc` to this run.
+Matching remains incomplete; preserve frozen `bf9f3d3`, its failed PostgreSQL
+attempt before SDK execution, and all ten required mixed lanes. Terra integration
+and review, then fresh-target workspace CI, must precede serial mixed gates.
+See `matching-native-checkpoint-20261029.md` and
+`matching-native-resume-state-20261029.md`.

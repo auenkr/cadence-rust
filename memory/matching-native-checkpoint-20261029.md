@@ -1,42 +1,45 @@
 # Matching native checkpoint — 2026-10-29
 
-Documentation-only state captured on shared `master`. Matching remains
-incomplete; no native mixed lane has passed. One read-only status query was
-made for run `40840392628`; no validation was run and nothing was dispatched.
+Documentation-only state on shared `master`. Matching remains incomplete; no
+native mixed lane has passed. Run `40840392628` is now terminal and was reviewed
+against its artifacts at the expected exact head. No CI was dispatched and no
+source, workflow, or service implementation was changed.
 
 ## Candidate and validation
 
-- Integrated source candidate: `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`
-  on `t3/matching-startup-integration-review`. It includes the diagnostics,
-  pool, and lock fixes. Source review exists; validation does not.
-- Run `40839466118` failed the scoped formatting check at
-  `matching_runtime.rs:925`; Clippy and tests were skipped. The one
-  authoritative status read of formatting artifact run
-  [40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
-  confirms exact head `d4ee53f00d505246dc0b7fbbe353d7e989a91c49` on
-  `t3/matching-startup-integration-review`. At `2026-10-29T08:15:01Z`, run
-  status was `in_progress`: workspace formatting, changed-Matching-runtime
-  formatting, and Clippy succeeded; Test was in progress and later evidence
-  upload/identity steps were pending. This is a live status only, not a terminal
-  conclusion. No exit files or test totals were available from this query. See
-  `memory/evidence/matching-format-ci-40840392628.md` for the compact record.
-- This candidate predates the later semaphore and adapter regression changes
-  under Terra integration/review, so this run cannot validate those changes.
-- Adapter regression branch `t3/matching-lock-regressions` at
-  `04826c745` covers four engine and three control cold production limiter
-  paths. It has no validation evidence.
-- Semaphore branch `t3/matching-semaphore-startup-timeout` at
-  `112217ac44cb88c25cb35a9a6bb0ea60d9a2f5e2` adds the independent paused-native
-  30-second no-deadline regression and maps startup failure from
-  `DeadlineExceeded` to Go-compatible `Internal`. It is unverified.
-- Terra is independently reviewing/integrating both regression branches. No
-  branch was imported or validated as part of this docs-only checkpoint.
+- Integrated review candidate: `d4ee53f00d505246dc0b7fbbe353d7e989a91c49`
+  on `t3/matching-startup-integration-review`.
+- Run [40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+  completed `success` at that exact head. Job `clippy-test` also concluded
+  success. The downloaded `rust/commit.txt` matches the expected SHA. Compact
+  evidence: `memory/evidence/matching-startup-candidate-ci-40840392628/`.
+- Selected package was `cadence-matching`. Recorded exits: `clippy.exit=0`,
+  `test.exit=0`, `fmt.exit=0`, `matching-runtime-format.exit=0`,
+  `query-format.exit=0`, `tls-format.exit=0`; advisory
+  `workspace-format.exit=1` due to a diff in unrelated
+  `rust/crates/cadence-api/src/admin.rs:371`. The workflow captured this
+  advisory formatting failure and continued. Test log has 27 result summaries:
+  1,083 pass results, 0 failures, 16 ignored (including filtered/repeated
+  library test invocations); the library suite itself was 973 passed and 2
+  ignored. The run restored a Rust cache and used the ordinary package target,
+  so it is not fresh uncached workspace acceptance.
+- The log contains cold-domain/runtime startup coverage, including the
+  `grpc_matching::cold_domain_metric_tests::*` cases,
+  `grpc_matching::durable_tests::matching_grpc_listener_registers_meta_health_and_gates_startup`,
+  `matching_host_native::tests::startup_gate_opens_and_shutdown_wakes_waiters_with_unavailable`,
+  and `thrift_matching::tests::matching_thrift_nil_request_waits_for_startup_like_go_start_profiling`.
+  No Rust test files changed in the run head's commit. Do not attribute later
+  semaphore startup-timeout, expanded adapter/lock, or two-thread regression
+  cases to this run. Specifically exclude candidates `25e`, `90cd`, `e84e`,
+  and `8cc` from its evidence.
+- This package run does not replace frozen candidate
+  `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`; its PostgreSQL mixed run failed
+  before SDK execution. Adapter branch `04826c745` and semaphore branch
+  `112217ac44cb88c25cb35a9a6bb0ea60d9a2f5e2` remain separate later unverified
+  regression work. The ten mixed lanes below remain required.
 - Requested audit note source thread
-  `t3/matching-native-gate-coverage1fc484820` returned `thread_not_found`.
-  Therefore no audit-note content could be retrieved or credited.
-- The old frozen candidate `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`
-  remains unchanged. Its native PostgreSQL mixed run failed before any SDK
-  workflow; this is not a passed native lane.
+  `t3/matching-native-gate-coverage1fc484820` returned `thread_not_found`;
+  it supplies no evidence.
 
 ## Ten required mixed lanes
 
@@ -63,19 +66,18 @@ before serial mixed validation. There is no native lane pass to report.
 
 ## Dependency chain
 
-1. After this run reaches a terminal state, collect and review artifact
-   `40840392628` against the exact candidate SHA, including actual formatting,
-   Clippy, and test exit files and test totals. Formatting and Clippy are
-   observed successes; tests were still in progress at the one status read.
-2. Complete Terra's source review/integration of both regression branches;
-   reconcile their exact commits and preserve focused regression coverage.
-3. Freeze one integrated candidate. Run fresh-target CI (Clippy then workspace
-   tests) and record run URL, head SHA, conclusion, and actual exits.
-4. Resolve startup/readiness and shutdown evidence before mixed acceptance.
-   Then execute the ten lanes serially on that same SHA, preserving artifact
-   identities and binary SHA256 for every lane, followed by supplemental oracles
-   and the Matching parity audit.
-5. Only after the audit and all required evidence are complete may migration
-   proceed from Matching to History.
+1. Terra integration/review must settle the adapter and semaphore regression
+   changes and their exact source identity. Keep them distinct from run
+   `40840392628`'s earlier cold-domain/runtime tests.
+2. Freeze one integrated candidate. Run fresh uncached workspace CI (Clippy,
+   then workspace tests) and record URL, exact head, conclusion, actual exit
+   files, and test totals.
+3. Resolve startup/readiness and shutdown evidence before mixed acceptance.
+   Execute all ten lanes serially on that same immutable candidate, retaining
+   artifact identities, binary SHA256, SDK behavior, failure/restart/recovery,
+   and cleanup evidence.
+4. Complete the Matching parity audit and required supplemental oracles before
+   migrating to History.
 
-This checkpoint does not change source, workflows, frozen refs, or lane status.
+This checkpoint records evidence only and does not change source, workflows,
+frozen refs, or mixed-lane status.

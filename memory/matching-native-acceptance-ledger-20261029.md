@@ -17,6 +17,29 @@ Dispatch commands and exact scenario/artifact requirements:
 oracles). No History implementation work until every Matching requirement is
 proved.
 
+## Terminal review of startup-integration candidate run 40840392628
+
+The successful selected-package Actions run
+[40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+was independently reviewed after completion. Exact expected source head
+`d4ee53f00d505246dc0b7fbbe353d7e989a91c49` matches the artifact identity.
+Clippy/test exits are 0/0; scoped changed Matching runtime, query, TLS, and
+selected formatting exits are all 0. Advisory workspace-wide formatting exit
+is 1 for unrelated `rust/crates/cadence-api/src/admin.rs:371`; workflow captures
+that result and succeeds. Package test evidence is 973 passed / 2 ignored in
+the library harness; 27 retained summaries total 1,083 pass results, no failures,
+16 ignored including filtered/repeated invocations. The job restored a Rust
+cache and selected `cadence-matching`; it is not fresh uncached workspace CI.
+
+The log contains existing cold-domain/runtime startup regressions (cold-domain
+metric handlers, gRPC listener startup/Meta Health, native startup gate and
+Thrift startup profiling). The exact-head commit changed no Rust test files.
+Do not credit later semaphore startup-timeout, expanded adapter/lock, or two-
+thread regressions, nor candidates `25e`, `90cd`, `e84e`, or `8cc`. This result
+is neither mixed runtime evidence nor validation of the frozen candidate's
+failed PostgreSQL attempt. Compact files are retained at
+`memory/evidence/matching-startup-candidate-ci-40840392628/`.
+
 ## Source identity
 
 Current frozen candidate: `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`,

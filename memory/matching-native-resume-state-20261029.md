@@ -130,3 +130,29 @@ passed. Preserve the two-node MySQL lane. Next dependency chain: collect/review
 the formatting artifact, finish Terra's two-branch integration review, freeze a
 single SHA, pass fresh-target workspace CI, then run all ten mixed lanes
 serially and close the parity audit.
+
+
+## Terminal run review — 2026-10-29
+
+Run [40840392628](https://github.com/auenkr/cadence-rust/actions/runs/40840392628)
+completed `success` at exact expected head
+`d4ee53f00d505246dc0b7fbbe353d7e989a91c49`; the artifact `commit.txt` agrees.
+The run selected `cadence-matching`, not the workspace. Actual exits: Clippy 0,
+tests 0, changed Matching runtime format 0, query format 0, TLS format 0, and
+`fmt.exit=0`; advisory workspace format check exit 1 reports an unrelated diff
+at `rust/crates/cadence-api/src/admin.rs:371`. The run restored the Rust cache,
+so it is not a fresh uncached workspace gate. The Matching library suite reports
+973 passed, 2 ignored; across 27 result summaries the retained log sums to 1,083
+pass results, 0 failures, 16 ignored, including filtered/repeated invocations.
+See `memory/evidence/matching-startup-candidate-ci-40840392628/`.
+
+The log includes earlier cold-domain/runtime startup coverage (cold domain
+metric tests, gRPC listener startup/Meta Health, native startup gate and Thrift
+startup profiling). The run-head commit changed no Rust test files. It does not
+validate later semaphore startup-timeout, expanded adapter/lock, or two-thread
+regressions, and gives no credit to later candidates `25e`, `90cd`, `e84e`, or
+`8cc`. This result does not replace frozen `bf9f3d3`; its PostgreSQL mixed run
+failed before SDK workflows. Preserve all ten required mixed lanes, including
+two-node MySQL, and the PostgreSQL failure detail above. Matching remains
+incomplete; next validation is only after integration/freeze of a coherent
+candidate and must be fresh-target workspace CI before serial mixed gates.
