@@ -925,7 +925,9 @@ impl MatchingRuntime {
             cache
                 .start()
                 .map_err(|error| anyhow::anyhow!("starting Matching domain cache: {error}"))?;
-            eprintln!("Matching startup: domain cache initial refresh complete; registering callback");
+            eprintln!(
+                "Matching startup: domain cache initial refresh complete; registering callback"
+            );
             let notification_version = Arc::new(std::sync::Mutex::new(None::<i64>));
             let prepare: crate::matching_domain_cache::PrepareCallback = Arc::new(|| {});
             let changed: crate::matching_domain_cache::DomainChangeCallback = Arc::new({
