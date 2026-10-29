@@ -300,24 +300,22 @@ impl<T> Rendezvous<T> {
             available.as_mut().enable();
             // Ownership moves synchronously during a poll of this future. A
             // cancelled waiting future never owns a task hidden in a oneshot.
-            if let Some(pending) = self
-                .offers
-                .lock()
-                .expect("Matching handoff lock")
-                .pop_front()
             {
-                let item = pending
-                    .item
-                    .lock()
-                    .expect("Matching offered task lock")
-                    .take();
-                if item.is_some() {
-                    if let Some(claimed) = &pending.claimed {
-                        claimed.store(true, std::sync::atomic::Ordering::Release);
+                let mut offers = self.offers.lock().expect("Matching handoff lock");
+                if let Some(pending) = offers.pop_front() {
+                    let item = pending
+                        .item
+                        .lock()
+                        .expect("Matching offered task lock")
+                        .take();
+                    if item.is_some() {
+                        if let Some(claimed) = &pending.claimed {
+                            claimed.store(true, std::sync::atomic::Ordering::Release);
+                        }
                     }
+                    pending.accepted.notify_one();
+                    return item;
                 }
-                pending.accepted.notify_one();
-                return item;
             }
             tokio::select! {
                 _ = available => (),
@@ -804,9 +802,10 @@ impl NativeTaskReader {
                                 if remaining.is_zero() {
                                     Attempt::TimedOut
                                 } else {
-                                    tokio::time::timeout(remaining, attempt)
-                                        .await
-                                        .unwrap_or_else(|_| {
+                                    // Drop the timed-out offer before checking its claim. Its
+                                    // guard synchronizes with a poller taking the task.
+                                    let result = tokio::time::timeout(remaining, attempt).await;
+                                    result.unwrap_or_else(|_| {
                                             if local_claimed.load(std::sync::atomic::Ordering::Acquire) {
                                                 Attempt::Offered
                                             } else {
@@ -1244,6 +1243,24 @@ mod tests {
         let _ = offer.await;
         assert!(claimed.load(Ordering::Acquire));
         assert!(channel.offers.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_unclaimed_handoff_cannot_be_claimed_after_retry() {
+        let channel = Rendezvous::default();
+        let (stop, receiver) = watch::channel(false);
+        let claimed = Arc::new(AtomicBool::new(false));
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            channel.offer(7, receiver, Some(claimed.clone())),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(!claimed.load(Ordering::Acquire));
+        assert!(channel.offers.lock().unwrap().is_empty());
+        assert!(tokio::time::timeout(Duration::from_secs(1), channel.poll(stop.subscribe()))
+            .await
+            .is_err());
     }
 
     // Go task_reader.go validates each batch read, but keeps signed range values.
