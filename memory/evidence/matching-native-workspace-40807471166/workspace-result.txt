@@ -1,0 +1,17 @@
+URL: https://github.com/auenkr/cadence-rust/actions/runs/40807471166
+Conclusion: success
+commit.txt: bf9f3d9387a72c4ed26b4be0a85025e65fd485a1
+target-dir.txt: /home/runner/work/_temp/cargo-target-final
+clippy.exit: 0
+test.exit: 0
+fmt.exit: 0
+workspace-format.exit: 1
+matching-runtime-format.exit: 0
+tls-format.exit: 0
+query-format.exit: 0
+test matching_engine_native::tests::forwarded_activity_sync_dispatch_preserves_cached_raw_source ... ok
+test matching_persistence::list_domain_metric_tests::raw_domain_request_metric_is_visible_while_source_is_blocked ... ok
+test matching_semaphore_manager_native::tests::failed_start_releases_waiter_and_next_request_rebuilds_manager ... ok
+test matching_semaphore_service_native::tests::slow_start_keeps_running_after_caller_cancel_and_reuses_manager ... ok
+test result: ok. 972 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 36.10s
+Workspace-wide formatting remains a nonblocking report with differences outside the targeted checks; do not claim workspace formatting passed.

@@ -13,9 +13,12 @@ proved.
 Current frozen candidate: `bf9f3d9387a72c4ed26b4be0a85025e65fd485a1`,
 remote ref `matching-native-final-20261029` (verified with `git ls-remote`).
 Whole-workspace Actions [40807471166](https://github.com/auenkr/cadence-rust/actions/runs/40807471166)
-is running at that exact SHA with fresh target, sequential Clippy then workspace
+passed at that exact SHA with fresh target, sequential Clippy then workspace
 tests, original-Go domain/source oracles enabled, and no formatting mutation.
-No terminal result is available yet. The selected predecessor runs failed on
+Clippy and test exits are 0; Matching reports 972 passed and 2 ignored. Four metric
+comparisons match. Targeted formatting passes; workspace-wide formatting reports
+existing differences (exit1), so no whole-workspace formatting pass is claimed.
+Evidence: `evidence/matching-native-workspace-40807471166/workspace-result.txt`. The selected predecessor runs failed on
 compile/test lint issues, now corrected; their compact evidence is retained below.
 
 Latest completed whole-workspace pass remains historical:
@@ -24,7 +27,7 @@ at `4d1007f3bdd0a6d667936d53aef6cf6277d98f51`. It predates source-domain changes
 and does not validate this candidate. Earlier results and diagnostics are retained
 in the continuation checkpoints and `memory/evidence/`.
 
-All ten native mixed lanes remain pending. Final gates must retain this same
+PostgreSQL is dispatched; the other nine native mixed lanes remain undispatched. Final gates must retain this same
 candidate SHA (or a coherently revalidated replacement if fixes are needed).
 Evidence-only commits on master may follow the frozen candidate; they do not
 change the immutable ref used to build and run the candidate.
@@ -33,8 +36,8 @@ change the immutable ref used to build and run the candidate.
 
 | Requirement | Current native evidence |
 | --- | --- |
-| Fresh uncached workspace Clippy, then workspace tests | Run40807471166 in progress at frozen bf9f3d938; terminal exits and artifacts pending. Historical workspace pass40803510954 predates candidate changes and cannot supply final-pin credit. |
-| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Not dispatched |
+| Fresh uncached workspace Clippy, then workspace tests | Run40807471166 passed at frozen bf9f3d938; retained Clippy/test exits0 and fresh target identity. Historical workspace pass40803510954 predates candidate changes and cannot supply final-pin credit. |
+| PostgreSQL shared Go schema + SDK + domain/GC/standby/partitions/restart/recovery | Run [40808334141](https://github.com/auenkr/cadence-rust/actions/runs/40808334141) live at frozen SHA; PostgreSQL client step observed. Results pending. |
 | MySQL probes, shared Go schema + SDK + forwarding/standby/partitions/restart/recovery | Not dispatched |
 | Thrift Matching / TChannel History mixed SDK + restart/recovery | Not dispatched |
 | Configstore live settings + SDK + restart/recovery | Not dispatched |

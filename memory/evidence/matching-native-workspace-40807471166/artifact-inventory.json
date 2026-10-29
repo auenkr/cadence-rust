@@ -1,0 +1,582 @@
+[
+  {
+    "path": "workflow.log",
+    "sha256": "445f6cdc3d9fe46841b25b4602ce425c8edc4c5f2e9d4540490b495f64d8f5d1",
+    "bytes": 586564
+  },
+  {
+    "path": "source-domain-boundary-oracle/command.txt",
+    "sha256": "c4ddb36727aa60ac1a92757586c867a8e94f5e4c4a0f9fd0f09ffbe7207dab3d",
+    "bytes": 162
+  },
+  {
+    "path": "source-domain-boundary-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "source-domain-boundary-oracle/overlay.json",
+    "sha256": "473cfc6e6790276282a91057f2e0397c9311c95e2d88b85eec35f05a4f898195",
+    "bytes": 435
+  },
+  {
+    "path": "source-domain-boundary-oracle/go-oracle.log",
+    "sha256": "0ad7f7feba0452419ad8f4746f2f6280147735413b41367a17f442b5d8051a9c",
+    "bytes": 4123
+  },
+  {
+    "path": "source-domain-boundary-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "domain-cache-uuid-oracle/command.txt",
+    "sha256": "bb9d5ace3e24a6d539f9eae54e5d45005d5df395256a39ca7b2117040ce12094",
+    "bytes": 150
+  },
+  {
+    "path": "domain-cache-uuid-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "domain-cache-uuid-oracle/overlay.json",
+    "sha256": "ca9c3543af1b434ef6c7b0e3a922beee2ac5708613a466905c158182a0170b7e",
+    "bytes": 197
+  },
+  {
+    "path": "domain-cache-uuid-oracle/go-oracle.log",
+    "sha256": "8a0c625744bf42613fbc926f1b238efc177914bb0526c00aaca144d7d5501711",
+    "bytes": 6927
+  },
+  {
+    "path": "domain-cache-uuid-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "metrics/rust-name-on.json",
+    "sha256": "ec09911eedb863cec1af0ca6afaac76a0b48a94e64df9222517f8c6c262ddb7b",
+    "bytes": 3436
+  },
+  {
+    "path": "metrics/compare-default.json",
+    "sha256": "79b49c1e82b7e8c3e322bf944ba598ea37ac00c70626d0cca284155484ae951f",
+    "bytes": 34
+  },
+  {
+    "path": "metrics/rust-both.json",
+    "sha256": "ed0c4be943a6c08012998e032621348c81e5523a1b88b10766a4d4fe0244a999",
+    "bytes": 4019
+  },
+  {
+    "path": "metrics/rust-name-off.json",
+    "sha256": "15f3cc4d0397f059bb3f897f4273c8f3ad4863be6ad403fc9a6d2fcacf4bc787",
+    "bytes": 3768
+  },
+  {
+    "path": "metrics/rust-default.json",
+    "sha256": "d7db5350756cd0d4bc4a85061b47e25682dc80871c4b8609ff9d8b1178dbcd88",
+    "bytes": 3185
+  },
+  {
+    "path": "metrics/go-both.json",
+    "sha256": "f651bdfbe5e6d6bd3eb9ef20b34b082956f75f5fc61445c175280d985f5cdafc",
+    "bytes": 4276
+  },
+  {
+    "path": "metrics/go-name-on.json",
+    "sha256": "7b04ea935dc188dbd0b8dba96498edc4458fc7e5ae74e74a0c466658366f2582",
+    "bytes": 3660
+  },
+  {
+    "path": "metrics/compare-name-off.json",
+    "sha256": "f35352cf9105d9cea47ff9182286a4677c4620500511a540dcabfd5f1f0f8e82",
+    "bytes": 34
+  },
+  {
+    "path": "metrics/head-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "metrics/go-persistence-wrapper.json",
+    "sha256": "82f6a168497c5cdcd2d076bdbf8ded8081afca979d7788456326fa749a721e31",
+    "bytes": 1112
+  },
+  {
+    "path": "metrics/compare-both.json",
+    "sha256": "93b81df2304705909aa604c76777b7b8650358e3f22b72fd725cbfaae7881ad9",
+    "bytes": 34
+  },
+  {
+    "path": "metrics/rust-persistence-wrapper.json",
+    "sha256": "587ea2248fc4929103a689c7e34a2450b409da505c1970e548ec1ea6f4b45a0c",
+    "bytes": 1019
+  },
+  {
+    "path": "metrics/compare-name-on.json",
+    "sha256": "4c9da7462a5e9bbacd1c47a4a970cb564bb372be70625a5d62fd4d0ee419c3fa",
+    "bytes": 34
+  },
+  {
+    "path": "metrics/rust-binary.sha256",
+    "sha256": "46386d4e5af015a384b3ee4d6dec01f5b4a83d78fab533e6055f16a933fc9fb0",
+    "bytes": 157
+  },
+  {
+    "path": "metrics/go-name-off.json",
+    "sha256": "45c77bd36a0edde6a1ab2fc1e52cb51e8d50a9edc27ca036cacb4bb029a70630",
+    "bytes": 4014
+  },
+  {
+    "path": "metrics/go-default.json",
+    "sha256": "bd6573206758cea16ef501e5292278b1edb478df9394f65ff5131246060eb8bd",
+    "bytes": 3398
+  },
+  {
+    "path": "matching-raw-string-oracle/go-format.patch",
+    "sha256": "55dd0ae01bc5b9cf60b8f5116c15453a321999b6c3b55c0a53f4b130e393b492",
+    "bytes": 9507
+  },
+  {
+    "path": "matching-raw-string-oracle/go-oracle.json",
+    "sha256": "dacf96b97afb012f28e9d35cd909299410019b128bd61d56d4b87a7d8351dd9a",
+    "bytes": 86537
+  },
+  {
+    "path": "matching-raw-string-oracle/modules.txt",
+    "sha256": "92fde93a4cef399f8446059584b94ec1bb57b7ac8635555c106ad1e56323c1c5",
+    "bytes": 209
+  },
+  {
+    "path": "matching-raw-string-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "matching-raw-string-oracle/go-version.txt",
+    "sha256": "72fbd1d67ca459621672bbf30387af1e39868899b7092da85d764dc5708a3702",
+    "bytes": 33
+  },
+  {
+    "path": "matching-raw-string-oracle/go-oracle.log",
+    "sha256": "5c2a5329f65aad5355d117d5561f834db8a2f1a25976b41ad978170491ec6e23",
+    "bytes": 4387
+  },
+  {
+    "path": "matching-raw-string-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "matching-describe-tasklist-go-oracle/command.txt",
+    "sha256": "40fe2a719bf29f21fa76a103098f6c6e9248aa4aa93666578dc522e4bc890a93",
+    "bytes": 200
+  },
+  {
+    "path": "matching-describe-tasklist-go-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "matching-describe-tasklist-go-oracle/overlay.json",
+    "sha256": "c8eea0b7abfa0da4fb2e0b35382d7ced42f6aa8c824a797c7658395c19e2b913",
+    "bytes": 420
+  },
+  {
+    "path": "matching-describe-tasklist-go-oracle/go-oracle.log",
+    "sha256": "942284bce73b6802fbb1bfa99f806f1bd5d9641332585659b256dc02038ac5a6",
+    "bytes": 42036
+  },
+  {
+    "path": "matching-describe-tasklist-go-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "rust-ci-logs/_temp/cadence-matching-owner-order.json",
+    "sha256": "8bc94062209fed2b157913cd94f5a511858ec995bc9aa23922cdbf82c27ba889",
+    "bytes": 13695
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/tls-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/matching-runtime-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/query-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/test.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/test.log",
+    "sha256": "3892ad1b66682d584e3b354b1eddea868916dc358f2914169b0d1bb3c020e4d1",
+    "bytes": 195663
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/fmt.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/Cargo.lock",
+    "sha256": "a0802225517ea5ef2bc43e80523f3819f10fdedb5892f0cd375fb51c83c75278",
+    "bytes": 102907
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/query-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/target-dir.txt",
+    "sha256": "f2e8e5be63d5f88f972b21dd7011c9862114aa2a59e1526e8c0671550a6af630",
+    "bytes": 43
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/clippy.log",
+    "sha256": "841a7974061b3c29d533ba363915951fa34dfe1ebd74f3f3c9cab69527a23212",
+    "bytes": 23117
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/tls-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/clippy.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/matching-runtime-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/format.log",
+    "sha256": "aa7ee1f5074affa6f72928c76534c90545de34385f123bae8ec390733a12f3c2",
+    "bytes": 604703
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/workspace-format.exit",
+    "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "bytes": 2
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/fmt.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "rust-ci-logs/cadence-rust/cadence-rust/rust/commit.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/source-domain-boundary-oracle/command.txt",
+    "sha256": "c4ddb36727aa60ac1a92757586c867a8e94f5e4c4a0f9fd0f09ffbe7207dab3d",
+    "bytes": 162
+  },
+  {
+    "path": "downloaded/source-domain-boundary-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/source-domain-boundary-oracle/overlay.json",
+    "sha256": "473cfc6e6790276282a91057f2e0397c9311c95e2d88b85eec35f05a4f898195",
+    "bytes": 435
+  },
+  {
+    "path": "downloaded/source-domain-boundary-oracle/go-oracle.log",
+    "sha256": "0ad7f7feba0452419ad8f4746f2f6280147735413b41367a17f442b5d8051a9c",
+    "bytes": 4123
+  },
+  {
+    "path": "downloaded/source-domain-boundary-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/domain-cache-uuid-oracle/command.txt",
+    "sha256": "bb9d5ace3e24a6d539f9eae54e5d45005d5df395256a39ca7b2117040ce12094",
+    "bytes": 150
+  },
+  {
+    "path": "downloaded/domain-cache-uuid-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/domain-cache-uuid-oracle/overlay.json",
+    "sha256": "ca9c3543af1b434ef6c7b0e3a922beee2ac5708613a466905c158182a0170b7e",
+    "bytes": 197
+  },
+  {
+    "path": "downloaded/domain-cache-uuid-oracle/go-oracle.log",
+    "sha256": "8a0c625744bf42613fbc926f1b238efc177914bb0526c00aaca144d7d5501711",
+    "bytes": 6927
+  },
+  {
+    "path": "downloaded/domain-cache-uuid-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/go-format.patch",
+    "sha256": "55dd0ae01bc5b9cf60b8f5116c15453a321999b6c3b55c0a53f4b130e393b492",
+    "bytes": 9507
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/go-oracle.json",
+    "sha256": "dacf96b97afb012f28e9d35cd909299410019b128bd61d56d4b87a7d8351dd9a",
+    "bytes": 86537
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/modules.txt",
+    "sha256": "92fde93a4cef399f8446059584b94ec1bb57b7ac8635555c106ad1e56323c1c5",
+    "bytes": 209
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/go-version.txt",
+    "sha256": "72fbd1d67ca459621672bbf30387af1e39868899b7092da85d764dc5708a3702",
+    "bytes": 33
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/go-oracle.log",
+    "sha256": "5c2a5329f65aad5355d117d5561f834db8a2f1a25976b41ad978170491ec6e23",
+    "bytes": 4387
+  },
+  {
+    "path": "downloaded/matching-raw-string-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/matching-describe-tasklist-go-oracle/command.txt",
+    "sha256": "40fe2a719bf29f21fa76a103098f6c6e9248aa4aa93666578dc522e4bc890a93",
+    "bytes": 200
+  },
+  {
+    "path": "downloaded/matching-describe-tasklist-go-oracle/go-oracle.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/matching-describe-tasklist-go-oracle/overlay.json",
+    "sha256": "c8eea0b7abfa0da4fb2e0b35382d7ced42f6aa8c824a797c7658395c19e2b913",
+    "bytes": 420
+  },
+  {
+    "path": "downloaded/matching-describe-tasklist-go-oracle/go-oracle.log",
+    "sha256": "942284bce73b6802fbb1bfa99f806f1bd5d9641332585659b256dc02038ac5a6",
+    "bytes": 42036
+  },
+  {
+    "path": "downloaded/matching-describe-tasklist-go-oracle/source-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-name-on.json",
+    "sha256": "ec09911eedb863cec1af0ca6afaac76a0b48a94e64df9222517f8c6c262ddb7b",
+    "bytes": 3436
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/compare-default.json",
+    "sha256": "79b49c1e82b7e8c3e322bf944ba598ea37ac00c70626d0cca284155484ae951f",
+    "bytes": 34
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-both.json",
+    "sha256": "ed0c4be943a6c08012998e032621348c81e5523a1b88b10766a4d4fe0244a999",
+    "bytes": 4019
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-name-off.json",
+    "sha256": "15f3cc4d0397f059bb3f897f4273c8f3ad4863be6ad403fc9a6d2fcacf4bc787",
+    "bytes": 3768
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-default.json",
+    "sha256": "d7db5350756cd0d4bc4a85061b47e25682dc80871c4b8609ff9d8b1178dbcd88",
+    "bytes": 3185
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/go-both.json",
+    "sha256": "f651bdfbe5e6d6bd3eb9ef20b34b082956f75f5fc61445c175280d985f5cdafc",
+    "bytes": 4276
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/go-name-on.json",
+    "sha256": "7b04ea935dc188dbd0b8dba96498edc4458fc7e5ae74e74a0c466658366f2582",
+    "bytes": 3660
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/compare-name-off.json",
+    "sha256": "f35352cf9105d9cea47ff9182286a4677c4620500511a540dcabfd5f1f0f8e82",
+    "bytes": 34
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/head-sha.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/go-persistence-wrapper.json",
+    "sha256": "82f6a168497c5cdcd2d076bdbf8ded8081afca979d7788456326fa749a721e31",
+    "bytes": 1112
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/compare-both.json",
+    "sha256": "93b81df2304705909aa604c76777b7b8650358e3f22b72fd725cbfaae7881ad9",
+    "bytes": 34
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-persistence-wrapper.json",
+    "sha256": "587ea2248fc4929103a689c7e34a2450b409da505c1970e548ec1ea6f4b45a0c",
+    "bytes": 1019
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/compare-name-on.json",
+    "sha256": "4c9da7462a5e9bbacd1c47a4a970cb564bb372be70625a5d62fd4d0ee419c3fa",
+    "bytes": 34
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/rust-binary.sha256",
+    "sha256": "46386d4e5af015a384b3ee4d6dec01f5b4a83d78fab533e6055f16a933fc9fb0",
+    "bytes": 157
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/go-name-off.json",
+    "sha256": "45c77bd36a0edde6a1ab2fc1e52cb51e8d50a9edc27ca036cacb4bb029a70630",
+    "bytes": 4014
+  },
+  {
+    "path": "downloaded/matching-metrics-emission-evidence/go-default.json",
+    "sha256": "bd6573206758cea16ef501e5292278b1edb478df9394f65ff5131246060eb8bd",
+    "bytes": 3398
+  },
+  {
+    "path": "downloaded/matching-panic-quote-oracle/go-1.25.14-quote.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/matching-panic-quote-oracle/go-1.25.14-quote.txt",
+    "sha256": "49786a1568bc404307169a7f73f7892d8ea8c40bb7295f0443118778277fa0ed",
+    "bytes": 532
+  },
+  {
+    "path": "downloaded/matching-panic-quote-oracle/go-1.25.14-quote.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "downloaded/rust-ci-logs/_temp/cadence-matching-owner-order.json",
+    "sha256": "8bc94062209fed2b157913cd94f5a511858ec995bc9aa23922cdbf82c27ba889",
+    "bytes": 13695
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/tls-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/matching-runtime-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/query-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/test.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/test.log",
+    "sha256": "3892ad1b66682d584e3b354b1eddea868916dc358f2914169b0d1bb3c020e4d1",
+    "bytes": 195663
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/fmt.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/Cargo.lock",
+    "sha256": "a0802225517ea5ef2bc43e80523f3819f10fdedb5892f0cd375fb51c83c75278",
+    "bytes": 102907
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/query-format.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/target-dir.txt",
+    "sha256": "f2e8e5be63d5f88f972b21dd7011c9862114aa2a59e1526e8c0671550a6af630",
+    "bytes": 43
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/clippy.log",
+    "sha256": "841a7974061b3c29d533ba363915951fa34dfe1ebd74f3f3c9cab69527a23212",
+    "bytes": 23117
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/tls-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/clippy.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/matching-runtime-format.exit",
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/format.log",
+    "sha256": "aa7ee1f5074affa6f72928c76534c90545de34385f123bae8ec390733a12f3c2",
+    "bytes": 604703
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/workspace-format.exit",
+    "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "bytes": 2
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/fmt.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0
+  },
+  {
+    "path": "downloaded/rust-ci-logs/cadence-rust/cadence-rust/rust/commit.txt",
+    "sha256": "38923218976d6087fb0d1dbea77429de77e504647e71f70b4a683eb93945ad98",
+    "bytes": 41
+  }
+]

@@ -1,0 +1,9 @@
+# Matching final-workspace continuation checkpoint
+
+Frozen candidate remains bf9f3d9387a72c4ed26b4be0a85025e65fd485a1 on matching-native-final-20261029. Master holds evidence-only followups.
+
+Final workspace run https://github.com/auenkr/cadence-rust/actions/runs/40807471166 completed successfully. Downloaded rust-ci-logs, complete workflow log, and matching-metrics-emission-evidence beside the already-retained Go oracles in /mnt/storage/service/ci-evidence/matching-native-workspace-40807471166. Compact results and artifact hashes are committed under memory/evidence/matching-native-workspace-40807471166. Clippy and workspace tests exit0 using /home/runner/work/_temp/cargo-target-final, in sequence. Matching 972 passed, 2 ignored. Source identity, blocked-source metric visibility, semaphore cancellation/reuse and startup-failure cleanup regressions explicitly passed. All four metric comparisons report match. Workspace-wide formatting report remains exit1 with existing differences; targeted formatting checks exit0.
+
+PostgreSQL run https://github.com/auenkr/cadence-rust/actions/runs/40808334141 was discovered already live at the frozen SHA; PostgreSQL client installation observed. An accidental duplicate dispatch40808357056 was immediately cancelled. Original run40808334141 remained authoritatively in_progress afterward. Inspect that existing run before dispatching anything else; workflows share concurrency and all mixed lanes must run serially. Do not restart merely because observation takes time.
+
+No local Cargo/Go/formatting/runtime validation ran. Matching remains incomplete. Retain and inspect actual topology, SDK, restart/recovery, probe, binary hash and cleanup artifacts when PostgreSQL terminates; then continue the other nine lanes and supplemental dependency oracles. Acceptance index: matching-native-acceptance-ledger-20261029.md. Checkout remains master.
