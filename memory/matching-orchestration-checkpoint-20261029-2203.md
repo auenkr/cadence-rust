@@ -23,7 +23,9 @@ Returned lifecycle configuration: `origin/t3/matching-lifecycle-startup`, source
 `3d36aef92aab362ba52772868ba3307f11283359`, evidence `b4329277e`.
 Adds partition/forwarding/QPS/burst binding; invalid ticker architecture was
 NOT implemented. CI
-https://github.com/auenkr/cadence-rust/actions/runs/40912368833 in progress.
+https://github.com/auenkr/cadence-rust/actions/runs/40912368833 subsequently
+completed with failure: changed Matching runtime formatting failed; Clippy and
+tests were skipped. This provides no runtime validation of the domain bindings.
 
 Terminal evidence newly verified: run40911583315 at `5abd83ef...` failed:
 974 passed, 1 failed, 2 ignored; configured semaphore launch test timed out
@@ -38,8 +40,8 @@ Current three delegate task suffixes (prefix
   started manager after invalid ticker, exact lease/reuse/shutdown parity.
 - `c95fde33-7e6e-41e7-87cf-22682c039cdf`: independent semaphore cancellation
   review and typed internal/untyped/timeout/ServiceBusy detail closure.
-- Integration review/remote-wire forwarding replacement launched this turn;
-  task identifier is in orchestration tool history. Owns actual remote-wire
+- `aaa6ad64-8cf9-4273-9b0f-0a3e962bf3d4`: integration review/remote-wire
+  forwarding replacement. Owns actual remote-wire
   deadline observation and cancellation/completion boundary regressions.
 
 All use T3 delegate_task worktree isolation, codex gpt-6.1-terra high/default.
