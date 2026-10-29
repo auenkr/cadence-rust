@@ -618,38 +618,101 @@ mod tests {
         };
         struct Source(MatchingDomainMetadata);
         impl crate::matching_domain_cache::DomainMetadataSource for Source {
-            fn metadata_version(&self, _: Duration) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> { Ok(2) }
-            fn list_domains(&self, _: usize, _: Option<&[u8]>, _: Duration) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
-                Ok(crate::matching_domain_cache::DomainMetadataPage { domains: vec![self.0.clone()], next_page_token: None })
+            fn metadata_version(
+                &self,
+                _: Duration,
+            ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(2)
             }
-            fn get_domain(&self, _: Option<&str>, id: Option<&str>, _: Duration) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
+            fn list_domains(
+                &self,
+                _: usize,
+                _: Option<&[u8]>,
+                _: Duration,
+            ) -> Result<
+                crate::matching_domain_cache::DomainMetadataPage,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
+                Ok(crate::matching_domain_cache::DomainMetadataPage {
+                    domains: vec![self.0.clone()],
+                    next_page_token: None,
+                })
+            }
+            fn get_domain(
+                &self,
+                _: Option<&str>,
+                id: Option<&str>,
+                _: Duration,
+            ) -> Result<
+                MatchingDomainMetadata,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
                 assert_eq!(id, Some(ID));
                 Ok(self.0.clone())
             }
         }
         let record = MatchingDomainMetadata {
-            info: cadence_api::types::DomainInfo { name: "cold-domain".into(), uuid: ID.into(), ..Default::default() },
-            configuration: Default::default(), replication: Default::default(),
-            is_global_domain: false, archival_bucket: String::new(), status_raw: 0,
-            archival_status_raw: 0, history_archival_status_raw: 0, visibility_archival_status_raw: 0,
-            config_version: 1, notification_version: 1, failover_notification_version: 1,
-            failover_version: 1, previous_failover_version: -1, failover_end_time_nanos: None,
-            last_updated_time_nanos: 0, bad_binaries: None, isolation_groups: None,
-            async_workflow_config: None, active_clusters_config: None, decoded_bad_binaries: None,
-            decoded_isolation_groups: None, decoded_async_workflow_config: None, config_decode_error: None,
+            info: cadence_api::types::DomainInfo {
+                name: "cold-domain".into(),
+                uuid: ID.into(),
+                ..Default::default()
+            },
+            configuration: Default::default(),
+            replication: Default::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 1,
+            notification_version: 1,
+            failover_notification_version: 1,
+            failover_version: 1,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 0,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
         };
         let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
         let value = |data: &[u8], filtered: bool| DynamicConfigValue {
-            value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: data.to_vec() }),
-            filters: if filtered { vec![DynamicConfigFilter { name: "domainName".into(), value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: br#""cold-domain""#.to_vec() }) }] } else { vec![] },
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: data.to_vec(),
+            }),
+            filters: if filtered {
+                vec![DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: br#""cold-domain""#.to_vec(),
+                    }),
+                }]
+            } else {
+                vec![]
+            },
         };
         {
             let mut config = overlay.lock().unwrap();
-            config.update(false, "matching.persistenceMaxQPS", vec![value(b"3000", false)]);
+            config.update(
+                false,
+                "matching.persistenceMaxQPS",
+                vec![value(b"3000", false)],
+            );
             for (key, data) in [
-                ("test.integer", b"17".as_slice()), ("test.duration", br#""250ms""#.as_slice()),
-                ("test.boolean", b"false".as_slice()), ("matching.enableStandbyTaskCompletion", b"false".as_slice()),
-                ("matching.maxTaskBatchSize", b"17".as_slice()), ("matching.appendTaskTimeout", br#""250ms""#.as_slice()),
+                ("test.integer", b"17".as_slice()),
+                ("test.duration", br#""250ms""#.as_slice()),
+                ("test.boolean", b"false".as_slice()),
+                ("matching.enableStandbyTaskCompletion", b"false".as_slice()),
+                ("matching.maxTaskBatchSize", b"17".as_slice()),
+                ("matching.appendTaskTimeout", br#""250ms""#.as_slice()),
                 ("matching.outstandingTaskAppendsThreshold", b"19".as_slice()),
                 ("matching.longPollExpirationInterval", br#""250ms""#.as_slice()),
                 ("matching.forwarderMaxChildrenPerNode", b"17".as_slice()),
@@ -658,22 +721,39 @@ mod tests {
                 ("matching.enableAdaptiveScaler", b"true".as_slice()),
                 ("matching.taskIsolationPollerWindow", br#""250ms""#.as_slice()),
                 ("matching.numTasklistWritePartitions", b"17".as_slice()),
-            ] { config.update(false, key, vec![value(data, true)]); }
+            ] {
+                config.update(false, key, vec![value(data, true)]);
+            }
         }
         let clock = Arc::new(AtomicI64::new(0));
         let now = clock.clone();
         let limiter = crate::matching_persistence_limiter::MatchingPersistenceLimiter::with_clock(
-            overlay.clone(), Arc::new(AtomicUsize::new(1)), Arc::new(move || now.load(Ordering::SeqCst)));
-        let source = crate::matching_persistence::limit_domain_source(Arc::new(Source(record)), limiter);
+            overlay.clone(),
+            Arc::new(AtomicUsize::new(1)),
+            Arc::new(move || now.load(Ordering::SeqCst)),
+        );
+        let source =
+            crate::matching_persistence::limit_domain_source(Arc::new(Source(record)), limiter);
         let cache = Arc::new(MatchingDomainCache::new(source));
         clock.store(5_000_000_000, Ordering::SeqCst);
         let domain = GoString::from(ID);
         let task = GoString::from(&b"queue-\xff"[..]);
         match case.as_str() {
-            "integer" => assert_eq!(integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0), 17),
-            "duration" => assert_eq!(duration_provider(cache, overlay, "test.duration", 1)(&domain, &task, 0), 250_000_000),
-            "boolean" => assert!(!boolean_provider(cache, overlay, "test.boolean", true)(&domain, &task, 0)),
-            "writer" => assert_eq!(writer_live_provider(cache, overlay)(&domain, &task, 0), (17, 250_000_000, 19)),
+            "integer" => assert_eq!(
+                integer_provider(cache, overlay, "test.integer", 1)(&domain, &task, 0),
+                17
+            ),
+            "duration" => assert_eq!(
+                duration_provider(cache, overlay, "test.duration", 1)(&domain, &task, 0),
+                250_000_000
+            ),
+            "boolean" => assert!(!boolean_provider(cache, overlay, "test.boolean", true)(
+                &domain, &task, 0
+            )),
+            "writer" => assert_eq!(
+                writer_live_provider(cache, overlay)(&domain, &task, 0),
+                (17, 250_000_000, 19)
+            ),
             "standby" => assert!(!standby_provider(cache, overlay)(&domain, &task, 0)),
             _ if case.starts_with("engine_") || case.starts_with("control_") => {
                 use crate::matching_engine_native::{DecisionAddContext, NativeControlContext, NativePollContext};
