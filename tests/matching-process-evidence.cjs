@@ -11,6 +11,8 @@ const { spawnSync } = require('node:child_process');
 
 const MAX_THREADS = 64;
 const MAX_TEXT = 8192;
+const MAX_THREAD_SYSCALL = 512;
+const MAX_THREAD_STACK = 2048;
 const MAX_GDB_TEXT = 24576;
 const CMD_TIMEOUT_MS = 3000;
 const GDB_TIMEOUT_MS = 20000;
@@ -36,6 +38,8 @@ const threadSnapshot = pid => {
   return tids.slice(0, MAX_THREADS).map(tid => {
     const base = `/proc/${pid}/task/${tid}`;
     return { tid: Number(tid), comm: readProc(`${base}/comm`), wchan: readProc(`${base}/wchan`),
+      syscall: clip(readProc(`${base}/syscall`), MAX_THREAD_SYSCALL),
+      kernelStack: clip(readProc(`${base}/stack`), MAX_THREAD_STACK),
       ...parseStat(readProc(`${base}/stat`)) };
   });
 };
@@ -67,8 +71,8 @@ async function captureProcessEvidence({ pid, grpcPort, workDir, label, reason })
       .filter(line => /^(State|Threads|VmRSS|voluntary_ctxt_switches|nonvoluntary_ctxt_switches):/.test(line)),
     threads,
     // Listener (Recv-Q = accept backlog depth) and per-connection states for the gRPC port only.
-    listenerQueues: run(['ss', '-ltn', 'sport', '=', `:${port}`], CMD_TIMEOUT_MS, MAX_TEXT),
-    connections: run(['ss', '-tn', 'sport', '=', `:${port}`], CMD_TIMEOUT_MS, MAX_TEXT),
+    listenerQueues: run(['ss', '-ltnp', 'sport', '=', `:${port}`], CMD_TIMEOUT_MS, MAX_TEXT),
+    connections: run(['ss', '-tnp', 'sport', '=', `:${port}`], CMD_TIMEOUT_MS, MAX_TEXT),
     gdb: 'not requested',
   };
   if (process.env.CADENCE_MATCHING_PROC_EVIDENCE_GDB === '1') {
