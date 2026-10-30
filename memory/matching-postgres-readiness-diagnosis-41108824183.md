@@ -1,0 +1,27 @@
+# Matching PostgreSQL gate: readiness failure diagnosis (41108824183)
+
+Source pin: `2c3bc4a9ab50a824a89b96bac33e40309ef587ef`. Production binary SHA256: `bc45dd2dc600599fdd2f1135a58a918c878bb4f9ca93eaac5692f6a5eece778d`. Build exit 0; mixed gate exit 1. Gate stopped in readiness; SDK/workflow compatibility was not exercised. This is evidence analysis only; no production code changed.
+
+Evidence is under `/mnt/storage/service/ci-evidence/matching-postgres-41108824183.AY5Gf8/matching-production-postgres/gate/run/` (artifact root also contains `build.exit`, `gate.exit`, `binary.sha256`, and `commit.txt`).
+
+## What entered and completed
+
+`rust-matching/rust-server-before-restart.log:45-60` records exactly one traced `ListTaskListPartitions` request (`lptp-...0001`) entering and completing successfully in 776 microseconds. Its engine trace reaches handler entry, admission, domain cache hit/resolution, activity and decision partition counts, both owner lookups, and `engine-complete`. Source path at the pinned revision: `grpc_matching.rs:4173-4185` installs `SharedNativeMatching`; `matching_transport_native.rs:23-32,52-88` forwards the generated API and traces this one method; `matching_service_native.rs:601-623,245-265` wraps and handles it; `matching_engine_control_native.rs:277-326` resolves the domain, computes partition counts, calls `owner_host`, and returns. A failed `owner_host` is intentionally defaulted at line 307, so the completion log does not prove an owner value was found.
+
+The trace timestamp is 2026-10-30 18:57:46.644–.645Z. The first direct diagnostic (`rust-matching/rust-process-evidence-before-restart-direct-partition.json:1-`) started at 18:58:11.740Z: its channel was READY throughout the 10s call, but it timed out at 18:58:21.739Z. In that diagnostic TCP connected, while a concurrent HTTP/2 probe received no SETTINGS and timed out (`.../rust-process-evidence-before-restart-direct-partition.json`, `transportDiagnostic`). Process evidence at the same end time (`rust-process-evidence-before-restart.json:108-`) shows the listener still bound, pending accept queue 2, and established/CLOSE-WAIT sockets with receive bytes. These are observations, not proof of which socket belongs to which RPC.
+
+The one successful server trace precedes that direct call by about 25s. The trace ID is generated locally and logs no caller/request identity or client peer, so there is no evidence to equate it with that diagnostic or the Go Frontend readiness request. There are no other traced `ListTaskListPartitions` entries in the captured server log.
+
+## Readiness path and limits
+
+The compatibility probe (`tests/matching-service-compat.cjs:705-715`) first asks Go Frontend `WorkflowAPI.DescribeTaskList`, then directly calls Rust `ListTaskListPartitions`; only after both pass does it proceed. The Go Frontend call timed out after 20s (`probe.log:1-4`; final error remote port 16413). Go server log line 473 at 18:58:11.639Z reports its `DescribeTaskList` client connection closing with context canceled. This is temporally consistent with the readiness timeout, but has no downstream RPC identity.
+
+The Go Frontend ring log (`server.log:468-470`, 18:57:59.993Z) reports `HostsRemoved:["127.0.0.1:15362"]` and an empty `cadence-matching` hashring. Rust's earlier Ringpop PING lines in `rust-server-before-restart.log:38-43` list `127.0.0.1:15362:alive`. This is a concrete discovery-view discrepancy consistent with Frontend failing to route readiness, but it does not identify why membership was removed or prove that it caused the direct gRPC hang.
+
+A later final direct retry (`list-task-list-partitions-readiness-before-restart.json:6-63`) ran 19:00:42.791–52.791Z: TCP connected, gRPC stayed CONNECTING and expired waiting for an LB pick, and the concurrent HTTP/2 probe again received no SETTINGS. Unlike the first direct call, the client never reached READY. Neither diagnostic records a matching handler entry at its own time. Therefore the final retry is blocked before RPC dispatch; the first READY timeout is also unresolved because client READY alone does not establish that the request reached the native handler. The earlier successful request proves that this endpoint did dispatch at least one RPC, but cannot be tied to the later attempts.
+
+`matching_dispatch_native.rs:35-60` defines only poll/add APIs for task forwarding; it is not the `ListTaskListPartitions` control path. That control path is `NativeControlContext` in `matching_engine_control_native.rs`, reached only after the native service handler. Thus the successful trace excludes domain resolution and owner lookup as the stopping point for that request, but gives no evidence about later timed-out connections. Do not infer a persistence, PostgreSQL, or dispatch failure from this readiness-only run.
+
+## Next discriminator
+
+Capture one correlated attempt end-to-end: tag the direct probe with a unique metadata/request marker and log it at native gRPC method entry/completion; at the same time capture accepted connection peer/timestamp and HTTP/2 preface/SETTINGS progress on port 18097, plus Go Frontend's matching ring membership at the `DescribeTaskList` call. This separates (a) Frontend discovery/routing, (b) TCP accept/HTTP/2 negotiation before handler entry, and (c) a request that enters the native handler and stalls. Keep client marker, peer tuple, and timestamps in the same artifact; the existing trace cannot identify its caller.
