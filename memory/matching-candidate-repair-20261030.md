@@ -62,4 +62,14 @@ parity audit before beginning History migration.
 
 ## Fresh workspace CI evidence
 
-Pending dispatch and completion.
+Dispatched `.github/workflows/rust-ci.yml` with `package` unset and
+`clean_target=true` on candidate source head
+`f8739bfbfc9ce1921b3404dd9cf6fd6193cb9db5`:
+https://github.com/auenkr/cadence-rust/actions/runs/41026357394
+
+The run was observed in progress at `2026-10-30T08:25:42Z` (UTC), with its
+`clippy-test` job starting. No conclusion, Clippy result, or test result was
+available at that observation. Run head is the exact candidate source SHA
+above; this evidence note is a follow-up commit and does not change the
+dispatched run's source. Inspect the run once when resuming; do not start a
+mixed gate unless it completed successfully.
