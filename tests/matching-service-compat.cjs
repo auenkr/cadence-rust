@@ -616,19 +616,23 @@ async function run() {
     });
   }
   async function waitForRustReady(label) {
-    const deadline = Date.now() + 180000;
+    const readinessWaitStartedAt = Date.now();
+    const deadline = readinessWaitStartedAt + 180000;
     let lastReadinessError;
     let directReadiness = 'not probed';
     let lastDirectDiagnostic;
     let nextDirectProbeAt = 0;
+    let processEvidenceAttempted = false;
     let processEvidenceCaptured = false;
-    // Opt-in, once per readiness wait: snapshot the Rust process at the first
-    // direct RPC failure, before the 180 s loop continues. Never affects readiness.
-    const captureFirstFailure = async reason => {
+    // Ignore transient startup refusals. After 20 s, capture the first direct
+    // failure once; at the final readiness failure, retry only if capture failed.
+    const captureReadinessFailure = async (reason, finalFailure = false) => {
       if (processEvidenceCaptured || process.env.CADENCE_MATCHING_PROC_EVIDENCE !== '1') return;
-      processEvidenceCaptured = true;
+      if (processEvidenceAttempted && !finalFailure) return;
+      processEvidenceAttempted = true;
       try {
         await captureProcessEvidence({ pid: rust.pid, grpcPort: rustGrpcPort, workDir: work, label, reason });
+        processEvidenceCaptured = true;
       } catch (_) { /* diagnostics must not alter readiness */ }
     };
     const primaryAddress = `127.0.0.1:${rustGrpcPort}`;
@@ -645,10 +649,12 @@ async function run() {
             lastDirectDiagnostic = await directPartitionDiagnostic(
               primaryReadinessClient, primaryAddress, domain, `primary-ready-${id}`);
             directReadiness = lastDirectDiagnostic.error?.details || 'ListTaskListPartitions responded';
-            if (lastDirectDiagnostic.error) await captureFirstFailure(directReadiness);
+            if (lastDirectDiagnostic.error && Date.now() - readinessWaitStartedAt >= 20000) {
+              await captureReadinessFailure(directReadiness);
+            }
           } catch (error) {
             directReadiness = error?.details || error?.message || String(error);
-            await captureFirstFailure(directReadiness);
+            if (Date.now() - readinessWaitStartedAt >= 20000) await captureReadinessFailure(directReadiness);
           }
         }
         try {
@@ -674,6 +680,9 @@ async function run() {
         return;
       }
       if (rust.exitCode !== null || rust.signalCode !== null) {
+        await captureReadinessFailure(
+          `Rust Matching exited before readiness (exit=${rust.exitCode}, signal=${rust.signalCode}); direct primary gRPC status: ${directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
+          true);
         primaryReadinessClient?.close();
         throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
       }
@@ -696,6 +705,9 @@ async function run() {
         }, directRustProbe: finalDirectDiagnostic, traceLog: `rust-server-${label}.log`,
         }, null, 2)}\n`);
     }
+    await captureReadinessFailure(
+      `final readiness failure; direct primary gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
+      true);
     throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct primary gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; see ${work}/rust-server-${label}.log`);
   }
   let exited;

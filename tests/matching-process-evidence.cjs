@@ -1,6 +1,6 @@
 'use strict';
 // Opt-in (CADENCE_MATCHING_PROC_EVIDENCE=1), CI-only, bounded snapshot of a
-// Rust Matching process taken once at the first direct readiness RPC failure.
+// Rust Matching process after sustained or final readiness failure.
 // It separates a process-wide stall (threads blocked or spinning, listener
 // accept queue growing) from a listener-only problem. Fixed argv, no shell,
 // no environment or command-line capture. gdb is attempted only when
