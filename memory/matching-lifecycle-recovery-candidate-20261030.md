@@ -59,8 +59,13 @@ service-completion claim is made.
 
 No local Cargo, Go, formatting, server, or runtime command was run. Only
 `git diff --check` was used as a source hygiene check; it does not validate
-compilation or behavior. The CI run on this candidate head is pending
-dispatch. Record its run URL, exact head, package scope, and conclusion here.
+compilation or behavior. Focused CI was dispatched on GitHub Actions:
+
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41021537962
+- Head: `ffa57359f801aeb2f5f60d6383a3675443f7cfe9`
+- Scope: `rust-ci.yml`, package `cadence-matching`, standard hosted runner
+- Observation: in progress at dispatch inspection; no conclusion available.
+
 Do not treat focused CI as Matching completion: fresh workspace gates and the
 mixed Go-service/Rust-Matching SDK failure, restart, and recovery lanes remain
 unverified, along with the broader Matching parity audit.
