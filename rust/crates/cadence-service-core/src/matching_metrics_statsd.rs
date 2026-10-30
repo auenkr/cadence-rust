@@ -127,13 +127,22 @@ fn parse_go_duration(input: &str) -> Result<i64, String> {
 }
 
 struct StatsdInner {
-    socket: UdpSocket,
+    sender: mpsc::SyncSender<SenderMessage>,
     buffer: Mutex<Vec<u8>>,
     max_packet_bytes: usize,
     client_prefix: String,
     scope_prefix: String,
     root_tags: BTreeMap<String, String>,
     aggregates: Mutex<BTreeMap<(String, String), Aggregate>>,
+}
+
+enum SenderMessage {
+    Packet {
+        bytes: Vec<u8>,
+        completion: Option<mpsc::SyncSender<io::Result<()>>>,
+    },
+    Barrier(mpsc::SyncSender<io::Result<()>>),
+    Shutdown,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -146,6 +155,7 @@ pub struct StatsdMetricSink {
     inner: Arc<StatsdInner>,
     stop: Option<mpsc::Sender<()>>,
     worker: Option<JoinHandle<()>>,
+    sender_worker: Option<JoinHandle<()>>,
     report_stop: Option<mpsc::Sender<()>>,
     report_worker: Option<JoinHandle<()>>,
 }
@@ -180,10 +190,14 @@ impl StatsdMetricSink {
             "[::]:0"
         })?;
         socket.connect(address)?;
+        let (sender, sender_receiver) = mpsc::sync_channel(32);
+        let sender_handle = thread::Builder::new()
+            .name("cadence-statsd-sender".to_owned())
+            .spawn(move || sender_worker(sender_receiver, |packet| socket.send(packet)))?;
         let mut root_tags = root_tags;
         root_tags.insert(CADENCE_SERVICE_TAG.to_owned(), MATCHING_SERVICE.to_owned());
         let inner = Arc::new(StatsdInner {
-            socket,
+            sender,
             buffer: Mutex::new(Vec::new()),
             max_packet_bytes: if config.flush_bytes <= 0 {
                 DEFAULT_PACKET_BYTES
@@ -202,18 +216,37 @@ impl StatsdMetricSink {
         };
         let (stop, receiver) = mpsc::channel();
         let weak = Arc::downgrade(&inner);
-        let worker = thread::Builder::new()
+        let worker = match thread::Builder::new()
             .name("cadence-statsd-flush".to_owned())
-            .spawn(move || flush_worker(weak, receiver, interval))?;
+            .spawn(move || flush_worker(weak, receiver, interval))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                let _ = inner.sender.send(SenderMessage::Shutdown);
+                let _ = sender_handle.join();
+                return Err(error);
+            }
+        };
         let report_weak = Arc::downgrade(&inner);
         let (report_stop, report_receiver) = mpsc::channel();
-        let report_worker = thread::Builder::new()
+        let report_worker = match thread::Builder::new()
             .name("cadence-statsd-report".to_owned())
-            .spawn(move || report_worker(report_weak, report_receiver, reporting_interval))?;
+            .spawn(move || report_worker(report_weak, report_receiver, reporting_interval))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                let _ = stop.send(());
+                let _ = worker.join();
+                let _ = inner.sender.send(SenderMessage::Shutdown);
+                let _ = sender_handle.join();
+                return Err(error);
+            }
+        };
         Ok(Self {
             inner,
             stop: Some(stop),
             worker: Some(worker),
+            sender_worker: Some(sender_handle),
             report_stop: Some(report_stop),
             report_worker: Some(report_worker),
         })
@@ -298,12 +331,12 @@ impl StatsdMetricSink {
 fn enqueue_inner(inner: &StatsdInner, metric_line: &str) {
     let mut buffer = inner.buffer.lock().expect("StatsD packet buffer poisoned");
     if !buffer.is_empty() && buffer.len() + metric_line.len() + 1 >= inner.max_packet_bytes {
-        let _ = send_buffer(inner, &mut buffer);
+        let _ = queue_buffer(inner, &mut buffer, None);
     }
     buffer.extend_from_slice(metric_line.as_bytes());
     buffer.push(b'\n');
     if buffer.len() >= inner.max_packet_bytes {
-        let _ = send_buffer(inner, &mut buffer);
+        let _ = queue_buffer(inner, &mut buffer, None);
     }
 }
 
@@ -392,7 +425,11 @@ impl Drop for StatsdMetricSink {
             let _ = worker.join();
         }
         self.flush_aggregates();
-        let _ = flush_buffer(&self.inner);
+        flush_buffer_async(&self.inner);
+        let _ = self.inner.sender.send(SenderMessage::Shutdown);
+        if let Some(worker) = self.sender_worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -429,7 +466,7 @@ fn flush_worker(inner: Weak<StatsdInner>, stop: mpsc::Receiver<()>, interval: Du
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if let Some(inner) = inner.upgrade() {
-                    let _ = flush_buffer(&inner);
+                    flush_buffer_async(&inner);
                 } else {
                     break;
                 }
@@ -440,18 +477,63 @@ fn flush_worker(inner: Weak<StatsdInner>, stop: mpsc::Receiver<()>, interval: Du
 
 fn flush_buffer(inner: &StatsdInner) -> io::Result<()> {
     let mut buffer = inner.buffer.lock().expect("StatsD packet buffer poisoned");
-    send_buffer(inner, &mut buffer)
+    let (completion, result) = mpsc::sync_channel(1);
+    if buffer.is_empty() {
+        inner
+            .sender
+            .send(SenderMessage::Barrier(completion))
+            .map_err(|_| sender_stopped())?;
+    } else {
+        queue_buffer(inner, &mut buffer, Some(completion))?;
+    }
+    result.recv().map_err(|_| sender_stopped())?
 }
 
-fn send_buffer(inner: &StatsdInner, buffer: &mut Vec<u8>) -> io::Result<()> {
+fn flush_buffer_async(inner: &StatsdInner) {
+    let mut buffer = inner.buffer.lock().expect("StatsD packet buffer poisoned");
+    let _ = queue_buffer(inner, &mut buffer, None);
+}
+
+fn queue_buffer(
+    inner: &StatsdInner,
+    buffer: &mut Vec<u8>,
+    completion: Option<mpsc::SyncSender<io::Result<()>>>,
+) -> io::Result<()> {
     if buffer.is_empty() {
         return Ok(());
     }
-    let result = inner.socket.send(buffer);
-    if result.is_ok() {
-        buffer.clear();
+    let packet = std::mem::replace(buffer, Vec::with_capacity(inner.max_packet_bytes));
+    inner
+        .sender
+        .send(SenderMessage::Packet {
+            bytes: packet,
+            completion,
+        })
+        .map_err(|_| sender_stopped())
+}
+
+fn sender_stopped() -> io::Error {
+    io::Error::new(io::ErrorKind::BrokenPipe, "StatsD sender stopped")
+}
+
+fn sender_worker<F>(receiver: mpsc::Receiver<SenderMessage>, mut send: F)
+where
+    F: FnMut(&[u8]) -> io::Result<usize>,
+{
+    while let Ok(message) = receiver.recv() {
+        match message {
+            SenderMessage::Packet { bytes, completion } => {
+                let result = send(&bytes).map(|_| ());
+                if let Some(completion) = completion {
+                    let _ = completion.send(result);
+                }
+            }
+            SenderMessage::Barrier(completion) => {
+                let _ = completion.send(Ok(()));
+            }
+            SenderMessage::Shutdown => break,
+        }
     }
-    result.map(|_| ())
 }
 
 fn duration_bucket_bounds(duration: Duration, bounds_nanos: &[u64]) -> (i64, i64) {
@@ -568,6 +650,58 @@ mod tests {
         assert_eq!(config.flush_bytes, 512);
         assert_eq!(parse_go_duration("250ms"), Ok(250_000_000));
         assert!(parse_go_duration("").is_err());
+    }
+
+    #[test]
+    fn sender_drops_failed_packet_and_continues_in_fifo_order() {
+        let (sender, receiver) = mpsc::sync_channel(32);
+        let attempted = Arc::new(Mutex::new(Vec::new()));
+        let worker_attempted = attempted.clone();
+        let worker = thread::spawn(move || {
+            sender_worker(receiver, move |packet| {
+                worker_attempted.lock().unwrap().push(packet.to_vec());
+                if packet == b"failed\n" {
+                    Err(io::Error::other("simulated UDP failure"))
+                } else {
+                    Ok(packet.len())
+                }
+            });
+        });
+
+        let (failed_completion, failed_result) = mpsc::sync_channel(1);
+        sender
+            .send(SenderMessage::Packet {
+                bytes: b"failed\n".to_vec(),
+                completion: Some(failed_completion),
+            })
+            .unwrap();
+        assert!(failed_result.recv().unwrap().is_err());
+
+        let (success_completion, success_result) = mpsc::sync_channel(1);
+        sender
+            .send(SenderMessage::Packet {
+                bytes: b"next\n".to_vec(),
+                completion: Some(success_completion),
+            })
+            .unwrap();
+        assert!(success_result.recv().unwrap().is_ok());
+        sender
+            .send(SenderMessage::Packet {
+                bytes: b"queued-at-shutdown\n".to_vec(),
+                completion: None,
+            })
+            .unwrap();
+        sender.send(SenderMessage::Shutdown).unwrap();
+        worker.join().unwrap();
+
+        assert_eq!(
+            *attempted.lock().unwrap(),
+            vec![
+                b"failed\n".to_vec(),
+                b"next\n".to_vec(),
+                b"queued-at-shutdown\n".to_vec(),
+            ]
+        );
     }
 
     #[test]
