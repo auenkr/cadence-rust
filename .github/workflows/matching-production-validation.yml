@@ -29,6 +29,7 @@ jobs:
       CADENCE_MATCHING_ADAPTIVE_TRACE: ${{ inputs.adaptive_trace && 'production-adaptive-scaler-probe' || '' }}
       CADENCE_MATCHING_PROC_EVIDENCE: ${{ inputs.lane == 'postgres' && '1' || '' }}
       CADENCE_MATCHING_LIST_PARTITIONS_TRACE: "1"
+      CADENCE_MATCHING_TRACE_LIST_TASK_LIST_PARTITIONS: "1"
       CADENCE_MATCHING_SHUTDOWN_TRACE: "1"
     steps:
       - uses: actions/checkout@v4

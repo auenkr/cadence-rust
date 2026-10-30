@@ -1,7 +1,7 @@
 //! Share one native handler across gRPC, HTTP Thrift and TChannel listeners.
 use cadence_proto::native::{matching as m, NativeMatchingApi};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tonic::{Request, Response, Status};
 
@@ -21,6 +21,12 @@ macro_rules! forward {
     ($($method:ident: $request:ident => $response:ident),* $(,)?) => {
         #[tonic::async_trait]
         impl NativeMatchingApi for SharedNativeMatching {
+            async fn list_task_list_partitions(
+                &self,
+                request: Request<m::ListTaskListPartitionsRequest>,
+            ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
+                self.trace_list_task_list_partitions(request).await
+            }
             $(async fn $method(&self, request: Request<m::$request>) -> Result<Response<m::$response>, Status> {
                 self.0.$method(request).await
             })*
@@ -43,18 +49,23 @@ forward! {
     acquire_semaphore: AcquireSemaphoreRequest => AcquireSemaphoreResponse,
 }
 
-#[tonic::async_trait]
-impl NativeMatchingApi for SharedNativeMatching {
-    async fn list_task_list_partitions(
+impl SharedNativeMatching {
+    async fn trace_list_task_list_partitions(
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
-        // Presence of this variable opts into payload-free native gRPC tracing.
+        // Presence opts into payload-free tracing at the shared native boundary.
         if std::env::var_os("CADENCE_MATCHING_TRACE_LIST_TASK_LIST_PARTITIONS").is_none() {
             return self.0.list_task_list_partitions(request).await;
         }
 
-        let request_id = LIST_PARTITIONS_TRACE_ID.fetch_add(1, Ordering::Relaxed);
+        let Ok(request_id) = LIST_PARTITIONS_TRACE_ID.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |id| (id <= 64).then_some(id + 1),
+        ) else {
+            return self.0.list_task_list_partitions(request).await;
+        };
         let started = Instant::now();
         eprintln!(
             "matching_list_task_list_partitions event=entry request_id=lptp-{request_id:016x} timestamp_unix_ms={}",
