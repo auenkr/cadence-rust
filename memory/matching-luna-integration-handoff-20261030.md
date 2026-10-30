@@ -1,5 +1,20 @@
 # Matching Luna integration handoff — 2026-10-30
 
+## Latest worker limit
+
+User reduced concurrency to ONE worker. Retain integration task
+`e23b4a3b-b2f1-4d52-a47c-7595e512a3d1`; cancellation requested for follow-up
+discovery review `3386857f-af5b-42e5-a12a-129020db0a2f`. Do not replace it while
+integration remains active. Original discovery diagnosis returned candidate
+`64fc423836e5366b3d3710a992121ee5a1b8c0ef`: independent endpoint diagnostics
+and readiness-failure cleanup only, not a production fix. Resume its review
+after integration when the single slot is free.
+
+Semaphore focused CI41021199544 subsequently passed at exact26f6a8853:
+Matching library977 passed/2 ignored, clippy/test exits0. Compact authoritative
+evidence is in memory/evidence/matching-semaphore-review-41021199544/.
+This uses a cached target and does not establish fresh workspace/mixed parity.
+
 Matching remains incomplete. All Cargo/Go/formatting/runtime validation CI-only.
 Two workers, Codex gpt-6-luna high thinking, default/normal speed.
 
