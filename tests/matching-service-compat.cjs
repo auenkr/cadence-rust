@@ -748,6 +748,24 @@ async function run() {
         }, directRustProbe: finalDirectDiagnostic, traceLog: path.basename(targetProcess.logPath || path.join(work, `rust-server-${label}.log`)),
         }, null, 2)}\n`);
     }
+    {
+      // Diagnostic: capture the raw direct Matching DescribeTaskList bytes so a
+      // Go Frontend response-parse failure can be attributed to Rust or Go.
+      const rawClient = directMatchingClient(`127.0.0.1:${targetGrpcPort}`);
+      try {
+        const method = matchingApi.MatchingAPI.service.DescribeTaskList;
+        const raw = await new Promise(resolve => rawClient.makeUnaryRequest(
+          method.path, method.requestSerialize, buffer => buffer,
+          { domainId, request: { domain, taskList: { name: `diag-describe-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true } },
+          new grpc.Metadata(), { deadline: Date.now() + 10000 },
+          (error, response) => resolve({ error: error ? String(error) : null, hex: response ? response.toString('hex') : null })));
+        fs.writeFileSync(path.join(work, `direct-describe-tasklist-raw-${label}.json`), JSON.stringify(raw, null, 2));
+      } catch (diagnosticError) {
+        fs.writeFileSync(path.join(work, `direct-describe-tasklist-raw-${label}.json`), JSON.stringify({ diagnosticError: String(diagnosticError) }));
+      } finally {
+        rawClient.close();
+      }
+    }
     await captureReadinessFailure(
       `final readiness failure; direct target gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
       true);
