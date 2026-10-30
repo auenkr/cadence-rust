@@ -57,6 +57,18 @@ pub struct NativeMatchingService<C> {
     pub integration: C,
 }
 
+/// Opt-in, bounded stage tracing for the first native Matching RPC in mixed
+/// service gates. Keep identifiers and request contents out of this trace.
+pub(crate) fn trace_list_partitions_stage(stage: &str) {
+    static TRACE_COUNT: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    if std::env::var_os("CADENCE_MATCHING_LIST_PARTITIONS_TRACE").is_some()
+        && TRACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 32
+    {
+        eprintln!("Matching ListTaskListPartitions stage: {stage}");
+    }
+}
+
 impl<C> NativeMatchingService<C> {
     pub fn new(engine: NativeMatchingEngine, integration: C) -> Self {
         Self {
@@ -235,12 +247,21 @@ impl<C: NativeMatchingIntegration> NativeMatchingService<C> {
         request: Request<n::matching::ListTaskListPartitionsRequest>,
     ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
         const METHOD: &str = "list_task_list_partitions";
+        trace_list_partitions_stage("handler-enter");
         let request = request.into_inner();
+        trace_list_partitions_stage("admission-begin");
         self.enter(METHOD, Some(&request.domain)).await?;
+        trace_list_partitions_stage("admission-complete");
+        trace_list_partitions_stage("engine-begin");
         let result = self
             .engine
             .list_task_list_partitions(request, &self.integration)
             .await;
+        trace_list_partitions_stage(if result.is_ok() {
+            "engine-complete"
+        } else {
+            "engine-error"
+        });
         result.map(Response::new)
     }
 
