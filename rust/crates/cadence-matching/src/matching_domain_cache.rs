@@ -834,12 +834,17 @@ impl MatchingDomainCache {
             return Err(DomainCacheError::EmptyName);
         }
         if let Some(entry) = self.by_name(name) {
+            crate::matching_service_native::trace_list_partitions_stage("domain-cache-hit");
             return Ok(entry);
         }
+        crate::matching_service_native::trace_list_partitions_stage("postgres-domain-read-begin");
         self.source
             .get_domain(Some(name), None, DOMAIN_CACHE_PERSISTENCE_TIMEOUT)
             .map_err(cache_source_error)?;
+        crate::matching_service_native::trace_list_partitions_stage("postgres-domain-read-complete");
+        crate::matching_service_native::trace_list_partitions_stage("domain-cache-refresh-begin");
         self.refresh_after_miss(Some(name), None)?;
+        crate::matching_service_native::trace_list_partitions_stage("domain-cache-refresh-complete");
         self.by_name(name)
             .ok_or_else(|| DomainCacheError::ExistsButNotLoaded(name.to_string()))
     }

@@ -279,7 +279,9 @@ impl NativeMatchingEngine {
         request: matching::ListTaskListPartitionsRequest,
         context: &dyn NativeControlContext,
     ) -> Result<matching::ListTaskListPartitionsResponse, Status> {
+        crate::matching_service_native::trace_list_partitions_stage("domain-resolution-begin");
         context.domain_id(&request.domain)?;
+        crate::matching_service_native::trace_list_partitions_stage("domain-resolution-complete");
         let list = request.task_list.unwrap_or_default();
         let name = helper::task_list_name(&list.name)?;
         let mut result = matching::ListTaskListPartitionsResponse::default();
@@ -287,10 +289,29 @@ impl NativeMatchingEngine {
             let count = context
                 .write_partition_count(&request.domain, name.root(), ty)
                 .max(1);
+            crate::matching_service_native::trace_list_partitions_stage(if ty == 1 {
+                "activity-partition-count-ready"
+            } else {
+                "decision-partition-count-ready"
+            });
             let mut partitions = Vec::new();
             for i in 0..count {
                 let key = name.partition_name(i);
+                if i == 0 {
+                    crate::matching_service_native::trace_list_partitions_stage(if ty == 1 {
+                        "activity-owner-lookup-begin"
+                    } else {
+                        "decision-owner-lookup-begin"
+                    });
+                }
                 let owner_host_name = context.owner_host(key.clone()).await.unwrap_or_default();
+                if i == 0 {
+                    crate::matching_service_native::trace_list_partitions_stage(if ty == 1 {
+                        "activity-owner-lookup-complete"
+                    } else {
+                        "decision-owner-lookup-complete"
+                    });
+                }
                 partitions.push(api::TaskListPartitionMetadata {
                     key,
                     owner_host_name,

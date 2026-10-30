@@ -27,6 +27,7 @@ jobs:
       LANE: ${{ inputs.lane }}
       ADAPTIVE_RETRY_ONLY: ${{ inputs.adaptive_retry_only }}
       CADENCE_MATCHING_ADAPTIVE_TRACE: ${{ inputs.adaptive_trace && 'production-adaptive-scaler-probe' || '' }}
+      CADENCE_MATCHING_LIST_PARTITIONS_TRACE: "1"
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init go/idls
