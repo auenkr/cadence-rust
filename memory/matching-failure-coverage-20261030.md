@@ -1,17 +1,83 @@
-# Matching failure-path test coverage follow-up (2026-10-30)
+# Matching failure-path test coverage reconciliation (2026-10-30)
 
-Base: immutable Matching candidate `22c695d65af367a0b49b605877f72ec33fa2beb8` (the code SHA associated with CI run `41028655670`; validation remains owned by the parent).
+## Exact candidate and validation boundary
 
-Added `refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears` to the crate's `matching_partition_cancellation_tests` unit module. It uses the existing `#[cfg(test)]` `Matching.engine_fault` hook, calls the public `MatchingApi::refresh_task_list_partition_config` RPC, checks the injected message and `Internal` status, confirms the failing request created no durable task list, clears the fault, and confirms the same request succeeds. The Go-style ignored manager-error stub was removed from `matching_engine_go_tests_c.rs` because this internal unit test now supplies deterministic public error-propagation and cleanup/recovery coverage without adding production APIs or changing behavior.
+This ledger was reconciled against supplemental candidate
+`565c8fc91893fae1a81cd8e47f10f2ee4744c046` on
+`t3/matching-queued-activity-candidate-5ee69b5`, whose ancestry includes the
+frozen source `5ee69b5572688c2dba2245c7b411c7182c5b9b16`, `741dafd86`, and
+`1c1c6e94d`. It is source-review evidence only. No Cargo, Go, build, format,
+test, or runtime command was run locally.
 
-The ignored query-dispatch failure case remains. Its Go oracle fails `DispatchQueryTask` directly; Rust still has no injected dispatch seam, and substituting a no-poller deadline would assert different behavior. A faithful deterministic version requires a narrow test-only dispatch failure hook at the dispatch boundary and observable assertions for the returned dispatch status plus removal of that query's waiter/index/pending offer. No such seam was added in this change.
+The matching PostgreSQL mixed gate is
+https://github.com/auenkr/cadence-rust/actions/runs/41056791529 on the frozen
+tag and was still `in_progress` at the post-review check, running
+`Mixed Go and Rust validation`. Do not dispatch supplemental CI or a second
+mixed gate until that run is terminal. The prior fresh workspace pass
+41055162424 applies to the frozen base only, not this supplemental candidate.
 
-Validation: no Cargo, Go, formatter, runtime, CI, or PR command was run. The test candidate therefore needs CI validation before its result is treated as established evidence.
+## Reconciled findings
 
-## Follow-up candidate
+1. **Query dispatch error and cleanup — covered in source, candidate CI pending.**
+   The formerly ignored integration stub is removed. In
+   `matching_partition_cancellation_tests.rs`,
+   `query_workflow_dispatch_failure_returns_error_and_cleans_pending_query`
+   injects failure through the `#[cfg(test)]` dispatch callback after waiter
+   registration and checks the public RPC's `Internal` code and exact message,
+   `deliver_query_result` returning `NotFound` for the failed query, and the
+   absence of a queued query offer. The seam and test were added by `1c1c6e94d`.
+   This corrects the stale audit claim that no dispatch-manager failure
+   injection existed.
 
-Based on `741dafd86f52ba7909811a52f49a04603bb592d6`, I reviewed the refresh test above: it exercises the public RPC, asserts the exact `Internal` message, verifies that the injected engine failure occurs before durable queue creation, then clears the fault and verifies a successful refresh of the same partition request.
+2. **Refresh error returned by RPC and recovery — covered in source, candidate
+   CI pending.** `refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears`
+   injects an engine error through the existing test-only fault hook, asserts
+   the public RPC returns `Internal` with the exact message, checks that the
+   failed refresh did not create a durable task list, clears the fault, and
+   succeeds on the same request. The former ignored Go-compatible stub is
+   removed. The test was added by `741dafd86`.
 
-Added a `#[cfg(test)]` query dispatch failure closure on `Matching`. The public `QueryWorkflow` path invokes it after registering the result waiter and immediately before offering the query to a poller. The new deterministic unit test asserts the returned Internal status, verifies `deliver_query_result` returns NotFound for the captured task ID (the waiter/index was removed), and confirms the queue has no pending query offer. Removed the formerly ignored `query_workflow_failed_to_dispatch_query_task_is_error` integration stub now that the unit test provides executable equivalent behavior and cleanup assertions.
+3. **Failover callback registration and catch-up — covered in source.**
+   Go `handler/engine.go::registerDomainFailoverCallback` seeds the callback
+   baseline from all cached domains; later `domainChangeCallback` only
+   disconnects eligible global, non-active-active domains whose failover
+   notification version advanced. Rust's
+   `matching_failover_callback_tests.rs` calls the production
+   `MatchingRuntime::start_domain_cache` registration path. It proves initial
+   catch-up does not release a blocked poll, filtered local/active-active/stale
+   changes do not release it, and an eligible advanced version does release it
+   while retaining the same queue owner. A second test covers the native
+   registry attached after cache catch-up. The previous selector-only-gap
+   claim is stale; no additional failover test is needed from this audit.
 
-Validation dispatched on the exact pushed source candidate `1c1c6e94d0d7384f89f09920a1452e58643b02e0` using `rust-ci.yml`, with no package input and `clean_target=true`: https://github.com/auenkr/cadence-rust/actions/runs/41029943649 . Conclusion was pending at dispatch; no result was polled. No local Cargo, Go, formatter, or runtime command was run. The task-specific source review used `git diff --check`; it reported no whitespace errors.
+4. **Typed error matrix and Thrift wrapper defaults — incomplete as an
+   exhaustive source-parity audit; no concrete runtime mismatch established.**
+   Go `handler/handler_test.go` has per-method cases for host throttling,
+   internal errors, poll timeout configuration, domain lookup, and manager
+   failures. Go `wrappers/thrift/thrift_handler_test.go` asserts error
+   conversion and returned default values for Health, AddActivityTask,
+   AddDecisionTask, CancelOutstandingPoll, DescribeTaskList,
+   ListTaskListPartitions, PollForActivityTask, PollForDecisionTask,
+   QueryWorkflow, and RespondQueryTaskCompleted. Rust has public RPC engine
+   error tests and Thrift exception mapping tests for untyped NotFound,
+   ResourceExhausted, DomainNotActive, RemoteSyncMatched, StickyWorkerUnavailable,
+   and QueryFailed errors, including method-specific exception fields and
+   required Thrift fields. These are representative, not a cross-product of
+   every Go error case over every Rust transport method. Rust's transport
+   encodes a Thrift application exception rather than exposing Go's internal
+   `(default response, error)` pair, so the Go wrapper's default-value
+   assertions are not directly observable in that same form. Keep this item as
+   audit-only coverage debt; add a narrowly scoped test only if a specific
+   externally visible mapping or default discrepancy is identified.
+
+The corrected source audit closes stale items 1–3 from
+`matching-validation-audit-20261030.md`. Item 4 remains an explicit, bounded
+coverage limitation. This ledger does not establish full Matching parity or
+service completion.
+
+## Validation evidence
+
+The source test candidate still requires fresh, package-unset
+`rust-ci.yml` CI with `clean_target=true` after gate 41056791529 is terminal.
+Do not treat source presence as passing test evidence. No mixed-cluster result
+or Matching completion is claimed here.
