@@ -298,7 +298,11 @@ mod tests {
                 &self,
                 _: Duration,
             ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
-                Ok(0)
+                // Go's refresh excludes records whose notification version is
+                // greater than or equal to metadata's notification version.
+                // This fixture's record is at 0, so the metadata watermark
+                // must be strictly later for it to enter the cache.
+                Ok(1)
             }
             fn list_domains(
                 &self,
@@ -658,7 +662,11 @@ mod tests {
                 .await
                 .unwrap();
             disconnected.abort();
-            let _ = disconnected.await;
+            let disconnect_result = tokio::time::timeout(Duration::from_secs(2), disconnected)
+                .await
+                .expect("aborted request task did not stop")
+                .unwrap_err();
+            assert!(disconnect_result.is_cancelled());
             // Wait until the server has received the stream reset before releasing
             // the scan; a later waiter must still reuse the registered manager.
             let mut waiter_client = client.clone();

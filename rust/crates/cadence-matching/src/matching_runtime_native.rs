@@ -746,7 +746,9 @@ mod tests {
                 &self,
                 _: std::time::Duration,
             ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
-                Ok(0)
+                // The cached record has notification version 0. Go's cache
+                // only publishes records older than the metadata watermark.
+                Ok(1)
             }
             fn list_domains(
                 &self,
