@@ -15,6 +15,10 @@ on:
         description: Capture bounded adaptive probe delivery and scaler traces
         type: boolean
         default: false
+      matching_gdb_diagnostic:
+        description: Attach GDB for up to 20 seconds on PostgreSQL Matching process evidence (briefly stops Matching; diagnostic only)
+        type: boolean
+        default: false
 concurrency:
   group: matching-production-validation
   cancel-in-progress: true
@@ -28,6 +32,7 @@ jobs:
       ADAPTIVE_RETRY_ONLY: ${{ inputs.adaptive_retry_only }}
       CADENCE_MATCHING_ADAPTIVE_TRACE: ${{ inputs.adaptive_trace && 'production-adaptive-scaler-probe' || '' }}
       CADENCE_MATCHING_PROC_EVIDENCE: ${{ inputs.lane == 'postgres' && '1' || '' }}
+      CADENCE_MATCHING_PROC_EVIDENCE_GDB: ${{ inputs.lane == 'postgres' && inputs.matching_gdb_diagnostic && '1' || '' }}
       CADENCE_MATCHING_LIST_PARTITIONS_TRACE: "1"
       CADENCE_MATCHING_TRACE_LIST_TASK_LIST_PARTITIONS: "1"
       CADENCE_MATCHING_SHUTDOWN_TRACE: "1"
@@ -60,6 +65,12 @@ jobs:
       - name: PostgreSQL probe client
         if: inputs.lane == 'postgres'
         run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
+      - name: Enable optional PostgreSQL process diagnostic
+        if: inputs.lane == 'postgres' && inputs.matching_gdb_diagnostic
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gdb
+          sudo sysctl -w kernel.yama.ptrace_scope=0
       - name: Build fresh Rust Matching
         if: inputs.lane != 'adaptive-go-control'
         run: |
