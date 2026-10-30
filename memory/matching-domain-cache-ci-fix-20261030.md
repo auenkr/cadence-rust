@@ -56,11 +56,12 @@ regression coverage once their fixtures represent a valid metadata snapshot.
 
 ## Validation
 
-Focused `rust-ci.yml` run dispatched with `package=cadence-matching`:
-<https://github.com/auenkr/cadence-rust/actions/runs/41028524128>.
-Result to record after inspection: pending.
+A focused `rust-ci.yml` run was dispatched with `package=cadence-matching` at
+<https://github.com/auenkr/cadence-rust/actions/runs/41028524128>. It was still
+queued at the single inspection, then explicitly cancelled as superseded before
+completion so it would not overlap the decisive uncached workspace run.
 
-If focused CI passes, run the exact committed candidate through `rust-ci.yml`
-with `package` unset and `clean_target=true`; require sequential workspace
-Clippy then workspace tests. PostgreSQL mixed validation remains undispatched
-until that fresh workspace run passes.
+The exact candidate revision is validated by a `rust-ci.yml` run with
+`package` unset and `clean_target=true`; require sequential workspace Clippy
+then workspace tests. PostgreSQL mixed validation remains undispatched until
+that fresh workspace run passes. Record its URL, head SHA and conclusion here.
