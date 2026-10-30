@@ -1949,6 +1949,11 @@ async function run() {
   }
   await call('Matching', 'AddActivityTask', { domainId, sourceDomainId: domainId, workflowExecution: { workflowId: `isolated-${id}`, runId: isoStart.runId }, taskList: isolatedList, scheduleId: scheduled.eventId, partitionConfig: { 'isolation-group': 'zone-a' } });
   const isolatedTask = await pollA;
+  if (isolatedTask.activityId !== 'isolated') {
+    console.error('ISOLATED POLL DIAGNOSTIC', JSON.stringify(isolatedTask));
+    const diag = await call('Matching', 'DescribeTaskList', { domainId, request: { taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true } }).catch(error => ({ error: error.message }));
+    console.error('ISOLATED DESCRIBE DIAGNOSTIC', JSON.stringify(diag));
+  }
   assert.equal(isolatedTask.activityId, 'isolated');
   await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB });
   // Go's CancelOutstandingPoll ends the poll with an empty response (ErrNoTasks), not a gRPC error.
