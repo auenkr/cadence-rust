@@ -1,0 +1,7 @@
+At source 2c3bc4a9ab50a824a89b96bac33e40309ef587ef, the poller audit's claimed production timestamp/status mismatches are not established: its pointers target cadence-service-core handlers.rs, the shared frontend adapter.
+
+Production gRPC registration selects SharedNativeMatching when native_service is attached (grpc_matching.rs:4173 onward). NativeMatchingService::core_describe_task_list invokes the native engine (matching_service_native.rs:183 onward). matching_engine_control_native.rs:43 converts HistoricalInfo.last_access_time from nanoseconds into protobuf seconds/nanos. Its include-status response at line 150 fills read_level, ack_level, backlog_count_hint, task_id_block, empty, rate_per_second, new_tasks_per_second and isolation_group_metrics. Therefore neither the adapter's millisecond field nor its default status fields demonstrate a production Matching mismatch. No source change warranted from this finding.
+
+Additional completed source reviews found no mismatch in shard-ownership lost branches or partition-owner lookup error behavior (Go and Rust both leave failed owner lookup empty). The real StatsD sink Drop regression test passed source review. All these findings remain source evidence, not executable validation.
+
+Fresh workspace CI https://github.com/auenkr/cadence-rust/actions/runs/41107169881 was confirmed in progress at exact source 2c3bc4a9ab50a824a89b96bac33e40309ef587ef. Matching remains incomplete; mixed acceptance and parity closure remain pending. No local executable validation or History migration.
