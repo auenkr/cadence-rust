@@ -290,8 +290,8 @@ async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller(
 #[tokio::test]
 async fn refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears() {
     use cadence_api::types::DomainInfo;
-    use cadence_proto::{api as p, matching as m};
     use cadence_proto::matching::matching_api_server::MatchingApi;
+    use cadence_proto::{api as p, matching as m};
 
     let directory = tempfile::tempdir().unwrap();
     let store = Arc::new(
@@ -378,8 +378,8 @@ async fn refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears() {
 /// so the RPC's registration guard must clean both pieces of state.
 #[tokio::test]
 async fn query_workflow_dispatch_failure_returns_error_and_cleans_pending_query() {
-    use cadence_api::types::DomainInfo;
     use crate::matching_query::QueryOutcome;
+    use cadence_api::types::DomainInfo;
     use cadence_proto::matching as m;
     use cadence_proto::matching::matching_api_server::MatchingApi;
 
