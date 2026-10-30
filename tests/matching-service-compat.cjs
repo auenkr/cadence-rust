@@ -518,7 +518,7 @@ async function run() {
   }
   function directPartitionDiagnostic(client, address, domainName, taskListName) {
     const request = { domain: domainName, taskList: { name: taskListName } };
-    const startedAt = new Date().toISOString();
+    let startedAt;
     const channel = client.getChannel();
     const connectivityTimeline = [];
     let previousConnectivityState;
@@ -571,14 +571,15 @@ async function run() {
     });
     const connectivitySampler = setInterval(() => sampleConnectivity('transition'), 50);
     return new Promise(resolve => {
-      const finish = async (error, response) => {
+      const finish = async (error, response, rpcCallbackAt) => {
         clearInterval(connectivitySampler);
         sampleConnectivity('post-rpc');
         const tcpProbe = await tcpProbePromise;
+        const diagnosticsAssembledAt = new Date().toISOString();
         const partitions = response?.decisionTaskListPartitions || [];
         resolve({
           rpc: 'MatchingAPI.ListTaskListPartitions', address, request, startedAt,
-          completedAt: new Date().toISOString(), outcome: error ? 'error' : 'response',
+          completedAt: rpcCallbackAt, diagnosticsAssembledAt, outcome: error ? 'error' : 'response',
           error: error ? { code: error.code, details: error.details || error.message } : null,
           response: response ? {
             decisionTaskListPartitions: response.decisionTaskListPartitions || [],
@@ -600,11 +601,16 @@ async function run() {
         });
       };
       try {
+        startedAt = new Date().toISOString();
         client.ListTaskListPartitions(request, new grpc.Metadata(),
-          { deadline: Date.now() + 10000 }, (error, response) => { void finish(error, response); });
+          { deadline: Date.now() + 10000 }, (error, response) => {
+            const rpcCallbackAt = new Date().toISOString();
+            void finish(error, response, rpcCallbackAt);
+          });
         sampleConnectivity('during-rpc');
       } catch (error) {
-        void finish(error, undefined);
+        const rpcCallbackAt = new Date().toISOString();
+        void finish(error, undefined, rpcCallbackAt);
       }
     });
   }

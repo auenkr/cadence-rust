@@ -13,3 +13,9 @@ This is diagnostic-only. It does not change channel options, proxy behavior, cre
 ## Limits and validation
 
 The TCP probe checks the direct host and port in the gRPC target, so it does not establish whether a proxy route is usable. Connectivity sampling runs every 50 ms and can miss shorter transitions; output is capped at 32 records. The one-second TCP timeout bounds probe lifetime. No Cargo, Go, build, format, test, runtime validation, or CI dispatch was run, as requested. `git diff --check` was used for whitespace inspection only.
+
+## Timestamp review correction
+
+Review finding against source `07c3f09e6ce4e5bb47fa19874adfc7a97b8474d3`: the diagnostic's `completedAt` was assigned after awaiting the TCP probe, so it could trail the gRPC callback by up to the probe's one-second timeout. The correction captures `completedAt` at callback entry, records `diagnosticsAssembledAt` after the probe settles, and starts `startedAt` immediately before the RPC invocation. The RPC deadline, assertions, probe timer, and timeline bounds are unchanged. Remaining timestamps retain their intended scope: connectivity sample timestamps mark sampling, `diagnosticStartedAt` anchors elapsed diagnostic sampling, and TCP probe elapsed time starts when its socket is opened.
+
+This correction is unvalidated: no local validation or CI dispatch/poll was performed. Source SHA: `07c3f09e6ce4e5bb47fa19874adfc7a97b8474d3`.
