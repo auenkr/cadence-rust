@@ -392,7 +392,8 @@ async function adaptiveScaler(ctx) {
 // both members before the kill, every poll after the restart is addressed to the partition's owner endpoint
 // (no retry onto another member), and the victim's partitions must show a higher persisted range afterwards.
 async function durableRestart(ctx) {
-  const rootName = `durable-restart-${ctx.id}`;
+  // Go getAllPartitions lists partitions from the dynamic config, so this fixed name carries a 3-partition constraint (run-go-service-baseline.py).
+  const rootName = 'probe-durable-restart-root';
   const root = { name: rootName };
   await ownerRpc(ctx, 'UpdateTaskListPartitionConfig', { domainId: ctx.domainId, taskList: root, taskListType: 'TASK_LIST_TYPE_ACTIVITY',
     partitionConfig: { version: '999', numReadPartitions: 3, numWritePartitions: 3, readPartitions: { 0: {}, 1: {}, 2: {} }, writePartitions: { 0: {}, 1: {}, 2: {} } } });

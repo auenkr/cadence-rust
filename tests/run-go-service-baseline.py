@@ -574,7 +574,7 @@ if args.probe_list_partitions:
     # persistence checkpoints deliberately observe the root owner.
     for key in ('matching.numTasklistWritePartitions', 'matching.numTasklistReadPartitions'):
         dynamic_text += f'\n{key}:\n'
-        for task_list in ('probe-list-partitions-root', 'probe-list-partitions-child'):
+        for task_list in ('probe-list-partitions-root', 'probe-list-partitions-child', 'probe-durable-restart-root'):
             dynamic_text += f'  - value: 3\n    constraints: {{taskListName: {task_list}}}\n'
 if args.probe_auto_config_hint:
     # go/config/dynamicconfig/development.yaml sets matching.enableClientAutoConfig to true; the probe asserts false,
