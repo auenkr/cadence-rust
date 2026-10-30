@@ -153,12 +153,6 @@ async fn refresh_task_list_partition_config_success_accepts_partitioned_normal_l
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go injects an error through tasklist.MockManager.RefreshTaskListPartitionConfig; Rust refreshes the SQLite-durable queue registry directly, and no public seam injects a failure into that call"]
-async fn refresh_task_list_partition_config_manager_error_is_propagated() {
-    unimplemented!("no public failure-injection seam for the durable partition refresh");
-}
-
-#[tokio::test]
 async fn refresh_task_list_partition_config_invalid_tasklist_name_is_internal() {
     let (_dir, matching) = matching_with_domain();
     let err = matching

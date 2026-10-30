@@ -282,3 +282,93 @@ async fn refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller(
         registry.shutdown(3).await.unwrap();
     }
 }
+
+/// The Go engine test injects a manager error and checks that the public RPC
+/// returns it. Exercise the same observable propagation through the existing
+/// test-only engine fault hook, then clear the fault and verify the same RPC
+/// can refresh the durable queue successfully.
+#[tokio::test]
+async fn refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears() {
+    use cadence_api::types::DomainInfo;
+    use cadence_proto::{api as p, matching as m};
+    use cadence_proto::matching::matching_api_server::MatchingApi;
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        SqliteTaskStore::create(
+            directory.path().join("refresh-engine-fault.db"),
+            BlobEncoding::ThriftRW,
+        )
+        .unwrap(),
+    );
+    let history = MatchingHistoryClient::new(
+        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        Duration::from_secs(1),
+        1024,
+    );
+    let registry = QueueRegistry::new(store.clone(), history, NonZeroU32::new(100).unwrap());
+    let domain_id = Uuid::from_u128(1);
+    let state = crate::handlers::AppState::default();
+    state
+        .domains
+        .create(
+            DomainInfo {
+                name: "refresh-engine-fault-domain".into(),
+                uuid: domain_id.to_string(),
+                ..Default::default()
+            },
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+    let matching = Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(5));
+    *matching.engine_fault.lock().unwrap() = Some((
+        "RefreshTaskListPartitionConfig",
+        "injected refresh failure".into(),
+    ));
+
+    let request = || {
+        Request::new(m::RefreshTaskListPartitionConfigRequest {
+            domain_id: domain_id.to_string(),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys/refresh-engine-fault/1".into(),
+                kind: 0,
+                ..Default::default()
+            }),
+            task_list_type: 1,
+            partition_config: Some(p::TaskListPartitionConfig {
+                version: 1,
+                read_partitions: HashMap::from([(0, p::TaskListPartition::default())]),
+                write_partitions: HashMap::from([(0, p::TaskListPartition::default())]),
+                ..Default::default()
+            }),
+        })
+    };
+
+    let status = matching
+        .refresh_task_list_partition_config(request())
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "injected refresh failure");
+    let key = TaskListKey {
+        domain_id,
+        name: "/__cadence_sys/refresh-engine-fault/1".into(),
+        task_type: 0,
+    };
+    assert!(
+        matches!(
+            store.get_task_list(&key),
+            Err(cadence_persistence::matching_task_store::MatchingTaskStoreError::NotFound)
+        ),
+        "failed refresh did not create a durable task list or leave a partial refresh behind"
+    );
+
+    *matching.engine_fault.lock().unwrap() = None;
+    matching
+        .refresh_task_list_partition_config(request())
+        .await
+        .unwrap();
+    registry.shutdown(3).await.unwrap();
+}
