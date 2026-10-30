@@ -181,3 +181,11 @@ at immutable ref `5ee69b5572688c2dba2245c7b411c7182c5b9b16` only after the
 workspace artifact checks above. That run is base evidence, not candidate
 validation. Keep this candidate marked unverified until the requested mixed
 PostgreSQL scenario has evidence from a gate built from the candidate source.
+
+GitHub Actions does not accept a raw commit SHA as `workflow_dispatch.ref`.
+Created tag `validation/matching-postgres-5ee69b5` at exactly
+`5ee69b5572688c2dba2245c7b411c7182c5b9b16` and dispatched the PostgreSQL
+lane there. Run [`41056791529`](https://github.com/auenkr/cadence-rust/actions/runs/41056791529)
+reports head `5ee69b5572688c2dba2245c7b411c7182c5b9b16` and status
+**in_progress** (observed 2026-10-30 12:37:58 UTC). This remains base evidence;
+the integrated candidate at `e07602e03` is still **UNVERIFIED**.
