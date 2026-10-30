@@ -1,0 +1,138 @@
+{
+  "label": "before-restart",
+  "reason": "Deadline exceeded after 9.999s,remote_addr=127.0.0.1:18097",
+  "startedAt": "2026-10-30T18:58:21.739Z",
+  "rustPid": 24289,
+  "grpcPort": 18097,
+  "cpuSampleGapMs": 500,
+  "threadCap": 64,
+  "processStatus": [
+    "State:\tS (sleeping)",
+    "VmRSS:\t   95508 kB",
+    "Threads:\t10",
+    "voluntary_ctxt_switches:\t10",
+    "nonvoluntary_ctxt_switches:\t4"
+  ],
+  "threads": [
+    {
+      "tid": 24289,
+      "comm": "cadence-matchin",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 0,
+      "stime": 0,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24290,
+      "comm": "tokio-rt-worker",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 12,
+      "stime": 1,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24291,
+      "comm": "tokio-rt-worker",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 12,
+      "stime": 1,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24292,
+      "comm": "tokio-rt-worker",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 12,
+      "stime": 2,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24293,
+      "comm": "tokio-rt-worker",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 14,
+      "stime": 2,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24294,
+      "comm": "cadence-statsd-",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 0,
+      "stime": 0,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24295,
+      "comm": "cadence-statsd-",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 0,
+      "stime": 0,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24296,
+      "comm": "cadence-statsd-",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 0,
+      "stime": 0,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24300,
+      "comm": "matching-domain",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 0,
+      "stime": 1,
+      "cpuTicksDuringGap": 0
+    },
+    {
+      "tid": 24304,
+      "comm": "tokio-rt-worker",
+      "wchan": "futex_do_wait",
+      "state": "S",
+      "utime": 6,
+      "stime": 1,
+      "cpuTicksDuringGap": 0
+    }
+  ],
+  "listenerQueues": {
+    "argv": [
+      "ss",
+      "-ltn",
+      "sport",
+      "=",
+      ":18097"
+    ],
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "stdout": "State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 2      128        127.0.0.1:18097      0.0.0.0:*          \n",
+    "stderr": ""
+  },
+  "connections": {
+    "argv": [
+      "ss",
+      "-tn",
+      "sport",
+      "=",
+      ":18097"
+    ],
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "stdout": "State      Recv-Q Send-Q Local Address:Port  Peer Address:Port Process\nCLOSE-WAIT 1      0          127.0.0.1:18097    127.0.0.1:49736       \nESTAB      204    0          127.0.0.1:18097    127.0.0.1:51752       \nCLOSE-WAIT 51     0          127.0.0.1:18097    127.0.0.1:49720       \nESTAB      13     0          127.0.0.1:18097    127.0.0.1:51744       \n",
+    "stderr": ""
+  },
+  "gdb": "not requested",
+  "finishedAt": "2026-10-30T18:58:22.279Z"
+}

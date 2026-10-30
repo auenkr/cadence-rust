@@ -1,0 +1,62 @@
+{
+  "snapshotLabel": "before-restart",
+  "directPartitionDiagnostic": {
+    "rpc": "MatchingAPI.ListTaskListPartitions",
+    "address": "127.0.0.1:18097",
+    "request": {
+      "domain": "service-compat-8e663adf-36f5-45e3-8c66-7dd426750178",
+      "taskList": {
+        "name": "before-restart-ready-8e663adf-36f5-45e3-8c66-7dd426750178"
+      }
+    },
+    "startedAt": "2026-10-30T18:58:11.740Z",
+    "completedAt": "2026-10-30T18:58:21.739Z",
+    "diagnosticsAssembledAt": "2026-10-30T18:58:21.739Z",
+    "outcome": "error",
+    "error": {
+      "code": 4,
+      "details": "Deadline exceeded after 9.999s,remote_addr=127.0.0.1:18097"
+    },
+    "response": null,
+    "requestedPartitionOwner": "",
+    "traceEnabled": true,
+    "transportDiagnostic": {
+      "grpcTarget": "127.0.0.1:18097",
+      "grpcTargetScheme": "bare host:port; grpc-js default resolver selection",
+      "grpcChannelConnectivityTimeline": [
+        {
+          "phase": "pre-rpc",
+          "state": "READY",
+          "observedAt": "2026-10-30T18:58:11.739Z",
+          "elapsedMs": 0
+        },
+        {
+          "phase": "during-rpc",
+          "state": "READY",
+          "observedAt": "2026-10-30T18:58:11.740Z",
+          "elapsedMs": 1
+        },
+        {
+          "phase": "post-rpc",
+          "state": "READY",
+          "observedAt": "2026-10-30T18:58:21.739Z",
+          "elapsedMs": 10000
+        }
+      ],
+      "omittedConnectivitySamples": 0,
+      "tcpProbe": {
+        "connected": true,
+        "elapsedMs": 1
+      },
+      "http2Probe": {
+        "connected": true,
+        "settingsReceived": false,
+        "error": "ETIMEDOUT",
+        "elapsedMs": 2002
+      },
+      "proxyEnvironmentVariablesPresent": [],
+      "noProxyConfigured": false,
+      "tlsCredentials": "insecure"
+    }
+  }
+}
