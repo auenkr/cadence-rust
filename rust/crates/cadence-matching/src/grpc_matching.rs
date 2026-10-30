@@ -380,9 +380,10 @@ pub struct Matching {
     /// Test-only failure at the query dispatch boundary, after its result
     /// waiter is registered and before the task is offered to a poller.
     #[cfg(test)]
-    pub(crate) query_dispatch_fault:
-        Arc<std::sync::Mutex<Option<Arc<dyn Fn(&str) -> Status + Send + Sync>>>>,
+    pub(crate) query_dispatch_fault: Arc<std::sync::Mutex<Option<QueryDispatchFault>>>,
 }
+#[cfg(test)]
+type QueryDispatchFault = Arc<dyn Fn(&str) -> Status + Send + Sync>;
 type DomainNameResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Runtime-provided ownership check. The cached flag is advisory and only
 /// allows the excluded-task-list Ring fast path; eligible names must still
