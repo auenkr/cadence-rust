@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { randomUUID, X509Certificate } = require('node:crypto');
 const fs = require('node:fs');
+const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 const tls = require('node:tls');
@@ -519,8 +520,27 @@ async function run() {
     const request = { domain: domainName, taskList: { name: taskListName } };
     const startedAt = new Date().toISOString();
     return new Promise(resolve => client.ListTaskListPartitions(request,
-      new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, response) => {
+      new grpc.Metadata(), { deadline: Date.now() + 10000 }, async (error, response) => {
         const partitions = response?.decisionTaskListPartitions || [];
+        let channelConnectivityState = null;
+        try {
+          channelConnectivityState = client.getChannel().getConnectivityState(false);
+        } catch (_) {}
+        const [host, rawPort] = address.split(':');
+        const tcpProbe = await new Promise(probeResolve => {
+          const started = Date.now();
+          const socket = net.createConnection({ host, port: Number(rawPort) });
+          let settled = false;
+          const finish = result => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            probeResolve({ ...result, elapsedMs: Date.now() - started });
+          };
+          socket.once('connect', () => finish({ connected: true }));
+          socket.once('error', probeError => finish({ connected: false, error: probeError.code || probeError.message }));
+          socket.setTimeout(1000, () => finish({ connected: false, error: 'ETIMEDOUT' }));
+        });
         resolve({
           rpc: 'MatchingAPI.ListTaskListPartitions', address, request, startedAt,
           completedAt: new Date().toISOString(), outcome: error ? 'error' : 'response',
@@ -531,6 +551,16 @@ async function run() {
           } : null,
           requestedPartitionOwner: partitions.find(partition => partition.key === taskListName)?.ownerHostName || '',
           traceEnabled: process.env.CADENCE_MATCHING_LIST_PARTITIONS_TRACE === '1',
+          transportDiagnostic: {
+            grpcTarget: address,
+            grpcTargetScheme: 'bare host:port; grpc-js default resolver selection',
+            grpcChannelConnectivityState: channelConnectivityState,
+            tcpProbe,
+            proxyEnvironmentVariablesPresent: ['grpc_proxy', 'https_proxy', 'http_proxy', 'GRPC_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY']
+              .filter(name => Boolean(process.env[name])),
+            noProxyConfigured: Boolean(process.env.no_proxy || process.env.NO_PROXY),
+            tlsCredentials: process.env.CADENCE_MATCHING_GRPC_CA_FILE ? 'custom CA' : 'insecure',
+          },
         });
       }));
   }
