@@ -24,6 +24,7 @@ const (
 	decisionTaskListType     = 1
 	// Go persistence.TaskListTypeDecision (iota 0); the seed/verify fixture above uses its own value.
 	liveDecisionTaskListType = 0
+	liveActivityTaskListType = 1
 	semaphoreOwnerRowType     = 2
 	semaphoreTokenRowType     = 1
 	semaphoreOwnerTokenIDNone = -1
@@ -78,10 +79,18 @@ func main() {
 		return
 	}
 	if os.Args[1] == "observe-task" || os.Args[1] == "wait-empty" {
-		if len(os.Args) != 5 {
-			log.Fatal("task observer expects domain-id task-list timeout-seconds")
+		if len(os.Args) != 5 && len(os.Args) != 6 {
+			log.Fatal("task observer expects domain-id task-list timeout-seconds [task-type]")
 		}
-		observeTask(os.Args[1], os.Args[2], os.Args[3], os.Args[4])
+		taskType := liveDecisionTaskListType
+		if len(os.Args) == 6 {
+			parsed, err := strconv.Atoi(os.Args[5])
+			if err != nil || (parsed != liveDecisionTaskListType && parsed != liveActivityTaskListType) {
+				log.Fatalf("task type must be decision (0) or activity (1): %q", os.Args[5])
+			}
+			taskType = parsed
+		}
+		observeTask(os.Args[1], os.Args[2], os.Args[3], os.Args[4], taskType)
 		return
 	}
 	if os.Args[1] == "verify-semaphore" || os.Args[1] == "release-semaphore" || os.Args[1] == "verify-semaphore-free" {
@@ -106,7 +115,7 @@ func main() {
 	}
 }
 
-func observeTask(command, domainID, name, timeoutText string) {
+func observeTask(command, domainID, name, timeoutText string, taskType int) {
 	domainUUID, err := gocql.ParseUUID(domainID)
 	if err != nil {
 		log.Fatal(err)
@@ -120,11 +129,11 @@ func observeTask(command, domainID, name, timeoutText string) {
 	deadline := time.Now().Add(timeout)
 	for {
 		var rangeID int64
-		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainUUID, name, liveDecisionTaskListType, tasksTaskListRowType).Scan(&rangeID)
+		err := session.Query("SELECT range_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=-12345", domainUUID, name, taskType, tasksTaskListRowType).Scan(&rangeID)
 		if err != nil && err != gocql.ErrNotFound {
 			log.Fatal(err)
 		}
-		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=?", domainUUID, name, liveDecisionTaskListType, tasksTaskRowType).Iter()
+		iter := session.Query("SELECT task_id FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=?", domainUUID, name, taskType, tasksTaskRowType).Iter()
 		count := 0
 		var taskID int64
 		for iter.Scan(&taskID) { count++ }

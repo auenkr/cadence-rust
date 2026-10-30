@@ -12,7 +12,7 @@ function createTaskObserver({ backend, cassandraCommand, sqliteTaskState, wait =
     let current;
     do {
       current = backend === 'cassandra'
-        ? cassandraCommand([condition === 'queued' ? 'observe-task' : 'wait-empty', domainId, taskList, String(timeoutSeconds)], label)
+        ? cassandraCommand([condition === 'queued' ? 'observe-task' : 'wait-empty', domainId, taskList, String(timeoutSeconds), String(taskType)], label)
         : sqliteTaskState(domainId, taskList, label, taskType);
       if (condition === 'queued' ? current.queued_rows > 0 : current.queued_rows === 0) return current;
       await wait(250);

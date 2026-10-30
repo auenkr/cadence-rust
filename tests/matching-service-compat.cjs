@@ -1106,23 +1106,24 @@ async function run() {
         await waitForRustReady('after-activity-owner-crash');
       } else {
         secondaryRust = startSecondaryRust();
-        const activityRejoinDeadline = Date.now() + 30000;
-        let activityMemberRejoined = false;
-        while (Date.now() < activityRejoinDeadline) {
-          try {
+        await waitForRustReady('after-activity-owner-crash');
+      }
+      const activityRejoinDeadline = Date.now() + 30000;
+      let activityMemberRejoined = false;
+      while (Date.now() < activityRejoinDeadline) {
+        try {
           const [primaryView, secondaryView] = await Promise.all(activityPeers.map(client =>
             directPartitionOwner(client, domain, activityTaskList, 'activity')));
           if (!primaryView || primaryView !== secondaryView) throw new Error('Rust activity ownership map has not reconverged');
-            await call('WorkflowAPI', 'DescribeTaskList', {
-              domain, taskList: { name: `activity-owner-restarted-${id}` },
-              taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true,
-            });
-            activityMemberRejoined = true;
-            break;
-          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
-        }
-      assert(activityMemberRejoined, 'restarted Rust Matching activity owner did not rejoin and reconverge through Go discovery');
+          await call('WorkflowAPI', 'DescribeTaskList', {
+            domain, taskList: { name: `activity-owner-restarted-${id}` },
+            taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true,
+          });
+          activityMemberRejoined = true;
+          break;
+        } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
       }
+      assert(activityMemberRejoined, 'restarted Rust Matching activity owner did not rejoin and reconverge through Go discovery');
     }
     if (cassandraGate && semaphoreEvidence) {
       const heldBeforeOwnerCrash = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-immediately-before-owner-crash');

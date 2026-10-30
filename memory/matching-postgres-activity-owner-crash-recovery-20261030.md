@@ -45,12 +45,33 @@ Existing scenarios are unchanged; this adds a distinct PostgreSQL-only case.
 
 ## Validation status and required evidence
 
-No local Cargo, Go, formatter, runtime, or CI validation was run, per task
-constraints. This is source work, not passing mixed-cluster evidence.
+Review correction on the supplemental branch: Go's persistence enum is
+`TaskListTypeDecision=0`, `TaskListTypeActivity=1` (`go/common/persistence/data_manager_interfaces.go`),
+matching Rust's persistence `task_type` values. The PostgreSQL observer in
+`durableTaskCount` already interpolates its `taskType` argument into both the
+durable-row and task-list-range queries; the activity caller passes `1`, while
+legacy calls default to decision type `0`. That reported PostgreSQL hardcode was
+not present in commit `3a1da7b06bdbec4ddaa5858f003f4f986870540c`.
 
-After review/integration, run the existing immutable PostgreSQL production
-validation lane against a fresh Matching binary built from the integrated
-source. Review its artifact for the new
+The cross-backend observer did have a Cassandra gap: it discarded the optional
+type and the Go CQL helper queried decision rows unconditionally. The observer
+now forwards the type; the helper accepts `0`/`1`, defaults older invocations
+to decision type `0`, and uses the selected type for both row and range reads.
+The observer self-check asserts the activity argument and decision default.
+The activity-owner restart path also now checks both Rust endpoints' activity
+partition views converge and confirms a Go Frontend activity-list describe
+after either primary or secondary owner restart.
+
+No local Cargo, Go, formatter, runtime, or CI validation was run, per task
+constraints. Existing workspace evidence is reported as **1,829 passed, 28
+ignored**; it is prior workspace validation and does not validate this source
+change. Active PostgreSQL production gate **41034380907** remains **pending** for
+this supplemental source review; it targets the separate frozen candidate
+`caa32882f9a3fd1da4450c8b216607c053996893`, not this branch.
+
+After this patch is integrated and the active lane is finished, run the
+existing PostgreSQL production validation lane against a fresh Matching binary
+built from the integrated source. Review its artifact for the new
 `production-activity-crash-recovery.json`, both SDK logs, nested gate exits,
 the binary SHA256, and the baseline topology fields showing `goMatchingStarted:
 false` and Go services `frontend,history,worker`. Record the run URL, head SHA,
