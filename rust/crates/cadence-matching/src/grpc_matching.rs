@@ -225,7 +225,13 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
                 reason: String::new(),
             },
         ),
-        ManagerError::Internal(message) => Status::internal(message),
+        ManagerError::ServiceBusyReason { message, reason } => crate::grpc::detailed_status(
+            tonic::Code::ResourceExhausted,
+            message,
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError { reason },
+        ),
+        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => Status::internal(message),
     }
 }
 use std::{

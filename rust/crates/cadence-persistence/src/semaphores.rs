@@ -88,8 +88,14 @@ pub enum AcquireError {
     Invalid(String),
     #[error("{0}")]
     Internal(String),
+    /// A Go types.InternalServiceError, retained through wrapping.
+    #[error("{0}")]
+    TypedInternal(String),
     #[error("{0}")]
     Throttled(String),
+    /// A typed ServiceBusyError with its transport detail.
+    #[error("{message}")]
+    ServiceBusy { message: String, reason: String },
 }
 
 /// Rejected by every scan: a zero page size could never advance, so Go's paging would loop forever.

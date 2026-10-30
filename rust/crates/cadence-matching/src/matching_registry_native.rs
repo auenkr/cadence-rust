@@ -108,6 +108,24 @@ pub type NativeIsolationProvider = Arc<
         + Sync,
 >;
 pub type NativeWriterLiveProvider = NativeProvider<(i64, i64, i64)>;
+/// Providers captured by Go `NewManager` after resolving its domain name.
+/// Values remain dynamic, but a rename cannot change this manager's filters.
+#[derive(Clone)]
+pub struct NativeBoundTimeouts {
+    pub task_wait: NativeProvider<i64>,
+    pub poll_wait: NativeProvider<i64>,
+    pub writer: NativeWriterLiveProvider,
+    pub partition_count: NativeProvider<i64>,
+    pub cache_enabled: NativeProvider<bool>,
+    pub forward_degree: NativeProvider<i64>,
+    pub forward_polls: NativeProvider<i64>,
+    pub forward_tasks: NativeProvider<i64>,
+    pub forward_rate: NativeProvider<i64>,
+    pub qps_interval: NativeProvider<i64>,
+    pub min_burst: NativeProvider<i64>,
+}
+pub type NativeTimeoutBinder =
+    Arc<dyn Fn(&GoString) -> Result<NativeBoundTimeouts, Status> + Send + Sync>;
 pub type NativeWriterLiveConfig = Arc<dyn Fn() -> (i64, i64, i64) + Send + Sync>;
 pub type NativeReaderPropertiesProvider = NativeProvider<ReaderLive>;
 pub type NativePollObserverProvider =
@@ -259,6 +277,7 @@ struct Owner {
     scaler: crate::matching_scaler::ScalerDaemon,
     created: i64,
     idle_ttl_nanos: i64,
+    ticker_start_failed: bool,
     last_update: Mutex<tokio::time::Instant>,
     next_ack_update: Mutex<Option<tokio::time::Instant>>,
     next_idle_check: Mutex<tokio::time::Instant>,
@@ -339,6 +358,7 @@ pub struct NativeQueueRegistry {
     poll_observer: Option<NativePollObserverProvider>,
     partition_count: Option<NativeProvider<i64>>,
     cache_enabled: Option<NativeProvider<bool>>,
+    timeout_binder: Option<NativeTimeoutBinder>,
     sync_wait: Option<NativeProvider<i64>>,
     local_poll_wait: Option<NativeProvider<i64>>,
     forward_degree: Option<NativeProvider<i64>>,
@@ -641,6 +661,7 @@ impl NativeQueueRegistry {
             poll_observer: None,
             partition_count: None,
             cache_enabled: None,
+            timeout_binder: None,
             sync_wait: None,
             local_poll_wait: None,
             forward_degree: None,
@@ -801,6 +822,10 @@ impl NativeQueueRegistry {
     }
     pub fn with_partition_cache_enabled(mut self, provider: NativeProvider<bool>) -> Self {
         self.cache_enabled = Some(provider);
+        self
+    }
+    pub fn with_timeout_binder(mut self, binder: NativeTimeoutBinder) -> Self {
+        self.timeout_binder = Some(binder);
         self
     }
     pub fn with_sync_wait(mut self, provider: NativeProvider<i64>) -> Self {
@@ -1337,7 +1362,7 @@ impl NativeQueueRegistry {
         }
         // Go starts the adaptive scaler on root normal managers; the loop
         // self-terminates when the owner stops.
-        if kind == 0 {
+        if kind == 0 && !owner.ticker_start_failed {
             if let Some(starter) = registry.scaler_starter.clone() {
                 if TaskListNameBytes::parse(key.name.as_bytes())
                     .is_ok_and(|parsed| parsed.is_root())
@@ -1357,6 +1382,11 @@ impl NativeQueueRegistry {
             .metrics
             .task_list_managers_gauge(state.owners.len());
         registry.changed.notify_waiters();
+        if owner.ticker_start_failed {
+            return Err(Status::internal(
+                "panic object is not error: \"non-positive interval for NewTicker\"",
+            ));
+        }
         Ok(Self::handle_of(&owner))
     }
 
@@ -1395,8 +1425,27 @@ impl NativeQueueRegistry {
         kind: i16,
         now: i64,
     ) -> Result<Arc<Owner>, Status> {
-        let registry = self;
         let domain = gs(key.domain_id);
+        let bound_timeouts = self
+            .timeout_binder
+            .as_ref()
+            .map(|bind| bind(&domain))
+            .transpose()?;
+        let mut scoped_registry = self.clone();
+        if let Some(bound) = &bound_timeouts {
+            scoped_registry.sync_wait = Some(bound.task_wait.clone());
+            scoped_registry.local_poll_wait = Some(bound.poll_wait.clone());
+            scoped_registry.writer_live = Some(bound.writer.clone());
+            scoped_registry.partition_count = Some(bound.partition_count.clone());
+            scoped_registry.cache_enabled = Some(bound.cache_enabled.clone());
+            scoped_registry.forward_degree = Some(bound.forward_degree.clone());
+            scoped_registry.forward_polls = Some(bound.forward_polls.clone());
+            scoped_registry.forward_tasks = Some(bound.forward_tasks.clone());
+            scoped_registry.forward_rate = Some(bound.forward_rate.clone());
+            scoped_registry.qps_interval = Some(bound.qps_interval.clone());
+            scoped_registry.min_burst = Some(bound.min_burst.clone());
+        }
+        let registry = &scoped_registry;
         let metric_context = registry.metric_context(lookup, kind);
         registry.metrics.lease_request(&metric_context);
         let queue = match DurableTaskQueueBytes::open(
@@ -1467,14 +1516,15 @@ impl NativeQueueRegistry {
                     .max(1)
             })
         };
-        let idle_ttl_nanos = Self::provider(
+        let configured_idle_ttl_nanos = Self::provider(
             &registry.idle_tasklist_check_interval,
             &domain,
             &lookup.1,
             lookup.2,
             300_000_000_000,
-        )
-        .max(1);
+        );
+        let ticker_start_failed = configured_idle_ttl_nanos <= 1;
+        let idle_ttl_nanos = configured_idle_ttl_nanos.max(1);
         let liveness = Arc::new(cadence_common::liveness::Liveness::new(
             registry_now(),
             idle_ttl_nanos,
@@ -1619,7 +1669,7 @@ impl NativeQueueRegistry {
             );
             NativeBacklogForward {
                 tokens: forward_state.add_tokens(),
-                forward: Arc::new(move |task| {
+                forward: Arc::new(move |task, deadline| {
                     let forward_state = forward_state.clone();
                     let domain = forward_domain.clone();
                     Box::pin(async move {
@@ -1630,6 +1680,7 @@ impl NativeQueueRegistry {
                                 &domain,
                                 forward_task_type,
                                 forward_kind,
+                                deadline,
                             )
                             .await
                     })
@@ -1649,7 +1700,7 @@ impl NativeQueueRegistry {
                     registry.metric_context(lookup, kind),
                 )
             });
-        let reader = NativeTaskReader::with_fatal_invariant_sink(
+        let reader = NativeTaskReader::with_start_state(
             queue.clone(),
             dispatcher.task_notification(),
             reader_config,
@@ -1663,6 +1714,7 @@ impl NativeQueueRegistry {
             )),
             backlog_forward,
             reader_fatal,
+            !ticker_start_failed,
         );
         let read_stop = reader.stop_signal();
         let sync_matcher = Arc::new(NativeSyncMatcher::new(&sync_groups, read_stop.subscribe()));
@@ -1699,6 +1751,7 @@ impl NativeQueueRegistry {
             sync_wait,
             created: now,
             idle_ttl_nanos,
+            ticker_start_failed,
             last_update: Mutex::new(tokio::time::Instant::now()),
             next_ack_update: Mutex::new(next_ack_update),
             next_idle_check: Mutex::new(tokio::time::Instant::now() + idle_half),
@@ -2082,6 +2135,26 @@ impl NativeQueueRegistry {
     /// All handles become unusable after shutdown. Persist every owner even if
     /// another owner fails, and return the first failure.
     pub async fn shutdown(&self, now: i64) -> Result<(), Status> {
+        let failed = {
+            let mut state = self.state.lock().expect("Matching registry lock");
+            let failed_key = state
+                .owners
+                .iter()
+                .find_map(|(key, owner)| owner.ticker_start_failed.then(|| key.clone()));
+            if let Some(key) = failed_key {
+                state.stopped = true;
+                let owner = state.owners.remove(&key);
+                self.metrics.task_list_managers_gauge(state.owners.len());
+                owner
+            } else {
+                None
+            }
+        };
+        if failed.is_some() {
+            // Go liveness.Start increments its wait group before NewTicker
+            // panics; Stop waits forever before stopping the writer or reader.
+            std::future::pending::<()>().await;
+        }
         self.flush(now, true, None).await
     }
     /// Fixed-interval controller. Reset after each completed update, as Go's
@@ -2104,6 +2177,7 @@ impl NativeQueueRegistry {
                 .expect("Matching registry lock")
                 .owners
                 .values()
+                .filter(|owner| !owner.ticker_start_failed)
                 .map(|owner| {
                     (*owner
                         .next_ack_update
@@ -2169,6 +2243,9 @@ impl NativeQueueRegistry {
                     .owners
                     .iter()
                     .filter_map(|(key, owner)| {
+                        if owner.ticker_start_failed {
+                            return None;
+                        }
                         let mut next = owner
                             .next_idle_check
                             .lock()
@@ -2515,6 +2592,59 @@ mod tests {
         assert_eq!(other.queue.task_list_size().unwrap(), 0);
         registry.shutdown(registry_now()).await.unwrap();
         assert!(registry.get(key(b"\xff"), 0, now).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_liveness_ticker_keeps_partial_manager_for_recovery() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+
+        for interval in [0, -1, 1] {
+            let (_dir, registry) = fixture();
+            let configured = Arc::new(AtomicI64::new(interval));
+            let provider = configured.clone();
+            let registry = registry.with_idle_tasklist_check_interval(Arc::new(move |_, _, _| {
+                provider.load(Ordering::SeqCst)
+            }));
+            let task_key = key(b"invalid-idle-ticker");
+            let error = match registry.get(task_key.clone(), 0, registry_now()).await {
+                Ok(_) => panic!("invalid ticker interval was accepted"),
+                Err(error) => error,
+            };
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(
+                error.message(),
+                "panic object is not error: \"non-positive interval for NewTicker\""
+            );
+            let lease = registry.store.get_task_list(&task_key).unwrap().range_id;
+            let lookup = (task_key.domain_id, task_key.name.clone(), task_key.task_type);
+            let owner = registry.state.lock().unwrap().owners.get(&lookup).unwrap().clone();
+            assert!(owner.ticker_start_failed);
+
+            configured.store(60_000_000_000, Ordering::SeqCst);
+            let reused = registry.get(task_key.clone(), 0, registry_now()).await.unwrap();
+            assert!(Arc::ptr_eq(&owner.queue, &reused.queue));
+            assert_eq!(registry.store.get_task_list(&task_key).unwrap().range_id, lease);
+
+            let mut shutdown = tokio::spawn({
+                let registry = registry.clone();
+                async move { registry.shutdown(registry_now()).await }
+            });
+            assert!(tokio::time::timeout(Duration::from_millis(100), &mut shutdown)
+                .await
+                .is_err());
+            assert!(!owner.queue.is_stopped());
+            assert!(registry.state.lock().unwrap().owners.is_empty());
+            shutdown.abort();
+            let _ = shutdown.await;
+            owner.stop();
+            owner.reader.wait_stopped().await;
+        }
+
+        let (_dir, registry) = fixture();
+        let healthy = registry.with_idle_tasklist_check_interval(Arc::new(|_, _, _| 60_000_000_000));
+        let handle = healthy.get(key(b"valid-idle-ticker"), 0, registry_now()).await.unwrap();
+        healthy.shutdown(registry_now()).await.unwrap();
+        assert!(handle.queue.is_stopped());
     }
 
     #[tokio::test]

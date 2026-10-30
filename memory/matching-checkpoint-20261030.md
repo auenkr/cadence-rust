@@ -50,7 +50,9 @@ Remote refs and CI inspected on resume; these are unaccepted candidates:
   `f0e876398862bba9d8cc6d663a46d424474ab7ce`; changes persistence error
   types, semaphore manager/service and gRPC transport. CI
   https://github.com/auenkr/cadence-rust/actions/runs/40912963402 succeeded
-  at that exact head. Validation scope still needs inspection before credit.
+  at that exact head, but only tested `cadence-persistence` (344 passed,
+  13 ignored); it is not workspace or Matching transport validation. See
+  `matching-semaphore-ci-scope-40912963402.md`.
 - Semaphore cancellation branch's later `dabc3d4a0` is evidence-only.
 
 Fetched candidates without changing master source. Do not redo these fixes

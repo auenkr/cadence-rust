@@ -22,8 +22,9 @@ Task suffix `22f66dfc-e404-46d1-872c-b6333af66fae` under the same prefix.
 Review/integrate cancellation candidate `8fa96afb8cb5463747000bdf96b0f98fcd3a29e8`
 and typed-errors candidate `f0e876398862bba9d8cc6d663a46d424474ab7ce`.
 Check exact Go cancellation/success/error behavior, Cassandra/SQL adapters and
-native transport propagation. Inspect passing run40912963402 scope, correct
-issues and return commits/evidence. Does not own lifecycle/ticker changes.
+native transport propagation. The scope of run40912963402 is now established
+as persistence-only (344 passed, 13 ignored), not workspace. Does not own
+lifecycle/ticker changes.
 
 ## Constraints and next integration
 
