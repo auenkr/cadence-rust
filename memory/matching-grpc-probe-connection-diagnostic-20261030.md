@@ -63,7 +63,10 @@ grpc-js resolver/channel/proxy mismatch at the next mixed run.
 
 This is a harness-only diagnostic. It does not weaken or skip readiness and
 does not change Matching runtime behavior. The candidate's queued-activity
-owner-crash recovery assertions are preserved.
+owner-crash recovery assertions are preserved. It is committed at
+`6c73d9aa447171d4eeda37d71dd0a955d0996a9b` on
+`t3/matching-grpc-connection-diagnostic-565c8fc`; the original candidate ref
+and its frozen tags were not changed.
 
 ## CI state and next action
 
@@ -72,8 +75,13 @@ The exact-candidate workspace run
 was still `in_progress` at the one post-review inspection on 2026-10-30; Clippy
 and formatting had succeeded and workspace tests were running. Its head is
 `565c8fc91893fae1a81cd8e47f10f2ee4744c046`. No result or exit code is inferred
-from that partial state. Once the exact candidate workspace run is successful,
-dispatch the existing PostgreSQL-only Matching production lane at immutable
-candidate ref `565c8fc91893fae1a81cd8e47f10f2ee4744c046`. Record its head,
-binary SHA256, nested exits, and the new `transportDiagnostic` object from the
-artifact before drawing a connection conclusion.
+from that partial state. The required fresh-target, package-unset workspace CI
+for the diagnostic source is
+[`run 41059165266`](https://github.com/auenkr/cadence-rust/actions/runs/41059165266),
+head `6c73d9aa447171d4eeda37d71dd0a955d0996a9b`. At its one initial inspection
+it was `in_progress`, with the job starting; conclusion and Cargo exits are not
+available. No mixed gate has been started for this source. After this exact
+head's workspace run succeeds, dispatch the PostgreSQL-only Matching
+production lane at immutable ref `6c73d9aa447171d4eeda37d71dd0a955d0996a9b`.
+Record its head, binary SHA256, nested exits, and the new `transportDiagnostic`
+object from the artifact before drawing a connection conclusion.
