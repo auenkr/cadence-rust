@@ -40,6 +40,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Check Matching diagnostic syntax and observer fixture
+        run: |
+          set -euo pipefail
+          node --check tests/matching-service-compat.cjs
+          node --check tests/matching-task-observer.cjs
+          node --check tests/matching-task-observer-self-check.cjs
+          node --check tests/matching-probe-scenarios.cjs
+          node --check tests/matching-adaptive-go-control.cjs
+          node --check tests/matching-process-evidence.cjs
+          node tests/matching-task-observer-self-check.cjs
+      - name: Compile Go SDK mixed Matching fixture
+        working-directory: tests/go-sdk
+        run: go test -run '^$' .
       - name: PostgreSQL probe client
         if: inputs.lane == 'postgres'
         run: sudo apt-get update -qq && sudo apt-get install -y postgresql-client
