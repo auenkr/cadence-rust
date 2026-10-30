@@ -36,3 +36,14 @@ Reconciliation: the successful native request precedes the captured READY-but-ti
 4. Close the final Go-to-Rust behavior/parity audit and requirement-to-evidence matrix; preserve reproducible evidence in memory; integrate accepted code into master. Only then begin History.
 
 An honest percentage is unavailable: code and unit evidence cover much of Matching, but service completion depends on mixed runtime acceptance. Current validation milestone counts are fresh workspace 1/1 passed and mixed lanes 0/10 accepted (PostgreSQL failed readiness). The overall cluster rewrite remains incomplete with History, Frontend and Worker still to follow Matching.
+
+## Latest saved checkpoint (2026-10-31)
+
+Synced the checkpoint branch with origin/master; preserved all unaccepted implementation branches and frozen validation tags. This master update saves progress only.
+
+- Latest validated source: `7b46ef884c7b33f1a57f29a1e1ac4055adfb8dc6`, immutable tag `validation/matching-stall-stack-7b46ef884`.
+- Fresh package-unset workspace CI succeeded: https://github.com/auenkr/cadence-rust/actions/runs/41112992201 . Artifacts confirm dedicated fresh target, Clippy exit 0 then workspace tests exit 0, and required formatting checks exit 0.
+- PostgreSQL diagnostic run https://github.com/auenkr/cadence-rust/actions/runs/41114430171 remains in progress at that exact source as checked during this save. Optional bounded GDB is enabled with frame arguments disabled. Its result is not yet known; diagnostic interruption must not automatically count as undisturbed acceptance.
+- Dynamic-config and Ringpop source audits found no proven lock cycle. No readiness cause or speculative production fix is claimed.
+- Matching remains incomplete: workspace validation 1/1 passed; current-source mixed lanes 0/10 accepted. Implementation is substantial, but no defensible overall completion percentage is available.
+- Next: collect the diagnostic run artifacts, identify the readiness/shutdown stall from evidence, fix any demonstrated defect, repeat fresh workspace CI after changes, then pass all ten serial mixed lanes on one final immutable source and close the parity audit. History, Frontend and Worker remain subsequent migrations.
