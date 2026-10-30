@@ -1,10 +1,21 @@
 //! Share one native handler across gRPC, HTTP Thrift and TChannel listeners.
 use cadence_proto::native::{matching as m, NativeMatchingApi};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub(crate) struct SharedNativeMatching(pub Arc<dyn NativeMatchingApi>);
+
+static LIST_PARTITIONS_TRACE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
 
 macro_rules! forward {
     ($($method:ident: $request:ident => $response:ident),* $(,)?) => {
@@ -26,11 +37,44 @@ forward! {
     respond_query_task_completed: RespondQueryTaskCompletedRequest => RespondQueryTaskCompletedResponse,
     cancel_outstanding_poll: CancelOutstandingPollRequest => CancelOutstandingPollResponse,
     describe_task_list: DescribeTaskListRequest => DescribeTaskListResponse,
-    list_task_list_partitions: ListTaskListPartitionsRequest => ListTaskListPartitionsResponse,
     get_task_lists_by_domain: GetTaskListsByDomainRequest => GetTaskListsByDomainResponse,
     update_task_list_partition_config: UpdateTaskListPartitionConfigRequest => UpdateTaskListPartitionConfigResponse,
     refresh_task_list_partition_config: RefreshTaskListPartitionConfigRequest => RefreshTaskListPartitionConfigResponse,
     acquire_semaphore: AcquireSemaphoreRequest => AcquireSemaphoreResponse,
+}
+
+#[tonic::async_trait]
+impl NativeMatchingApi for SharedNativeMatching {
+    async fn list_task_list_partitions(
+        &self,
+        request: Request<m::ListTaskListPartitionsRequest>,
+    ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
+        // Presence of this variable opts into payload-free native gRPC tracing.
+        if std::env::var_os("CADENCE_MATCHING_TRACE_LIST_TASK_LIST_PARTITIONS").is_none() {
+            return self.0.list_task_list_partitions(request).await;
+        }
+
+        let request_id = LIST_PARTITIONS_TRACE_ID.fetch_add(1, Ordering::Relaxed);
+        let started = Instant::now();
+        eprintln!(
+            "matching_list_task_list_partitions event=entry request_id=lptp-{request_id:016x} timestamp_unix_ms={}",
+            unix_timestamp_millis()
+        );
+        let result = self.0.list_task_list_partitions(request).await;
+        let elapsed_us = started.elapsed().as_micros();
+        match &result {
+            Ok(_) => eprintln!(
+                "matching_list_task_list_partitions event=completion request_id=lptp-{request_id:016x} timestamp_unix_ms={} elapsed_us={elapsed_us} category=ok",
+                unix_timestamp_millis()
+            ),
+            Err(status) => eprintln!(
+                "matching_list_task_list_partitions event=error request_id=lptp-{request_id:016x} timestamp_unix_ms={} elapsed_us={elapsed_us} category=grpc_status_{:?}",
+                unix_timestamp_millis(),
+                status.code()
+            ),
+        }
+        result
+    }
 }
 
 #[cfg(test)]
