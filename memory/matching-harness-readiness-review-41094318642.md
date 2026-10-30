@@ -53,7 +53,11 @@ the harness stopped Matching prematurely.
 
 Artifact `matching-production-postgres` records head SHA
 `6c73d9aa447171d4eeda37d71dd0a955d0996a9b`; `run.exit`, `lane.exit`, and
-`gate.exit` are all `1`. The probe failed before SDK scenarios began, so this
+`gate.exit` are all `1`. Run URL:
+`https://github.com/auenkr/cadence-rust/actions/runs/41094318642`. Go's log
+places the Frontend, History and Worker startup in `2026-10-30T17:01:13Z` and
+the shutdown at `2026-10-30T17:05:00.170Z`; the matching shutdown record gives
+the more precise SIGTERM/SIGKILL times above. The probe failed before SDK scenarios began, so this
 run is not compatibility or recovery evidence. The logs do not timestamp each
 readiness attempt and do not identify the gRPC load-balancer state beyond the
 final error. This review therefore cannot distinguish a Matching transport,
