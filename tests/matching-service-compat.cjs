@@ -1937,7 +1937,8 @@ async function run() {
     scheduled = history.history.events.find(event => event.activityTaskScheduledEventAttributes);
     if (!scheduled && Date.now() > scheduleDeadline) throw new Error('isolated activity not scheduled');
   }
-  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } });
+  const isoPollStart = Date.now();
+  const pollA = call('Matching', 'PollForActivityTask', { domainId, pollerId: randomUUID(), isolationGroup: 'zone-a', request: { taskList: isolatedList, identity: 'isolated-worker-a' } }).then(response => { response.__elapsedMs = Date.now() - isoPollStart; return response; });
   const pollerB = randomUUID();
   const pollB = call('Matching', 'PollForActivityTask', { domainId, pollerId: pollerB, isolationGroup: 'zone-b', request: { taskList: isolatedList, identity: 'isolated-worker-b' } }).then(response => ({ response }), error => ({ error }));
   const registeredDeadline = Date.now() + 10000;
@@ -1955,6 +1956,8 @@ async function run() {
   const isolatedTask = await pollA;
   if (isolatedTask.activityId !== 'isolated') {
     console.error('ISOLATED POLL DIAGNOSTIC', JSON.stringify(isolatedTask));
+    await call('Matching', 'CancelOutstandingPoll', { domainId, taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', pollerId: pollerB }).catch(() => {});
+    console.error('ISOLATED POLLB DIAGNOSTIC', JSON.stringify(await pollB).slice(0, 600));
     const diag = await call('Matching', 'DescribeTaskList', { domainId, request: { taskList: isolatedList, taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true } }).catch(error => ({ error: error.message }));
     console.error('ISOLATED DESCRIBE DIAGNOSTIC', JSON.stringify(diag));
   }
