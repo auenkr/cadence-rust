@@ -62,14 +62,57 @@ ancestors of `3a958668` by `git merge-base --is-ancestor`.
 
 ## Candidate composition
 
-Candidate branch: `t3/reconcile-matching-source-candidate`, based exactly at
+Original source candidate: `t3/reconcile-matching-source-candidate`, based exactly at
 `3a958668c040b289b495f9b76b2209969db7e2a0`. Applied only the three Rust source-file
 hunks from `a534baae8c921e0ec8109527c6bc3184937b0323` (47 added lines in
 `matching_domain_cache.rs`, `matching_engine_control_native.rs`, and
-`matching_service_native.rs`). Did not bring over its workflow edit, diagnostic
-report, or any of the 28-file source reversion. The trace is bounded to 32 messages
-and inactive unless `CADENCE_MATCHING_LIST_PARTITIONS_TRACE` is set.
+`matching_service_native.rs`). Did not bring over its diagnostic report or any of
+the 28-file source reversion. The trace is bounded to 32 messages and inactive
+unless `CADENCE_MATCHING_LIST_PARTITIONS_TRACE` is set.
 
-No Cargo, Go, formatter, runtime, CI, or mixed-cluster command was run. Parent-owned
-active gate was not polled, dispatched, or canceled. This source-only reconciliation
-is ready for parent review before any CI action.
+## Failed PostgreSQL lane boundary and trace wiring
+
+Run `41053262746` failed on `a534baae8c921e0ec8109527c6bc3184937b0323`.
+Artifacts are downloaded to
+`/mnt/storage/service/ci-evidence/matching-postgres-41053262746`.
+
+- Build exit: 0. Rust Matching binary SHA256:
+  `35dbba533304d735476161da8ca5a50f4566706e3132a3f18f824a8409cbc5ff`.
+- Outer gate exit: 1; nested PostgreSQL lane exit: 1; service baseline exit: 1.
+  PostgreSQL container initialized and became ready. Go Frontend, History, and
+  Worker started; results record `workerReadiness.observed: true`,
+  `goMatchingStarted: false`, and `acceptanceEligible: false`.
+- The Rust process started and bound internal gRPC at 27448 and TChannel at
+  19025. The first readiness iteration timed out on Go Frontend `DescribeTaskList`
+  at `127.0.0.1:20882` (`remote_addr=127.0.0.1:20882`). The compatibility probe
+  never advanced to its direct `ListTaskListPartitions` owner lookup. No SDK body,
+  PostgreSQL scenario, restart/recovery scenario, or request-stage handler was
+  reached. `probe.log` then reported `Rust Matching did not stop` during cleanup;
+  shutdown evidence records SIGTERM. Consequently this run proves neither a
+  Matching RPC logic defect nor any PostgreSQL persistence defect. The failure
+  boundary is discovery/readiness through the Go Frontend, followed by cleanup.
+- The failed run's workflow explicitly set
+  `CADENCE_MATCHING_LIST_PARTITIONS_TRACE=1`, so opt-in tracing was active on
+  `a534baae8`; its Rust log contains no request-stage trace because readiness did
+  not reach Matching. The coherent source candidate inherited the three trace
+  hunks but not the workflow line. The follow-up candidate restores that opt-in
+  line in `.github/workflows/matching-production-validation.yml` so a subsequent
+  diagnostic lane records matching ListTaskListPartitions stages when requests
+  arrive.
+
+## Current checkpoint (2026-10-30)
+
+Working branch `t3/matching-postgres-readiness-trace-reconciled` starts from
+`c435a2067c247a3da64936f444d5151be1c6a90b`, which descends from the previously
+validated `3a958668` source line and retains its 16 additional tests plus all three
+bounded request-trace source hunks. This avoids the divergence identified above:
+`a534baae8` descends from `5b0423a`, not `3a958668`, and its large Rust tree diff
+removes 16 of those tests and multiple behavior/failure-coverage fixes. The only
+source-tree change to the follow-up is the missing diagnostic opt-in line; queued
+activity candidate `f009e8d` remains separate and is not included.
+
+The failed run artifacts were read only. No Cargo, Go, formatter, or runtime command
+was run locally. Next: review this workflow/evidence-only delta, commit and push this
+immutable candidate, then dispatch fresh `rust-ci.yml` with `clean_target=true` and
+no package input. No mixed-cluster gate is authorized until exact-head Clippy and
+workspace tests pass.
