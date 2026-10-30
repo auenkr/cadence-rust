@@ -27,4 +27,4 @@ At `rust/crates/cadence-matching/src/ringpop_provider.rs`, log the bounded JOIN 
 
 ## Validation state
 
-Fresh CI workspace validation for the diagnostic revision is pending. Do not dispatch a mixed-cluster gate until that workspace run passes. The evidence above is a readiness/bootstrap failure diagnosis only, not Matching acceptance or SDK/recovery evidence.
+Fresh uncached CI workspace validation was dispatched with package unset and `clean_target=true`: https://github.com/auenkr/cadence-rust/actions/runs/41035815248 at diagnostic source SHA `5755021dbaaeeb70b87ec9ba3c69bd06065398e4`. Its observed state was `in_progress`; no conclusion is credited yet. Do not dispatch a mixed-cluster gate until that workspace run passes. The evidence above is a readiness/bootstrap failure diagnosis only, not Matching acceptance or SDK/recovery evidence.
