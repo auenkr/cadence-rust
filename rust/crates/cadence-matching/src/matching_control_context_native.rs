@@ -71,10 +71,12 @@ impl NativeMatchingControlContext {
         task_type: i32,
         default: bool,
     ) -> bool {
+        // Resolve the domain name before locking: the rate-limited domain source reads this same overlay and std mutexes are not reentrant.
+        let domain_name = self.cached_domain_name(domain);
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_boolean_bytes(
             config.property_values(property),
-            self.cached_domain_name(domain).as_deref(),
+            domain_name.as_deref(),
             list.as_bytes(),
             task_type,
             default,
@@ -149,10 +151,12 @@ impl NativeControlContextApi for NativeMatchingControlContext {
     }
 
     fn poller_window_nanos(&self, domain: &GoString, list: &GoString, task_type: i32) -> i64 {
+        // Resolve the domain name before locking: the rate-limited domain source reads this same overlay and std mutexes are not reentrant.
+        let domain_name = self.cached_domain_name(domain);
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_duration_bytes(
             config.property_values("matching.taskIsolationPollerWindow"),
-            self.cached_domain_name(domain).as_deref(),
+            domain_name.as_deref(),
             list.as_bytes(),
             task_type,
             2_000_000_000,
@@ -160,10 +164,12 @@ impl NativeControlContextApi for NativeMatchingControlContext {
     }
 
     fn write_partition_count(&self, domain: &GoString, root: &GoString, task_type: i32) -> i64 {
+        // Resolve the domain name before locking: the rate-limited domain source reads this same overlay and std mutexes are not reentrant.
+        let domain_name = self.cached_domain_name(domain);
         let config = self.overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_integer_bytes(
             config.property_values("matching.numTasklistWritePartitions"),
-            self.cached_domain_name(domain).as_deref(),
+            domain_name.as_deref(),
             root.as_bytes(),
             task_type,
             1,
