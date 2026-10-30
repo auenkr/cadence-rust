@@ -666,6 +666,12 @@ async function run() {
       try {
         await captureProcessEvidence({ pid: rust.pid, grpcPort: rustGrpcPort, workDir: work, label, reason });
         processEvidenceCaptured = true;
+        if (lastDirectDiagnostic) {
+          try {
+            fs.writeFileSync(path.join(work, `rust-process-evidence-${label}-direct-partition.json`),
+              `${JSON.stringify({ snapshotLabel: label, directPartitionDiagnostic: lastDirectDiagnostic }, null, 2)}\n`);
+          } catch (_) { /* diagnostics must not alter readiness */ }
+        }
       } catch (_) { /* diagnostics must not alter readiness */ }
     };
     const primaryAddress = `127.0.0.1:${rustGrpcPort}`;
