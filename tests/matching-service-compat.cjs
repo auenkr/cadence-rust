@@ -517,9 +517,24 @@ async function run() {
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
     let lastReadinessError;
+    let directReadiness = 'not probed';
+    let nextDirectProbeAt = 0;
     const primaryReadinessClient = productionMode ? directMatchingClient(`127.0.0.1:${rustGrpcPort}`) : null;
     while (Date.now() < deadline) {
       if (productionMode) {
+        // Probe the exact Rust endpoint independently of Go Frontend routing.
+        // The production gate still requires Frontend discovery below; this
+        // sample only separates a Rust admission/startup failure from a
+        // Frontend peer-selection or outbound-client failure.
+        if (Date.now() >= nextDirectProbeAt) {
+          nextDirectProbeAt = Date.now() + 5000;
+          try {
+            await directPartitionOwner(primaryReadinessClient, domain, `primary-ready-${id}`);
+            directReadiness = 'ready';
+          } catch (error) {
+            directReadiness = error?.details || error?.message || String(error);
+          }
+        }
         try {
           // This public Go Frontend call must resolve Matching through Go's
           // real Ringpop PeerProvider; TCP readiness alone is insufficient.
@@ -549,7 +564,7 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     primaryReadinessClient?.close();
-    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last readiness error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; see ${work}/rust-server-${label}.log`);
+    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct primary gRPC status: ${directReadiness}; see ${work}/rust-server-${label}.log`);
   }
   let exited;
   let rust = startRust('before-restart');
@@ -558,6 +573,7 @@ async function run() {
   let semaphoreAcquire;
   let configstoreEvidence;
   let semaphoreOwner;
+  let probeFailure;
   try {
     await waitForRustReady('before-restart');
   const coldDomain = process.env.CADENCE_MATCHING_COLD_DOMAIN;
@@ -1749,8 +1765,8 @@ async function run() {
   console.log(JSON.stringify({ result: productionMode ? (cassandraGate ? 'passed' : 'preliminary-passed') : 'passed', acceptanceEligible: cassandraGate, topology: productionMode ? (cassandraGate ? 'Go Frontend/History/Worker and Rust Matching on shared Go Cassandra schema' : 'Go Frontend/History/Worker with Rust Matching via original Go Ringpop discovery') : 'Go Frontend/History/Worker with Rust Matching RPC', idleUnloadAndRecovery: productionMode ? 'production process idle eviction and recovery' : 'passed', gracefulDrainRecovery: gracefulDrainEvidence || 'not requested', queryDispatch: 'passed', isolationDispatch: 'passed', nativePartitionConfig: 'passed', backlogForward: backlogForwardEvidence || 'not requested', configstore: configstoreEvidence || 'not requested', probeScenarios, processRestart: restartEvidence || 'not requested', parityGate: cassandraGate ? 'Cassandra mixed SDK, domain pagination, task rows, semaphore concurrency, SIGKILL and SIGTERM recovery gates passed; service parity audit still required' : (productionMode ? 'production mixed SDK/restart evidence only; Cassandra acceptance requires --cassandra' : 'adapter compatibility evidence only'), productionDatabaseEvidence: productionDatabaseEvidence || 'not collected', shardDistributor: shardManagerControl ? shardDistributorEvidence : 'not requested', peer, domain, execution, attributes }));
   } catch (error) {
     // Keep the probe-body failure visible; the shutdown checks in finally may throw their own error.
+    probeFailure = error;
     console.error('PROBE BODY FAILED:', error);
-    throw error;
   } finally {
     if (productionMode) {
       const sigtermSentUnixNs = Date.now() * 1_000_000;
@@ -1761,10 +1777,18 @@ async function run() {
     }
     else fs.writeFileSync(stop, 'stop');
     let shutdownTimer;
-    const result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
+    let result = await Promise.race([exited, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 20000); })]);
     clearTimeout(shutdownTimer);
-    if (result === null) { rust.kill('SIGKILL'); await exited; throw new Error('Rust Matching did not stop'); }
-    if (result.code !== 0) throw new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+    if (result === null) {
+      rust.kill('SIGKILL');
+      result = await exited;
+      if (probeFailure) console.error('RUST SHUTDOWN TIMEOUT after probe failure; sent SIGKILL.');
+      else throw new Error('Rust Matching did not stop');
+    } else if (result.code !== 0) {
+      const shutdownError = new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
+      if (probeFailure) console.error('RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
+      else throw shutdownError;
+    }
     if (productionMode) {
       const shutdownPath = path.join(work, 'matching-shutdown.json');
       const shutdown = JSON.parse(fs.readFileSync(shutdownPath, 'utf8'));
@@ -1783,5 +1807,6 @@ async function run() {
       if (secondaryExit.code !== 0) throw new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
     }
   }
+  if (probeFailure) throw probeFailure;
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => Object.values(clients).forEach(client => client.close()));
