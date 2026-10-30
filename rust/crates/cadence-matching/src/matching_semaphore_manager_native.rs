@@ -655,9 +655,9 @@ impl Registry {
                 None => {
                     // Weak, so a manager stopped after the registry is gone
                     // does not keep the map alive.
-                    let managers = Arc::downgrade(&self.managers);
+                    let registry = Arc::downgrade(&self.managers);
                     let on_stop: OnStop = Box::new(move |stopping: &Manager| {
-                        if let Some(managers) = managers.upgrade() {
+                        if let Some(managers) = registry.upgrade() {
                             remove_current(&managers, stopping, stopping.identifier());
                         }
                     });
