@@ -190,12 +190,6 @@ async fn query_workflow_sticky_worker_unavailable_is_error() {
 }
 
 #[tokio::test]
-#[ignore = "parity gap: Go injects a DispatchQueryTask error through a gomock TaskListManager; Rust has no seam to fail dispatch, and a non-sticky query with no poller waits for the deadline instead of erroring"]
-async fn query_workflow_failed_to_dispatch_query_task_is_error() {
-    unimplemented!("no public seam to inject a dispatch failure");
-}
-
-#[tokio::test]
 async fn query_workflow_success_returns_worker_answer() {
     let state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());

@@ -7,3 +7,11 @@ Added `refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears` to t
 The ignored query-dispatch failure case remains. Its Go oracle fails `DispatchQueryTask` directly; Rust still has no injected dispatch seam, and substituting a no-poller deadline would assert different behavior. A faithful deterministic version requires a narrow test-only dispatch failure hook at the dispatch boundary and observable assertions for the returned dispatch status plus removal of that query's waiter/index/pending offer. No such seam was added in this change.
 
 Validation: no Cargo, Go, formatter, runtime, CI, or PR command was run. The test candidate therefore needs CI validation before its result is treated as established evidence.
+
+## Follow-up candidate
+
+Based on `741dafd86f52ba7909811a52f49a04603bb592d6`, I reviewed the refresh test above: it exercises the public RPC, asserts the exact `Internal` message, verifies that the injected engine failure occurs before durable queue creation, then clears the fault and verifies a successful refresh of the same partition request.
+
+Added a `#[cfg(test)]` query dispatch failure closure on `Matching`. The public `QueryWorkflow` path invokes it after registering the result waiter and immediately before offering the query to a poller. The new deterministic unit test asserts the returned Internal status, verifies `deliver_query_result` returns NotFound for the captured task ID (the waiter/index was removed), and confirms the queue has no pending query offer. Removed the formerly ignored `query_workflow_failed_to_dispatch_query_task_is_error` integration stub now that the unit test provides executable equivalent behavior and cleanup assertions.
+
+Validation remains pending CI on the exact pushed candidate. No local Cargo, Go, formatter, or runtime command was run. The task-specific source review used `git diff --check`; it reported no whitespace errors.

@@ -377,6 +377,11 @@ pub struct Matching {
     /// call fail with `message`. See `injected_engine_fault`.
     #[cfg(test)]
     pub(crate) engine_fault: Arc<std::sync::Mutex<Option<(&'static str, String)>>>,
+    /// Test-only failure at the query dispatch boundary, after its result
+    /// waiter is registered and before the task is offered to a poller.
+    #[cfg(test)]
+    pub(crate) query_dispatch_fault:
+        Arc<std::sync::Mutex<Option<Arc<dyn Fn(&str) -> Status + Send + Sync>>>>,
 }
 type DomainNameResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Runtime-provided ownership check. The cached flag is advisory and only
@@ -430,6 +435,8 @@ impl Matching {
             domain_id_parse: Default::default(),
             #[cfg(test)]
             engine_fault: Default::default(),
+            #[cfg(test)]
+            query_dispatch_fault: Default::default(),
         }
     }
     /// Attach the byte-valued handler to every transport served by this handle.
@@ -457,6 +464,15 @@ impl Matching {
             Some((name, message)) if *name == rpc => Err(Status::internal(message.clone())),
             _ => Ok(()),
         }
+    }
+    #[cfg(test)]
+    fn injected_query_dispatch_fault(&self, task_id: &str) -> Result<(), Status> {
+        let fault = self
+            .query_dispatch_fault
+            .lock()
+            .expect("query dispatch fault lock")
+            .clone();
+        fault.map_or(Ok(()), |fault| Err(fault(task_id)))
     }
     /// Install an optional inbound Matching metrics sink.
     pub fn with_metrics(mut self, sink: Arc<dyn crate::matching_metrics::MetricSink>) -> Self {
@@ -3000,6 +3016,8 @@ impl m::matching_api_server::MatchingApi for Matching {
                                     };
                                     let (receiver, _registration) =
                                         handle.queries.register_guarded(&task_id);
+                                    #[cfg(test)]
+                                    self.injected_query_dispatch_fault(&task_id)?;
                                     let offered = if force_local {
                                         handle.queries.offer(query);
                                         true

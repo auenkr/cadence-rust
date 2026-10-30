@@ -372,3 +372,104 @@ async fn refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears() {
         .unwrap();
     registry.shutdown(3).await.unwrap();
 }
+
+/// A failed Go `DispatchQueryTask` leaves neither its waiter-map entry nor a
+/// pending query offer. Fail at the dispatch boundary after waiter registration
+/// so the RPC's registration guard must clean both pieces of state.
+#[tokio::test]
+async fn query_workflow_dispatch_failure_returns_error_and_cleans_pending_query() {
+    use cadence_api::types::DomainInfo;
+    use crate::matching_query::QueryOutcome;
+    use cadence_proto::matching as m;
+    use cadence_proto::matching::matching_api_server::MatchingApi;
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        SqliteTaskStore::create(
+            directory.path().join("query-dispatch-failure.db"),
+            BlobEncoding::ThriftRW,
+        )
+        .unwrap(),
+    );
+    let history = MatchingHistoryClient::new(
+        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        Duration::from_secs(1),
+        1024,
+    );
+    let registry = QueueRegistry::new(store, history, NonZeroU32::new(100).unwrap());
+    let domain_id = Uuid::from_u128(1);
+    let state = crate::handlers::AppState::default();
+    state
+        .domains
+        .create(
+            DomainInfo {
+                name: "query-dispatch-domain".into(),
+                uuid: domain_id.to_string(),
+                ..Default::default()
+            },
+            Default::default(),
+            Default::default(),
+            false,
+        )
+        .unwrap();
+    let matching = Matching::with_durable_queues(state, registry.clone(), Duration::from_secs(5));
+    let task_list = "query-dispatch-failure";
+    let key = TaskListKey {
+        domain_id,
+        name: task_list.into(),
+        task_type: 0,
+    };
+    let queue = registry.get(key, 0, 1).await.unwrap();
+    let dispatched_task_id = Arc::new(Mutex::new(None));
+    let captured_task_id = dispatched_task_id.clone();
+    *matching.query_dispatch_fault.lock().unwrap() = Some(Arc::new(move |task_id| {
+        *captured_task_id.lock().unwrap() = Some(task_id.to_owned());
+        tonic::Status::internal("injected query dispatch failure")
+    }));
+
+    let status = matching
+        .query_workflow(Request::new(m::QueryWorkflowRequest {
+            domain_id: domain_id.to_string(),
+            task_list: Some(p::TaskList {
+                name: task_list.into(),
+                kind: 0,
+                ..Default::default()
+            }),
+            request: Some(p::QueryWorkflowRequest {
+                query: Some(p::WorkflowQuery {
+                    query_type: "ping".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), tonic::Code::Internal);
+    assert_eq!(status.message(), "injected query dispatch failure");
+
+    let task_id = dispatched_task_id
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("dispatch fault did not observe its query task ID");
+    assert_eq!(
+        registry
+            .deliver_query_result(
+                &task_id,
+                QueryOutcome::Internal(tonic::Status::internal("late result")),
+            )
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound,
+        "failed query dispatch left a result waiter indexed"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), queue.queries.next())
+            .await
+            .is_err(),
+        "failed query dispatch left a pending offer"
+    );
+    registry.shutdown(3).await.unwrap();
+}
