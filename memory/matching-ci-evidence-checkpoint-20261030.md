@@ -19,7 +19,7 @@ The query seam is `#[cfg(test)]`; refresh uses the existing `#[cfg(test)] engine
 
 ## Final workspace run and mixed gate
 
-Run [41029943649](https://github.com/auenkr/cadence-rust/actions/runs/41029943649) was dispatched on `t3/matching-failure-coverage-20261030142037` at exact head `1c1c6e94d0d7384f89f09920a1452e58643b02e`. At checkpoint, the single status inspection reported `in_progress`; no final artifacts or conclusion are available yet. Do not infer a pass from dispatch or started steps.
+Run [41029943649](https://github.com/auenkr/cadence-rust/actions/runs/41029943649) was dispatched on t3/matching-failure-coverage-20261030142037 at exact head 1c1c6e94d0d7384f89f09920a1452e58643b02e. It subsequently completed with failure; see Final run outcome below. This run does not validate a passing workspace at the frozen source SHA.
 
 Next action after this checkpoint: inspect run 41029943649 once. If terminal-successful, inspect its fresh-target workspace artifacts and exact head, confirm there is no active mixed gate, then dispatch only the PostgreSQL lane of `matching-production-validation.yml` pinned to exact source 1c. Record the Rust binary SHA256 plus nested SDK/readiness/restart/recovery outcomes from gate artifacts before drawing any conclusion. If run 41029943649 is still in progress, checkpoint and stop without polling or starting a gate. If it fails, diagnose with its logs and propose the smallest necessary fix; do not modify source absent a proven CI defect.
 
