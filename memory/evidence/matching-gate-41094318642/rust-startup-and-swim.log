@@ -1,0 +1,35 @@
+Matching startup: starting Ringpop membership
+Matching startup stage: Ringpop provider.start begin
+Matching startup stage: Ringpop provider lifecycle lock begin
+Matching startup stage: Ringpop provider lifecycle lock acquired
+Matching Ringpop JOIN attempt 1 started: targets=["127.0.0.1:29694", "127.0.0.1:16061", "127.0.0.1:17753", "127.0.0.1:26121"]
+Matching Ringpop JOIN attempt 1 completed: successes=["127.0.0.1:17753", "127.0.0.1:16061", "127.0.0.1:26121"] failures=["127.0.0.1:29694"]
+Matching startup stage: Ringpop ready
+Matching startup stage: Ringpop membership monitor started
+Matching startup stage: Ringpop healer started
+Matching startup stage: Ringpop labels publication begin
+Matching startup stage: Ringpop labels publication complete
+Matching startup stage: Ringpop provider snapshot publication begin
+Matching startup stage: Ringpop provider snapshot publication complete
+Matching startup stage: Ringpop provider lifecycle started
+Matching startup stage: Ringpop provider.start complete
+Matching startup stage: membership subscribe begin
+Matching startup stage: membership subscribe complete
+Matching startup stage: initial membership refresh begin
+Matching startup stage: membership snapshot begin
+Matching startup stage: membership snapshot complete
+Matching startup stage: membership publication begin
+Matching startup stage: membership publication complete
+Matching startup stage: initial membership refresh complete
+Matching startup stage: membership refresh worker started
+Matching startup: opening admission
+Matching startup stage: admission opened
+Matching Ringpop received PING #1 from 127.0.0.1:17753; accepted_changes=[]; members=["127.0.0.1:17753:alive", "127.0.0.1:26121:alive", "127.0.0.1:22438:alive", "127.0.0.1:16061:alive"]
+Matching Ringpop received PING #2 from 127.0.0.1:16061; accepted_changes=[]; members=["127.0.0.1:17753:alive", "127.0.0.1:26121:alive", "127.0.0.1:22438:alive", "127.0.0.1:16061:alive"]
+Matching Ringpop received PING #3 from 127.0.0.1:26121; accepted_changes=[]; members=["127.0.0.1:17753:alive", "127.0.0.1:26121:alive", "127.0.0.1:22438:alive", "127.0.0.1:16061:alive"]
+Matching Ringpop received PING #4 from 127.0.0.1:17753; accepted_changes=[]; members=["127.0.0.1:26121:alive", "127.0.0.1:16061:alive", "127.0.0.1:22438:alive", "127.0.0.1:17753:alive"]
+Matching Ringpop received PING #5 from 127.0.0.1:16061; accepted_changes=[]; members=["127.0.0.1:26121:alive", "127.0.0.1:16061:alive", "127.0.0.1:22438:alive", "127.0.0.1:17753:alive"]
+Matching Ringpop received PING #6 from 127.0.0.1:26121; accepted_changes=[]; members=["127.0.0.1:26121:alive", "127.0.0.1:16061:alive", "127.0.0.1:22438:alive", "127.0.0.1:17753:alive"]
+Matching Ringpop received PING #7 from 127.0.0.1:17753; accepted_changes=[]; members=["127.0.0.1:22438:alive", "127.0.0.1:16061:alive", "127.0.0.1:26121:alive", "127.0.0.1:17753:alive"]
+Matching Ringpop received PING #8 from 127.0.0.1:16061; accepted_changes=[]; members=["127.0.0.1:22438:alive", "127.0.0.1:16061:alive", "127.0.0.1:26121:alive", "127.0.0.1:17753:alive"]
+dynamic config integer read failed (value was not found); using default

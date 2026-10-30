@@ -31,11 +31,24 @@ own them.
 - Partition ownership lookup and several shard ownership branches have active behavioral assertions. The eight Go rows should not be called wholly unverified.
 - Generic Go `handleErr` identity and mock Thrift handler failures are not portable Rust interfaces. Their protocol-visible mappings have meaningful Rust coverage, with the exhaustive matrices still unasserted.
 
-## Confirmed actionable coverage gaps
+## Reconciliation against exact native source (2026-10-30)
 
-1. Add an injectable query-dispatch failure test that asserts the public Rust query error result against Go's `some error` case.
-2. Add direct refresh persistence/refresh failure propagation coverage at the RPC boundary; current cancellation coverage does not prove the Go manager-error return.
-3. Add an integration assertion for production failover callback registration/catch-up and eligible poll release if full callback parity is required.
-4. For exhaustive typed-error/wrapper parity, maintain a Go-category-to-Rust-boundary assertion matrix, including Thrift default response values. Current representative mappings do not establish every Go row.
+Checked at `6c73d9aa447171d4eeda37d71dd0a955d0996a9b`. The rows below are
+stale and superseded by active source tests now present in this tree:
+
+| Previously reported gap | Current active assertion | Updated disposition |
+|---|---|---|
+| Query dispatch failure | `matching_partition_cancellation_tests.rs::query_workflow_dispatch_failure_returns_error_and_cleans_pending_query` injects a failure after waiter registration, asserts the public `QueryWorkflow` status/message, and verifies late results cannot find the removed query. `matching_service_native.rs::query_rpc_propagates_dispatch_forward_failure_and_releases_its_permit` additionally checks forwarding failure, normalized root/forwarded-from fields, and permit cleanup. | Covered at the public RPC and dispatch boundary; do not add the previously requested seam/test as a remaining gap. |
+| Refresh RPC failure | `matching_partition_cancellation_tests.rs::refresh_rpc_persistence_failure_matches_go_and_observes_expired_caller` checks Internal versus typed ResourceExhausted, the underlying failure, unchanged partition cache, manager retention, and expired caller behavior. `matching_service_native.rs::refresh_rpc_returns_storage_failure_without_replacing_native_cache_or_owner` checks the native path's storage-read failure, unchanged cache, and owner reuse. | The direct RPC propagation gap is closed for these injected failure classes. Do not describe only cancellation coverage. |
+| Registered failover callback/catch-up | `matching_failover_callback_tests.rs::registered_failover_callbacks_preserve_catchup_and_release_only_eligible_updates` registers the production `MatchingRuntime` callbacks, proves catch-up establishes a baseline, filters ineligible changes, and releases a blocked eligible poll without unloading its manager. `registered_failover_callback_reaches_native_registry_attached_after_catchup` covers the native registry attached after catch-up. | Callback registration, catch-up, eligibility, poll release, and native attachment now have integration assertions; the earlier “partial only” disposition is stale. |
+
+Other rows in the 2026-10-27 table were not re-audited in this reconciliation.
+The checked-in Go sources and test inventory still matter for their boundaries;
+this correction is source/test evidence, not CI or mixed-runtime evidence.
+
+## Superseded actionable coverage gaps (historical)
+
+1. The query-dispatch, direct refresh RPC failure, and registered failover callback items are closed by the current active tests listed above; they must not be repeated as current open gaps.
+2. Exhaustive typed-error and Thrift wrapper response-default matrices remain a separate bounded coverage question. This reconciliation did not find a production mismatch in that area.
 
 No source mismatch or production bug was confirmed in the inspected rows. Config and concurrent scenario rows are outside this audit. No runtime test, CI run, or mixed-cluster gate is claimed.

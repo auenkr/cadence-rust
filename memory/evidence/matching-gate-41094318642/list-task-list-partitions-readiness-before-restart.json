@@ -1,0 +1,39 @@
+{
+  "frontendReadiness": {
+    "outcome": "timeout",
+    "error": "Call cancelled"
+  },
+  "directRustProbe": {
+    "rpc": "MatchingAPI.ListTaskListPartitions",
+    "address": "127.0.0.1:27161",
+    "request": {
+      "domain": "service-compat-d8b470cc-455e-4e3a-a519-fdf8ce3c0350",
+      "taskList": {
+        "name": "primary-ready-d8b470cc-455e-4e3a-a519-fdf8ce3c0350"
+      }
+    },
+    "startedAt": "2026-10-30T17:04:30.103Z",
+    "completedAt": "2026-10-30T17:04:40.109Z",
+    "outcome": "error",
+    "error": {
+      "code": 4,
+      "details": "Deadline exceeded after 10.005s,name resolution: 0.001s,Waiting for LB pick"
+    },
+    "response": null,
+    "requestedPartitionOwner": "",
+    "traceEnabled": true,
+    "transportDiagnostic": {
+      "grpcTarget": "127.0.0.1:27161",
+      "grpcTargetScheme": "bare host:port; grpc-js default resolver selection",
+      "grpcChannelConnectivityState": 1,
+      "tcpProbe": {
+        "connected": true,
+        "elapsedMs": 1
+      },
+      "proxyEnvironmentVariablesPresent": [],
+      "noProxyConfigured": false,
+      "tlsCredentials": "insecure"
+    }
+  },
+  "traceLog": "rust-server-before-restart.log"
+}

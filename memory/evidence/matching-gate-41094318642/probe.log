@@ -1,0 +1,11 @@
+PROBE BODY FAILED: Error: Rust Matching before-restart did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: Call cancelled; direct primary gRPC status: Deadline exceeded after 10.005s,name resolution: 0.001s,Waiting for LB pick; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching/rust-server-before-restart.log
+    at waitForRustReady (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:636:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:647:5)
+RUST SHUTDOWN FAILURE after probe failure: Error: Rust Matching exceeded the graceful shutdown deadline; sent SIGKILL.
+    at run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:2026:29)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+Error: Rust Matching before-restart did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: Call cancelled; direct primary gRPC status: Deadline exceeded after 10.005s,name resolution: 0.001s,Waiting for LB pick; see /home/runner/work/cadence-rust/cadence-rust/out/gate/run/rust-matching/rust-server-before-restart.log
+    at waitForRustReady (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:636:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async run (/home/runner/work/cadence-rust/cadence-rust/tests/matching-service-compat.cjs:647:5)
