@@ -940,10 +940,13 @@ async function run() {
 
     const crashList = `production-crash-${id}`;
     const crashProbeID = `production-crash-owner-probe-${id}`;
+    // The ownership oracle and the crash workflow use different task lists so the oracle's
+    // leftover task row can never satisfy the crash workflow's pre-kill persistence check.
+    const crashProbeList = `production-crash-owner-probe-list-${id}`;
     const crashTaskList = { name: crashList };
     const probeStart = await call('WorkflowAPI', 'StartWorkflowExecution', {
       ...startRequest, workflowId: crashProbeID, workflowType: { name: 'main.EchoWorkflow' },
-      taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
+      taskList: { name: crashProbeList }, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
     });
     const directPeers = [
       directMatchingClient(`127.0.0.1:${rustGrpcPort}`),
@@ -953,17 +956,17 @@ async function run() {
     const directDeadline = Date.now() + 30000;
     while (Date.now() < directDeadline) {
       directPolls = await Promise.allSettled(directPeers.map((client, index) =>
-        directDecisionPoll(client, domainId, crashList, `${index}-${randomUUID()}`)));
+        directDecisionPoll(client, domainId, crashProbeList, `${index}-${randomUUID()}`)));
       if (directPolls.some(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0)) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    const ownerIndex = directPolls?.findIndex(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0) ?? -1;
-    assert(ownerIndex >= 0, 'neither production Rust Matching instance delivered the queued owner-probe task');
-    const staleResult = directPolls[1 - ownerIndex];
+    const probeOwnerIndex = directPolls?.findIndex(result => result.status === 'fulfilled' && result.value.taskToken?.length > 0) ?? -1;
+    assert(probeOwnerIndex >= 0, 'neither production Rust Matching instance delivered the queued owner-probe task');
+    const staleResult = directPolls[1 - probeOwnerIndex];
     assert.equal(staleResult.status, 'rejected', 'direct request to non-owner must be rejected with Go-compatible typed ownership');
     assert.equal(staleResult.reason.code, grpc.status.ABORTED, 'non-owner must return the typed TaskListNotOwnedByHost status');
     assert.match(staleResult.reason.details || '', /task list is not owned by this host/i);
-    const nonOwnerIndex = 1 - ownerIndex;
+    const nonOwnerIndex = 1 - probeOwnerIndex;
     const nonOwnerGrpcPort = nonOwnerIndex === 0
       ? rustGrpcPort : process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT;
     const goTypedOwnership = spawnSync('go', ['run', './tests/matching-error-oracle'], {
@@ -973,14 +976,14 @@ async function run() {
         CADENCE_MATCHING_ERROR_TARGET: `127.0.0.1:${nonOwnerGrpcPort}`,
         CADENCE_MATCHING_ERROR_DOMAIN_ID: domainId,
         CADENCE_MATCHING_ERROR_DOMAIN: domain,
-        CADENCE_MATCHING_ERROR_TASK_LIST: crashList,
-        CADENCE_MATCHING_ERROR_EXPECTED_OWNER: ownerIndex === 0 ? primaryAddress : secondaryAddress,
+        CADENCE_MATCHING_ERROR_TASK_LIST: crashProbeList,
+        CADENCE_MATCHING_ERROR_EXPECTED_OWNER: probeOwnerIndex === 0 ? primaryAddress : secondaryAddress,
         CADENCE_MATCHING_ERROR_EXPECTED_SELF: nonOwnerIndex === 0 ? primaryAddress : secondaryAddress,
       }, encoding: 'utf8', timeout: 120000,
     });
     fs.writeFileSync(path.join(work, 'production-typed-ownership-go.log'), `${goTypedOwnership.stdout || ''}\n${goTypedOwnership.stderr || ''}`);
     assert.equal(goTypedOwnership.status, 0, `pinned Go Matching client did not decode Rust's typed non-owner response; see ${work}/production-typed-ownership-go.log`);
-    const ownerProbeTask = directPolls[ownerIndex].value;
+    const ownerProbeTask = directPolls[probeOwnerIndex].value;
     await call('WorkerAPI', 'RespondDecisionTaskCompleted', {
       taskToken: ownerProbeTask.taskToken,
       identity: 'production-owner-probe',
@@ -994,6 +997,12 @@ async function run() {
       ...startRequest, workflowId: crashID, workflowType: { name: 'main.EchoWorkflow' },
       taskList: crashTaskList, requestId: randomUUID(), input: payload(JSON.stringify('restart-proof')),
     });
+    // Resolve the ring owner of the crash workflow's own list (not the oracle's) and require both
+    // members to agree before the owner is killed.
+    const crashOwners = await Promise.all(directPeers.map(client => directPartitionOwner(client, domain, crashList)));
+    assert(crashOwners[0] && crashOwners[0] === crashOwners[1], `Rust Matching members disagree on the owner of ${crashList}: ${JSON.stringify(crashOwners)}`);
+    const ownerIndex = [primaryAddress, secondaryAddress].indexOf(crashOwners[0]);
+    assert(ownerIndex >= 0, `owner ${crashOwners[0]} of ${crashList} is not a known Rust Matching member`);
     let queued;
     try {
       queued = await taskObserver.observe(domainId, crashList, 20, 'task-before-crash');
@@ -1017,7 +1026,11 @@ async function run() {
       }, null, 2) + '\n');
       throw error;
     }
-    assert(queued.queued_rows > 0, 'decision task was not visible in Matching persistence before production owner crash');
+    assert.equal(Number(queued.queued_rows), 1, 'exactly the crash workflow decision task must be persisted under its own unique list before the owner crash');
+    const preCrashHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashID, runId: crashStart.runId } });
+    const preCrashEvents = preCrashHistory.history.events;
+    assert.equal(preCrashEvents.filter(event => event.decisionTaskScheduledEventAttributes).length, 1, 'crash workflow must have one scheduled decision before the owner crash');
+    assert.equal(preCrashEvents.filter(event => event.decisionTaskStartedEventAttributes).length, 0, 'crash workflow decision must still be undelivered before the owner crash');
     const beforeCrash = await call('WorkflowAPI', 'DescribeTaskList', {
       domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
     });
@@ -1056,6 +1069,14 @@ async function run() {
     const crashHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', { domain, workflowExecution: { workflowId: crashID, runId: crashStart.runId } });
     const crashCompletions = crashHistory.history.events.filter(event => event.workflowExecutionCompletedEventAttributes).length;
     assert.equal(crashCompletions, 1, 'crash-recovered workflow must have exactly one visible completion');
+    const crashEvents = crashHistory.history.events;
+    const countCrashEvents = key => crashEvents.filter(event => event[key]).length;
+    assert.equal(crashEvents[0].workflowExecutionStartedEventAttributes?.taskList?.name, crashList, 'crash history must belong to the crash workflow list');
+    assert.equal(countCrashEvents('decisionTaskScheduledEventAttributes'), 1, 'persisted decision task must be drained, not re-enqueued by a second schedule');
+    assert.equal(countCrashEvents('decisionTaskStartedEventAttributes'), 1, 'decision task must be started exactly once after the owner crash');
+    assert.equal(countCrashEvents('decisionTaskTimedOutEventAttributes') + countCrashEvents('decisionTaskFailedEventAttributes'), 0, 'no decision timeout or failure may mask the recovery');
+    assert(crashEvents[crashEvents.length - 1].workflowExecutionCompletedEventAttributes, 'workflow completion must be the final history event');
+    const crashEventSequence = crashEvents.map(event => Object.keys(event).find(key => key.endsWith('EventAttributes')) || 'unknown');
     const recoveredStatus = await call('WorkflowAPI', 'DescribeTaskList', {
       domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
     });
@@ -1084,7 +1105,9 @@ async function run() {
       },
       crashRecovery: {
         taskList: crashList, crashedPid: failedPid, crashedHostIndex: ownerIndex,
-        survivorPid: survivor.pid, workflowId: crashID, completionEvents: crashCompletions,
+        survivorPid: survivor.pid, workflowId: crashID, runId: crashStart.runId, completionEvents: crashCompletions,
+        ownerOracleTaskList: crashProbeList, ownerOracleHostIndex: probeOwnerIndex,
+        crashListOwner: crashOwners[0], rowsBeforeCrash: Number(queued.queued_rows), historyEventSequence: crashEventSequence,
         rangeBefore, rangeAfter, ackBefore: beforeAck, ackAfter: afterAck,
         queuedRowsAfterCompletion: afterCount,
       },
@@ -1944,14 +1967,41 @@ async function run() {
     }
     probeScenarios = await runProbeScenarios({
       grpc, call, directClients, domain, domainId, id, startRequest, work, durableTaskCount,
-      restartRust: async () => {
-        const killedPid = rust.pid;
-        rust.kill('SIGKILL');
-        const killed = await exited;
+      hostAddresses: [primaryAddress, secondaryAddress],
+      // Owner address per partition key of an activity task list, as each member's own ring reports it.
+      activityPartitionOwners: async (rootName, hostIndex) => {
+        const client = directClients[hostIndex].client;
+        const response = await new Promise((resolve, reject) => client.ListTaskListPartitions({
+          domain, taskList: { name: rootName },
+        }, new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, value) => error ? reject(error) : resolve(value)));
+        return Object.fromEntries((response.activityTaskListPartitions || []).map(partition => [partition.key, partition.ownerHostName || '']));
+      },
+      // Kills (SIGKILL) and restarts the selected Rust Matching member: 0 = primary, 1 = secondary.
+      restartRust: async (hostIndex = 0) => {
+        const process_ = hostIndex === 0 ? rust : secondaryRust;
+        const killedPid = process_.pid;
+        const secondaryExit = hostIndex === 1
+          ? new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))) : null;
+        process_.kill('SIGKILL');
+        const killed = hostIndex === 0 ? await exited : await secondaryExit;
         assert.equal(killed.signal, 'SIGKILL', 'Rust Matching did not terminate for the durable restart scenario');
-        rust = startRust('after-durable-restart');
-        await waitForRustReady('after-durable-restart');
-        return { killedPid, restartedPid: rust.pid };
+        if (hostIndex === 0) {
+          rust = startRust('after-durable-restart');
+          await waitForRustReady('after-durable-restart');
+          return { hostIndex, killedPid, restartedPid: rust.pid, killSignal: killed.signal };
+        }
+        secondaryRust = startSecondaryRust();
+        const readyDeadline = Date.now() + 30000;
+        let ready = false;
+        while (Date.now() < readyDeadline) {
+          try {
+            await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `durable-restart-rejoin-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
+            ready = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+        assert(ready, 'restarted secondary Rust Matching member did not rejoin Go discovery');
+        return { hostIndex, killedPid, restartedPid: secondaryRust.pid, killSignal: killed.signal };
       },
     });
   }

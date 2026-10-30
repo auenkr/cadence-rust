@@ -1,0 +1,10 @@
+# Matching acceptance false-pass fixes (2026-10-30)
+
+Base: `d0ef6bf3a4fb8056b22a0b10d56ccd16e8f495c0` (origin/t3/matching-rpc-callback-timestamp, retains 6c73d9aa/565c8fc and attempt diagnostics).
+Audit: `memory/matching-postgres-owner-sigkill-audit-20261030.md` at `cb7c2a0bc5ef8d8c5fcefb32d2617da88e47f730`.
+Status: **UNVALIDATED**. Harness-only change (tests/); no production runtime change; no Cargo/Go/test run locally. Validation is owned by the integration parent via GitHub Actions only (PostgreSQL mixed-cluster lane).
+
+## Changes
+- `tests/matching-probe-scenarios.cjs::durableRestart`: reads each queued activity partition's owner from both members, kills (SIGKILL) the owner of partition 0 (not always the primary), asserts exactly 1 row per partition and records range before; after restart + membership convergence requires the restarted member to own a queued partition, polls each partition directly at its owner endpoint (new `nodeRpc`, no retry onto another member), requires one poll through the restarted member, keeps exactly-once task delivery, and requires a higher persisted activity `range_id` for the restarted member's partitions. Forwarding caveat: the response carries no serving-partition field, so evidence is addressed endpoint + range increase.
+- `tests/matching-service-compat.cjs`: `restartRust(hostIndex)` supports primary or secondary, plus `hostAddresses` and `activityPartitionOwners` ctx helpers. Owner-crash flow now uses a separate task list for the ownership oracle/typed-error probe (`crashProbeList`); the owner of the crash workflow's own list is resolved via ListTaskListPartitions on both members (must agree) and that member is killed. Pre-kill: exactly 1 persisted row, 1 DecisionTaskScheduled, 0 DecisionTaskStarted. Post: exactly 1 scheduled, 1 started, no decision timeout/failure, completion is final event, started event task list matches; run id, event sequence and owners recorded in `production-failure-recovery-checkpoints.json`.
+- Supplemental queued-activity owner-crash scenario (already persisted range / exact history / 64 owners) untouched.

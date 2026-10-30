@@ -14,18 +14,21 @@ const payload = data => ({ data: Buffer.from(data) });
 const partitionName = (root, index) => (index === 0 ? root : `/__cadence_sys/${root}/${index}`);
 
 // ctx: { grpc, call, directClients: [{ client, tchannel }], domain, domainId, id, startRequest, work, durableTaskCount }
-function ownerRpc(ctx, method, request) {
-  const attempt = ({ client }) => new Promise((resolve, reject) => {
+function nodeRpc(ctx, node, method, request) {
+  return new Promise((resolve, reject) => {
     const metadata = new ctx.grpc.Metadata();
     metadata.set('rpc-service', 'cadence-matching');
     metadata.set('rpc-encoding', 'proto');
     metadata.set('rpc-caller', 'cadence-probe-scenarios');
-    client[method](request, metadata, { deadline: Date.now() + 25000 }, (error, response) => (error ? reject(error) : resolve(response)));
+    node.client[method](request, metadata, { deadline: Date.now() + 25000 }, (error, response) => (error ? reject(error) : resolve(response)));
   });
+}
+
+function ownerRpc(ctx, method, request) {
   return (async () => {
     let last;
     for (const node of ctx.directClients) {
-      try { return await attempt(node); } catch (error) {
+      try { return await nodeRpc(ctx, node, method, request); } catch (error) {
         if (error.code !== ctx.grpc.status.ABORTED) throw error;
         last = error;
       }
@@ -383,37 +386,77 @@ async function adaptiveScaler(ctx) {
     servingPartitionProof: `requested live read partition delivered the expected task through an addressed ${ctx.matchingImplementation || 'Rust Matching'} endpoint (owner retry may choose another candidate endpoint); current RPC response has no field identifying the internal partition that physically served after forwarding` };
 }
 
-// CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a Rust Matching restart and
-// every partition drains afterwards. ctx.restartRust() kills and restarts the primary Rust process.
+// CADENCE_PROBE_DURABLE_RESTART: backlog rows for a three-partition list survive a SIGKILL of the Rust Matching
+// member that owns a queued partition, and the restarted member takes part in the drain.
+// The victim is the ring owner of partition 0 (primary when only one member exists); ownership is read from
+// both members before the kill, every poll after the restart is addressed to the partition's owner endpoint
+// (no retry onto another member), and the victim's partitions must show a higher persisted range afterwards.
 async function durableRestart(ctx) {
   const rootName = `durable-restart-${ctx.id}`;
   const root = { name: rootName };
   await ownerRpc(ctx, 'UpdateTaskListPartitionConfig', { domainId: ctx.domainId, taskList: root, taskListType: 'TASK_LIST_TYPE_ACTIVITY',
     partitionConfig: { version: '999', numReadPartitions: 3, numWritePartitions: 3, readPartitions: { 0: {}, 1: {}, 2: {} }, writePartitions: { 0: {}, 1: {}, 2: {} } } });
+  const rangeOf = partition => {
+    const range = ctx.durableTaskCount(ctx.domainId, partition, 1, undefined, true);
+    assert.equal(range.status, 0, `could not read range for ${partition}: ${range.stderr}`);
+    return Number(String(range.stdout).trim());
+  };
+  const rowsOf = partition => {
+    const rows = ctx.durableTaskCount(ctx.domainId, partition, 1, undefined);
+    assert.equal(rows.status, 0, `could not count rows for ${partition}: ${rows.stderr}`);
+    return Number(String(rows.stdout).trim());
+  };
   const queued = [];
   for (let index = 0; index < 3; index++) {
     const activityId = `durable-${index}`;
     const scheduled = await scheduleActivity(ctx, `durable-${index}`, activityId);
     const partition = partitionName(rootName, index);
     await ownerRpc(ctx, 'AddActivityTask', { domainId: ctx.domainId, sourceDomainId: ctx.domainId, workflowExecution: { workflowId: scheduled.workflowId, runId: scheduled.runId }, taskList: { name: partition }, scheduleId: scheduled.scheduleId });
-    queued.push({ partition, activityId, rows: await waitForRows(ctx, partition, 1, `partition ${index} backlog`) });
+    await waitForRows(ctx, partition, 1, `partition ${index} backlog`);
+    queued.push({ partition, activityId, rows: rowsOf(partition), rangeBefore: rangeOf(partition) });
   }
-  const restart = await ctx.restartRust();
+  for (const entry of queued) assert.equal(entry.rows, 1, `partition ${entry.partition} must hold exactly its own queued row before the kill`);
+  const ownersOf = async () => {
+    const maps = await Promise.all(ctx.directClients.map((_, index) => ctx.activityPartitionOwners(rootName, index)));
+    for (const entry of queued) {
+      const owners = maps.map(map => map[entry.partition]);
+      assert(owners.every(owner => owner && owner === owners[0]), `members disagree on owner of ${entry.partition}: ${JSON.stringify(owners)}`);
+      entry.owner = owners[0];
+    }
+    return queued.map(entry => ({ partition: entry.partition, owner: entry.owner }));
+  };
+  const ownersBefore = await ownersOf();
+  const addressOf = index => ctx.hostAddresses[index];
+  const hostIndexOf = owner => ctx.directClients.findIndex((_, index) => addressOf(index) === owner);
+  const victimIndex = hostIndexOf(queued[0].owner);
+  assert(victimIndex >= 0, `owner ${queued[0].owner} of ${queued[0].partition} is not a known Rust Matching member`);
+  const victimPartitions = queued.filter(entry => entry.owner === addressOf(victimIndex)).map(entry => entry.partition);
+  const restart = await ctx.restartRust(victimIndex);
+  assert.equal(restart.killSignal, 'SIGKILL', 'queued-partition owner was not SIGKILLed');
+  const ownersAfter = await ownersOf();
+  const restartedOwned = queued.filter(entry => entry.owner === addressOf(victimIndex)).map(entry => entry.partition);
+  assert(restartedOwned.length > 0, `restarted member ${addressOf(victimIndex)} owns no queued partition after membership converged: ${JSON.stringify(ownersAfter)}`);
   const drained = [];
   // A cold partition forwards its poll to its parent after the 10ms local wait (Go
   // LocalPollWaitTime parity) while its own backlog is still loading, and a loaded child
   // may hand its task to a waiting parent poller, so which partition's task a given poll
-  // returns is timing dependent in Go too. Assert every backlog task survives the restart
-  // and is delivered exactly once across the three polls.
+  // returns is timing dependent in Go too. Assert every backlog task survives the kill
+  // and is delivered exactly once across the three polls, each addressed to the owner endpoint.
   const remaining = new Set(queued.map(entry => entry.activityId));
   for (const entry of queued) {
-    const task = await ownerRpc(ctx, 'PollForActivityTask', { domainId: ctx.domainId, pollerId: randomUUID(), request: { taskList: { name: entry.partition }, identity: 'durable-restart-poller' } });
+    const ownerIndex = hostIndexOf(entry.owner);
+    const task = await nodeRpc(ctx, ctx.directClients[ownerIndex], 'PollForActivityTask', { domainId: ctx.domainId, pollerId: randomUUID(), request: { taskList: { name: entry.partition }, identity: 'durable-restart-poller' } });
     assert(remaining.delete(task.activityId), `partition ${entry.partition} returned unexpected or duplicate task ${task.activityId} after restart`);
     await ctx.call('WorkerAPI', 'RespondActivityTaskCompleted', { taskToken: task.taskToken, result: payload('durable-ok') });
-    drained.push({ partition: entry.partition, activityId: task.activityId });
+    drained.push({ partition: entry.partition, activityId: task.activityId, addressedOwner: entry.owner, addressedHostIndex: ownerIndex, restartedMember: ownerIndex === victimIndex });
   }
   assert.equal(remaining.size, 0, `backlog tasks not delivered after restart: ${[...remaining]}`);
-  return { result: 'passed', rootPartition: rootName, queuedBeforeRestart: queued, restart, drainedAfterRestart: drained };
+  assert(drained.some(entry => entry.restartedMember), 'no poll was served through the restarted member');
+  const rangeAfter = queued.map(entry => ({ partition: entry.partition, rangeBefore: entry.rangeBefore, rangeAfter: rangeOf(entry.partition), rowsAfter: rowsOf(entry.partition) }));
+  for (const entry of rangeAfter.filter(entry => restartedOwned.includes(entry.partition))) {
+    assert(entry.rangeAfter > entry.rangeBefore, `restarted member did not acquire a higher persisted range for ${entry.partition}`);
+  }
+  return { result: 'passed', rootPartition: rootName, queuedBeforeRestart: queued, ownersBefore, ownersAfter, victimPartitions, restart, drainedAfterRestart: drained, rangeAfter };
 }
 
 // CADENCE_PROBE_AUTO_CONFIG_HINT: the poll responses that Go Frontend forwards from Rust Matching carry autoConfigHint.
