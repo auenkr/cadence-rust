@@ -129,6 +129,55 @@ func remaining(ctx context.Context) time.Duration {
 // The domain is provisioned by the mixed-service harness. Every worker poll and
 // task append crosses original Go Frontend/History and Rust Matching RPCs.
 func runMixedMatchingSDK(ctx context.Context, rpc workflowserviceclient.Interface, domain string) {
+	if os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_SEED") == "1" {
+		workflowTaskList := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_TASK_LIST")
+		activityTaskList := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_ACTIVITY_TASK_LIST")
+		workflowID := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_ID")
+		w := worker.New(rpc, domain, workflowTaskList, worker.Options{DisableStickyExecution: true})
+		w.RegisterWorkflow(ActivityCrashRecoveryWorkflow)
+		if err := w.Start(); err != nil {
+			panic(err)
+		}
+		defer w.Stop()
+		run, err := client.NewClient(rpc, domain, nil).ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+			ID: workflowID, TaskList: workflowTaskList, ExecutionStartToCloseTimeout: 5 * time.Minute,
+			DecisionTaskStartToCloseTimeout: time.Minute,
+		}, ActivityCrashRecoveryWorkflow, activityTaskList, "activity-crash-recovered")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("activity-crash seed started workflowID=%s runID=%s workflowTaskList=%s activityTaskList=%s\n",
+			run.GetID(), run.GetRunID(), workflowTaskList, activityTaskList)
+		var result string
+		if err := run.Get(ctx, &result); err != nil {
+			panic(mixedRunGetError(rpc, domain, "activity-crash-seed", run, err))
+		}
+		panic("activity crash seed unexpectedly completed before the recovery worker started")
+	}
+	if workflowID := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_RECOVERY_WORKFLOW_ID"); workflowID != "" {
+		workflowTaskList := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_TASK_LIST")
+		activityTaskList := os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_ACTIVITY_TASK_LIST")
+		workflowWorker := worker.New(rpc, domain, workflowTaskList, worker.Options{DisableStickyExecution: true})
+		workflowWorker.RegisterWorkflow(ActivityCrashRecoveryWorkflow)
+		activityWorker := worker.New(rpc, domain, activityTaskList, worker.Options{DisableStickyExecution: true})
+		activityWorker.RegisterActivity(EchoActivity)
+		if err := workflowWorker.Start(); err != nil {
+			panic(err)
+		}
+		defer workflowWorker.Stop()
+		if err := activityWorker.Start(); err != nil {
+			panic(err)
+		}
+		defer activityWorker.Stop()
+		var result string
+		run := client.NewClient(rpc, domain, nil).GetWorkflow(ctx, workflowID, "")
+		if err := run.Get(ctx, &result); err != nil {
+			panic(mixedRunGetError(rpc, domain, "activity-crash-recovery", run, err))
+		}
+		require(result == "activity-crash-recovered", "activity crash recovery SDK result changed")
+		fmt.Printf("Existing Go SDK recovered queued activity after Rust Matching owner SIGKILL; workflowID=%s result=%s\n", workflowID, result)
+		return
+	}
 	if workflowID := os.Getenv("CADENCE_MIXED_RESTART_WORKFLOW_ID"); workflowID != "" {
 		taskList := os.Getenv("CADENCE_MIXED_RESTART_TASK_LIST")
 		w := worker.New(rpc, domain, taskList, worker.Options{DisableStickyExecution: true})

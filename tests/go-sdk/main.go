@@ -110,6 +110,19 @@ func EchoWorkflow(ctx workflow.Context, input string) (string, error) {
 	err := workflow.ExecuteActivity(ctx, EchoActivity, input).Get(ctx, &result)
 	return result, err
 }
+
+// ActivityCrashRecoveryWorkflow keeps its decision work on the workflow task
+// list while placing the activity on a separately controlled task list. The
+// mixed Matching harness leaves the activity list unpolled until its owner has
+// been SIGKILLed, then resumes this execution with the existing Go SDK worker.
+func ActivityCrashRecoveryWorkflow(ctx workflow.Context, activityTaskList, input string) (string, error) {
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		TaskList: activityTaskList, ScheduleToStartTimeout: time.Minute, StartToCloseTimeout: time.Minute,
+	})
+	var result string
+	err := workflow.ExecuteActivity(ctx, EchoActivity, input).Get(ctx, &result)
+	return result, err
+}
 func ptr[T any](v T) *T { return &v }
 func require(ok bool, message string) {
 	if !ok {
@@ -144,7 +157,11 @@ func main() {
 	}
 	defer dispatcher.Stop()
 	rpc := workflowserviceclient.New(dispatcher.ClientConfig("cadence-frontend"))
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	workflowTimeout := 60 * time.Second
+	if os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_SEED") == "1" || os.Getenv("CADENCE_MIXED_ACTIVITY_CRASH_RECOVERY_WORKFLOW_ID") != "" {
+		workflowTimeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), workflowTimeout)
 	defer cancel()
 	if domain := os.Getenv("CADENCE_MIXED_MATCHING_DOMAIN"); domain != "" {
 		runMixedMatchingSDK(ctx, rpc, domain)
