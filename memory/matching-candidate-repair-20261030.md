@@ -18,11 +18,27 @@ duplicating their source changes.
 The semaphore fix renames the captured weak registry reference from
 `managers` to `registry` in
 `rust/crates/cadence-matching/src/matching_semaphore_manager_native.rs`.
-`get_or_create_with_idle_ttl` still holds the registry `MutexGuard` across
-manager construction and insertion, then leaves the lexical block before
-`manager.start().await`. The `OnStop` callback still captures only a `Weak`
-reference and removes only the same manager instance. This preserves both
-creation serialization and callback lifetime behavior.
+`get_or_create_with_idle_ttl` constructs a candidate manager before acquiring
+the registry mutex. The mutex protects lookup/insertion only and is released
+before `manager.start().await`. Concurrent cold requests may construct losing
+unstarted candidates; only the inserted manager is started. The `OnStop`
+callback captures only a `Weak` registry reference and removes only the same
+manager instance. The candidate's validation and in-memory initialization have
+no observed external effect when a losing candidate is dropped.
+
+## Startup scan cancellation regression
+
+The semaphore test fixture now permits its startup scan to be blocked and then
+unblocked without sleeps. The new
+`matching_semaphore_aborted_start_unregisters_releases_waiter_and_rebuilds`
+test parks an acquire future while the registered manager's scan is pending,
+aborts the `get_or_create` task, checks the waiter receives `NotReady` and the
+registry entry is removed, then retries and checks the replacement is registered
+and reused. This exercises the existing `LoadInFlight::drop`/`stop()` path; no
+production defect was established, so implementation code was unchanged.
+The test has not been run locally (local Cargo/Go/formatter/runtime execution
+is prohibited); parent owns CI scheduling and validation. No CI or mixed-gate
+result is claimed for this test revision.
 
 ## Failed CI and discovery diagnosis
 

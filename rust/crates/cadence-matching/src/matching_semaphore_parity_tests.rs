@@ -17,7 +17,7 @@ struct ScriptStore {
     read_tokens: Mutex<Vec<i32>>,
     scans: std::sync::atomic::AtomicUsize,
     next_page_index: std::sync::atomic::AtomicUsize,
-    block_scan: bool,
+    block_scan: std::sync::atomic::AtomicBool,
     /// Delay before every grant write returns, to let a caller's deadline pass mid-write.
     write_delay: std::time::Duration,
     scanning: Notify,
@@ -44,7 +44,7 @@ impl ScriptStore {
             read_tokens: Mutex::new(Vec::new()),
             scans: std::sync::atomic::AtomicUsize::new(0),
             next_page_index: std::sync::atomic::AtomicUsize::new(0),
-            block_scan: false,
+            block_scan: std::sync::atomic::AtomicBool::new(false),
             write_delay: std::time::Duration::ZERO,
             scanning: Notify::new(),
             finish_scan: Notify::new(),
@@ -114,7 +114,7 @@ impl SemaphorePersistence for ScriptStore {
             None => assert_eq!(index, 0, "first page must start with no token"),
             Some(token) => assert_eq!(token, format!("page-{index}").as_bytes()),
         }
-        if self.block_scan {
+        if self.block_scan.load(std::sync::atomic::Ordering::SeqCst) {
             self.scanning.notify_one();
             self.finish_scan.notified().await;
         }
@@ -337,8 +337,10 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
     assert!(manager.start().await.is_err());
     assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
 
-    let mut store = ScriptStore::new(free(&[1, 2]), vec![]);
-    Arc::get_mut(&mut store).unwrap().block_scan = true;
+    let store = ScriptStore::new(free(&[1, 2]), vec![]);
+    store
+        .block_scan
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let manager = new_manager(&store);
     let loading = {
         let manager = manager.clone();
@@ -355,8 +357,10 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
 // TestStartDoesNotWaitOnALoadInFlight (420).
 #[tokio::test]
 async fn matching_semaphore_second_start_does_not_wait_for_scan() {
-    let mut store = ScriptStore::new(free(&[1]), vec![]);
-    Arc::get_mut(&mut store).unwrap().block_scan = true;
+    let store = ScriptStore::new(free(&[1]), vec![]);
+    store
+        .block_scan
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let manager = new_manager(&store);
     let loading = {
         let manager = manager.clone();
@@ -370,6 +374,46 @@ async fn matching_semaphore_second_start_does_not_wait_for_scan() {
     store.finish_scan.notify_one();
     loading.await.unwrap().unwrap();
     assert_eq!(store.scans.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+// Go Start defers startup notification and manager teardown when its load is
+// interrupted. Keep the scan parked until an acquire is registered as a waiter,
+// then cancel the start task and verify the same bucket can be rebuilt.
+#[tokio::test]
+async fn matching_semaphore_aborted_start_unregisters_releases_waiter_and_rebuilds() {
+    let store = ScriptStore::new(free(&[7]), vec![]);
+    store
+        .block_scan
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let registry = Registry::new(store.clone());
+    let id = Identifier::new("uuid-d", "sem", 2).unwrap();
+    let startup_registry = registry.clone();
+    let startup_id = id.clone();
+    let loading = tokio::spawn(async move { startup_registry.get_or_create(startup_id).await });
+    store.scanning.notified().await;
+
+    let manager = registry.by_identifier(&id).expect("startup manager registered");
+    let mut waiter = Box::pin(manager.acquire("waiter", None));
+    assert!(futures_util::poll!(waiter.as_mut()).is_pending());
+
+    loading.abort();
+    assert!(matches!(loading.await, Err(error) if error.is_cancelled()));
+    assert_eq!(waiter.await, Err(ManagerError::NotReady));
+    assert!(registry.by_identifier(&id).is_none());
+
+    store
+        .block_scan
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let replacement = registry.get_or_create(id.clone()).await.unwrap();
+    assert!(!Arc::ptr_eq(&manager, &replacement));
+    assert_eq!(replacement.free_count(), 1);
+    let reused = registry.get_or_create(id.clone()).await.unwrap();
+    assert!(Arc::ptr_eq(&replacement, &reused));
+    assert!(Arc::ptr_eq(
+        &replacement,
+        &registry.by_identifier(&id).expect("replacement remains registered")
+    ));
+    assert_eq!(store.scans.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
 // TestAcquireHandsBackWhatTheGrantDecided (454).
@@ -777,8 +821,10 @@ async fn matching_semaphore_scan_skips_nil_and_unknown_rows() {
 
 #[tokio::test]
 async fn matching_semaphore_acquire_honors_deadline_while_starting() {
-    let mut store = ScriptStore::new(free(&[1]), vec![]);
-    Arc::get_mut(&mut store).unwrap().block_scan = true;
+    let store = ScriptStore::new(free(&[1]), vec![]);
+    store
+        .block_scan
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let manager = new_manager(&store);
     let loading = {
         let manager = manager.clone();
