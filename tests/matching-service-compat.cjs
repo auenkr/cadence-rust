@@ -9,6 +9,7 @@ const { createRequire } = require('node:module');
 const tls = require('node:tls');
 const { createTaskObserver } = require('./matching-task-observer.cjs');
 const { runProbeScenarios } = require('./matching-probe-scenarios.cjs');
+const { captureProcessEvidence } = require('./matching-process-evidence.cjs');
 const webRequire = createRequire(path.resolve(__dirname, '../cadence-web/package.json'));
 const grpc = webRequire('@grpc/grpc-js');
 const loader = webRequire('@grpc/proto-loader');
@@ -620,6 +621,16 @@ async function run() {
     let directReadiness = 'not probed';
     let lastDirectDiagnostic;
     let nextDirectProbeAt = 0;
+    let processEvidenceCaptured = false;
+    // Opt-in, once per readiness wait: snapshot the Rust process at the first
+    // direct RPC failure, before the 180 s loop continues. Never affects readiness.
+    const captureFirstFailure = async reason => {
+      if (processEvidenceCaptured || process.env.CADENCE_MATCHING_PROC_EVIDENCE !== '1') return;
+      processEvidenceCaptured = true;
+      try {
+        await captureProcessEvidence({ pid: rust.pid, grpcPort: rustGrpcPort, workDir: work, label, reason });
+      } catch (_) { /* diagnostics must not alter readiness */ }
+    };
     const primaryAddress = `127.0.0.1:${rustGrpcPort}`;
     const primaryReadinessClient = productionMode ? directMatchingClient(primaryAddress) : null;
     while (Date.now() < deadline) {
@@ -634,8 +645,10 @@ async function run() {
             lastDirectDiagnostic = await directPartitionDiagnostic(
               primaryReadinessClient, primaryAddress, domain, `primary-ready-${id}`);
             directReadiness = lastDirectDiagnostic.error?.details || 'ListTaskListPartitions responded';
+            if (lastDirectDiagnostic.error) await captureFirstFailure(directReadiness);
           } catch (error) {
             directReadiness = error?.details || error?.message || String(error);
+            await captureFirstFailure(directReadiness);
           }
         }
         try {

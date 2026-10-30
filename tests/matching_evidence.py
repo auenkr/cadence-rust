@@ -152,6 +152,9 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
             server_logs.mkdir(exist_ok=True)
             shutil.copy2(source, server_logs / source.name)
             copied.append(f'rust-server-logs/{source.name}')
+        for source in sorted(probe_dir.glob('rust-process-evidence-*.json')):
+            shutil.copy2(source, destination / source.name)
+            copied.append(source.name)
     config_dir = destination / 'config-redacted'
     config_dir.mkdir(exist_ok=True)
     for source in config_files:
