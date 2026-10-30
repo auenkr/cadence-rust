@@ -142,7 +142,15 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
     if probe_dir.is_dir():
         for name in ('db-observations.json', 'gc-backlog-sdk.log', 'go-sdk.log',
                      'graceful-drain-sdk.log', 'restart-sdk.log', 'matching-shutdown.json',
-                     'matching-tls-handshakes.json'):
+                     'matching-tls-handshakes.json',
+                     'production-failure-recovery-checkpoints.json',
+                     'production-activity-crash-recovery.json',
+                     'production-idle-recovery-sdk.log', 'production-crash-recovery-sdk.log',
+                     'production-activity-crash-recovery-sdk.log',
+                     'task-before-crash-diagnostics.json', 'rust-postgres-evidence.json',
+                     'postgresGcDomain.json', 'queryStandbyForwarding.json',
+                     'listTaskListPartitions.json', 'adaptiveScaler.json',
+                     'durableRestartDrain.json', 'autoConfigHint.json', 'activeOffer.json'):
             source = probe_dir / name
             if source.is_file():
                 shutil.copy2(source, destination / name)
@@ -152,9 +160,10 @@ def copy_evidence(destination, *, work, config_files, repository, binaries, resu
             server_logs.mkdir(exist_ok=True)
             shutil.copy2(source, server_logs / source.name)
             copied.append(f'rust-server-logs/{source.name}')
-        for source in sorted(probe_dir.glob('rust-process-evidence-*.json')):
-            shutil.copy2(source, destination / source.name)
-            copied.append(source.name)
+        for pattern in ('rust-process-evidence-*.json', 'list-task-list-partitions-readiness-*.json'):
+            for source in sorted(probe_dir.glob(pattern)):
+                shutil.copy2(source, destination / source.name)
+                copied.append(source.name)
     config_dir = destination / 'config-redacted'
     config_dir.mkdir(exist_ok=True)
     for source in config_files:
