@@ -9,4 +9,6 @@ Independent source review found a blocker in the preexisting GDB command: defaul
 Superseded fresh workspace run41112810382 received a cancellation request; do not credit it. Replacement package-unset clean_target=true run:
 https://github.com/auenkr/cadence-rust/actions/runs/41112992201
 
-Require exact head7b46ef884c7b33f1a57f29a1e1ac4055adfb8dc6, fresh target, Clippy and workspace test exits0 and terminal success before immutable PostgreSQL diagnostic rerun with matching_gdb_diagnostic=true. Two independent Luna audits of dynamic-config re-entry and Ringpop synchronous lock ordering remain pending. No source-proven cause for failed mixed gate41108824183 is established; no current mixed lane accepted; Matching incomplete.
+Require exact head7b46ef884c7b33f1a57f29a1e1ac4055adfb8dc6, fresh target, Clippy and workspace test exits0 and terminal success before immutable PostgreSQL diagnostic rerun with matching_gdb_diagnostic=true. CI41112992201 is confirmed live at that head; superseded run41112810382 is confirmed terminal cancelled.
+
+The two independent Luna audits completed without a source-proven cycle: `memory/evidence/matching-postgres-41108824183/lock-audit.md` and `membership-lock-audit.md`. These scoped negative findings do not exclude unrelated runtime synchronization or driver stalls. No production fix is warranted by them. No source-proven cause for failed mixed gate41108824183 is established; no current mixed lane accepted; Matching incomplete. No delegates remain running from this round.
