@@ -38,3 +38,21 @@ Failed logs inspected:
   the integration candidate's later lookup/refresh fixture correction.
 
 No source fixes or local Cargo/Go/runtime commands executed on resume.
+
+## Recovered later remote candidates
+
+Remote refs and CI inspected on resume; these are unaccepted candidates:
+- `t3/invalid-ticker-recovery`, head
+  `4ec0bb103f98b3fc5065e861223536ac0be0e229`; source architecture commit
+  `2e2b400f955433402c8f7e0f0413904ba29489f1` and atomic-import correction.
+  https://github.com/auenkr/cadence-rust/actions/runs/40912942632 failed.
+- `t3/matching-semaphore-typed-errors`, head
+  `f0e876398862bba9d8cc6d663a46d424474ab7ce`; changes persistence error
+  types, semaphore manager/service and gRPC transport. CI
+  https://github.com/auenkr/cadence-rust/actions/runs/40912963402 succeeded
+  at that exact head. Validation scope still needs inspection before credit.
+- Semaphore cancellation branch's later `dabc3d4a0` is evidence-only.
+
+Fetched candidates without changing master source. Do not redo these fixes
+before reviewing them. T3 capability tool remains unavailable on recheck;
+no replacement worker was started, no prior task terminal state inferred.
