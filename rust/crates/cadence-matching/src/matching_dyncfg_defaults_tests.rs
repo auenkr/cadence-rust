@@ -10,10 +10,14 @@ use std::time::Duration;
 
 const WINDOW: usize = 700;
 
-/// Production text ends at the first top-level `#[cfg(test)]` (the test modules). Indented
-/// `#[cfg(test)]` items are test-only fields, statements, and methods inside production items.
+/// Production files can have top-level test-only helpers before later production items, such as
+/// `QueryDispatchFault` in `grpc_matching.rs`. Stop at the test modules instead of the first
+/// top-level `#[cfg(test)]`; indented test-only fields, statements, and methods are also retained.
 fn production(source: &'static str) -> &'static str {
-    source.split("\n#[cfg(test)]").next().unwrap()
+    let path_module = source.find("\n#[cfg(test)]\n#[path =");
+    let inline_module = source.find("\n#[cfg(test)]\nmod ");
+    let end = path_module.into_iter().chain(inline_module).min();
+    end.map_or(source, |end| &source[..end])
 }
 
 fn assert_default(source: &'static str, key: &str, expected: &str) {
