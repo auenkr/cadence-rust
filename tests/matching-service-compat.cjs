@@ -514,12 +514,33 @@ async function run() {
       resolve(partitions.find(partition => partition.key === taskListName)?.ownerHostName || '');
     }));
   }
+  function directPartitionDiagnostic(client, address, domainName, taskListName) {
+    const request = { domain: domainName, taskList: { name: taskListName } };
+    const startedAt = new Date().toISOString();
+    return new Promise(resolve => client.ListTaskListPartitions(request,
+      new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, response) => {
+        const partitions = response?.decisionTaskListPartitions || [];
+        resolve({
+          rpc: 'MatchingAPI.ListTaskListPartitions', address, request, startedAt,
+          completedAt: new Date().toISOString(), outcome: error ? 'error' : 'response',
+          error: error ? { code: error.code, details: error.details || error.message } : null,
+          response: response ? {
+            decisionTaskListPartitions: response.decisionTaskListPartitions || [],
+            activityTaskListPartitions: response.activityTaskListPartitions || [],
+          } : null,
+          requestedPartitionOwner: partitions.find(partition => partition.key === taskListName)?.ownerHostName || '',
+          traceEnabled: process.env.CADENCE_MATCHING_LIST_PARTITIONS_TRACE === '1',
+        });
+      }));
+  }
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
     let lastReadinessError;
     let directReadiness = 'not probed';
+    let lastDirectDiagnostic;
     let nextDirectProbeAt = 0;
-    const primaryReadinessClient = productionMode ? directMatchingClient(`127.0.0.1:${rustGrpcPort}`) : null;
+    const primaryAddress = `127.0.0.1:${rustGrpcPort}`;
+    const primaryReadinessClient = productionMode ? directMatchingClient(primaryAddress) : null;
     while (Date.now() < deadline) {
       if (productionMode) {
         // Probe the exact Rust endpoint independently of Go Frontend routing.
@@ -529,8 +550,9 @@ async function run() {
         if (Date.now() >= nextDirectProbeAt) {
           nextDirectProbeAt = Date.now() + 5000;
           try {
-            await directPartitionOwner(primaryReadinessClient, domain, `primary-ready-${id}`);
-            directReadiness = 'ready';
+            lastDirectDiagnostic = await directPartitionDiagnostic(
+              primaryReadinessClient, primaryAddress, domain, `primary-ready-${id}`);
+            directReadiness = lastDirectDiagnostic.error?.details || 'ListTaskListPartitions responded';
           } catch (error) {
             directReadiness = error?.details || error?.message || String(error);
           }
@@ -564,7 +586,23 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     primaryReadinessClient?.close();
-    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct primary gRPC status: ${directReadiness}; see ${work}/rust-server-${label}.log`);
+    let finalDirectDiagnostic = lastDirectDiagnostic || null;
+    if (productionMode && process.env.CADENCE_PROBE_LIST_PARTITIONS === '1') {
+      const diagnosticClient = directMatchingClient(primaryAddress);
+      try {
+        finalDirectDiagnostic = await directPartitionDiagnostic(
+          diagnosticClient, primaryAddress, domain, `primary-ready-${id}`);
+      } finally {
+        diagnosticClient.close();
+      }
+      fs.writeFileSync(path.join(work, `list-task-list-partitions-readiness-${label}.json`),
+        `${JSON.stringify({ frontendReadiness: {
+          outcome: 'timeout',
+          error: lastReadinessError?.details || lastReadinessError?.message || 'none',
+        }, directRustProbe: finalDirectDiagnostic, traceLog: `rust-server-${label}.log`,
+        }, null, 2)}\n`);
+    }
+    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct primary gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; see ${work}/rust-server-${label}.log`);
   }
   let exited;
   let rust = startRust('before-restart');
@@ -1781,9 +1819,18 @@ async function run() {
     clearTimeout(shutdownTimer);
     if (result === null) {
       rust.kill('SIGKILL');
-      result = await exited;
-      if (probeFailure) console.error('RUST SHUTDOWN TIMEOUT after probe failure; sent SIGKILL.');
-      else throw new Error('Rust Matching did not stop');
+      let forcedTimer;
+      result = await Promise.race([exited, new Promise(resolve => { forcedTimer = setTimeout(() => resolve(null), 5000); })]);
+      clearTimeout(forcedTimer);
+      const shutdownError = new Error(result === null
+        ? 'Rust Matching did not exit within five seconds after SIGKILL'
+        : 'Rust Matching exceeded the graceful shutdown deadline; sent SIGKILL.');
+      if (probeFailure) console.error('RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
+      else if (result === null) throw shutdownError;
+      if (result === null) result = { code: null, signal: 'SIGKILL' };
+      else if (result.code !== 0 && !probeFailure) {
+        throw new Error(`Rust Matching exited ${JSON.stringify(result)} after forced shutdown; see ${work}/rust-server-after-restart.log`);
+      }
     } else if (result.code !== 0) {
       const shutdownError = new Error(`Rust Matching exited ${JSON.stringify(result)}; see ${work}/rust-server-after-restart.log`);
       if (probeFailure) console.error('RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
@@ -1803,8 +1850,23 @@ async function run() {
         new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))),
         new Promise(resolve => setTimeout(() => resolve(null), 20000)),
       ]);
-      if (secondaryExit === null) { secondaryRust.kill('SIGKILL'); throw new Error('secondary Rust Matching did not stop'); }
-      if (secondaryExit.code !== 0) throw new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
+      if (secondaryExit === null) {
+        secondaryRust.kill('SIGKILL');
+        const forcedSecondaryExit = await Promise.race([
+          new Promise(resolve => secondaryRust.once('exit', (code, signal) => resolve({ code, signal }))),
+          new Promise(resolve => setTimeout(() => resolve(null), 5000)),
+        ]);
+        const shutdownError = new Error(forcedSecondaryExit === null
+          ? 'secondary Rust Matching did not exit within five seconds after SIGKILL'
+          : 'secondary Rust Matching exceeded the graceful shutdown deadline; sent SIGKILL.');
+        if (probeFailure) console.error('SECONDARY RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
+        else if (forcedSecondaryExit === null) throw shutdownError;
+      }
+      if (secondaryExit && secondaryExit.code !== 0) {
+        const shutdownError = new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
+        if (probeFailure) console.error('SECONDARY RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
+        else throw shutdownError;
+      }
     }
   }
   if (probeFailure) throw probeFailure;

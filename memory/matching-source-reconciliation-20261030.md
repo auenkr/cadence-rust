@@ -125,3 +125,40 @@ with `clean_target=true` and package left unset. At dispatch, exact head was
 <https://github.com/auenkr/cadence-rust/actions/runs/41054585478>.
 The one status read returned `in_progress` (no conclusion yet). Per the checkpoint
 instruction, the run was not polled. No mixed-cluster gate has been started.
+
+## PostgreSQL probe independence correction (2026-10-30)
+
+The requested inspection of failed PostgreSQL run `41053262746` confirms the
+original failure was Go Frontend `DescribeTaskList` timing out (`Deadline exceeded
+after 20.001s`, remote `127.0.0.1:20882`). `matching-service-compat.cjs` exited from
+`waitForRustReady` before the SDK body and `CADENCE_PROBE_LIST_PARTITIONS` scenario.
+The artifact's `probe.log` records the original readiness error followed by
+`Rust Matching did not stop`; the Rust shutdown record has SIGTERM but no exit
+code. The gate, lane, and service baseline exit files each contain `1`. The
+PostgreSQL container started and its cleanup file is present. This run does not
+exercise Matching's partition handler or establish a persistence defect.
+
+The 4ffa candidate already sends a direct Rust `MatchingAPI.ListTaskListPartitions`
+request every five seconds during readiness, separate from Go Frontend. However,
+it reduced each response to an owner string, retained no structured direct-RPC
+evidence, and the failed-run artifacts predate that corrected independent probe.
+The candidate also used an unbounded `await exited` after SIGKILL for the primary
+process.
+
+The follow-up harness change on `t3/matching-postgres-readiness-trace-reconciled`
+keeps those periodic direct calls, records the direct RPC request, response/error,
+address, timestamps, and trace setting, and makes one final direct call after
+Frontend readiness expires. When the PostgreSQL list-partitions probe is enabled,
+it writes `list-task-list-partitions-readiness-<stage>.json` before rethrowing the
+original readiness error. The existing workflow opt-in enables the bounded Rust
+request-stage trace, whose server log is referenced in this JSON. Existing
+acceptance assertions are untouched. Cleanup now bounds the post-SIGKILL wait to
+five seconds and reports shutdown failure without replacing the probe-body error;
+the secondary process cleanup follows the same bounded rule.
+
+No local Cargo, Go, formatter, test, or runtime command was run. The correction
+has not yet been validated by CI or by a mixed PostgreSQL gate. The one inspection
+of `41054585478` returned `in_progress`, exact head
+`4ffa5b8d2776ee3217144188db5379412f4ce0cb`, package unset, with the fresh-target
+step complete and Clippy/test steps still pending. No conclusion or test counts
+were available in that inspection. No further status polling was performed.
