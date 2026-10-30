@@ -87,3 +87,26 @@ PostgreSQL cleanup separate from the earlier membership timeline and require
 an explicit cleanup result in the next run evidence.
 
 No SDK, restart, or recovery conclusion is claimed from run 41094318642.
+
+## Diagnostic implementation CI
+
+The first fresh run, [41097675024](https://github.com/auenkr/cadence-rust/actions/runs/41097675024), used clean target `true` and package unset at commit
+`e684d428fdbdae625bfa898948885a8410961d65`. Runner formatting passed, then
+Clippy rejected the newly added counter's deprecated `fetch_update` call and
+the environment-variable early-return lint. Tests did not run. Both exact
+findings were corrected, and the runner-produced rustfmt patch for
+`grpc_matching.rs` was applied and committed.
+
+The corrected source at `4a5da9fb0b9709e40d1117244c1faf82bc60a27f` passed a
+fresh uncached package-unset workspace run:
+[41098477832](https://github.com/auenkr/cadence-rust/actions/runs/41098477832)
+completed successfully, with Clippy followed by workspace tests. No cache step
+ran; Cargo used the dedicated `$RUNNER_TEMP/cargo-target-final` target.
+
+The immutable tag
+`validation/matching-grpc-transport-evidence-4a5da9fb` points to that exact
+SHA. PostgreSQL-only run
+[41100032910](https://github.com/auenkr/cadence-rust/actions/runs/41100032910)
+was dispatched at this tag after confirming no other Matching production
+gate was active. It is still running at the time of this note; no result or
+artifact has yet been observed.
