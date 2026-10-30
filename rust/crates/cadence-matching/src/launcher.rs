@@ -1571,7 +1571,9 @@ pub async fn run(
                         }
                     }
                     if let Some(runtime) = matching_runtime.as_mut() {
-                        eprintln!("Matching startup cleanup stage: Matching runtime shutdown begin");
+                        eprintln!(
+                            "Matching startup cleanup stage: Matching runtime shutdown begin"
+                        );
                         let result = runtime.shutdown().await;
                         eprintln!(
                             "Matching startup cleanup stage: Matching runtime shutdown complete ok={}",
