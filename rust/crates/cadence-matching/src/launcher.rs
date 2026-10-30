@@ -1560,17 +1560,35 @@ pub async fn run(
                 if let Err(start_error) = start_result {
                     let mut cleanup_errors = Vec::new();
                     if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                        if let Err(error) = lifecycle.withdraw().await {
+                        eprintln!("Matching startup cleanup stage: membership withdrawal begin");
+                        let result = lifecycle.withdraw().await;
+                        eprintln!(
+                            "Matching startup cleanup stage: membership withdrawal complete ok={}",
+                            result.is_ok()
+                        );
+                        if let Err(error) = result {
                             cleanup_errors.push(format!("withdrawing membership: {error}"));
                         }
                     }
                     if let Some(runtime) = matching_runtime.as_mut() {
-                        if let Err(error) = runtime.shutdown().await {
+                        eprintln!("Matching startup cleanup stage: Matching runtime shutdown begin");
+                        let result = runtime.shutdown().await;
+                        eprintln!(
+                            "Matching startup cleanup stage: Matching runtime shutdown complete ok={}",
+                            result.is_ok()
+                        );
+                        if let Err(error) = result {
                             cleanup_errors.push(format!("stopping Matching runtime: {error:#}"));
                         }
                     }
                     if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                        if let Err(error) = lifecycle.stop_after_drain().await {
+                        eprintln!("Matching startup cleanup stage: membership teardown begin");
+                        let result = lifecycle.stop_after_drain().await;
+                        eprintln!(
+                            "Matching startup cleanup stage: membership teardown complete ok={}",
+                            result.is_ok()
+                        );
+                        if let Err(error) = result {
                             cleanup_errors.push(format!("stopping membership: {error}"));
                         }
                     }
@@ -1601,6 +1619,7 @@ pub async fn run(
             if let Some(runtime) = matching_runtime.as_ref() {
                 runtime.mark_started();
             }
+            eprintln!("Matching startup stage: admission opened");
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -1753,12 +1772,24 @@ pub async fn run(
             // On a signal, or after one listener exits, the remaining listener
             // tasks stay active while membership withdraws and Matching drains.
             let withdrawal = if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                lifecycle.withdraw().await.map_err(anyhow::Error::new)
+                eprintln!("Matching shutdown stage: membership withdrawal begin");
+                let result = lifecycle.withdraw().await.map_err(anyhow::Error::new);
+                eprintln!(
+                    "Matching shutdown stage: membership withdrawal complete ok={}",
+                    result.is_ok()
+                );
+                result
             } else {
                 Ok(())
             };
             let shutdown = if let Some(runtime) = matching_runtime.as_mut() {
-                runtime.shutdown().await
+                eprintln!("Matching shutdown stage: Matching runtime shutdown begin");
+                let result = runtime.shutdown().await;
+                eprintln!(
+                    "Matching shutdown stage: Matching runtime shutdown complete ok={}",
+                    result.is_ok()
+                );
+                result
             } else {
                 Ok(())
             };
@@ -1767,10 +1798,16 @@ pub async fn run(
             // watcher and destroy the shared Ringpop node.
             let membership_shutdown =
                 if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
-                    lifecycle
+                    eprintln!("Matching shutdown stage: membership teardown begin");
+                    let result = lifecycle
                         .stop_after_drain()
                         .await
-                        .map_err(anyhow::Error::new)
+                        .map_err(anyhow::Error::new);
+                    eprintln!(
+                        "Matching shutdown stage: membership teardown complete ok={}",
+                        result.is_ok()
+                    );
+                    result
                 } else {
                     Ok(())
                 };

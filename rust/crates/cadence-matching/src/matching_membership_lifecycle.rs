@@ -51,24 +51,45 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         if self.worker.is_some() || self.stopped.load(Ordering::Acquire) {
             return Ok(());
         }
+        eprintln!("Matching startup stage: Ringpop provider.start begin");
         if let Err(error) = self.provider.start().await {
+            eprintln!("Matching startup stage: Ringpop provider.start failed");
             let _ = self.provider.stop().await;
             return Err(error);
         }
+        eprintln!("Matching startup stage: Ringpop provider.start complete");
+        eprintln!("Matching startup stage: membership subscribe begin");
         let events = match self.provider.subscribe(&self.service).await {
             Ok(events) => events,
             Err(error) => {
+                eprintln!("Matching startup stage: membership subscribe failed");
+                eprintln!(
+                    "Matching startup cleanup stage: provider stop after subscribe failure begin"
+                );
                 let _ = self.provider.stop().await;
+                eprintln!(
+                    "Matching startup cleanup stage: provider stop after subscribe failure complete"
+                );
                 return Err(error);
             }
         };
+        eprintln!("Matching startup stage: membership subscribe complete");
+        eprintln!("Matching startup stage: initial membership refresh begin");
         let initial_changed = match self.refresh().await {
             Ok(changed) => changed,
             Err(e) => {
+                eprintln!("Matching startup stage: initial membership refresh failed");
+                eprintln!(
+                    "Matching startup cleanup stage: provider stop after refresh failure begin"
+                );
                 let _ = self.provider.stop().await;
+                eprintln!(
+                    "Matching startup cleanup stage: provider stop after refresh failure complete"
+                );
                 return Err(e);
             }
         };
+        eprintln!("Matching startup stage: initial membership refresh complete");
         let (tx, mut stop) = watch::channel(false);
         self.shutdown = Some(tx);
         let provider = self.provider.clone();
@@ -141,12 +162,17 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
                 }
             }
         }));
+        eprintln!("Matching startup stage: membership refresh worker started");
         Ok(())
     }
     async fn refresh(&self) -> Result<bool, ProviderError> {
-        Ok(self
-            .membership
-            .replace_if_addresses_changed(snapshot(self.provider.as_ref(), &self.service).await?))
+        eprintln!("Matching startup stage: membership snapshot begin");
+        let hosts = snapshot(self.provider.as_ref(), &self.service).await?;
+        eprintln!("Matching startup stage: membership snapshot complete");
+        eprintln!("Matching startup stage: membership publication begin");
+        let changed = self.membership.replace_if_addresses_changed(hosts);
+        eprintln!("Matching startup stage: membership publication complete");
+        Ok(changed)
     }
     pub fn membership(&self) -> &Membership {
         &self.membership

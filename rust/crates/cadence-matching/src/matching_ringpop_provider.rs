@@ -227,7 +227,9 @@ impl MatchingRingpopProvider {
 
 impl MatchingPeerProvider for MatchingRingpopProvider {
     async fn start(&self) -> Result<(), ProviderError> {
+        eprintln!("Matching startup stage: Ringpop provider lifecycle lock begin");
         let mut lifecycle = self.lifecycle.lock().await;
+        eprintln!("Matching startup stage: Ringpop provider lifecycle lock acquired");
         match &*lifecycle {
             Lifecycle::Started { .. } => return Ok(()),
             Lifecycle::Stopping { .. } => {
@@ -267,6 +269,7 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
             .start_swim()
             .map_err(|error| ProviderError(format!("starting Ringpop SWIM: {error}")))?;
         self.node.set_ready(true);
+        eprintln!("Matching startup stage: Ringpop ready");
 
         let (stop, mut stopped) = watch::channel(false);
         let mut healer_stopped = stop.subscribe();
@@ -291,6 +294,7 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
                 }
             }
         });
+        eprintln!("Matching startup stage: Ringpop membership monitor started");
 
         let healer_node = self.node.clone();
         let discovery = Arc::clone(&self.discovery);
@@ -353,23 +357,29 @@ impl MatchingPeerProvider for MatchingRingpopProvider {
                 }
             }
         });
+        eprintln!("Matching startup stage: Ringpop healer started");
 
         let mut labels = BTreeMap::new();
         labels.insert("serviceName".to_owned(), self.service.clone());
         for (name, port) in &self.ports {
             labels.insert(name.clone(), port.to_string());
         }
+        eprintln!("Matching startup stage: Ringpop labels publication begin");
         self.node.set_local_labels(&labels);
+        eprintln!("Matching startup stage: Ringpop labels publication complete");
+        eprintln!("Matching startup stage: Ringpop provider snapshot publication begin");
         Self::publish_snapshot(
             &self.snapshot,
             &self.events,
             Self::current_members(&self.node),
         );
+        eprintln!("Matching startup stage: Ringpop provider snapshot publication complete");
         *lifecycle = Lifecycle::Started {
             stop,
             monitor,
             healer,
         };
+        eprintln!("Matching startup stage: Ringpop provider lifecycle started");
         Ok(())
     }
 
