@@ -10,4 +10,4 @@ Shutdown trace change is opt-in source diagnostics plus enabling `CADENCE_MATCHI
 
 Status: **UNVALIDATED**. No local Cargo, Go, test, runtime, formatting, or syntax checks; no CI dispatched. Main 35 retains active gate 41100032910 and CI ownership. Process snapshot `c9c470` is pending and must be added by its owner before any acceptance conclusion. This candidate does not replace or modify the integration worker's branch. Do not apply `3479f193` a second time; it is already in the reviewed ancestry.
 
-Exact candidate commit SHA: recorded in the final commit immediately after this manifest is committed; it will be filled here before push.
+Exact consolidated source tree SHA: `c9135e39c082ba47f57311d7527f183a38c6f088`. Validation status applies to this tree.
