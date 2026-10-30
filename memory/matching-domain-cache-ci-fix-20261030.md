@@ -61,7 +61,7 @@ A focused `rust-ci.yml` run was dispatched with `package=cadence-matching` at
 queued at the single inspection, then explicitly cancelled as superseded before
 completion so it would not overlap the decisive uncached workspace run.
 
-The exact candidate revision is validated by a `rust-ci.yml` run with
-`package` unset and `clean_target=true`; require sequential workspace Clippy
-then workspace tests. PostgreSQL mixed validation remains undispatched until
-that fresh workspace run passes. Record its URL, head SHA and conclusion here.
+Final fresh uncached workspace run: <https://github.com/auenkr/cadence-rust/actions/runs/41028655670>.
+It was dispatched with `package` unset and `clean_target=true` on head
+`22c695d65af367a0b49b605877f72ec33fa2beb8`. Its conclusion is not yet
+observed. PostgreSQL mixed validation remains undispatched until this run passes.
