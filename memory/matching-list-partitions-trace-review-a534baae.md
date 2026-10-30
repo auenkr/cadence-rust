@@ -78,6 +78,13 @@ single-node readiness request, the ordered stage sequence can still narrow the
 last blocking stage, but concurrent retries would be ambiguous. The trace is
 observational and does not change request behavior.
 
+The prior gate facts remain: Matching startup completed; the first actual
+`ListTaskListPartitions` readiness call timed out before SDK workflows or
+failure/restart recovery started. Later Ringpop removals happened during
+teardown and are not evidence of an earlier spontaneous membership failure.
+This rerun is intended to locate the handler/cache/persistence/owner stage; it
+does not retroactively provide SDK or recovery evidence.
+
 Separately, `ListTaskListPartitions` does not forward the gRPC request deadline
 into its cold domain-cache lookup: `NativeMatchingService::list_task_list_partitions`
 discards request metadata and `NativeMatchingEngine::list_task_list_partitions`
