@@ -1115,8 +1115,6 @@ async function run() {
         durableActivityRowsAfterRecovery: activityQueueAfterRecovery.queued_rows,
         sdkResultAssertion: 'activity-crash-recovered',
       };
-      fs.writeFileSync(path.join(work, 'production-activity-crash-recovery.json'),
-        JSON.stringify(activityCrashEvidence, null, 2) + '\n');
       if (activityOwnerIndex === 0) {
         rust = startRust('after-activity-owner-crash');
         await waitForRustReady('after-activity-owner-crash');
@@ -1124,13 +1122,26 @@ async function run() {
         secondaryRust = startSecondaryRust();
         await waitForRustReady('after-activity-owner-crash');
       }
+      const restartedActivityAddress = activityOwnerIndex === 0 ? primaryAddress : secondaryAddress;
+      const activityRejoinKeys = Array.from({ length: 64 }, (_, index) =>
+        `activity-rejoin-${id}-${index}`);
       const activityRejoinDeadline = Date.now() + 30000;
       let activityMemberRejoined = false;
+      let activityRejoinOwnership = [];
       while (Date.now() < activityRejoinDeadline) {
         try {
-          const [primaryView, secondaryView] = await Promise.all(activityPeers.map(client =>
-            directPartitionOwner(client, domain, activityTaskList, 'activity')));
-          if (!primaryView || primaryView !== secondaryView) throw new Error('Rust activity ownership map has not reconverged');
+          activityRejoinOwnership = await Promise.all(activityRejoinKeys.map(async taskListName => {
+            const [primaryOwner, secondaryOwner] = await Promise.all(activityPeers.map(client =>
+              directPartitionOwner(client, domain, taskListName, 'activity')));
+            return { taskListName, primaryOwner, secondaryOwner };
+          }));
+          const converged = activityRejoinOwnership.every(({ primaryOwner, secondaryOwner }) =>
+            primaryOwner && primaryOwner === secondaryOwner);
+          const restartedOwnsActivityPartition = activityRejoinOwnership.some(({ primaryOwner }) =>
+            primaryOwner === restartedActivityAddress);
+          if (!converged || !restartedOwnsActivityPartition) {
+            throw new Error('activity partition ownership has not converged onto the restarted member');
+          }
           await call('WorkflowAPI', 'DescribeTaskList', {
             domain, taskList: { name: `activity-owner-restarted-${id}` },
             taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true,
@@ -1139,7 +1150,14 @@ async function run() {
           break;
         } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
       }
-      assert(activityMemberRejoined, 'restarted Rust Matching activity owner did not rejoin and reconverge through Go discovery');
+      assert(activityMemberRejoined,
+        `restarted Rust Matching member ${restartedActivityAddress} did not appear as an activity partition owner in both converged Rust views and become describable through Go Frontend`);
+      activityCrashEvidence.restartedMemberAddress = restartedActivityAddress;
+      activityCrashEvidence.activityRejoinPartitionCount = activityRejoinOwnership.length;
+      activityCrashEvidence.activityRejoinOwnership = activityRejoinOwnership;
+      activityCrashEvidence.rejoinEvidence = 'restarted address owns at least one activity partition; all 64 direct owner observations agree across both Rust endpoints; Go Frontend activity DescribeTaskList succeeds';
+      fs.writeFileSync(path.join(work, 'production-activity-crash-recovery.json'),
+        JSON.stringify(activityCrashEvidence, null, 2) + '\n');
     }
     if (cassandraGate && semaphoreEvidence) {
       const heldBeforeOwnerCrash = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-immediately-before-owner-crash');
