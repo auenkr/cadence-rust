@@ -643,39 +643,37 @@ impl Registry {
             existing.start().await?;
             return Ok(existing);
         }
-        // Weak, so a manager stopped after the registry is gone does not keep the map alive.
-        let managers = Arc::downgrade(&self.managers);
-        let on_stop: OnStop = Box::new(move |stopping: &Manager| {
-            if let Some(managers) = managers.upgrade() {
-                remove_current(&managers, stopping, stopping.identifier());
-            }
-        });
-        let manager = Arc::new(Manager::new(
-            id.clone(),
-            self.store.clone(),
-            idle_ttl_nanos,
-            on_stop,
-        )?);
-        // The registry lock is released before any await, so the guard never
-        // crosses a suspension point.
+        // Construct under the registry lock like Go GetOrCreate. If another
+        // request wins between this optimistic lookup and the lock, return its
+        // manager even when this caller's current TTL is invalid. The lock is
+        // held only for synchronous construction and map insertion, then
+        // released before any await.
         let existing = {
             let mut managers = self.managers.lock().expect("semaphore registry lock");
             match managers.get(&id).cloned() {
                 Some(existing) => Some(existing),
                 None => {
+                    // Weak, so a manager stopped after the registry is gone
+                    // does not keep the map alive.
+                    let managers = Arc::downgrade(&self.managers);
+                    let on_stop: OnStop = Box::new(move |stopping: &Manager| {
+                        if let Some(managers) = managers.upgrade() {
+                            remove_current(&managers, stopping, stopping.identifier());
+                        }
+                    });
+                    let manager = Arc::new(Manager::new(
+                        id.clone(),
+                        self.store.clone(),
+                        idle_ttl_nanos,
+                        on_stop,
+                    )?);
                     managers.insert(id, manager.clone());
-                    None
+                    Some(manager)
                 }
             }
         };
-        if let Some(existing) = existing {
-            existing.start().await?;
-            return Ok(existing);
-        }
-        if let Err(error) = manager.start().await {
-            self.unregister(&manager);
-            return Err(error);
-        }
+        let manager = existing.expect("created or found under registry lock");
+        manager.start().await?;
         Ok(manager)
     }
 
