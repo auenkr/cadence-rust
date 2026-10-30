@@ -464,6 +464,38 @@ impl NativeTaskReader {
         backlog_forward: Option<NativeBacklogForward>,
         fatal_invariant: Option<ReaderFatalSink>,
     ) -> Self {
+        Self::with_start_state(
+            queue,
+            wake,
+            config,
+            active,
+            limiter,
+            isolation,
+            dispatch_check,
+            metric_context,
+            backlog_forward,
+            fatal_invariant,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_start_state(
+        queue: Arc<DurableTaskQueueBytes>,
+        wake: Arc<Notify>,
+        config: ReaderConfig,
+        active: Arc<dyn Fn() -> bool + Send + Sync>,
+        limiter: Arc<TaskListLimiter>,
+        isolation: NativeIsolationConfig,
+        dispatch_check: Option<NativeDispatchCheck>,
+        metric_context: Option<(
+            crate::matching_metrics::MatchingMetrics,
+            crate::matching_metrics::PollMetricContext,
+        )>,
+        backlog_forward: Option<NativeBacklogForward>,
+        fatal_invariant: Option<ReaderFatalSink>,
+        start: bool,
+    ) -> Self {
         let (stop, stopped) = watch::channel(false);
         let matcher = Arc::new(Rendezvous::default());
         let isolated: HashMap<GoString, _> = isolation
@@ -517,6 +549,10 @@ impl NativeTaskReader {
             let backlog_forward = inner.backlog_forward.clone();
             tokio::spawn(async move {
                 let _completed = dispatched;
+                if !start {
+                    let _ = dispatch_stop.changed().await;
+                    return;
+                }
                 'dispatch: loop {
                     if *dispatch_stop.borrow() {
                         break;
@@ -635,14 +671,15 @@ impl NativeTaskReader {
                         let rps = dispatch_limiter.limit();
                         let async_timeout = dispatch_timeout_nanos(&dispatch_config);
                         let deadline = ((group_known || rps > 1e-7) && active()).then(|| {
-                            let timeout = cadence_common::task_isolation::dispatch_timeout(
-                                rps,
-                                buffers,
-                                async_timeout,
-                                isolation_duration,
-                                timeout_buffer.as_nanos() as i64,
-                            );
-                            dispatch_limiter.now().saturating_add(timeout)
+                            dispatch_limiter.now().saturating_add(
+                                cadence_common::task_isolation::dispatch_timeout(
+                                    rps,
+                                    buffers,
+                                    async_timeout,
+                                    isolation_duration,
+                                    timeout_buffer.as_nanos() as i64,
+                                ),
+                            )
                         });
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {
@@ -900,6 +937,10 @@ impl NativeTaskReader {
         let reader_metrics = inner.metric_context.clone();
         tokio::spawn(async move {
             let _completed = pumped;
+            if !start {
+                let _ = pump_stop.changed().await;
+                return;
+            }
             let mut ack_timer = Box::pin(tokio::time::sleep(update_ack_interval(&config)));
             'pump: loop {
                 if *pump_stop.borrow() {
