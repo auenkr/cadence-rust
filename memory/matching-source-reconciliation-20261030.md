@@ -112,7 +112,16 @@ source-tree change to the follow-up is the missing diagnostic opt-in line; queue
 activity candidate `f009e8d` remains separate and is not included.
 
 The failed run artifacts were read only. No Cargo, Go, formatter, or runtime command
-was run locally. Next: review this workflow/evidence-only delta, commit and push this
-immutable candidate, then dispatch fresh `rust-ci.yml` with `clean_target=true` and
-no package input. No mixed-cluster gate is authorized until exact-head Clippy and
+was run locally. The candidate was committed and pushed, then the fresh CI run below
+was dispatched. No mixed-cluster gate is authorized until exact-head Clippy and
 workspace tests pass.
+
+## Reconciled candidate CI dispatch
+
+Committed and pushed the workflow opt-in plus this audit on
+`t3/matching-postgres-readiness-trace-reconciled`. Fresh `rust-ci.yml` was dispatched
+with `clean_target=true` and package left unset. At dispatch, exact head was
+`4ffa5b8d2776ee3217144188db5379412f4ce0cb`; run:
+<https://github.com/auenkr/cadence-rust/actions/runs/41054585478>.
+The one status read returned `in_progress` (no conclusion yet). Per the checkpoint
+instruction, the run was not polled. No mixed-cluster gate has been started.
