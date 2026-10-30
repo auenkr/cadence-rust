@@ -1158,8 +1158,13 @@ async function run() {
     const crashEvents = crashHistory.history.events;
     const countCrashEvents = key => crashEvents.filter(event => event[key]).length;
     assert.equal(crashEvents[0].workflowExecutionStartedEventAttributes?.taskList?.name, crashList, 'crash history must belong to the crash workflow list');
-    assert.equal(countCrashEvents('decisionTaskScheduledEventAttributes'), 1, 'persisted decision task must be drained, not re-enqueued by a second schedule');
-    assert.equal(countCrashEvents('decisionTaskStartedEventAttributes'), 1, 'decision task must be started exactly once after the owner crash');
+    // EchoWorkflow runs one activity: the persisted first decision task plus the
+    // one scheduled when the activity completes. Any third would be a re-enqueue.
+    assert.equal(countCrashEvents('decisionTaskScheduledEventAttributes'), 2, 'persisted decision task must be drained, not re-enqueued by an extra schedule');
+    assert.equal(countCrashEvents('decisionTaskStartedEventAttributes'), 2, 'each decision task must be started exactly once after the owner crash');
+    assert.equal(countCrashEvents('decisionTaskCompletedEventAttributes'), 2, 'each decision task must complete exactly once');
+    assert.equal(countCrashEvents('activityTaskScheduledEventAttributes'), 1, 'activity must be scheduled exactly once');
+    assert.equal(countCrashEvents('activityTaskCompletedEventAttributes'), 1, 'activity must complete exactly once');
     assert.equal(countCrashEvents('decisionTaskTimedOutEventAttributes') + countCrashEvents('decisionTaskFailedEventAttributes'), 0, 'no decision timeout or failure may mask the recovery');
     assert(crashEvents[crashEvents.length - 1].workflowExecutionCompletedEventAttributes, 'workflow completion must be the final history event');
     const crashEventSequence = crashEvents.map(event => Object.keys(event).find(key => key.endsWith('EventAttributes')) || 'unknown');
