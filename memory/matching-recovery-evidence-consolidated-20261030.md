@@ -1,0 +1,7 @@
+Matching remains incomplete. Frozen source c760e1c57 on t3/matching-recovery-evidence-consolidated consolidates the Clippy atomic rename, durable restart zero-row drain assertion (30-second bound), reviewed secondary restart PID/port readiness and unique logs (d1ce44c39), and first-qualified process snapshot's RPC diagnostic (cc98574e0). The durable evidence copier now retains named recovery/checkpoint/scenario JSON and SDK logs plus readiness diagnostics.
+
+Fresh package-unset clean_target=true workspace CI: https://github.com/auenkr/cadence-rust/actions/runs/41106048247 . Source is unvalidated. Requested cancellation of superseded run 41105484493; no mixed gate dispatched. Earlier db06 run recorded Clippy exit 101 for deprecated fetch_update; source uses runner-suggested try_update.
+
+Local validation: source inspection and git diff --check only. All executable validation stays on Actions. Next: require fresh workspace Clippy and tests at the exact source SHA, then immutable PostgreSQL gate and full artifact review. No History migration.
+
+StatsD audit caveat: the latest worker's claim that Rust timer events aggregate is contradicted by MetricSink::record's Timer arm, which calls enqueue directly. Do not credit that reporting-timing claim. Both earlier audit and direct inspection show synchronous UDP send reachable under buffer mutex at packet threshold; incident causality remains unproven.
