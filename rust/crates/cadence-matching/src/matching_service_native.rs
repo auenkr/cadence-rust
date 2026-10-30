@@ -69,6 +69,39 @@ pub(crate) fn trace_list_partitions_stage(stage: &str) {
     }
 }
 
+/// Trace the production native gRPC handler used by the launcher. Keep this
+/// separate from the legacy protobuf adapter: the production listener serves
+/// `NativeMatchingService` whenever the native runtime is installed.
+fn trace_native_list_partitions_transport(
+    event: &str,
+    id: usize,
+    peer: &str,
+    domain: &str,
+    task_list: &str,
+    elapsed_ms: Option<u128>,
+    outcome: &str,
+) {
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    eprintln!(
+        "matching_native_grpc_transport ts_unix_ms={timestamp_ms} id={id} event={event} peer={peer:?} domain={domain:?} task_list={task_list:?} elapsed_ms={elapsed_ms:?} outcome={outcome}"
+    );
+}
+
+fn next_native_list_partitions_transport_diagnostic_id() -> Option<usize> {
+    std::env::var_os("CADENCE_MATCHING_TRANSPORT_DIAGNOSTICS")?;
+    static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT_ID
+        .try_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |id| (id < 64).then_some(id + 1),
+        )
+        .ok()
+}
+
 impl<C> NativeMatchingService<C> {
     pub fn new(engine: NativeMatchingEngine, integration: C) -> Self {
         Self {
@@ -602,7 +635,31 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
         &self,
         request: Request<n::matching::ListTaskListPartitionsRequest>,
     ) -> Result<Response<n::matching::ListTaskListPartitionsResponse>, Status> {
-        crate::matching_panic::capture("list_task_list_partitions", async move {
+        let diagnostic_id = next_native_list_partitions_transport_diagnostic_id();
+        let diagnostic_started = std::time::Instant::now();
+        let diagnostic_peer = request
+            .remote_addr()
+            .map(|address| address.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let diagnostic_domain = metric_string(&request.get_ref().domain);
+        let diagnostic_task_list = request
+            .get_ref()
+            .task_list
+            .as_ref()
+            .map(|task_list| metric_string(&task_list.name))
+            .unwrap_or_default();
+        if let Some(id) = diagnostic_id {
+            trace_native_list_partitions_transport(
+                "handler-enter",
+                id,
+                &diagnostic_peer,
+                &diagnostic_domain,
+                &diagnostic_task_list,
+                None,
+                "pending",
+            );
+        }
+        let result = crate::matching_panic::capture("list_task_list_partitions", async move {
             let domain = Some(metric_string(&request.get_ref().domain));
             let list = request.get_ref().task_list.as_ref().map(metric_task_list);
             let context = crate::matching_metrics::MatchingMetrics::context_from_metadata(
@@ -619,8 +676,24 @@ impl<C: NativeMatchingIntegration> n::NativeMatchingApi for NativeMatchingServic
             )
             .await
         })
-        .await
-        .unwrap_or_else(|message| Err(Status::unknown(message)))
+        .await;
+        if let Some(id) = diagnostic_id {
+            let outcome = match &result {
+                Ok(Ok(_)) => "ok",
+                Ok(Err(_)) => "rpc-error",
+                Err(_) => "panic-capture-error",
+            };
+            trace_native_list_partitions_transport(
+                "handler-complete",
+                id,
+                &diagnostic_peer,
+                &diagnostic_domain,
+                &diagnostic_task_list,
+                Some(diagnostic_started.elapsed().as_millis()),
+                outcome,
+            );
+        }
+        result.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn get_task_lists_by_domain(
         &self,

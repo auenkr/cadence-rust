@@ -108,5 +108,65 @@ The immutable tag
 SHA. PostgreSQL-only run
 [41100032910](https://github.com/auenkr/cadence-rust/actions/runs/41100032910)
 was dispatched at this tag after confirming no other Matching production
-gate was active. It is still running at the time of this note; no result or
-artifact has yet been observed.
+gate was active. Its full artifact was downloaded to the unique directory
+`/tmp/cadence-artifacts-41100032910` after the run completed.
+
+## PostgreSQL transport diagnostic follow-up
+
+Run 41100032910 used source head
+`4a5da9fb0b9709e40d1117244c1faf82bc60a27f`, with fresh build exit `0` and
+binary SHA256
+`3cbfebef37ec88b34d3655be8f0b97af7b14b34db9fb00dee8dc2747ea8d25eb`.
+Probe, nested run, lane, and gate exits are all `1`. The uploaded artifact now
+contains `gate/run/probe.log`, `results.json`, `ports.json`, the readiness
+JSON, full Go `server.log`, and full Rust `rust-server-before-restart.log`.
+The Go Frontend/History/Worker peers ran with PostgreSQL and Rust Matching;
+there was no Go Matching. The SDK, restart, and durable-recovery probes still
+did not run (`acceptanceEligible:false`).
+
+The final direct `ListTaskListPartitions` call targeted `127.0.0.1:29438`.
+It started at `2026-10-30T17:42:36.618Z`, completed at
+`2026-10-30T17:42:48.625Z`, and returned no response: gRPC code 4,
+`Deadline exceeded after 10.006s,name resolution: 0.001s,Waiting for LB pick`.
+Transport fields report channel state `1` (`CONNECTING`), TCP connect
+`connected:true` in 0 ms, and an independent HTTP/2 probe with
+`socketConnected:true`, `remoteSettingsReceived:false`, `ETIMEDOUT` after
+2 seconds. No proxy environment variables were present, no `NO_PROXY` setting
+was configured, and the client credentials were insecure. This proves that
+the TCP connect succeeded but no HTTP/2 SETTINGS response arrived in that
+probe window. It does not prove whether the listener accepted or dispatched
+the connection, whether a TLS path was selected, or whether this direct RPC
+entered the handler.
+
+Go's Ringpop logs show peer membership addition at 17:39:30.996Z
+(History), 17:39:31.091Z (Frontend), and 17:39:31.114Z (Worker), followed by
+removal at 17:39:44.325Z, 17:39:44.526Z, and 17:39:44.570Z respectively.
+Those removals preceded the final direct probe by about 2 minutes 52 seconds
+and preceded the later Go shutdown records at 17:43:08Z; they are not the
+gate teardown. Rust logs show listener binding, Ringpop startup, initial
+membership refresh, and admission opening. Its bounded Ringpop log contains
+eight inbound PING messages, but does not record SWIM response writes or
+outbound probe outcomes. The Go removal is real, but the evidence still does
+not identify its SWIM/TChannel cause.
+
+Source inspection found why the previous request trace did not correlate:
+the timestamped `matching_grpc_transport` instrumentation was added to the
+legacy `Matching` protobuf implementation in `grpc_matching.rs`, while
+`serve_with_listener_tls_or_no_identity` registers
+`NativeMatchingService` through `NativeMatchingApi` when the native runtime is
+installed. The captured `Matching ListTaskListPartitions stage:` lines come
+from `matching_service_native.rs` and are bounded but have neither timestamps
+nor request identity. The missing transport records therefore cannot be read
+as proof that no handler ran. I added opt-in, 64-request-bounded
+`matching_native_grpc_transport` enter/complete markers in the actual native
+handler. This change is diagnostic only and leaves the existing legacy trace,
+readiness assertions, SDK assertions, and Matching behavior intact.
+
+The next step is a fresh uncached package-unset Rust CI run with Clippy then
+workspace tests. Only if it passes should the serial PostgreSQL-only gate be
+dispatched at the exact immutable diagnosis commit. Its next artifact should
+be evaluated by correlating each native handler timestamp to the direct probe
+window. A handler entry and completion would move investigation to gRPC
+response delivery; no entry with a TCP connect but no HTTP/2 SETTINGS would
+focus the next bounded trace at Tonic accept/HTTP2 dispatch. Neither current
+run is SDK or recovery evidence.
