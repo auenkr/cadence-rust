@@ -106,6 +106,13 @@ impl Membership {
         }
         changed
     }
+
+    /// Go resolver MemberCount reads the published service ring, including its
+    /// initialized empty state, rather than the raw peer provider.
+    pub(crate) fn member_count(&self) -> Result<usize, ()> {
+        Ok(self.ring.read().map_err(|_| ())?.hosts().len())
+    }
+
     /// Test hook: poison the ring lock so the next ownership check panics.
     #[cfg(test)]
     pub(crate) fn poison_ring_for_test(&self) {
@@ -386,6 +393,24 @@ pub(crate) fn semaphore_not_owned_status(
 mod tests {
     use super::*;
     use prost::Message;
+
+    #[test]
+    fn resolver_member_count_tracks_the_published_ring() {
+        let membership = Membership::new("self", vec![]);
+        assert_eq!(membership.member_count(), Ok(0));
+        let host = Host {
+            address: "remote:7935".into(),
+            identity: "remote".into(),
+            grpc_address: "remote:7835".into(),
+        };
+        assert!(membership.replace_if_addresses_changed(vec![host.clone()]));
+        assert_eq!(membership.member_count(), Ok(1));
+        assert!(!membership.replace_if_addresses_changed(vec![host]));
+        assert_eq!(membership.member_count(), Ok(1));
+        membership.replace(vec![]);
+        assert_eq!(membership.member_count(), Ok(0));
+    }
+
     #[test]
     fn native_ownership_error_keeps_raw_name_and_live_ring() {
         use crate::matching_native_status::RAW_MESSAGE_MARKER;

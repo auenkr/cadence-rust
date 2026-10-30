@@ -380,6 +380,8 @@ mod tests {
                 fail_scan: AtomicBool::new(false),
                 scan_entered: Notify::new(),
                 scan_release: Notify::new(),
+                park_confirm: AtomicBool::new(false),
+                cancel_grant: AtomicBool::new(false),
             });
             let domain = GoString::from(DOMAIN);
             for name in ["sem", "deadline", "wire-deadline", "disconnect"] {

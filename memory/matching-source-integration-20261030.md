@@ -24,7 +24,9 @@ included:
   `c37d8a8cb15525baa66735b8b9b82a637ac29f24`: list/get return the same domain,
   and the initial scan wait fails with the premature RPC result. Also retained
   the Matching persistence limiter membership wiring from the combined
-  predecessor `f4ffd30798955dabe34bbd0efe5736bacad17f61`.
+  predecessor `f4ffd30798955dabe34bbd0efe5736bacad17f61`; this candidate now
+  includes the missing per-datastore limiter builder and live ring member-count
+  provider used by that launcher path.
 
 No History implementation was introduced. `git diff --check` passed. No local
 Cargo, Go, rustfmt, build, or runtime validation was run.
@@ -35,8 +37,14 @@ Reviewed the construction-time domain binding/live dynamic values, forwarded
 deadline propagation through local and remote gRPC clients, invalid liveness
 TTL creation/cleanup behavior, semaphore waiter cancellation and typed error
 mapping, configured TCP gRPC fixture, and persistence limiter membership/store
-wiring against the corresponding Go paths. One small Go-parity race was found
-in `Registry::get_or_create_with_idle_ttl`: it constructed/validated a manager
+wiring against the corresponding Go paths. Exact-source CI exposed integration
+omissions in `d75ecfe9f`: the launcher referenced a per-datastore limiter
+builder and membership-count method absent from the source tree, and the
+configured gRPC fixture omitted two new mock fields. These are now included:
+each configured datastore gets an independent limiter, refreshed global quotas
+read the published Matching ring count, and the fixture initializes both
+fields. The check also found a small Go-parity race in
+`Registry::get_or_create_with_idle_ttl`: it constructed/validated a manager
 before taking the map lock, so a concurrent winner could be present by the
 time this request returned a stale invalid-TTL error. Manager construction now
 happens synchronously under the registry lock, matching Go `GetOrCreate`; the
@@ -86,10 +94,22 @@ conclusion, and retained artifacts. It must complete fresh-target workspace
 Clippy followed by workspace tests. Pending runs are not passing evidence.
 
 The older exact-source run https://github.com/auenkr/cadence-rust/actions/runs/41022755953
-was still in progress on `d75ecfe9f7a649d5e1f9acfe46e16f1b783ac808` at the last
-check (fresh target selected; workspace Clippy running; tests pending). It does
-not include the diagnostic change or this review fix. Inspect its logs/artifacts
-after it reaches a terminal state; do not transfer its credit to the final head.
+completed failure on `d75ecfe9f7a649d5e1f9acfe46e16f1b783ac808`, with package
+unset and fresh target `/home/runner/work/_temp/cargo-target-final`. Workspace
+Clippy exited 101 before tests ran. `clippy.log` reports missing
+`build_datastore_limiters`, missing `Membership::member_count`, and missing
+`ParkGrant::{cancel_grant,park_confirm}` fields in the configured gRPC fixture.
+Artifacts and full action log are retained under
+`/mnt/storage/service/ci-evidence/matching-source-d75-41022755953/`; this failed
+run does not validate the harness change or final candidate.
+
+The next fresh-target workspace run
+https://github.com/auenkr/cadence-rust/actions/runs/41023998574 completed
+failure at `42d20c5192b7bbc6205605fb0a31ef6e939cf2a7`, package unset. Clippy
+failed before workspace tests ran. This head included the registry race fix
+and diagnostic harness, but preceded the current datastore-limiter/member-count
+and fixture corrections; it is not final-candidate evidence. A fresh clean
+workspace run is required after pushing those changes.
 
 Matching acceptance remains incomplete: no mixed-cluster gate or SDK workflow
 has exercised this candidate against the other Go services; failure,

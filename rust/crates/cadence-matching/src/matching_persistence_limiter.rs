@@ -17,6 +17,7 @@ const REFRESH_NANOS: i64 = 5_000_000_000;
 type DomainNameResolver = Arc<dyn Fn(uuid::Uuid) -> Option<String> + Send + Sync>;
 
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+pub(crate) type MemberCount = Arc<dyn Fn() -> Result<usize, ()> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PersistenceRateSnapshot {
@@ -88,7 +89,7 @@ impl PersistenceErrorClass {
 /// configured default datastore. Rejections are counted for observability.
 pub struct MatchingPersistenceLimiter {
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
-    matching_members: Arc<AtomicUsize>,
+    matching_members: MemberCount,
     clock: Clock,
     state: Mutex<LimiterState>,
     enabled: bool,
@@ -149,6 +150,27 @@ pub(crate) async fn with_persistence_retry_count<F: std::future::Future>(
     PERSISTENCE_RETRY_COUNT.scope(count, future).await
 }
 
+/// Go constructs a separate limiter for every configured datastore, including
+/// stores Matching does not currently use.
+pub(crate) fn build_datastore_limiters<'a>(
+    names: impl IntoIterator<Item = &'a String>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+    matching_members: MemberCount,
+) -> std::collections::HashMap<String, Arc<MatchingPersistenceLimiter>> {
+    names
+        .into_iter()
+        .map(|name| {
+            (
+                name.clone(),
+                MatchingPersistenceLimiter::with_member_count(
+                    overlay.clone(),
+                    matching_members.clone(),
+                ),
+            )
+        })
+        .collect()
+}
+
 impl MatchingPersistenceLimiter {
     pub fn new(
         overlay: Arc<Mutex<DynamicConfigOverlay>>,
@@ -162,9 +184,35 @@ impl MatchingPersistenceLimiter {
         matching_members: Arc<AtomicUsize>,
         clock: Clock,
     ) -> Arc<Self> {
+        Self::with_member_count_and_clock(
+            overlay,
+            Arc::new(move || Ok(matching_members.load(Ordering::Relaxed))),
+            clock,
+        )
+    }
+
+    pub(crate) fn with_member_count(
+        overlay: Arc<Mutex<DynamicConfigOverlay>>,
+        matching_members: MemberCount,
+    ) -> Arc<Self> {
+        Self::with_member_count_and_clock(overlay, matching_members, Arc::new(monotonic_nanos))
+    }
+
+    fn with_member_count_and_clock(
+        overlay: Arc<Mutex<DynamicConfigOverlay>>,
+        matching_members: MemberCount,
+        clock: Clock,
+    ) -> Arc<Self> {
         let now = clock();
-        let snapshot = read_rate_snapshot(&overlay, matching_members.load(Ordering::Relaxed));
-        let enabled = snapshot.effective_qps > 0.0;
+        let initial = read_rate_snapshot(&overlay, &matching_members);
+        let enabled = initial.effective_qps > 0.0;
+        let snapshot = if enabled {
+            // Go samples once when deciding whether to wrap, then the dynamic
+            // limiter samples again while it constructs its live limit func.
+            read_rate_snapshot(&overlay, &matching_members)
+        } else {
+            initial
+        };
         let mut limiter = RateLimiter::new(snapshot.effective_qps, burst(snapshot.effective_qps));
         limiter.tokens(now);
         Arc::new(Self {
@@ -603,8 +651,7 @@ impl MatchingPersistenceLimiter {
             .lock()
             .expect("Matching persistence limiter lock");
         if now.saturating_sub(state.last_refresh_nanos) >= REFRESH_NANOS {
-            let snapshot =
-                read_rate_snapshot(&self.overlay, self.matching_members.load(Ordering::Relaxed));
+            let snapshot = read_rate_snapshot(&self.overlay, &self.matching_members);
             state
                 .limiter
                 .set_limit_and_burst(snapshot.effective_qps, burst(snapshot.effective_qps));
@@ -640,7 +687,7 @@ fn burst(qps: f64) -> i64 {
 
 fn read_rate_snapshot(
     overlay: &Arc<Mutex<DynamicConfigOverlay>>,
-    matching_members: usize,
+    member_count: &MemberCount,
 ) -> PersistenceRateSnapshot {
     let overlay = overlay.lock().expect("admin dynamic config lock");
     let host_values = overlay.property_values("matching.persistenceMaxQPS");
@@ -653,6 +700,11 @@ fn read_rate_snapshot(
         GLOBAL_QPS_DEFAULT,
     )
     .max(0) as f64;
+    let matching_members = if global_qps > 0.0 {
+        member_count().unwrap_or(0)
+    } else {
+        0
+    };
     let effective_qps = if global_qps > 0.0 && matching_members > 0 {
         (global_qps / matching_members as f64)
             .max(1.0)
@@ -697,6 +749,27 @@ mod tests {
                 }),
             }],
         );
+    }
+
+    #[test]
+    fn configured_datastores_receive_independent_limiters() {
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        set(&overlay, "matching.persistenceMaxQPS", 1);
+        set(&overlay, "matching.persistenceGlobalMaxQPS", 1);
+        let members = Arc::new(AtomicUsize::new(1));
+        let count = members.clone();
+        let names = ["default".to_owned(), "visibility".to_owned(), "unused".to_owned()];
+        let limiters = build_datastore_limiters(
+            names.iter(),
+            overlay,
+            Arc::new(move || Ok(count.load(Ordering::SeqCst))),
+        );
+
+        assert_eq!(limiters.len(), 3);
+        assert!(limiters["default"].allow());
+        assert!(!limiters["default"].allow());
+        assert!(limiters["visibility"].allow());
+        assert!(limiters["unused"].allow());
     }
 
     #[test]
