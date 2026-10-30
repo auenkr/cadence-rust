@@ -22,3 +22,15 @@ The query seam is `#[cfg(test)]`; refresh uses the existing `#[cfg(test)] engine
 Run [41029943649](https://github.com/auenkr/cadence-rust/actions/runs/41029943649) was dispatched on `t3/matching-failure-coverage-20261030142037` at exact head `1c1c6e94d0d7384f89f09920a1452e58643b02e`. At checkpoint, the single status inspection reported `in_progress`; no final artifacts or conclusion are available yet. Do not infer a pass from dispatch or started steps.
 
 Next action after this checkpoint: inspect run 41029943649 once. If terminal-successful, inspect its fresh-target workspace artifacts and exact head, confirm there is no active mixed gate, then dispatch only the PostgreSQL lane of `matching-production-validation.yml` pinned to exact source 1c. Record the Rust binary SHA256 plus nested SDK/readiness/restart/recovery outcomes from gate artifacts before drawing any conclusion. If run 41029943649 is still in progress, checkpoint and stop without polling or starting a gate. If it fails, diagnose with its logs and propose the smallest necessary fix; do not modify source absent a proven CI defect.
+
+## Final run outcome
+
+Run 41029943649 completed with conclusion failure at exact head 1c1c6e94d0d7384f89f09920a1452e58643b02e. Fresh-target selection succeeded at /home/runner/work/_temp/cargo-target-final and cache was skipped. The failure is step 36, Check changed Matching runtime formatting. Clippy, formatting, and tests were skipped, so there is no current-head Cargo clippy/test result.
+
+The uploaded matching-runtime-format.log shows exactly two import-order diffs in rust/crates/cadence-matching/src/matching_partition_cancellation_tests.rs:
+- In refresh_rpc_propagates_engine_error_and_recovers_after_fault_clears, move the MatchingApi import before the grouped cadence_proto import.
+- In query_workflow_dispatch_failure_returns_error_and_cleans_pending_query, move the QueryOutcome import before DomainInfo.
+
+This is a source formatting issue, not a CI defect. The source freeze was preserved; no code was changed. No PostgreSQL mixed gate was dispatched because the required fresh workspace run did not succeed.
+
+Minimal next action for the owner: apply those two rustfmt import reorderings on the source branch, then rerun rust-ci.yml with package unset and clean_target=true on the resulting exact source SHA. After success, inspect workflow ref resolution and active runs, then dispatch only PostgreSQL at the tested source SHA. Record binary SHA and actual nested SDK/readiness/restart/recovery results. Do not treat the 22c successful run as 1c validation.
