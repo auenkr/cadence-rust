@@ -79,6 +79,7 @@ jobs:
             exit "$result"
           fi
           common=(--matching-restart --matching-failure-recovery --matching-idle-check-seconds 3)
+          export CADENCE_MATCHING_TRANSPORT_DIAGNOSTICS=1
           if [[ "$LANE" == "adaptive-single-diagnostic" ]]; then
             # Diagnostic topology: one Rust Matching process, with the same
             # adaptive SDK/load/routing assertions and process restart as adaptive.

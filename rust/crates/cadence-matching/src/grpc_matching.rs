@@ -11,6 +11,38 @@ pub(crate) fn matching_now() -> i64 {
         .map(|time| time.as_nanos() as i64)
         .unwrap_or_default()
 }
+
+fn log_list_partitions_transport(
+    event: &str,
+    id: usize,
+    peer: &str,
+    domain: &str,
+    task_list: &str,
+    elapsed_ms: Option<u128>,
+    outcome: &str,
+) {
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    eprintln!(
+        "matching_grpc_transport ts_unix_ms={timestamp_ms} id={id} event={event} peer={peer:?} domain={domain:?} task_list={task_list:?} elapsed_ms={elapsed_ms:?} outcome={outcome}"
+    );
+}
+
+fn next_list_partitions_transport_diagnostic_id() -> Option<usize> {
+    if std::env::var_os("CADENCE_MATCHING_TRANSPORT_DIAGNOSTICS").is_none() {
+        return None;
+    }
+    static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT_ID
+        .fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |id| (id < 64).then_some(id + 1),
+        )
+        .ok()
+}
 /// Resolve a domain UUID to its name the way Go's domain cache does before
 /// applying a dynamic-property filter. Unknown or unnamed domains fall back to
 /// unfiltered values.
@@ -3273,9 +3305,34 @@ impl m::matching_api_server::MatchingApi for Matching {
         &self,
         request: Request<m::ListTaskListPartitionsRequest>,
     ) -> Result<Response<m::ListTaskListPartitionsResponse>, Status> {
-        crate::matching_panic::capture::<Response<m::ListTaskListPartitionsResponse>, Status>(
-            "list_task_list_partitions",
-            async move {
+        let diagnostic_id = next_list_partitions_transport_diagnostic_id();
+        let diagnostic_started = std::time::Instant::now();
+        let diagnostic_peer = request
+            .remote_addr()
+            .map(|address| address.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let diagnostic_domain = request.get_ref().domain.clone();
+        let diagnostic_task_list = request
+            .get_ref()
+            .task_list
+            .as_ref()
+            .map(|task_list| task_list.name.clone())
+            .unwrap_or_default();
+        if let Some(id) = diagnostic_id {
+            log_list_partitions_transport(
+                "handler-enter",
+                id,
+                &diagnostic_peer,
+                &diagnostic_domain,
+                &diagnostic_task_list,
+                None,
+                "pending",
+            );
+        }
+        let result = crate::matching_panic::capture::<
+            Response<m::ListTaskListPartitionsResponse>,
+            Status,
+        >("list_task_list_partitions", async move {
                 self.metrics
                     .matching_request(
                         "ListTaskListPartitions",
@@ -3322,10 +3379,25 @@ impl m::matching_api_server::MatchingApi for Matching {
                         },
                     )
                     .await
-            },
-        )
-        .await
-        .unwrap_or_else(|message| Err(Status::unknown(message)))
+        })
+        .await;
+        if let Some(id) = diagnostic_id {
+            let outcome = match &result {
+                Ok(Ok(_)) => "ok",
+                Ok(Err(_)) => "rpc-error",
+                Err(_) => "panic-capture-error",
+            };
+            log_list_partitions_transport(
+                "handler-complete",
+                id,
+                &diagnostic_peer,
+                &diagnostic_domain,
+                &diagnostic_task_list,
+                Some(diagnostic_started.elapsed().as_millis()),
+                outcome,
+            );
+        }
+        result.unwrap_or_else(|message| Err(Status::unknown(message)))
     }
     async fn acquire_semaphore(
         &self,

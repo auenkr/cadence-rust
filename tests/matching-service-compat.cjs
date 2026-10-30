@@ -4,6 +4,7 @@ const path = require('node:path');
 const { randomUUID, X509Certificate } = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
+const http2 = require('node:http2');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
 const tls = require('node:tls');
@@ -495,6 +496,28 @@ async function run() {
   function directMatchingClient(address) {
     return new matchingApi.MatchingAPI(address, matchingCredentials);
   }
+  function http2SettingsDiagnostic(address) {
+    const started = Date.now();
+    const caFile = process.env.CADENCE_MATCHING_GRPC_CA_FILE;
+    const origin = `${caFile ? 'https' : 'http'}://${address}`;
+    const options = caFile ? { ca: fs.readFileSync(caFile) } : undefined;
+    return new Promise(resolve => {
+      let settled = false;
+      let socketConnected = false;
+      const session = http2.connect(origin, options);
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        session.destroy();
+        resolve({ ...result, socketConnected, elapsedMs: Date.now() - started });
+      };
+      const timer = setTimeout(() => finish({ remoteSettingsReceived: false, error: 'ETIMEDOUT' }), 2000);
+      session.once('connect', () => { socketConnected = true; });
+      session.once('remoteSettings', settings => finish({ remoteSettingsReceived: true, settings }));
+      session.once('error', error => finish({ remoteSettingsReceived: false, error: error.code || error.message }));
+    });
+  }
   function directDecisionPoll(client, domainId, taskListName, suffix) {
     const metadata = new grpc.Metadata();
     metadata.set('rpc-service', 'cadence-matching');
@@ -541,6 +564,7 @@ async function run() {
           socket.once('error', probeError => finish({ connected: false, error: probeError.code || probeError.message }));
           socket.setTimeout(1000, () => finish({ connected: false, error: 'ETIMEDOUT' }));
         });
+        const http2Probe = await http2SettingsDiagnostic(address);
         resolve({
           rpc: 'MatchingAPI.ListTaskListPartitions', address, request, startedAt,
           completedAt: new Date().toISOString(), outcome: error ? 'error' : 'response',
@@ -556,6 +580,7 @@ async function run() {
             grpcTargetScheme: 'bare host:port; grpc-js default resolver selection',
             grpcChannelConnectivityState: channelConnectivityState,
             tcpProbe,
+            http2Probe,
             proxyEnvironmentVariablesPresent: ['grpc_proxy', 'https_proxy', 'http_proxy', 'GRPC_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY']
               .filter(name => Boolean(process.env[name])),
             noProxyConfigured: Boolean(process.env.no_proxy || process.env.NO_PROXY),
