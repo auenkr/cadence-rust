@@ -78,7 +78,11 @@ Go command was run locally.
   Cassandra integration, or Matching parity completion.
 - The integrated review branch excludes the candidate's `matching_launch_native.rs`
   launch regression file to avoid taking lifecycle/launch ownership. A focused
-  `rust-ci.yml` run is therefore required for this exact pushed review commit.
+  `rust-ci.yml` run was dispatched with package `cadence-matching` for the
+  exact source commit `26f6a88535463740d722cdeac922571a7424a943`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41021199544 . It was
+  in progress at checkpoint time; conclusion is pending and must be recorded
+  after completion.
 
 ## Remaining risks / required follow-up
 
