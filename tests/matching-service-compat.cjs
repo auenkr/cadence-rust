@@ -519,28 +519,63 @@ async function run() {
   function directPartitionDiagnostic(client, address, domainName, taskListName) {
     const request = { domain: domainName, taskList: { name: taskListName } };
     const startedAt = new Date().toISOString();
-    return new Promise(resolve => client.ListTaskListPartitions(request,
-      new grpc.Metadata(), { deadline: Date.now() + 10000 }, async (error, response) => {
+    const channel = client.getChannel();
+    const connectivityTimeline = [];
+    let previousConnectivityState;
+    let omittedConnectivitySamples = 0;
+    const connectivityStateName = state => Object.entries(grpc.connectivityState || {})
+      .find(([, value]) => value === state)?.[0] || String(state);
+    const sampleConnectivity = phase => {
+      let state;
+      try { state = channel.getConnectivityState(false); }
+      catch (_) { return; }
+      if (phase !== 'transition' || state !== previousConnectivityState) {
+        if (connectivityTimeline.length < 32) {
+          connectivityTimeline.push({
+            phase,
+            state: connectivityStateName(state),
+            observedAt: new Date().toISOString(),
+            elapsedMs: Date.now() - diagnosticStartedAt,
+          });
+        } else {
+          omittedConnectivitySamples += 1;
+        }
+      }
+      previousConnectivityState = state;
+    };
+    const diagnosticStartedAt = Date.now();
+    sampleConnectivity('pre-rpc');
+    // Probe the endpoint at the same time as the RPC. Running this after the
+    // callback hid whether the listener was reachable during the RPC attempt.
+    const tcpProbePromise = new Promise(probeResolve => {
+      const separator = address.lastIndexOf(':');
+      const host = address.slice(0, separator).replace(/^\[|\]$/g, '');
+      const port = Number(address.slice(separator + 1));
+      const probeStarted = Date.now();
+      let settled = false;
+      let socket;
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        socket?.destroy();
+        probeResolve({ ...result, elapsedMs: Date.now() - probeStarted });
+      };
+      try {
+        socket = net.createConnection({ host, port });
+        socket.once('connect', () => finish({ connected: true }));
+        socket.once('error', probeError => finish({ connected: false, error: probeError.code || 'CONNECT_ERROR' }));
+        socket.setTimeout(1000, () => finish({ connected: false, error: 'ETIMEDOUT' }));
+      } catch (_) {
+        finish({ connected: false, error: 'CONNECT_ERROR' });
+      }
+    });
+    const connectivitySampler = setInterval(() => sampleConnectivity('transition'), 50);
+    return new Promise(resolve => {
+      const finish = async (error, response) => {
+        clearInterval(connectivitySampler);
+        sampleConnectivity('post-rpc');
+        const tcpProbe = await tcpProbePromise;
         const partitions = response?.decisionTaskListPartitions || [];
-        let channelConnectivityState = null;
-        try {
-          channelConnectivityState = client.getChannel().getConnectivityState(false);
-        } catch (_) {}
-        const [host, rawPort] = address.split(':');
-        const tcpProbe = await new Promise(probeResolve => {
-          const started = Date.now();
-          const socket = net.createConnection({ host, port: Number(rawPort) });
-          let settled = false;
-          const finish = result => {
-            if (settled) return;
-            settled = true;
-            socket.destroy();
-            probeResolve({ ...result, elapsedMs: Date.now() - started });
-          };
-          socket.once('connect', () => finish({ connected: true }));
-          socket.once('error', probeError => finish({ connected: false, error: probeError.code || probeError.message }));
-          socket.setTimeout(1000, () => finish({ connected: false, error: 'ETIMEDOUT' }));
-        });
         resolve({
           rpc: 'MatchingAPI.ListTaskListPartitions', address, request, startedAt,
           completedAt: new Date().toISOString(), outcome: error ? 'error' : 'response',
@@ -554,7 +589,8 @@ async function run() {
           transportDiagnostic: {
             grpcTarget: address,
             grpcTargetScheme: 'bare host:port; grpc-js default resolver selection',
-            grpcChannelConnectivityState: channelConnectivityState,
+            grpcChannelConnectivityTimeline: connectivityTimeline,
+            omittedConnectivitySamples,
             tcpProbe,
             proxyEnvironmentVariablesPresent: ['grpc_proxy', 'https_proxy', 'http_proxy', 'GRPC_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY']
               .filter(name => Boolean(process.env[name])),
@@ -562,7 +598,15 @@ async function run() {
             tlsCredentials: process.env.CADENCE_MATCHING_GRPC_CA_FILE ? 'custom CA' : 'insecure',
           },
         });
-      }));
+      };
+      try {
+        client.ListTaskListPartitions(request, new grpc.Metadata(),
+          { deadline: Date.now() + 10000 }, (error, response) => { void finish(error, response); });
+        sampleConnectivity('during-rpc');
+      } catch (error) {
+        void finish(error, undefined);
+      }
+    });
   }
   async function waitForRustReady(label) {
     const deadline = Date.now() + 180000;
