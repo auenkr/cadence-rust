@@ -1983,8 +1983,9 @@ where
         ));
     }
     node.counts.ping = node.counts.ping.saturating_add(1);
+    let ping_number = node.counts.ping;
     let local_address = node.address.clone();
-    node.apply_changes(
+    let accepted = node.apply_changes(
         request.changes.as_deref().unwrap_or_default(),
         next_incarnation,
         insert_position,
@@ -1996,6 +1997,24 @@ where
         .incarnation;
     let local_checksum = node.memberlist.checksum();
     let members = node.memberlist.members().to_vec();
+    // Keep a small production-gate trace of actual Go-to-Rust SWIM traffic.
+    // The first few successful PINGs distinguish a Ringpop transport/protocol
+    // failure from a Matching resolver or domain-cache failure without making
+    // discovery or readiness more permissive.
+    if ping_number <= 8 {
+        let accepted: Vec<_> = accepted
+            .iter()
+            .map(|change| format!("{}:{}", change.address, change.status))
+            .collect();
+        let members: Vec<_> = members
+            .iter()
+            .map(|member| format!("{}:{}", member.address, member.status))
+            .collect();
+        eprintln!(
+            "Matching Ringpop received PING #{ping_number} from {}; accepted_changes={accepted:?}; members={members:?}",
+            request.source
+        );
+    }
     let (changes, full_sync) = node.disseminator.issue_receiver(
         &request.source,
         request.source_incarnation,
