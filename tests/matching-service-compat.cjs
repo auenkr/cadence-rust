@@ -515,7 +515,7 @@ async function run() {
         resolve({ connected, settingsReceived: false, ...result, elapsedMs: Date.now() - startedAt });
       };
       try {
-        const options = caFile ? { ca: fs.readFileSync(caFile) } : undefined;
+        const options = caFile ? { ca: fs.readFileSync(caFile), servername: 'localhost' } : undefined;
         session = http2.connect(origin, options);
         timer = setTimeout(() => finish({ settingsReceived: false, error: 'ETIMEDOUT' }), 2000);
         session.once('connect', () => { connected = true; });

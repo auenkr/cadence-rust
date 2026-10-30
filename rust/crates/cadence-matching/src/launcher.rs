@@ -1326,14 +1326,15 @@ pub async fn run(
                 let live_drain = crate::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );
-                let drain: crate::matching_runtime::DrainDuration = std::sync::Arc::new(move || {
-                    let resolved = live_drain();
-                    shutdown_trace(&format!(
-                        "resolved shutdownDrainDuration_ms={}",
-                        resolved.as_millis()
-                    ));
-                    resolved
-                });
+                let drain: crate::matching_runtime::DrainDuration =
+                    std::sync::Arc::new(move || {
+                        let resolved = live_drain();
+                        shutdown_trace(&format!(
+                            "resolved shutdownDrainDuration_ms={}",
+                            resolved.as_millis()
+                        ));
+                        resolved
+                    });
                 let source = crate::matching_task_store::select_source(
                     embedded_development,
                     data_dir.as_deref(),
