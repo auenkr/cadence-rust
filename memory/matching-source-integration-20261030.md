@@ -46,10 +46,17 @@ Cargo, Go, rustfmt, build, or runtime validation was run.
 
 ## Required validation and remaining gaps
 
-Dispatch `rust-ci.yml` on this branch with `clean_target=true`, no package,
-then record the exact run URL, head, conclusion, and artifacts. It must complete
-fresh-target workspace Clippy followed by workspace tests. Pending runs are not
-passing evidence.
+Final uncached workspace validation is pending:
+
+- https://github.com/auenkr/cadence-rust/actions/runs/41022755953
+- Head: `d75ecfe9f7a649d5e1f9acfe46e16f1b783ac808`.
+- State at checkpoint: in progress; `clean_target=true`, package unset. The
+  `Select fresh final target` step had not completed, and workspace Clippy and
+  tests had not started. No artifact or binary SHA is available yet.
+
+Do not credit this as a pass until the run completes and logs confirm fresh
+target workspace Clippy followed by workspace tests. Mixed Go/Rust validation
+must separately record the Rust binary SHA256.
 
 Matching acceptance remains incomplete: no mixed-cluster gate or SDK workflow
 has exercised this candidate against the other Go services; failure,
