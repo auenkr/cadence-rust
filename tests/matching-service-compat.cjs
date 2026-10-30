@@ -1967,7 +1967,8 @@ async function run() {
     }
     probeScenarios = await runProbeScenarios({
       grpc, call, directClients, domain, domainId, id, startRequest, work, durableTaskCount,
-      hostAddresses: [primaryAddress, secondaryAddress],
+      // Ring owner names are TChannel addresses (primaryAddress/secondaryAddress above are block scoped).
+      hostAddresses: directClients.map(node => node.tchannel),
       // Owner address per partition key of an activity task list, as each member's own ring reports it.
       activityPartitionOwners: async (rootName, hostIndex) => {
         const client = directClients[hostIndex].client;

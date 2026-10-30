@@ -433,7 +433,19 @@ async function durableRestart(ctx) {
   const victimPartitions = queued.filter(entry => entry.owner === addressOf(victimIndex)).map(entry => entry.partition);
   const restart = await ctx.restartRust(victimIndex);
   assert.equal(restart.killSignal, 'SIGKILL', 'queued-partition owner was not SIGKILLed');
-  const ownersAfter = await ownersOf();
+  // Membership needs a moment to converge after the SIGKILL and restart: both members must agree again, and the
+  // consistent ring (same member set as before) must hand every partition back to its original owner.
+  let ownersAfter;
+  const convergeDeadline = Date.now() + 30000;
+  for (let lastError;;) {
+    try {
+      ownersAfter = await ownersOf();
+      if (ownersAfter.every((entry, index) => entry.owner === ownersBefore[index].owner)) break;
+      lastError = new Error(`owners did not return to their pre-kill values: ${JSON.stringify(ownersAfter)} vs ${JSON.stringify(ownersBefore)}`);
+    } catch (error) { lastError = error; }
+    if (Date.now() > convergeDeadline) throw lastError;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
   const restartedOwned = queued.filter(entry => entry.owner === addressOf(victimIndex)).map(entry => entry.partition);
   assert(restartedOwned.length > 0, `restarted member ${addressOf(victimIndex)} owns no queued partition after membership converged: ${JSON.stringify(ownersAfter)}`);
   const drained = [];
@@ -456,7 +468,7 @@ async function durableRestart(ctx) {
   for (const entry of rangeAfter.filter(entry => restartedOwned.includes(entry.partition))) {
     assert(entry.rangeAfter > entry.rangeBefore, `restarted member did not acquire a higher persisted range for ${entry.partition}`);
   }
-  return { result: 'passed', rootPartition: rootName, queuedBeforeRestart: queued, ownersBefore, ownersAfter, victimPartitions, restart, drainedAfterRestart: drained, rangeAfter };
+  return { result: 'passed', rootPartition: rootName, crossMemberTopology: new Set(queued.map(entry => entry.owner)).size > 1, queuedBeforeRestart: queued, ownersBefore, ownersAfter, victimPartitions, restart, drainedAfterRestart: drained, rangeAfter };
 }
 
 // CADENCE_PROBE_AUTO_CONFIG_HINT: the poll responses that Go Frontend forwards from Rust Matching carry autoConfigHint.
