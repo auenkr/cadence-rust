@@ -17,12 +17,14 @@ Exact head: `2c3bc4a9ab50a824a89b96bac33e40309ef587ef`. Artifacts record fresh t
 
 Local artifact directory: `/mnt/storage/service/ci-evidence/matching-workspace-41107169881.eL8mkx/`. No local Cargo/Go/Node validation was run.
 
-## In progress
+## Latest mixed result
 
 PostgreSQL mixed gate:
 https://github.com/auenkr/cadence-rust/actions/runs/41108824183
 
-Confirmed live at the exact frozen SHA, with no artifact available at this checkpoint. No current-source mixed lane is credited as passed. Earlier readiness failures do not establish a unique runtime cause, and the StatsD correction is not claimed to explain them.
+Terminal conclusion: failure at the exact frozen SHA. Build exit 0; probe/run/lane/gate exit 1. Readiness failed before SDK or recovery scenarios, and shutdown exceeded the harness grace deadline before SIGKILL. No current-source mixed lane is credited as passed. Diagnostic syntax and observer selfcheck succeeded; the completed Actions log records Go SDK compile-only output `[no test files]` and subsequent steps. Those preflights do not establish runtime acceptance. Earlier readiness failures do not establish a unique runtime cause, and the StatsD correction is not claimed to explain them.
+
+Compact evidence is committed on master under `memory/evidence/matching-postgres-41108824183/`; see `matching-postgres-failure-41108824183-20261031.md`. Full Actions log is downloaded at `/mnt/storage/service/ci-evidence/matching-postgres-41108824183.AY5Gf8/actions.log`. Three independent high-reasoning Luna analyses cover the process snapshot, native request trace and shutdown stopping boundary. Findings remain pending; no speculative production fix or replacement gate is dispatched.
 
 ## Remaining work
 
@@ -31,4 +33,4 @@ Confirmed live at the exact frozen SHA, with no artifact available at this check
 3. Pass all ten serial mixed lanes on one validated immutable source: PostgreSQL, MySQL probes, Thrift/TChannel, configstore, real shard-distributor/etcd, two-node MySQL, Cassandra, full adaptive, active offer, production TLS. None is currently accepted on this source.
 4. Close the final Go-to-Rust behavior/parity audit and requirement-to-evidence matrix; preserve reproducible evidence in memory; integrate accepted code into master. Only then begin History.
 
-An honest percentage is unavailable: code and unit evidence cover much of Matching, but service completion depends on mixed runtime acceptance. Current validation milestone counts are fresh workspace 1/1 passed and mixed lanes 0/10 accepted (PostgreSQL running). The overall cluster rewrite remains incomplete with History, Frontend and Worker still to follow Matching.
+An honest percentage is unavailable: code and unit evidence cover much of Matching, but service completion depends on mixed runtime acceptance. Current validation milestone counts are fresh workspace 1/1 passed and mixed lanes 0/10 accepted (PostgreSQL failed readiness). The overall cluster rewrite remains incomplete with History, Frontend and Worker still to follow Matching.
