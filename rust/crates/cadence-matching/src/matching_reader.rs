@@ -782,14 +782,15 @@ impl TaskReader {
                         let async_timeout = dispatch_config.dispatch_timeout_nanos();
                         let deadline = ((isolated.contains_key(&group) || rps > 1e-7) && active())
                             .then(|| {
-                                let timeout = cadence_common::task_isolation::dispatch_timeout(
-                                    rps,
-                                    buffers,
-                                    async_timeout,
-                                    isolation_duration,
-                                    timeout_buffer.as_nanos() as i64,
-                                );
-                                dispatch_limiter.now().saturating_add(timeout)
+                                dispatch_limiter.now().saturating_add(
+                                    cadence_common::task_isolation::dispatch_timeout(
+                                        rps,
+                                        buffers,
+                                        async_timeout,
+                                        isolation_duration,
+                                        timeout_buffer.as_nanos() as i64,
+                                    ),
+                                )
                             });
                         let attempt_started = std::time::Instant::now();
                         let attempt = async {

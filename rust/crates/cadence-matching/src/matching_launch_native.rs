@@ -277,4 +277,428 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unavailable);
     }
+
+    // Exercises the configured host through the same TCP gRPC server wrapper used
+    // by the launcher. The store parks only the first scan of each phase.
+    #[tokio::test]
+    async fn configured_grpc_semaphore_slow_start_deadlines_cleanup_and_retry() {
+        use crate::matching_semaphore_manager_native::tests::ParkGrant;
+        use cadence_common::membership::Host;
+        use cadence_persistence::semaphores_native::{
+            InMemorySemaphorePersistenceBytes, SemaphorePersistenceBytes,
+        };
+        use cadence_proto::native::NativeMatchingApi;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use tokio::sync::Notify;
+
+        const DOMAIN: &str = "00000000-0000-0000-0000-000000000001";
+        struct Source;
+        impl crate::matching_domain_cache::DomainMetadataSource for Source {
+            fn metadata_version(
+                &self,
+                _: Duration,
+            ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(0)
+            }
+            fn list_domains(
+                &self,
+                _: usize,
+                _: Option<&[u8]>,
+                _: Duration,
+            ) -> Result<
+                crate::matching_domain_cache::DomainMetadataPage,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
+                Ok(crate::matching_domain_cache::DomainMetadataPage {
+                    domains: vec![self.get_domain(None, Some(DOMAIN), Duration::ZERO)?],
+                    next_page_token: None,
+                })
+            }
+            fn get_domain(
+                &self,
+                _: Option<&str>,
+                _: Option<&str>,
+                _: Duration,
+            ) -> Result<
+                MatchingDomainMetadata,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
+                Ok(MatchingDomainMetadata {
+                    info: cadence_api::types::DomainInfo {
+                        uuid: DOMAIN.into(),
+                        name: "domain".into(),
+                        ..Default::default()
+                    },
+                    configuration: Default::default(),
+                    replication: Default::default(),
+                    is_global_domain: false,
+                    archival_bucket: String::new(),
+                    status_raw: 0,
+                    archival_status_raw: 0,
+                    history_archival_status_raw: 0,
+                    visibility_archival_status_raw: 0,
+                    config_version: 0,
+                    notification_version: 0,
+                    failover_notification_version: 0,
+                    failover_version: 0,
+                    previous_failover_version: -1,
+                    failover_end_time_nanos: None,
+                    last_updated_time_nanos: 0,
+                    bad_binaries: None,
+                    isolation_groups: None,
+                    async_workflow_config: None,
+                    active_clusters_config: None,
+                    decoded_bad_binaries: None,
+                    decoded_isolation_groups: None,
+                    decoded_async_workflow_config: None,
+                    config_decode_error: None,
+                })
+            }
+        }
+        struct AbortOnDrop(tokio::task::AbortHandle);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+
+        tokio::time::timeout(Duration::from_secs(45), async {
+            let directory = tempfile::tempdir().unwrap();
+            let task_store = Arc::new(
+                cadence_persistence::matching_sqlite::SqliteTaskStore::create(
+                    directory.path().join("native.db"),
+                    cadence_persistence::matching_blob::BlobEncoding::ThriftRW,
+                )
+                .unwrap(),
+            );
+            let store = Arc::new(ParkGrant {
+                inner: InMemorySemaphorePersistenceBytes::default(),
+                entered: Notify::new(),
+                release: Notify::new(),
+                scan_pages: AtomicUsize::new(0),
+                park_scan: AtomicBool::new(true),
+                fail_scan: AtomicBool::new(false),
+                scan_entered: Notify::new(),
+                scan_release: Notify::new(),
+            });
+            let domain = GoString::from(DOMAIN);
+            for name in ["sem", "deadline", "wire-deadline", "disconnect"] {
+                store
+                    .inner
+                    .create_semaphore(&domain, &GoString::from(name), 1, 1)
+                    .await
+                    .unwrap();
+            }
+            let state = AppState::default();
+            state.admin.dynamic_config.lock().unwrap().update(
+                false,
+                "system.enableDistributedSemaphore",
+                vec![cadence_api::admin::DynamicConfigValue {
+                    value: Some(cadence_api::types::DataBlob::new(
+                        cadence_api::enums::EncodingType::JSON,
+                        b"true".to_vec(),
+                    )),
+                    filters: vec![],
+                }],
+            );
+            let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source)));
+            let sink = Arc::new(crate::matching_metrics::RecordingMetricSink::default());
+            let metrics = crate::matching_metrics::MatchingMetrics::new(sink.clone());
+            let quota = Arc::new(MatchingRpcQuota::with_metric_sink(
+                state.admin.dynamic_config.clone(),
+                Arc::new(|_| {}),
+            ));
+            let (fatal, _fatal_rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut runtime = assemble_configured(
+                state,
+                ConfiguredNativeAssembly {
+                    task_store,
+                    semaphore_store: store.clone(),
+                    history: crate::matching_history::MatchingHistoryClient::new(
+                        tonic::transport::Endpoint::from_static("http://127.0.0.1:1")
+                            .connect_lazy(),
+                        Duration::from_secs(1),
+                        32 * 1024 * 1024,
+                    ),
+                    cache: cache.clone(),
+                    membership: Membership::new(
+                        "local",
+                        vec![Host {
+                            address: "local".into(),
+                            identity: "local".into(),
+                            grpc_address: String::new(),
+                        }],
+                    ),
+                    quota,
+                    domain_parse: DomainIdParse::Lenient,
+                    drain: Arc::new(|| Duration::ZERO),
+                    fatal,
+                    poll_observer:
+                        crate::matching_engine_context_native::metrics_poll_observer_factory(
+                            metrics.clone(),
+                            cache,
+                        ),
+                    metrics,
+                },
+            )
+            .await
+            .unwrap();
+            runtime.mark_started();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(crate::grpc_matching::serve_with_listener(
+                listener,
+                runtime.matching().clone(),
+            ));
+            let _abort = AbortOnDrop(server.abort_handle());
+            let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+                .unwrap()
+                .connect()
+                .await
+                .unwrap();
+            let client =
+                cadence_proto::native_service::matching_api_client::MatchingApiClient::new(channel);
+            let transport = crate::matching_transport_native::SharedNativeMatching(
+                runtime.matching().native_service().unwrap().clone(),
+            );
+            let request = |name: &str, owner: &str, timeout: Option<Duration>| {
+                assert!(
+                    cadence_common::semaphore_bytes::parse_owner_bytes(owner.as_bytes()).is_ok()
+                );
+                let mut request =
+                    tonic::Request::new(cadence_proto::native::matching::AcquireSemaphoreRequest {
+                        domain_id: GoString::from(DOMAIN),
+                        semaphore_name: GoString::from(name),
+                        bucket: 0,
+                        owner_id: GoString::from(owner),
+                    });
+                if let Some(timeout) = timeout {
+                    request.set_timeout(timeout);
+                }
+                request
+            };
+            let count = || {
+                sink.events()
+                    .iter()
+                    .filter(|event| {
+                        event.name == crate::matching_metrics::SEMAPHORE_CONTEXT_TIMEOUT
+                    })
+                    .count()
+            };
+
+            // A live gRPC initiating caller gets the independent 30s load error.
+            // The in-process transport adapter gives the waiter a caller deadline.
+            let mut first_client = client.clone();
+            let first_request = request("sem", "5:first:r:1", None);
+            let mut first =
+                tokio::spawn(async move { first_client.acquire_semaphore(first_request).await });
+            tokio::select! {
+                result = &mut first => panic!("initial RPC returned before scan: {result:?}"),
+                result = tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified()) => {
+                    result.expect("initial RPC never reached semaphore scan");
+                }
+            }
+            let error = tokio::time::timeout(
+                Duration::from_secs(3),
+                transport.acquire_semaphore(request(
+                    "sem",
+                    "6:waiter:r:2",
+                    Some(Duration::from_millis(200)),
+                )),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(error.message(), "context deadline exceeded");
+            assert_eq!(count(), 1);
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
+            let error = tokio::time::timeout(Duration::from_secs(33), first)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(
+                error.message(),
+                format!("load semaphore bucket {DOMAIN}/sem/0: context deadline exceeded")
+            );
+            assert_eq!(count(), 1);
+            // A new scan and successful grant prove the stopped manager was removed.
+            store.release.notify_one();
+            let mut retry_client = client.clone();
+            let retry = tokio::time::timeout(
+                Duration::from_secs(3),
+                retry_client.acquire_semaphore(request(
+                    "sem",
+                    "5:retry:r:3",
+                    Some(Duration::from_secs(2)),
+                )),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .into_inner();
+            assert_eq!(retry.outcome, 1);
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
+
+            // Through the in-process transport adapter, an initiating caller's deadline expires while its independent scan
+            // is parked; after the scan returns Go substitutes the context error.
+            store.park_scan.store(true, Ordering::SeqCst);
+            let deadline_transport = transport.clone();
+            let deadline_request =
+                request("deadline", "5:first:r:4", Some(Duration::from_millis(200)));
+            let deadline = tokio::spawn(async move {
+                deadline_transport.acquire_semaphore(deadline_request).await
+            });
+            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(350)).await;
+            assert!(
+                !deadline.is_finished(),
+                "initiating scan must outlive its caller deadline"
+            );
+            store.scan_release.notify_one();
+            let error = tokio::time::timeout(Duration::from_secs(2), deadline)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(error.message(), "context deadline exceeded");
+            assert_eq!(count(), 2);
+            store.release.notify_one();
+            let mut retry_client = client.clone();
+            let retry = tokio::time::timeout(
+                Duration::from_secs(3),
+                retry_client.acquire_semaphore(request(
+                    "deadline",
+                    "5:retry:r:5",
+                    Some(Duration::from_secs(2)),
+                )),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .into_inner();
+            assert_eq!(retry.outcome, 1);
+
+            // A real wire deadline ends the client RPC. Tonic 0.12 maps its
+            // server timeout to Cancelled (a client-enforced deadline may instead
+            // report DeadlineExceeded). Go's background startup
+            // remains in flight: a later caller waits for that same scan and can
+            // acquire after it finishes. The server records the context metric
+            // after startup completes, independent of the expired client RPC.
+            store.park_scan.store(true, Ordering::SeqCst);
+            let scans_before = store.scan_pages.load(Ordering::SeqCst);
+            let mut wire_client = client.clone();
+            let wire_request = request(
+                "wire-deadline",
+                "4:wire:r:6",
+                Some(Duration::from_millis(500)),
+            );
+            let wire =
+                tokio::spawn(async move { wire_client.acquire_semaphore(wire_request).await });
+            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified())
+                .await
+                .unwrap();
+            let error = tokio::time::timeout(Duration::from_secs(2), wire)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Cancelled);
+            let mut waiter_client = client.clone();
+            let waiter_request = request(
+                "wire-deadline",
+                "6:waiter:r:7",
+                Some(Duration::from_secs(3)),
+            );
+            let mut waiter =
+                tokio::spawn(async move { waiter_client.acquire_semaphore(waiter_request).await });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), &mut waiter)
+                    .await
+                    .is_err(),
+                "later caller must wait for the original background scan"
+            );
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            store.scan_release.notify_one();
+            store.release.notify_one();
+            let response = tokio::time::timeout(Duration::from_secs(2), waiter)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .into_inner();
+            assert_eq!(response.outcome, 1);
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while count() != 3 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("wire deadline context metric missing");
+
+            // Drop an active TCP request without a deadline. Startup still owns
+            // the original scan, and its eventual canceled context is counted.
+            store.park_scan.store(true, Ordering::SeqCst);
+            let scans_before = store.scan_pages.load(Ordering::SeqCst);
+            let mut disconnect_client = client.clone();
+            let disconnected = tokio::spawn(async move {
+                disconnect_client
+                    .acquire_semaphore(request("disconnect", "10:disconnect:r:8", None))
+                    .await
+            });
+            tokio::time::timeout(Duration::from_secs(2), store.scan_entered.notified())
+                .await
+                .unwrap();
+            disconnected.abort();
+            let _ = disconnected.await;
+            // Wait until the server has received the stream reset before releasing
+            // the scan; a later waiter must still reuse the registered manager.
+            let mut waiter_client = client.clone();
+            let mut waiter = tokio::spawn(async move {
+                waiter_client
+                    .acquire_semaphore(request(
+                        "disconnect",
+                        "6:waiter:r:9",
+                        Some(Duration::from_secs(3)),
+                    ))
+                    .await
+            });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(300), &mut waiter)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            store.scan_release.notify_one();
+            store.release.notify_one();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(2), waiter)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap()
+                    .into_inner()
+                    .outcome,
+                1
+            );
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while count() != 4 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("disconnect context metric missing");
+            assert_eq!(store.scan_pages.load(Ordering::SeqCst), scans_before + 1);
+            runtime.shutdown().await.unwrap();
+            server.abort();
+        })
+        .await
+        .expect("configured transport scenario timed out");
+    }
 }

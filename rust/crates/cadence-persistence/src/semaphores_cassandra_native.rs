@@ -10,7 +10,7 @@ use crate::{
         AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, DEFAULT_BUCKET_SIZE,
         MAX_BUCKET_SIZE, SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE,
     },
-    semaphores_native::{SemaphoreBucketPageBytes, SemaphorePersistenceBytes, SemaphoreRowBytes},
+    semaphores_native::{SemaphoreBucketPageBytes, SemaphoreCallContext, SemaphorePersistenceBytes, SemaphoreRowBytes},
 };
 use async_trait::async_trait;
 use cadence_common::go_string::GoString;
@@ -140,6 +140,21 @@ impl CassandraSemaphorePersistence {
             .0;
         let bytes = value.filter(|v| v != FREE).unwrap_or_default().into_bytes();
         Ok(GoString::from(bytes))
+    }
+}
+
+// Dropping a Scylla request future stops waiting for the response, but cannot
+// undo a request already sent to Cassandra. A cancelled LWT is ambiguous, as
+// with gocql's WithContext; never retry it here. Poll the result first when
+// both become ready so a received applied result is retained by the manager.
+async fn caller_io<T>(
+    context: &SemaphoreCallContext,
+    operation: impl std::future::Future<Output = Result<T, AcquireError>>,
+) -> Result<T, AcquireError> {
+    tokio::select! {
+        biased;
+        result = operation => result,
+        _ = context.wait() => Err(AcquireError::Internal("context canceled".into())),
     }
 }
 
@@ -407,6 +422,29 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
             Err(e) => Err(e),
         }
     }
+    async fn confirm_with_context(
+        &self,
+        d: &GoString,
+        n: &GoString,
+        b: i32,
+        t: i32,
+        context: &SemaphoreCallContext,
+    ) -> Result<GoString, AcquireError> {
+        caller_io(context, self.get_semaphore_ownership_by_token(d, n, b, t)).await
+    }
+
+    async fn grant_with_context(
+        &self,
+        d: &GoString,
+        n: &GoString,
+        b: i32,
+        t: i32,
+        o: &GoString,
+        context: &SemaphoreCallContext,
+    ) -> Result<GrantOutcome, AcquireError> {
+        caller_io(context, self.grant_semaphore_token(d, n, b, t, o)).await
+    }
+
     async fn release_semaphore_token(
         &self,
         d: &GoString,
@@ -480,6 +518,27 @@ impl SemaphorePersistenceBytes for CassandraSemaphorePersistence {
 mod tests {
     use super::*;
     use scylla::serialize::writers::CellWriter;
+
+    #[tokio::test]
+    async fn caller_io_cancels_pending_and_keeps_ready_result() {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let context = SemaphoreCallContext { cancelled: Some(rx), ..Default::default() };
+        let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+        let signal = entered.clone();
+        let pending = async move {
+            signal.notify_one();
+            std::future::pending::<Result<(), AcquireError>>().await
+        };
+        let task = tokio::spawn(async move { caller_io(&context, pending).await });
+        entered.notified().await;
+        tx.send(true).unwrap();
+        assert!(matches!(task.await.unwrap(), Err(AcquireError::Internal(_))));
+
+        let (_tx, rx) = tokio::sync::watch::channel(true);
+        let context = SemaphoreCallContext { cancelled: Some(rx), ..Default::default() };
+        let result = caller_io(&context, async { Ok(GrantOutcome::Applied) }).await.unwrap();
+        assert!(matches!(result, GrantOutcome::Applied));
+    }
 
     #[test]
     fn raw_text_binding_keeps_go_string_bytes_exact() {

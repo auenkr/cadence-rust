@@ -262,6 +262,7 @@ pub fn native_queue_registry(
         .with_standby_enabled(standby)
         .with_partition_count(partition_count)
         .with_partition_cache_enabled(cache_enabled)
+        .with_timeout_binder(timeout_binder(cache.clone(), overlay.clone()))
         .with_sync_wait(sync_wait)
         .with_local_poll_wait(local_poll_wait)
         .with_forward_degree(forward_degree)
@@ -506,6 +507,122 @@ fn boolean_provider(
     })
 }
 
+fn timeout_binder(
+    cache: Arc<MatchingDomainCache>,
+    overlay: Arc<Mutex<DynamicConfigOverlay>>,
+) -> crate::matching_registry_native::NativeTimeoutBinder {
+    Arc::new(move |domain| {
+        let name = domain_by_raw_id(&cache, domain)?.info.name;
+        let integer = |key: &'static str, default: i64| {
+            let overlay = overlay.clone();
+            let name = name.clone();
+            Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_integer_bytes(
+                    config.property_values(key),
+                    Some(&name),
+                    task.as_bytes(),
+                    task_type,
+                    default,
+                )
+            }) as crate::matching_registry_native::NativeProvider<i64>
+        };
+        let duration = |key: &'static str, default: i64| {
+            let overlay = overlay.clone();
+            let name = name.clone();
+            Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+                let config = overlay.lock().expect("admin lock");
+                cadence_persistence::dynamic_config::task_list_duration_bytes(
+                    config.property_values(key),
+                    Some(&name),
+                    task.as_bytes(),
+                    task_type,
+                    default,
+                )
+            }) as crate::matching_registry_native::NativeProvider<i64>
+        };
+        let cache_overlay = overlay.clone();
+        let cache_name = name.clone();
+        let cache_enabled = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            let config = cache_overlay.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_boolean_bytes(
+                config.property_values("matching.enableGetNumberOfPartitionsFromCache"),
+                Some(&cache_name),
+                task.as_bytes(),
+                task_type,
+                false,
+            )
+        });
+        let qps_overlay = overlay.clone();
+        let qps_name = name.clone();
+        let qps_interval = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            let config = qps_overlay.lock().expect("admin lock");
+            cadence_persistence::dynamic_config::task_list_duration_bytes(
+                config.property_values("matching.qpsTrackerInterval"),
+                Some(&qps_name),
+                task.as_bytes(),
+                task_type,
+                crate::matching_registry_native::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
+            )
+        });
+        let degree_value = integer("matching.forwarderMaxChildrenPerNode", 20);
+        let forward_degree = Arc::new(move |domain: &GoString, task: &GoString, task_type: i32| {
+            degree_value(domain, task, task_type).max(1)
+        });
+        let writer_overlay = overlay.clone();
+        let writer_name = name.clone();
+        let writer = Arc::new(move |_: &GoString, task: &GoString, task_type: i32| {
+            writer_properties(&writer_overlay, &writer_name, task, task_type)
+        });
+        Ok(crate::matching_registry_native::NativeBoundTimeouts {
+            task_wait: duration("matching.localTaskWaitTime", 10_000_000),
+            poll_wait: duration("matching.localPollWaitTime", 10_000_000),
+            writer,
+            partition_count: integer("matching.numTasklistReadPartitions", 1),
+            cache_enabled,
+            forward_degree,
+            forward_polls: integer("matching.forwarderMaxOutstandingPolls", 1),
+            forward_tasks: integer("matching.forwarderMaxOutstandingTasks", 1),
+            forward_rate: integer("matching.forwarderMaxRatePerSecond", 10),
+            qps_interval,
+            min_burst: integer(
+                "matching.minTaskThrottlingBurstSize",
+                crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE,
+            ),
+        })
+    })
+}
+
+fn writer_properties(
+    overlay: &Mutex<DynamicConfigOverlay>,
+    name: &str,
+    task: &GoString,
+    task_type: i32,
+) -> (i64, i64, i64) {
+    let config = overlay.lock().expect("admin lock");
+    let integer = |key, default| {
+        cadence_persistence::dynamic_config::task_list_integer_bytes(
+            config.property_values(key),
+            Some(name),
+            task.as_bytes(),
+            task_type,
+            default,
+        )
+    };
+    let timeout = cadence_persistence::dynamic_config::task_list_duration_bytes(
+        config.property_values("matching.appendTaskTimeout"),
+        Some(name),
+        task.as_bytes(),
+        task_type,
+        5_000_000_000,
+    );
+    (
+        integer("matching.maxTaskBatchSize", 100),
+        timeout,
+        integer("matching.outstandingTaskAppendsThreshold", 250),
+    )
+}
+
 fn record_started_timeout_provider(
     cache: Arc<MatchingDomainCache>,
     overlay: Arc<Mutex<DynamicConfigOverlay>>,
@@ -586,6 +703,115 @@ mod tests {
             }
         }
         MatchingDomainCache::new(Arc::new(EmptySource))
+    }
+
+    fn domain_metadata(name: &str) -> MatchingDomainMetadata {
+        MatchingDomainMetadata {
+            info: cadence_api::types::DomainInfo {
+                uuid: "00000000-0000-0000-0000-000000000001".into(),
+                name: name.into(),
+                ..Default::default()
+            },
+            configuration: Default::default(),
+            replication: Default::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 0,
+            notification_version: 0,
+            failover_notification_version: 0,
+            failover_version: 0,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 0,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        }
+    }
+
+    #[test]
+    fn manager_config_binder_keeps_constructed_domain_name_and_live_values() {
+        struct Source;
+        impl crate::matching_domain_cache::DomainMetadataSource for Source {
+            fn metadata_version(
+                &self,
+                _: std::time::Duration,
+            ) -> Result<i64, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(0)
+            }
+            fn list_domains(
+                &self,
+                _: usize,
+                _: Option<&[u8]>,
+                _: std::time::Duration,
+            ) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(crate::matching_domain_cache::DomainMetadataPage {
+                    domains: vec![domain_metadata("manager-name")],
+                    next_page_token: None,
+                })
+            }
+            fn get_domain(
+                &self,
+                _: Option<&str>,
+                _: Option<&str>,
+                _: std::time::Duration,
+            ) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
+                Ok(domain_metadata("manager-name"))
+            }
+        }
+        let cache = Arc::new(MatchingDomainCache::new(Arc::new(Source)));
+        cache.start().unwrap();
+        let overlay = Arc::new(Mutex::new(DynamicConfigOverlay::default()));
+        let value = |json: &[u8]| DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: json.to_vec(),
+            }),
+            filters: vec![
+                DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: br#""manager-name""#.to_vec(),
+                    }),
+                },
+                DynamicConfigFilter {
+                    name: "taskListName".into(),
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: br#""queue""#.to_vec(),
+                    }),
+                },
+            ],
+        };
+        overlay.lock().unwrap().update(
+            false,
+            "matching.numTasklistReadPartitions",
+            vec![value(b"7")],
+        );
+        let bound = timeout_binder(cache.clone(), overlay.clone())(
+            &GoString::from("00000000-0000-0000-0000-000000000001"),
+        )
+        .unwrap();
+        let task = GoString::from("queue");
+        let renamed_id = GoString::from("00000000-0000-0000-0000-000000000002");
+        assert_eq!((bound.partition_count)(&renamed_id, &task, 0), 7);
+        overlay.lock().unwrap().update(
+            false,
+            "matching.numTasklistReadPartitions",
+            vec![value(b"11")],
+        );
+        assert_eq!((bound.partition_count)(&renamed_id, &task, 0), 11);
+        cache.stop();
     }
 
     #[test]
