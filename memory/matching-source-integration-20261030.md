@@ -68,6 +68,24 @@ Ringpop entry was installed, while the later empty-ring error does not identify
 the contemporaneous ring contents or establish whether the selected Rust RPC
 route completed.
 
+Reviewed retained PostgreSQL run
+https://github.com/auenkr/cadence-rust/actions/runs/40808511931 at
+`bf9f3d9387a72c4ed26b4be0a85025e65fd485a1` and artifacts in
+`/mnt/storage/service/ci-evidence/matching-native-postgres-40808511931/`.
+The topology was Go Frontend/History/Worker, Rust Matching, and
+`goMatchingStarted=false`; the binary SHA256 was
+`54771ed458f78f0ea7a5b87678c3f0cd8b9b72e563e378a70bb8d13266d87b57`. Gate and
+nested probe failed before SDK operations: Go Frontend readiness ended in
+`Call cancelled`, then the `finally` cleanup threw `Rust Matching did not stop`
+and replaced that readiness error. The diagnostic harness now retains the
+probe-body error through forced cleanup. Go server logs show Matching ring
+membership with `127.0.0.1:12973` / gRPC `14329` at `02:51:19` (counter 1), then
+empty Matching rings at `02:51:38` (counter 0); the Rust log only confirms the
+listeners started. These observations do not prove why peers were withdrawn or
+whether any selected Rust RPC completed. SDK, restart/recovery, and PostgreSQL
+acceptance assertions did not run, so this retained run is failure evidence,
+not parity evidence.
+
 ## Candidate CI evidence
 
 - Semaphore candidate: https://github.com/auenkr/cadence-rust/actions/runs/41021199544
