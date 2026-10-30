@@ -1,0 +1,4 @@
+
+## Result of run 41114430171 (recorded 2026-10-30 20:30Z)
+
+Terminal failure at `7b46ef884`. The failure was NOT the readiness stall: the `Mixed Go and Rust validation` step failed in `tests/run-go-service-baseline.py:1305` ("Go baseline probe failed; see out/gate/run/probe.log") after pulling postgres:13, before Rust Matching started. Artifact download returned HTTP 503 "Egress is over the account limit", so probe.log is unavailable; only the actions log is saved at `/mnt/storage/service/ci-evidence/matching-postgres-41114430171.uerafL/actions.log`. No GDB/stack evidence was produced. Not credited as acceptance. A rerun (41123777022) was cancelled because another gate (41123635434, tag validation/matching-map-value-396ca859) was already running; lanes must not overlap. Next: review 41123635434, then rerun postgres diagnostic when idle.
