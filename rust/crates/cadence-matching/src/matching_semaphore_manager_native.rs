@@ -17,7 +17,7 @@ use cadence_api::enums::SemaphoreAcquireOutcome;
 use cadence_common::go_string::GoString;
 use cadence_common::liveness::Liveness;
 use cadence_persistence::{
-    semaphores_native::{SemaphorePersistenceBytes, SemaphoreRowBytes},
+    semaphores_native::{SemaphoreCallContext, SemaphorePersistenceBytes, SemaphoreRowBytes},
     AcquireError, GrantOutcome,
 };
 pub type Identifier = IdentifierBytes;
@@ -70,19 +70,27 @@ pub enum ManagerError {
     /// for startup or before the next grant attempt.
     Deadline,
     /// `types.EntityNotExistsError`: the semaphore itself is missing.
-    NotFound(String),
+    NotFound(cadence_api::errors::EntityNotExistsError),
     /// `types.InternalServiceError`.
     Internal(String),
+    /// A typed internal error, distinct from an untyped persistence failure.
+    TypedInternal(String),
+    /// ServiceBusy with its original reason.
+    ServiceBusyReason { message: String, reason: String },
     /// `types.ServiceBusyError` returned by the Go persistence limiter.
     ServiceBusy(String),
+    /// Startup scan failure with its original classification and raw identifier.
+    Load(GoString, Box<ManagerError>),
 }
 
 impl From<AcquireError> for ManagerError {
     fn from(error: AcquireError) -> Self {
         match error {
-            AcquireError::NotFound(error) => ManagerError::NotFound(error.message),
+            AcquireError::NotFound(error) => ManagerError::NotFound(error),
             AcquireError::Invalid(message) => ManagerError::BadRequest(message),
             AcquireError::Internal(message) => ManagerError::Internal(message),
+            AcquireError::TypedInternal(message) => ManagerError::TypedInternal(message),
+            AcquireError::ServiceBusy { message, reason } => ManagerError::ServiceBusyReason { message, reason },
             AcquireError::Throttled(message) => ManagerError::ServiceBusy(message),
         }
     }
@@ -249,10 +257,9 @@ impl Manager {
     }
 
     async fn load(&self) -> Result<(), ManagerError> {
-        self.store
-            .get_semaphore_metadata(&self.id.domain_id, &self.id.semaphore_name)
-            .await?;
-        let rows = self.scan_bucket().await?;
+        let rows = self.scan_bucket().await.map_err(|error| {
+            ManagerError::Load(self.id.to_log_string(), Box::new(error.into()))
+        })?;
         // Go builds the free set only from rows returned by the scan. Metadata
         // does not prove that an absent token row exists or is unheld.
         let mut free: HashMap<i32, ()> = HashMap::new();
@@ -335,6 +342,17 @@ impl Manager {
         owner_id: &GoString,
         deadline: Option<tokio::time::Instant>,
     ) -> Result<AcquireResult, ManagerError> {
+        self.acquire_with_context(owner_id, &SemaphoreCallContext {
+            deadline,
+            ..Default::default()
+        }).await
+    }
+
+    pub async fn acquire_with_context(
+        &self,
+        owner_id: &GoString,
+        context: &SemaphoreCallContext,
+    ) -> Result<AcquireResult, ManagerError> {
         if owner_id.is_empty() {
             return Err(ManagerError::BadRequest("ownerID is required".into()));
         }
@@ -347,17 +365,15 @@ impl Manager {
         if starting {
             let mut done = self.startup_done.subscribe();
             let finished = done.wait_for(|finished| *finished);
-            let _ = match deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, finished)
-                    .await
-                    .map_err(|_| ManagerError::Deadline)?,
-                None => finished.await,
-            };
+            tokio::select! {
+                _ = finished => {},
+                _ = context.wait() => return Err(ManagerError::Deadline),
+            }
         }
         if !self.is_running() {
             return Err(ManagerError::NotReady);
         }
-        self.grant(owner_id, deadline).await
+        self.grant(owner_id, context).await
     }
 
     /// Go `grant`: confirm an existing hold, else draw a free id and settle it
@@ -365,7 +381,7 @@ impl Manager {
     async fn grant(
         &self,
         owner_id: &GoString,
-        deadline: Option<tokio::time::Instant>,
+        context: &SemaphoreCallContext,
     ) -> Result<AcquireResult, ManagerError> {
         let existing = self
             .index
@@ -375,7 +391,7 @@ impl Manager {
             .get(owner_id)
             .copied();
         if let Some(token_id) = existing {
-            if self.confirm_hold(owner_id, token_id).await? {
+            if self.confirm_hold(owner_id, token_id, context).await? {
                 return Ok(AcquireResult {
                     outcome: SemaphoreAcquireOutcome::Acquired,
                     token_id,
@@ -385,7 +401,7 @@ impl Manager {
         for _ in 0..MAX_GRANT_ATTEMPTS {
             // Go checks ctx before each write: a caller that gave up stops here
             // instead of letting the write fail as a store timeout.
-            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            if context.ended() {
                 return Err(ManagerError::Deadline);
             }
             let Some(token_id) = self.reserve() else {
@@ -398,12 +414,13 @@ impl Manager {
             };
             let outcome = self
                 .store
-                .grant_semaphore_token(
+                .grant_with_context(
                     &self.id.domain_id,
                     &self.id.semaphore_name,
                     self.id.bucket,
                     token_id,
                     owner_id,
+                    context,
                 )
                 .await;
             let outcome = match outcome {
@@ -460,14 +477,15 @@ impl Manager {
     }
 
     /// Go `confirmHold`: verify the reverse-index entry against the token row.
-    async fn confirm_hold(&self, owner_id: &GoString, token_id: i32) -> Result<bool, ManagerError> {
+    async fn confirm_hold(&self, owner_id: &GoString, token_id: i32, context: &SemaphoreCallContext) -> Result<bool, ManagerError> {
         match self
             .store
-            .get_semaphore_ownership_by_token(
+            .confirm_with_context(
                 &self.id.domain_id,
                 &self.id.semaphore_name,
                 self.id.bucket,
                 token_id,
+                context,
             )
             .await
         {
@@ -720,6 +738,8 @@ pub(crate) mod tests {
         pub(crate) fail_scan: std::sync::atomic::AtomicBool,
         pub(crate) scan_entered: Notify,
         pub(crate) scan_release: Notify,
+        pub(crate) park_confirm: std::sync::atomic::AtomicBool,
+        pub(crate) cancel_grant: std::sync::atomic::AtomicBool,
     }
     #[async_trait]
     impl SemaphorePersistenceBytes for ParkGrant {
@@ -808,6 +828,27 @@ pub(crate) mod tests {
             self.release.notified().await;
             self.inner.grant_semaphore_token(d, n, b, t, o).await
         }
+        async fn confirm_with_context(
+            &self, d: &GoString, n: &GoString, b: i32, t: i32,
+            _context: &SemaphoreCallContext,
+        ) -> Result<GoString, AcquireError> {
+            if self.park_confirm.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            self.inner.get_semaphore_ownership_by_token(d, n, b, t).await
+        }
+        async fn grant_with_context(
+            &self, d: &GoString, n: &GoString, b: i32, t: i32, o: &GoString,
+            context: &SemaphoreCallContext,
+        ) -> Result<GrantOutcome, AcquireError> {
+            if self.cancel_grant.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.entered.notify_one();
+                context.wait().await;
+                return Err(AcquireError::Internal("context canceled".into()));
+            }
+            self.grant_semaphore_token(d, n, b, t, o).await
+        }
         async fn release_semaphore_token(
             &self,
             d: &GoString,
@@ -834,7 +875,7 @@ pub(crate) mod tests {
             park_scan: std::sync::atomic::AtomicBool::new(false),
             fail_scan: std::sync::atomic::AtomicBool::new(false),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(),
+            scan_release: Notify::new(), park_confirm: std::sync::atomic::AtomicBool::new(false), cancel_grant: std::sync::atomic::AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let id = Identifier::new(domain.clone(), name.clone(), 0).unwrap();
@@ -878,6 +919,43 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn context_aware_grant_cancellation_restores_reservation() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        let domain = bytes(b"cancel-d");
+        let name = bytes(b"cancel-s");
+        let inner = InMemorySemaphorePersistenceBytes::default();
+        inner.create_semaphore(&domain, &name, 1, 1).await.unwrap();
+        let store = Arc::new(ParkGrant {
+            inner, entered: Notify::new(), release: Notify::new(),
+            scan_pages: AtomicUsize::new(0), park_scan: AtomicBool::new(false),
+            fail_scan: AtomicBool::new(false), scan_entered: Notify::new(),
+            scan_release: Notify::new(), park_confirm: AtomicBool::new(false),
+            cancel_grant: AtomicBool::new(true),
+        });
+        let limiter = crate::matching_persistence_limiter::MatchingPersistenceLimiter::new(
+            Arc::new(std::sync::Mutex::new(crate::admin::DynamicConfigOverlay::default())),
+            Arc::new(AtomicUsize::new(1)),
+        );
+        let registry = Registry::new(crate::matching_persistence::limit_semaphore_store_bytes(store.clone(), limiter));
+        let manager = registry.get_or_create(Identifier::new(domain, name, 0).unwrap()).await.unwrap();
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        let pending = {
+            let manager = manager.clone();
+            tokio::spawn(async move {
+                let context = SemaphoreCallContext { cancelled: Some(receiver), ..Default::default() };
+                manager.acquire_with_context(&bytes(b"1:x:r:1"), &context).await
+            })
+        };
+        store.entered.notified().await;
+        assert_eq!(manager.free_count(), 0);
+        cancel.send(true).unwrap();
+        assert!(matches!(pending.await.unwrap(), Err(ManagerError::Internal(_))));
+        assert_eq!(manager.free_count(), 1);
+        store.release.notify_one();
+        assert_eq!(manager.acquire(&bytes(b"1:y:r:2"), None).await.unwrap().outcome, SemaphoreAcquireOutcome::Acquired);
+    }
+
+    #[tokio::test]
     async fn failed_start_releases_waiter_and_next_request_rebuilds_manager() {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -893,7 +971,7 @@ pub(crate) mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(true),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(),
+            scan_release: Notify::new(), park_confirm: std::sync::atomic::AtomicBool::new(false), cancel_grant: std::sync::atomic::AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let id = Identifier::new(domain, name, 0).unwrap();
@@ -913,7 +991,13 @@ pub(crate) mod tests {
             _ = tokio::task::yield_now() => {}
         }
         store.scan_release.notify_one();
-        assert!(start.await.unwrap().is_err());
+        assert_eq!(
+            start.await.unwrap().err().unwrap(),
+            ManagerError::Load(
+                id.to_log_string(),
+                Box::new(ManagerError::Internal("injected scan failure".into())),
+            )
+        );
         assert_eq!(waiting.await.unwrap_err(), ManagerError::NotReady);
         assert!(registry.by_identifier(&id).is_none());
         let replacement = registry.get_or_create(id).await.unwrap();
