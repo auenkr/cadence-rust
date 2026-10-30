@@ -25,3 +25,5 @@ RPC readiness criteria, retries, deadlines, SDK assertions, production code and 
 - Only the first failure is captured per readiness wait.
 - `wchan` may read `0` or be unavailable on some kernels. Without debug symbols, gdb frames can be unsymbolized.
 - UNVALIDATED: no Cargo, Go, node syntax check, runtime or CI was run, as requested. Capture runs only on GitHub Actions standard runners.
+
+Source SHA: `93deac8eb07d8def9cf037b0b4a0a851587e8e86`
