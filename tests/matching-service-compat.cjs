@@ -399,7 +399,8 @@ function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeI
     }
     const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
       '-v', `domain_id=${domainId}`, '-f', '-'], {
-      input: rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND name = :'task_list' AND task_type = ${Number(taskType)};\n` : `SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = ${Number(taskType)};\n`,
+      // The baseline config uses one SQL shard, so Go's task-list hash selects shard 0.
+      input: rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE shard_id = 0 AND domain_id = decode(replace(:'domain_id','-',''),'hex') AND name = :'task_list' AND task_type = ${Number(taskType)};\n` : `SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = ${Number(taskType)};\n`,
       encoding: 'utf8', env: pgEnv, timeout: timeoutMs,
     });
     if (result.status === 0) result.stdout = result.stdout.trim();
