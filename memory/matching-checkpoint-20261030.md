@@ -39,6 +39,24 @@ Failed logs inspected:
 
 No source fixes or local Cargo/Go/runtime commands executed on resume.
 
+## Exact-head CI checkpoint (2026-10-30)
+
+Inspected GitHub Actions run 41055162424 once:
+https://github.com/auenkr/cadence-rust/actions/runs/41055162424
+
+- Workflow: `rust-ci`, event `workflow_dispatch`.
+- Head: `5ee69b5572688c2dba2245c7b411c7182c5b9b16` (the requested exact
+  code SHA).
+- At inspection, the run was still `in_progress`; Clippy and Formatting had
+  completed successfully, while the workspace Test step was in progress.
+- No terminal conclusion, test exit code, totals, or artifact evidence is
+  established yet. The requested PKG-empty / fresh-target / clippy.exit=0 then
+  test.exit=0 evidence must be checked if this run reaches success.
+- No immutable gate ref or PostgreSQL mixed-validation dispatch was created,
+  because terminal success has not been established. Do not poll this run per
+  the user instruction. Matching remains incomplete; the supplemental
+  `f009e8d` queued activity branch remains unintegrated.
+
 ## Recovered later remote candidates
 
 Remote refs and CI inspected on resume; these are unaccepted candidates:
