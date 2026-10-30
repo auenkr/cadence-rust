@@ -162,3 +162,15 @@ of `41054585478` returned `in_progress`, exact head
 `4ffa5b8d2776ee3217144188db5379412f4ce0cb`, package unset, with the fresh-target
 step complete and Clippy/test steps still pending. No conclusion or test counts
 were available in that inspection. No further status polling was performed.
+
+The structured readiness diagnostic and bounded cleanup correction were committed
+as `5ee69b5572688c2dba2245c7b411c7182c5b9b16` and pushed to the same candidate
+branch. The stale `rust-ci` run `41054585478` was cancelled after its one inspection
+showed it was still running at the pre-correction head. A fresh `rust-ci.yml` run
+was dispatched with `clean_target=true` and `package` omitted:
+<https://github.com/auenkr/cadence-rust/actions/runs/41055162424>.
+Its one initial status read confirmed the exact head above, `workflow_dispatch`,
+and `pending`; no jobs had started yet. There are therefore no Clippy/test exit
+codes or counts to report. No PostgreSQL mixed gate has been dispatched; it must
+wait for this exact candidate workspace run to pass. The queued-activity commit
+`f009e8d` remains excluded.
