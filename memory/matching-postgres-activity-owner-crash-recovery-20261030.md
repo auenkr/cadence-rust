@@ -58,9 +58,10 @@ type and the Go CQL helper queried decision rows unconditionally. The observer
 now forwards the type; the helper accepts `0`/`1`, defaults older invocations
 to decision type `0`, and uses the selected type for both row and range reads.
 The observer self-check asserts the activity argument and decision default.
-The activity-owner restart path also now checks both Rust endpoints' activity
-partition views converge and confirms a Go Frontend activity-list describe
-after either primary or secondary owner restart.
+The activity-owner restart path checks both Rust endpoints' activity partition
+views converge and confirms a Go Frontend activity-list describe after either
+primary or secondary owner restart. A single common nonempty owner for one key
+does not establish that the restarted process rejoined the owner set.
 
 ## Independent supplemental review
 
@@ -86,14 +87,17 @@ JS adapter forwards types 0 and 1. The production mixed gate must therefore
 show the activity pre-kill `range_id > 0` and one observed durable activity row;
 that live assertion exercises the Cassandra range read for the activity type.
 
-One remaining assertion limitation: after restart, the probe checks that two
-direct Rust `ListTaskListPartitions` responses report the same nonempty owner,
-then that Go Frontend can describe another activity list. This proves the
-restarted endpoint responds and views agree, but it does not prove the
-restarted process is present in the converged membership set; the reported
-task-list owner may be only the surviving member. Do not treat the current
-`activityMemberRejoined` boolean as proof of member rejoin without gate evidence
-that identifies the restarted host in membership.
+The supplemental follow-up replaces that weak check with bounded activity
+partition ownership evidence. After restart it probes 64 deterministic
+activity task-list names through both direct Rust `ListTaskListPartitions`
+clients, requiring every owner to be nonempty and equal across the endpoints,
+and requiring the restarted endpoint address itself to own at least one of the
+64 partitions. It also retains the Go Frontend activity `DescribeTaskList`
+check. The production evidence JSON records each key and both observed owners,
+the restarted address, and the assertion description. This establishes that
+the restarted endpoint participates as a published activity partition owner
+in both views; it is not a dump of the full SWIM member set and must not be
+reported as exhaustive membership proof.
 
 Forced cleanup preserves the original probe failure: the outer `probeFailure`
 is rethrown after shutdown, and a shutdown timeout logs the forced SIGKILL
@@ -106,9 +110,12 @@ owner finishes scheduling, against the committed supplemental source. Inspect
 its activity row/range before kill, actual SIGKILL signal, survivor owner,
 activity history event counts (including zero timeout/failure), one SDK result,
 one activity/workflow completion, post-recovery queue drain, and binary SHA256.
-Separately resolve the membership evidence gap before claiming the restarted
-member rejoined. No local Cargo, Go, formatter, runtime, or CI action was taken
-by this review agent.
+The owner-convergence assertion source fix has not been executed. Inspect the
+64 recorded post-restart keys, each observed from both Rust endpoints, and
+require at least one owner pair to equal the restarted endpoint address. The
+gate should fail if only the survivor remains an activity partition owner.
+Do not claim full Ringpop membership from these partition samples. No local
+Cargo, Go, formatter, runtime, or CI action was taken by this review agent.
 
 No local Cargo, Go, formatter, runtime, or CI validation was run, per task
 constraints. Existing workspace evidence is reported as **1,829 passed, 28
