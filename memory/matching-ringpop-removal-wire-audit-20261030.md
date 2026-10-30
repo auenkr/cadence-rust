@@ -1,0 +1,49 @@
+# Matching Ringpop removal: Go/Rust wire audit (2026-10-30)
+
+Scope: investigate why the original Go Ringpop nodes removed native Rust Matching in mixed Postgres run `40808511931`, after the Rust member had appeared in the Go ring. The requested candidate was `origin/t3/matching-startup-abort-regression` at exact SHA `17ca0308e22973bfc9216e362a679596189907be`; I inspected its source with `git show` and did not alter it. The checkout used for this research is on a separate branch. This is source inspection only. No Cargo, Go, formatter, runtime, or CI command was run here; CI 41027247246 was owned by the parent and was not inspected or polled. No production code changed.
+
+## Evidence actually available
+
+The local run artifact is `memory/evidence/matching-native-postgres-40808511931/`. Its `diagnosis.txt` records that Rust listeners started but Go Frontend readiness never succeeded during its 180-second wait; Go logs said `Not enough hosts to serve the request for Matching`. It records no root cause, SDK success, or restart/recovery success. `gate/run/results.json` confirms Go Matching was not started, and Go Frontend/History/Worker were running against Rust Matching. `gate/run/rust-matching/` contains only `matching-shutdown.json`, which records SIGTERM. There is no retained Rust server log, Go Ringpop member-status log, packet capture, or serialized PING request/response in this artifact.
+
+The candidate contains `memory/matching-ringpop-removal-20261030.md`. It records Go role discovery at `02:51:19.562` and Go-side removal at `02:51:38.612`–`02:51:38.815`, and describes the candidate's bounded first-eight inbound-PING trace in `ringpop_provider.rs`. Candidate instrumentation logs handler entry, source, accepted change summaries, and Rust's local membership statuses. It does not log the encoded PING response, outbound socket write completion, Go's `json.CallPeer` result/decode, or Go's transition reason. Thus the trace narrows the failure to after handler entry for those particular requests, but still does not prove Go accepted a PING response or that subsequent membership updates were correct.
+
+## Source comparison
+
+Reference Go implementation is Ringpop Go v0.10.0 (`go/go.mod`, module cache at `$GOMODCACHE/github.com/uber/ringpop-go@v0.10.0`) and TChannel Go v1.34.4 (`go/go.mod`, module cache at `$GOMODCACHE/github.com/uber/tchannel-go@v1.34.4`). Relevant Go files:
+
+- `ringpop-go/swim/ping_sender.go`: direct PING JSON fields are `changes`, `checksum`, `source`, `sourceIncarnationNumber`, `app`. Sender includes its current memberlist checksum, address/incarnation and app; success callback advances dissemination counters only after successful JSON RPC.
+- `ringpop-go/swim/ping_handler.go`: reject before-ready and wrong/missing app cases; otherwise apply incoming changes, issue receiver gossip, and return `checksum`, `changes`, `source`, `sourceIncarnationNumber` (app omitted/empty). A checksum difference can also trigger reverse full sync.
+- `ringpop-go/swim/ping_request_sender.go`: PING-REQ fields are `source`, `sourceIncarnationNumber`, `target`, `checksum`, `changes`; request is `ringpop` service `/protocol/ping-req`.
+- `ringpop-go/swim/ping_request_handler.go`: response fields are `pingStatus`, `target`, `changes`. Handler applies the request gossip, probes target with ordinary PING, merges target gossip on success, then returns the boolean and its own gossip delta.
+- `ringpop-go/swim/handlers.go`: registers `/protocol/ping` and `/protocol/ping-req` with the TChannel JSON handler.
+- `tchannel-go/connection.go`: native control PING_REQ receives PING_RES with the same message ID; this is separate from Ringpop's JSON `/protocol/ping` RPC.
+
+Rust paths:
+
+- `rust/crates/cadence-common/src/ringpop_wire.rs`: `Ping`, `PingRequest`, and `PingResponse` serde names match the Go JSON field names, including `sourceIncarnationNumber` and `pingStatus`. Default absent/null values are handled deliberately. `Ping` serializes the app field (empty in a response), consistent with Go's struct's zero-valued field if encoded.
+- `rust/crates/cadence-matching/src/ringpop_provider.rs` at the candidate SHA: `RingpopNode::ping` constructs the corresponding direct request and calls `ringpop` `/protocol/ping`; it fully decodes the response before merging membership and completing sender dissemination. The inbound handler dispatches `/protocol/ping` to `handle_ping_with_full_sync`, which checks readiness/app, applies `changes`, computes local checksum, issues receiver gossip, and encodes checksum/changes/source/incarnation. `/protocol/ping-req` decodes the matching request, checks readiness and uses `relay_ping_request` to probe target and build a `PingResponse`. The candidate-only instrumentation is bounded to eight successfully handled PINGs and records the pre-response membership summary; it does not observe response serialization/write completion or the Go caller's result.
+- `rust/crates/cadence-matching/src/tchannel.rs`: inbound JSON calls require `as=json`; request service/method and all three args are parsed from the TChannel call. JSON success writes CALL_RES/CONT_RES with the same call ID, JSON response headers (`null\n`) in arg2 and handler JSON in arg3, preserves the request trace and checksum type, and marks the response as JSON. JSON application failures set the application-error flag and return the usual error object. The independent TChannel PING_REQ control-frame case responds with PING_RES using the incoming frame ID and empty payload. `write_frame` uses `TcpStream::OwnedWriteHalf::write_all`; this is not a buffered writer, so no explicit flush is required for bytes to be handed to the socket.
+- `rust/crates/cadence-matching/src/tchannel.rs` also constructs fragmented responses with matching continuation IDs and checksums. No source-level discrepancy was found in response ID, transport headers, JSON args, or fragmentation from this inspection. This is not a live interop result for the failing binary.
+- `rust/crates/cadence-matching/src/matching_ringpop_provider.rs`: bootstrap JOIN completes, then SWIM starts and the node becomes ready. Its local labels are `serviceName=cadence-matching`, `tchannel=<shared listener port>`, and `grpc=<configured gRPC port>`. `current_members` preserves labels, maps the Ringpop status, and defaults identity to the address; service membership exposes only Alive/Suspect members with the requested service label. This matches the expected role/port-label contract on inspection.
+- `rust/crates/cadence-matching/src/ringpop_runtime.rs`: the owned scheduler performs a direct PING, then falls back to indirect PING-REQ on error and only marks the member Suspect after helper outcomes. This makes a decoded successful response materially different from mere handler entry.
+
+## Finding
+
+No concrete Go/Rust wire or status-label mismatch is proven by the available evidence. In particular, the candidate's `received PING` trace proves request delivery and handler dispatch for those requests. It does not prove that the response was successfully serialized/written, that Go accepted the application response and decoded its PING JSON, that Go received all response fragments, or that Go retained Rust as Alive/Suspect after applying the response.
+
+The shutdown JSON and readiness timeout cannot discriminate these cases. The existing Go-to-Rust Ringpop TChannel and Rust-to-Go direct PING/PING-REQ compatibility harnesses are useful scoped checks, but passing them would not establish the behavior of this production startup sequence or the exact binary that failed in run 40808511931.
+
+## Discriminating artifacts for the next mixed gate
+
+On the next existing mixed-cluster gate, preserve per-process monotonic timestamps and capture one complete failed membership cycle without adding a separate local run or triggering CI churn:
+
+1. Rust Matching startup milestones: listener bound address, JOIN success/member count, SWIM started, ready set, and local-label publication. Capture local/remote member address, status, incarnation and labels at JOIN completion, first inbound PING, first outbound PING, and immediately before Go removal. Avoid relying on only the service-filtered peer snapshot.
+2. Rust TChannel/Ringpop request trace: direction, peer, method, call/frame ID, request `as`/`cn` headers, three JSON args, checksum type, frame count and final-fragment flag, response frame IDs, application-error flag, response arg2/arg3, handler result, and decode/transport error. Redact or cap payloads to the Ringpop fields and changes needed for diagnosis.
+3. Go Ringpop peer-side evidence: `PingReceiveEvent`, `PingSendCompleteEvent`/failure, decoded response or JSON decode error, `MemberlistChangesReceivedEvent`/applied status transitions for the Rust address, and SWIM stats/log around suspect/faulty transition. Keep the exact Rust binary SHA256 and source SHA in the gate metadata.
+4. Correlate directionally. If Go-to-Rust sees handler entry but Go records a failed `json.CallPeer`/decode, inspect response frames and payload. If Go records a successful direct ping, inspect subsequent Rust `status`/incarnation changes and Go memberlist transition events to find who disseminated the terminal status. If no Go PING reaches Rust during the relevant interval, inspect probe selection and transport reachability rather than the handler response.
+5. Retain both Go logs and Rust logs through the first faulty/removal transition and include the actual captured request/response bytes or a safe structured equivalent. Current downloaded artifact has neither.
+
+## Open follow-up
+
+The review's bounded-timeout follow-up remains open. Do not fold it into this investigation or dispatch CI solely for that follow-up. Any future timeout change should be separately scoped and validated by the parent-owned CI/gate lane.
