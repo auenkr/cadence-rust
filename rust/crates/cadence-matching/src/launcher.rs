@@ -152,6 +152,18 @@ fn matching_listen_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::ne
         .ok_or_else(|| anyhow::anyhow!("no addresses to listen on"))
 }
 
+/// Opt-in (CADENCE_MATCHING_SHUTDOWN_TRACE set) timestamped shutdown stage
+/// marker. Fixed stage names only; no identifiers or payloads.
+pub(crate) fn shutdown_trace(stage: &str) {
+    if std::env::var_os("CADENCE_MATCHING_SHUTDOWN_TRACE").is_some() {
+        let unix_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        eprintln!("Matching shutdown trace unix_ns={unix_ns}: {stage}");
+    }
+}
+
 async fn shutdown_signal() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -1311,9 +1323,17 @@ pub async fn run(
                 // Keep this as a provider: Go reads the global drain property
                 // at shutdown, after membership withdrawal, rather than when
                 // the Matching runtime is constructed.
-                let drain = crate::matching_runtime::live_shutdown_drain_duration(
+                let live_drain = crate::matching_runtime::live_shutdown_drain_duration(
                     state.admin.dynamic_config.clone(),
                 );
+                let drain: crate::matching_runtime::DrainDuration = std::sync::Arc::new(move || {
+                    let resolved = live_drain();
+                    shutdown_trace(&format!(
+                        "resolved shutdownDrainDuration_ms={}",
+                        resolved.as_millis()
+                    ));
+                    resolved
+                });
                 let source = crate::matching_task_store::select_source(
                     embedded_development,
                     data_dir.as_deref(),
@@ -1767,6 +1787,11 @@ pub async fn run(
                     (Some(Err(fatal.into_error())), None)
                 },
             };
+            shutdown_trace(&format!(
+                "stop trigger received signal={} listener_or_fatal={}",
+                signal_result.is_some(),
+                serving_result.is_some()
+            ));
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
@@ -1814,6 +1839,7 @@ pub async fn run(
                     Ok(())
                 };
             let mut serving_shutdown_errors = Vec::new();
+            shutdown_trace("listener abort begin");
             serving.abort_all();
             while let Some(result) = serving.join_next().await {
                 match result {
@@ -1829,10 +1855,12 @@ pub async fn run(
                     }
                 }
             }
+            shutdown_trace("listener join complete");
             if let Some(task) = matching_tchannel_task.take() {
                 task.abort();
                 let _ = task.await;
             }
+            shutdown_trace("tchannel abort complete");
             // Runtime shutdown joins every writer actor after stopping its
             // owners, so no SQL fatal notification can arrive after this
             // final sample. Keep the sample after listener teardown to catch
@@ -1864,7 +1892,10 @@ pub async fn run(
             if let Some(metrics) = matching_metrics_runtime.as_mut() {
                 // Go's tally reporters swallow sink write errors, so an
                 // unreachable metrics sink must not fail the shutdown.
-                if let Err(error) = metrics.shutdown().await {
+                shutdown_trace("metrics flush begin");
+                let flushed = metrics.shutdown().await;
+                shutdown_trace("metrics flush complete");
+                if let Err(error) = flushed {
                     eprintln!("flushing Matching metrics failed: {error:#}");
                 }
             }

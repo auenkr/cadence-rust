@@ -186,7 +186,12 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
         }
         if self.withdrawal.is_none() {
             let provider = self.provider.clone();
-            self.withdrawal = Some(tokio::spawn(async move { provider.self_evict().await }));
+            self.withdrawal = Some(tokio::spawn(async move {
+                crate::launcher::shutdown_trace("provider self_evict begin");
+                let result = provider.self_evict().await;
+                crate::launcher::shutdown_trace("provider self_evict complete");
+                result
+            }));
         }
         let result = self.withdrawal.as_mut().unwrap().await;
         self.withdrawal = None;
@@ -210,12 +215,17 @@ impl<P: MatchingPeerProvider> MatchingMembershipLifecycle<P> {
             let membership = self.membership.clone();
             let provider = self.provider.clone();
             self.teardown = Some(tokio::spawn(async move {
+                crate::launcher::shutdown_trace("membership worker abort begin");
                 if let Some(worker) = worker {
                     worker.abort();
                     let _ = worker.await;
                 }
+                crate::launcher::shutdown_trace("membership worker abort complete");
                 membership.replace(Vec::new());
-                provider.stop().await
+                crate::launcher::shutdown_trace("provider stop begin");
+                let result = provider.stop().await;
+                crate::launcher::shutdown_trace("provider stop complete");
+                result
             }));
         }
         let result = self.teardown.as_mut().unwrap().await;
