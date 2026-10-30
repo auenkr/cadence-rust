@@ -7,13 +7,13 @@ function pause(milliseconds) {
 function createTaskObserver({ backend, cassandraCommand, sqliteTaskState, wait = pause }) {
   if (!['cassandra', 'sqlite'].includes(backend)) throw new Error('task observer backend must be cassandra or sqlite');
 
-  async function state(domainId, taskList, label, condition, timeoutSeconds) {
+  async function state(domainId, taskList, taskType, label, condition, timeoutSeconds) {
     const deadline = Date.now() + timeoutSeconds * 1000;
     let current;
     do {
       current = backend === 'cassandra'
         ? cassandraCommand([condition === 'queued' ? 'observe-task' : 'wait-empty', domainId, taskList, String(timeoutSeconds)], label)
-        : sqliteTaskState(domainId, taskList, label);
+        : sqliteTaskState(domainId, taskList, label, taskType);
       if (condition === 'queued' ? current.queued_rows > 0 : current.queued_rows === 0) return current;
       await wait(250);
     } while (Date.now() < deadline);
@@ -21,10 +21,10 @@ function createTaskObserver({ backend, cassandraCommand, sqliteTaskState, wait =
   }
 
   return {
-    observe: (domainId, taskList, timeoutSeconds, label) =>
-      state(domainId, taskList, label, 'queued', timeoutSeconds),
-    waitEmpty: (domainId, taskList, timeoutSeconds, label) =>
-      state(domainId, taskList, label, 'empty', timeoutSeconds),
+    observe: (domainId, taskList, timeoutSeconds, label, taskType = 0) =>
+      state(domainId, taskList, taskType, label, 'queued', timeoutSeconds),
+    waitEmpty: (domainId, taskList, timeoutSeconds, label, taskType = 0) =>
+      state(domainId, taskList, taskType, label, 'empty', timeoutSeconds),
   };
 }
 

@@ -75,22 +75,22 @@ function cassandraCommand(args, label) {
   if (result.status !== 0) throw new Error(`Cassandra ${label} failed (${result.error || result.status}); see ${path.resolve(process.argv[5], `${label}.log`)}`);
   return JSON.parse(result.stdout.trim().split('\n').at(-1));
 }
-function sqliteTaskState(domainId, taskList, label) {
+function sqliteTaskState(domainId, taskList, label, taskType = 0) {
   if (process.env.CADENCE_MATCHING_MYSQL || process.env.CADENCE_MATCHING_POSTGRES) {
     // The observer contract is the same for every production database: the
     // number of undelivered decision or activity rows for one task list.
-    const durable = durableTaskCount(domainId, taskList, 0, undefined);
+    const durable = durableTaskCount(domainId, taskList, taskType, undefined, false, 10000);
     fs.writeFileSync(path.join(path.resolve(process.argv[5]), label + '.log'), (durable.stdout || '') + '\n' + (durable.stderr || ''));
     if (durable.status !== 0) throw new Error('durable task observation failed (' + (durable.error || durable.status) + '); see ' + path.resolve(process.argv[5], label + '.log'));
-    const range = durableTaskCount(domainId, taskList, 0, undefined, true);
+    const range = durableTaskCount(domainId, taskList, taskType, undefined, true, 10000);
     if (range.status !== 0) throw new Error('task-list range observation failed (' + (range.error || range.status) + '): ' + (range.stderr || ''));
     return { queued_rows: Number(durable.stdout.trim()), range_id: Number(range.stdout.trim()) };
   }
   const database = productionMode ? process.env.CADENCE_MATCHING_SQLITE_DB : path.join(path.resolve(process.argv[5]), 'matching.db');
   if (!database) throw new Error('SQLite production probe requires CADENCE_MATCHING_SQLITE_DB');
   const result = spawnSync('python3', ['-c',
-    'import json,sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1],timeout=30); n=c.execute("select count(*) from tasks where task_list_name=? and task_type=0",(sys.argv[3],)).fetchone()[0]; r=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=0",(uuid.UUID(sys.argv[2]).bytes,sys.argv[3])).fetchone(); print(json.dumps({"queued_rows":n,"range_id":r[0] if r else 0}))',
-    database, domainId, taskList], { encoding: 'utf8' });
+    'import json,sqlite3,sys,uuid; c=sqlite3.connect(sys.argv[1],timeout=30); n=c.execute("select count(*) from tasks where task_list_name=? and task_type=?",(sys.argv[3],int(sys.argv[4]))).fetchone()[0]; r=c.execute("select range_id from task_lists where shard_id=0 and domain_id=? and name=? and task_type=?",(uuid.UUID(sys.argv[2]).bytes,sys.argv[3],int(sys.argv[4]))).fetchone(); print(json.dumps({"queued_rows":n,"range_id":r[0] if r else 0}))',
+    database, domainId, taskList, String(taskType)], { encoding: 'utf8' });
   fs.writeFileSync(path.join(path.resolve(process.argv[5]), label + '.log'), (result.stdout || '') + '\n' + (result.stderr || ''));
   if (result.status !== 0) throw new Error('SQLite task observation failed (' + (result.error || result.status) + '); see ' + path.resolve(process.argv[5], label + '.log'));
   return JSON.parse(result.stdout.trim());
@@ -378,7 +378,7 @@ function mysqlRows(sql) {
 }
 // Every task query is constrained by the canonical domain UUID, the task list
 // and the task type, exactly like Go's task table keys.
-function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeId = false) {
+function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeId = false, timeoutMs) {
   if (process.env.CADENCE_MATCHING_MYSQL) {
     const query = rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE domain_id=UNHEX('${domainHex(domainId)}') AND name='${sqlText(taskList)}' AND task_type=${taskType}` : `SELECT COUNT(*) FROM tasks WHERE domain_id=UNHEX('${domainHex(domainId)}') AND task_list_name='${sqlText(taskList)}' AND task_type=${taskType}`;
     const result = mysqlQuery(query);
@@ -398,7 +398,7 @@ function durableTaskCount(domainId, taskList, taskType, fallbackDatabase, rangeI
     const result = spawnSync('psql', ['-X', '-A', '-t', '-w', '-v', 'ON_ERROR_STOP=1', '-v', `task_list=${taskList}`,
       '-v', `domain_id=${domainId}`, '-f', '-'], {
       input: rangeId ? `SELECT COALESCE(MAX(range_id),0) FROM task_lists WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND name = :'task_list' AND task_type = ${Number(taskType)};\n` : `SELECT count(*) FROM tasks WHERE domain_id = decode(replace(:'domain_id','-',''),'hex') AND task_list_name = :'task_list' AND task_type = ${Number(taskType)};\n`,
-      encoding: 'utf8', env: pgEnv,
+      encoding: 'utf8', env: pgEnv, timeout: timeoutMs,
     });
     if (result.status === 0) result.stdout = result.stdout.trim();
     return result;
@@ -505,12 +505,13 @@ async function run() {
       },
     }, metadata, { deadline: Date.now() + 10000 }, (error, response) => error ? reject(error) : resolve(response)));
   }
-  function directPartitionOwner(client, domainName, taskListName) {
+  function directPartitionOwner(client, domainName, taskListName, taskType = 'decision') {
     return new Promise((resolve, reject) => client.ListTaskListPartitions({
       domain: domainName, taskList: { name: taskListName },
     }, new grpc.Metadata(), { deadline: Date.now() + 10000 }, (error, response) => {
       if (error) return reject(error);
-      const partitions = response.decisionTaskListPartitions || [];
+      const partitions = taskType === 'activity'
+        ? response.activityTaskListPartitions || [] : response.decisionTaskListPartitions || [];
       resolve(partitions.find(partition => partition.key === taskListName)?.ownerHostName || '');
     }));
   }
@@ -1025,6 +1026,141 @@ async function run() {
         } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
       }
       assert(secondaryReady, 'restarted Rust Matching member did not rejoin Go discovery');
+    }
+    if (process.env.CADENCE_MATCHING_POSTGRES) {
+      // Separate decision and activity lists let the Go SDK create real activity
+      // work while its seed worker polls only decisions. The activity remains
+      // durable and unconsumed until the API-reported Rust owner is SIGKILLed.
+      const activityCrashId = `production-activity-crash-${id}`;
+      const activityWorkflowTaskList = `production-activity-decisions-${id}`;
+      const activityTaskList = `production-activity-queue-${id}`;
+      const seedOutput = fs.openSync(path.join(work, 'production-activity-crash-seed-sdk.log'), 'w');
+      const seedSdk = spawn('go', ['run', '.'], {
+        cwd: path.resolve(__dirname, 'go-sdk'), detached: true,
+        env: {
+          ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain,
+          CADENCE_TCHANNEL_PEER: process.argv[6], CADENCE_MIXED_ACTIVITY_CRASH_SEED: '1',
+          CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_ID: activityCrashId,
+          CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_TASK_LIST: activityWorkflowTaskList,
+          CADENCE_MIXED_ACTIVITY_CRASH_ACTIVITY_TASK_LIST: activityTaskList,
+        }, stdio: ['ignore', seedOutput, seedOutput],
+      });
+      fs.closeSync(seedOutput);
+      const cleanupSeedSdk = () => { try { process.kill(-seedSdk.pid, 'SIGKILL'); } catch (_) {} };
+      process.once('exit', cleanupSeedSdk);
+      const seedExited = new Promise(resolve => seedSdk.once('exit', (code, signal) => resolve({ code, signal })));
+      let activityQueued;
+      try {
+        activityQueued = await taskObserver.observe(domainId, activityTaskList, 45,
+          'production-activity-task-before-owner-crash', 1);
+      assert.equal(activityQueued.queued_rows, 1,
+        'existing Go SDK must persist exactly one activity task before owner crash');
+      } catch (error) {
+        cleanupSeedSdk();
+        await Promise.race([seedExited, new Promise(resolve => setTimeout(resolve, 5000))]);
+        process.removeListener('exit', cleanupSeedSdk);
+        throw error;
+      }
+      const activityPeers = [
+        directMatchingClient(`127.0.0.1:${rustGrpcPort}`),
+        directMatchingClient(`127.0.0.1:${process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT}`),
+      ];
+      const [activityPrimaryOwner, activitySecondaryOwner] = await Promise.all(activityPeers.map(client =>
+        directPartitionOwner(client, domain, activityTaskList, 'activity')));
+      assert(activityPrimaryOwner && activityPrimaryOwner === activitySecondaryOwner,
+        `Rust Matching members disagree on activity owner for ${activityTaskList}: ${activityPrimaryOwner} vs ${activitySecondaryOwner}`);
+      const activityOwnerIndex = activityPrimaryOwner === primaryAddress ? 0
+        : activityPrimaryOwner === secondaryAddress ? 1 : -1;
+      assert(activityOwnerIndex >= 0,
+        `activity owner ${activityPrimaryOwner} is not one of the two Rust Matching members`);
+      const activityOwnerProcess = activityOwnerIndex === 0 ? rust : secondaryRust;
+      const activitySurvivorProcess = activityOwnerIndex === 0 ? secondaryRust : rust;
+      const activitySurvivorAddress = activityOwnerIndex === 0 ? secondaryAddress : primaryAddress;
+      const activityOwnerExitPromise = new Promise(resolve => activityOwnerProcess.once('exit', (code, signal) => resolve({ code, signal })));
+      activityOwnerProcess.kill('SIGKILL');
+      const activityOwnerExit = await activityOwnerExitPromise;
+      assert.equal(activityOwnerExit.signal, 'SIGKILL', 'selected activity task owner did not SIGKILL');
+      const activityRecoveryDeadline = Date.now() + 45000;
+      let recoveredActivityOwner = '';
+      while (Date.now() < activityRecoveryDeadline) {
+        if (activitySurvivorProcess.exitCode !== null || activitySurvivorProcess.signalCode !== null) {
+          throw new Error('surviving Rust Matching exited during queued activity recovery');
+        }
+        try {
+          recoveredActivityOwner = await directPartitionOwner(activityPeers[1 - activityOwnerIndex], domain, activityTaskList, 'activity');
+          if (recoveredActivityOwner === activitySurvivorAddress) break;
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      assert.equal(recoveredActivityOwner, activitySurvivorAddress,
+        'surviving Rust Matching did not become the reported owner of the durable activity partition');
+      const recoveredActivitySdk = spawnSync('go', ['run', '.'], {
+        cwd: path.resolve(__dirname, 'go-sdk'), env: {
+          ...process.env, CADENCE_MIXED_MATCHING_DOMAIN: domain,
+          CADENCE_TCHANNEL_PEER: process.argv[6],
+          CADENCE_MIXED_ACTIVITY_CRASH_RECOVERY_WORKFLOW_ID: activityCrashId,
+          CADENCE_MIXED_ACTIVITY_CRASH_WORKFLOW_TASK_LIST: activityWorkflowTaskList,
+          CADENCE_MIXED_ACTIVITY_CRASH_ACTIVITY_TASK_LIST: activityTaskList,
+        }, encoding: 'utf8', timeout: 180000,
+      });
+      fs.writeFileSync(path.join(work, 'production-activity-crash-recovery-sdk.log'),
+        `${recoveredActivitySdk.stdout || ''}\n${recoveredActivitySdk.stderr || ''}`);
+      cleanupSeedSdk();
+      const seedExit = await Promise.race([seedExited, new Promise(resolve => setTimeout(() => resolve(null), 5000))]);
+      assert(seedExit, 'activity crash seed Go SDK process group did not exit after cleanup');
+      assert.equal(seedExit.signal, 'SIGKILL', 'activity crash seed worker unexpectedly exited before cleanup');
+      process.removeListener('exit', cleanupSeedSdk);
+      assert.equal(recoveredActivitySdk.status, 0,
+        `existing Go SDK could not consume the queued activity after owner crash: ${recoveredActivitySdk.error || recoveredActivitySdk.status}; see ${work}/production-activity-crash-recovery-sdk.log`);
+      const recoveredActivityHistory = await call('WorkflowAPI', 'GetWorkflowExecutionHistory', {
+        domain, workflowExecution: { workflowId: activityCrashId },
+      });
+      const recoveredActivityCompletions = recoveredActivityHistory.history.events
+        .filter(event => event.workflowExecutionCompletedEventAttributes).length;
+      const recoveredActivityEvents = recoveredActivityHistory.history.events
+        .filter(event => event.activityTaskCompletedEventAttributes).length;
+      assert.equal(recoveredActivityEvents, 1, 'crash-recovered activity must complete exactly once');
+      assert.equal(recoveredActivityCompletions, 1, 'crash-recovered activity workflow must complete exactly once');
+      const activityQueueAfterRecovery = await taskObserver.waitEmpty(domainId, activityTaskList, 30,
+        'production-activity-task-after-owner-recovery', 1);
+      assert.equal(activityQueueAfterRecovery.queued_rows, 0,
+        'crash-recovered activity remained in durable Matching persistence');
+      const activityCrashEvidence = {
+        topology: 'Go Frontend/History/Worker with two Rust Matching members; no Go Matching',
+        workflowId: activityCrashId,
+        workflowTaskList: activityWorkflowTaskList, activityTaskList,
+        durableActivityRowsBeforeCrash: activityQueued.queued_rows,
+        activityOwnerBeforeCrash: activityPrimaryOwner, crashedPid: activityOwnerProcess.pid,
+        crashSignal: activityOwnerExit.signal, survivorPid: activitySurvivorProcess.pid,
+        activityOwnerAfterCrash: recoveredActivityOwner,
+        activityCompletionEvents: recoveredActivityEvents, workflowCompletionEvents: recoveredActivityCompletions,
+        durableActivityRowsAfterRecovery: activityQueueAfterRecovery.queued_rows,
+        sdkResultAssertion: 'activity-crash-recovered',
+      };
+      fs.writeFileSync(path.join(work, 'production-activity-crash-recovery.json'),
+        JSON.stringify(activityCrashEvidence, null, 2) + '\n');
+      if (activityOwnerIndex === 0) {
+        rust = startRust('after-activity-owner-crash');
+        await waitForRustReady('after-activity-owner-crash');
+      } else {
+        secondaryRust = startSecondaryRust();
+        const activityRejoinDeadline = Date.now() + 30000;
+        let activityMemberRejoined = false;
+        while (Date.now() < activityRejoinDeadline) {
+          try {
+          const [primaryView, secondaryView] = await Promise.all(activityPeers.map(client =>
+            directPartitionOwner(client, domain, activityTaskList, 'activity')));
+          if (!primaryView || primaryView !== secondaryView) throw new Error('Rust activity ownership map has not reconverged');
+            await call('WorkflowAPI', 'DescribeTaskList', {
+              domain, taskList: { name: `activity-owner-restarted-${id}` },
+              taskListType: 'TASK_LIST_TYPE_ACTIVITY', includeTaskListStatus: true,
+            });
+            activityMemberRejoined = true;
+            break;
+          } catch (_) { await new Promise(resolve => setTimeout(resolve, 100)); }
+        }
+      assert(activityMemberRejoined, 'restarted Rust Matching activity owner did not rejoin and reconverge through Go discovery');
+      }
     }
     if (cassandraGate && semaphoreEvidence) {
       const heldBeforeOwnerCrash = cassandraCommand(['verify-semaphore', domainId, semaphoreEvidence.semaphoreName, semaphoreOwner, String(semaphoreEvidence.tokenId)], 'semaphore-immediately-before-owner-crash');
