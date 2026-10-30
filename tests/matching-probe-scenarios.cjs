@@ -464,6 +464,13 @@ async function durableRestart(ctx) {
   }
   assert.equal(remaining.size, 0, `backlog tasks not delivered after restart: ${[...remaining]}`);
   assert(drained.some(entry => entry.restartedMember), 'no poll was served through the restarted member');
+  const drainDeadline = Date.now() + 30000;
+  for (;;) {
+    const remainingRows = queued.map(entry => ({ partition: entry.partition, rows: rowsOf(entry.partition) }));
+    if (remainingRows.every(entry => entry.rows === 0)) break;
+    assert(Date.now() < drainDeadline, `durable restart queues did not drain: ${JSON.stringify(remainingRows)}`);
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
   const rangeAfter = queued.map(entry => ({ partition: entry.partition, rangeBefore: entry.rangeBefore, rangeAfter: rangeOf(entry.partition), rowsAfter: rowsOf(entry.partition) }));
   for (const entry of rangeAfter.filter(entry => restartedOwned.includes(entry.partition))) {
     assert(entry.rangeAfter > entry.rangeBefore, `restarted member did not acquire a higher persisted range for ${entry.partition}`);
