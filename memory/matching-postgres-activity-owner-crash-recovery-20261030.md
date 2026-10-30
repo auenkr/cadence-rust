@@ -10,6 +10,10 @@ frozen candidate. It closes the gap recorded in
 SIGKILL scenario covered a queued decision task, while the separate activity
 backlog restart probe did not crash the activity's owner.
 
+Supplemental review patch: `t3/matching-pg-observer-fix`, commit
+`f07ef0a37fa391cc1492d4e2563df9ef95e50068`, based on original harness commit
+`3a1da7b06bdbec4ddaa5858f003f4f986870540c`.
+
 ## Added scenario and assertions
 
 The existing PostgreSQL production failure-recovery path in
@@ -75,5 +79,5 @@ built from the integrated source. Review its artifact for the new
 `production-activity-crash-recovery.json`, both SDK logs, nested gate exits,
 the binary SHA256, and the baseline topology fields showing `goMatchingStarted:
 false` and Go services `frontend,history,worker`. Record the run URL, head SHA,
-binary SHA256, and conclusion here. A passing adapter test or Rust CI run alone
+binary SHA256, and conclusion here. A passing observer fixture or Rust CI run alone
 does not validate this scenario.
