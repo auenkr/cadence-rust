@@ -6,6 +6,10 @@ Base: `origin/t3/postgres-gate-diagnostic` at
 `c5ac7c2e8821b4a2a8b1190051e7a414a55db562`, including diagnostic source commit
 `5755021dbaaeeb70b87ec9ba3c69bd06065398e4`.
 
+Candidate implementation commit:
+[`b1f1b7204b086731e47c5425b47cfeb99f47b2f1`](https://github.com/auenkr/cadence-rust/commit/b1f1b7204b086731e47c5425b47cfeb99f47b2f1)
+on `t3/matching-startup-stage-diagnostics`.
+
 The retained PostgreSQL mixed-gate trace described in
 [`matching-ringpop-startup-source-audit-20261030.md`](matching-ringpop-startup-source-audit-20261030.md)
 has inbound PING #1–#8, each accepted by the ready-node path. In Rust,
@@ -15,6 +19,18 @@ and `MatchingRingpopProvider::start` sets `ready` only after `join_cluster`
 returns and `start_swim` succeeds. The evidence therefore establishes that
 Ringpop JOIN and bootstrap completed. The stall is after Ringpop Ready and
 before `Matching::started`, not a JOIN stall.
+
+Evidence: [mixed-gate run 41034380907](https://github.com/auenkr/cadence-rust/actions/runs/41034380907),
+retained under
+`/mnt/storage/service/ci-evidence/matching-postgres-41034380907/matching-production-postgres/`;
+the corrected source audit is
+[`0b302efaf7d3feec5955089e39acddffdc884455`](https://github.com/auenkr/cadence-rust/commit/0b302efaf7d3feec5955089e39acddffdc884455).
+Key source locations are the [ready-gated inbound PING trace](https://github.com/auenkr/cadence-rust/blob/5755021dbaaeeb70b87ec9ba3c69bd06065398e4/rust/crates/cadence-matching/src/ringpop_provider.rs#L1965-L2024),
+[provider Ready and post-Ready work](https://github.com/auenkr/cadence-rust/blob/5755021dbaaeeb70b87ec9ba3c69bd06065398e4/rust/crates/cadence-matching/src/matching_ringpop_provider.rs#L257-L378),
+[membership lifecycle awaits](https://github.com/auenkr/cadence-rust/blob/5755021dbaaeeb70b87ec9ba3c69bd06065398e4/rust/crates/cadence-matching/src/matching_membership_lifecycle.rs#L49-L163),
+the [Matching start gate](https://github.com/auenkr/cadence-rust/blob/5755021dbaaeeb70b87ec9ba3c69bd06065398e4/rust/crates/cadence-matching/src/launcher.rs#L1552-L1611),
+[Go Ringpop provider startup](https://github.com/auenkr/cadence-rust/blob/c5ac7c2e8821b4a2a8b1190051e7a414a55db562/go/common/peerprovider/ringpopprovider/provider.go#L128-L170),
+and [Go Matching service startup](https://github.com/auenkr/cadence-rust/blob/c5ac7c2e8821b4a2a8b1190051e7a414a55db562/go/service/matching/service.go#L95-L137).
 
 The health gate is the separate `Matching::started` watch in
 `rust/crates/cadence-matching/src/grpc_matching.rs` (`wait_started`), set by
