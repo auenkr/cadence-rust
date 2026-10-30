@@ -13,3 +13,28 @@ Matching is still INCOMPLETE. Prior orchestration thread stopped (Codex usage li
 2. Land remaining worker fixes (see matching-orchestration-checkpoint-20261029-2203.md).
 3. Run fresh-target clippy+tests and mixed gates (.github/workflows/matching-*.yml); record run URL, SHA, binary sha256.
 4. Complete parity audit before moving to History.
+
+## Resume observations (2026-10-30)
+
+Latest user preference: TWO workers; Codex Luna only, normal/default speed,
+high thinking for hard tasks and low/medium for simple tasks. This supersedes
+the prior three-Terra roster. Do not cancel existing workers just to reduce the
+count; let them finish and replace only below two.
+
+T3 orchestration tools are unavailable in the resumed tool catalog:
+`mcp__t3_code__orchestrator_capabilities` was attempted and returned
+`is not a function`; tool discovery exposed no delegate/capability tools.
+No Luna replacements launched. Prior worker terminal state is not established.
+
+Failed logs inspected:
+- https://github.com/auenkr/cadence-rust/actions/runs/40912650991 at
+  `f4ffd30798955dabe34bbd0efe5736bacad17f61`: Clippy fails `let_and_return`
+  in `matching_reader.rs:792` and `matching_reader_native.rs:669` (return
+  `dispatch_timeout(...)` directly). Exit101; tests not established.
+- https://github.com/auenkr/cadence-rust/actions/runs/40912428949 at
+  `8fa96afb8cb5463747000bdf96b0f98fcd3a29e8`: configured semaphore launch
+  regression still times out at `matching_launch_native.rs:497`;
+  976 passed, 1 failed, 2 ignored, exit101. This branch does not contain
+  the integration candidate's later lookup/refresh fixture correction.
+
+No source fixes or local Cargo/Go/runtime commands executed on resume.
