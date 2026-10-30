@@ -62,6 +62,54 @@ The activity-owner restart path also now checks both Rust endpoints' activity
 partition views converge and confirms a Go Frontend activity-list describe
 after either primary or secondary owner restart.
 
+## Independent supplemental review
+
+Reviewed `3a1da7b06bdbec4ddaa5858f003f4f986870540c` and supplemental head
+`01bf00dd04d72f131e9d1a527d83e2904783bf4b` (branch
+`t3/matching-pg-observer-fix`). Confirmed the reported PostgreSQL task-type
+hardcode was not present: the PostgreSQL `durableTaskCount` path already binds
+its `taskType` into both task row and range row queries. The Cassandra helper
+did discard the activity type; supplemental fix forwards it to both CQL
+queries and preserves decision type 0 as the legacy default.
+
+Review found and fixed two assertion gaps in this branch: the activity probe
+now requires a positive activity-list range ID before owner selection/kill,
+and the recovered history requires exactly one scheduled and started activity,
+zero activity timeout/failure events, and exactly one activity/workflow
+completion. This prevents an activity timeout/retry followed by eventual
+success from satisfying the recovery assertion. These are source changes only;
+they have not been run locally or in CI.
+
+The JS observer self-check does **not** execute the Go Cassandra observer or
+exercise either CQL query (including the range query). It only asserts that the
+JS adapter forwards types 0 and 1. The production mixed gate must therefore
+show the activity pre-kill `range_id > 0` and one observed durable activity row;
+that live assertion exercises the Cassandra range read for the activity type.
+
+One remaining assertion limitation: after restart, the probe checks that two
+direct Rust `ListTaskListPartitions` responses report the same nonempty owner,
+then that Go Frontend can describe another activity list. This proves the
+restarted endpoint responds and views agree, but it does not prove the
+restarted process is present in the converged membership set; the reported
+task-list owner may be only the surviving member. Do not treat the current
+`activityMemberRejoined` boolean as proof of member rejoin without gate evidence
+that identifies the restarted host in membership.
+
+Forced cleanup preserves the original probe failure: the outer `probeFailure`
+is rethrown after shutdown, and a shutdown timeout logs the forced SIGKILL
+without replacing that original failure. The activity seed worker is also
+asserted to have remained alive until intentional process-group SIGKILL after
+the recovery SDK succeeds.
+
+Required CI: run the active production PostgreSQL mixed gate only after its
+owner finishes scheduling, against the committed supplemental source. Inspect
+its activity row/range before kill, actual SIGKILL signal, survivor owner,
+activity history event counts (including zero timeout/failure), one SDK result,
+one activity/workflow completion, post-recovery queue drain, and binary SHA256.
+Separately resolve the membership evidence gap before claiming the restarted
+member rejoined. No local Cargo, Go, formatter, runtime, or CI action was taken
+by this review agent.
+
 No local Cargo, Go, formatter, runtime, or CI validation was run, per task
 constraints. Existing workspace evidence is reported as **1,829 passed, 28
 ignored**; it is prior workspace validation and does not validate this source

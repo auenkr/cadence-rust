@@ -1055,6 +1055,8 @@ async function run() {
           'production-activity-task-before-owner-crash', 1);
       assert.equal(activityQueued.queued_rows, 1,
         'existing Go SDK must persist exactly one activity task before owner crash');
+      assert(Number(activityQueued.range_id) > 0,
+        'activity task-list range row must be visible before owner crash');
       } catch (error) {
         cleanupSeedSdk();
         await Promise.race([seedExited, new Promise(resolve => setTimeout(resolve, 5000))]);
@@ -1119,6 +1121,18 @@ async function run() {
         .filter(event => event.workflowExecutionCompletedEventAttributes).length;
       const recoveredActivityEvents = recoveredActivityHistory.history.events
         .filter(event => event.activityTaskCompletedEventAttributes).length;
+      const recoveredActivityScheduled = recoveredActivityHistory.history.events
+        .filter(event => event.activityTaskScheduledEventAttributes).length;
+      const recoveredActivityStarted = recoveredActivityHistory.history.events
+        .filter(event => event.activityTaskStartedEventAttributes).length;
+      const recoveredActivityTimeouts = recoveredActivityHistory.history.events
+        .filter(event => event.activityTaskTimedOutEventAttributes).length;
+      const recoveredActivityFailures = recoveredActivityHistory.history.events
+        .filter(event => event.activityTaskFailedEventAttributes).length;
+      assert.equal(recoveredActivityScheduled, 1, 'crash-recovered activity must be scheduled exactly once');
+      assert.equal(recoveredActivityStarted, 1, 'crash-recovered activity must start exactly once');
+      assert.equal(recoveredActivityTimeouts, 0, 'crash-recovered activity must not time out or be retried');
+      assert.equal(recoveredActivityFailures, 0, 'crash-recovered activity must not fail before its successful attempt');
       assert.equal(recoveredActivityEvents, 1, 'crash-recovered activity must complete exactly once');
       assert.equal(recoveredActivityCompletions, 1, 'crash-recovered activity workflow must complete exactly once');
       const activityQueueAfterRecovery = await taskObserver.waitEmpty(domainId, activityTaskList, 30,
@@ -1134,6 +1148,8 @@ async function run() {
         crashSignal: activityOwnerExit.signal, survivorPid: activitySurvivorProcess.pid,
         activityOwnerAfterCrash: recoveredActivityOwner,
         activityCompletionEvents: recoveredActivityEvents, workflowCompletionEvents: recoveredActivityCompletions,
+        activityScheduledEvents: recoveredActivityScheduled, activityStartedEvents: recoveredActivityStarted,
+        activityTimeoutEvents: recoveredActivityTimeouts, activityFailureEvents: recoveredActivityFailures,
         durableActivityRowsAfterRecovery: activityQueueAfterRecovery.queued_rows,
         sdkResultAssertion: 'activity-crash-recovered',
       };
