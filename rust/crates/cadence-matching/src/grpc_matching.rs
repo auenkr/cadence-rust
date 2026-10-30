@@ -31,12 +31,10 @@ fn log_list_partitions_transport(
 }
 
 fn next_list_partitions_transport_diagnostic_id() -> Option<usize> {
-    if std::env::var_os("CADENCE_MATCHING_TRANSPORT_DIAGNOSTICS").is_none() {
-        return None;
-    }
+    std::env::var_os("CADENCE_MATCHING_TRANSPORT_DIAGNOSTICS")?;
     static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT_ID
-        .fetch_update(
+        .try_update(
             std::sync::atomic::Ordering::Relaxed,
             std::sync::atomic::Ordering::Relaxed,
             |id| (id < 64).then_some(id + 1),
@@ -263,7 +261,9 @@ fn semaphore_status(error: crate::matching_semaphore::ManagerError) -> Status {
             "ServiceBusyError",
             cadence_proto::api::ServiceBusyError { reason },
         ),
-        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => Status::internal(message),
+        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => {
+            Status::internal(message)
+        }
     }
 }
 use std::{
@@ -3333,52 +3333,52 @@ impl m::matching_api_server::MatchingApi for Matching {
             Response<m::ListTaskListPartitionsResponse>,
             Status,
         >("list_task_list_partitions", async move {
-                self.metrics
-                    .matching_request(
-                        "ListTaskListPartitions",
-                        Some(request.get_ref().domain.as_str()),
-                        request
-                            .get_ref()
-                            .task_list
-                            .as_ref()
-                            .map(|t| (t.name.as_str(), Some(t.kind))),
-                        Some(
-                            crate::matching_metrics::MatchingMetrics::context_from_metadata(
-                                request.metadata(),
-                                "grpc",
-                            ),
+            self.metrics
+                .matching_request(
+                    "ListTaskListPartitions",
+                    Some(request.get_ref().domain.as_str()),
+                    request
+                        .get_ref()
+                        .task_list
+                        .as_ref()
+                        .map(|t| (t.name.as_str(), Some(t.kind))),
+                    Some(
+                        crate::matching_metrics::MatchingMetrics::context_from_metadata(
+                            request.metadata(),
+                            "grpc",
                         ),
-                        async {
-                            self.check_rpc_quota(
-                                crate::matching_quota::MatchingRpc::ListTaskListPartitions,
-                                None,
-                                Some(&request.get_ref().domain),
-                            )?;
-                            let r = request.get_ref().clone();
-                            let task_list = r.task_list.unwrap_or_default();
-                            // Go resolves `request.GetDomain()` through the domain cache; the
-                            // single-process store is keyed by name and yields the UUID.
-                            let domain_id = self.domain_id_by_name(&r.domain).await?;
-                            // Go Identifier returns an untyped error, wrapped by handleErr.
-                            let name =
-                                TaskListName::parse(&task_list.name).map_err(Status::internal)?;
-                            #[cfg(test)]
-                            self.injected_engine_fault("ListTaskListPartitions")?;
-                            // Go getAllPartitions returns root first, then numbered write
-                            // partitions, regardless of whether those managers are loaded.
-                            let activity_task_list_partitions = self
-                                .task_list_partition_metadata(&domain_id, &name, 1)
-                                .await?;
-                            let decision_task_list_partitions = self
-                                .task_list_partition_metadata(&domain_id, &name, 0)
-                                .await?;
-                            Ok(Response::new(m::ListTaskListPartitionsResponse {
-                                activity_task_list_partitions,
-                                decision_task_list_partitions,
-                            }))
-                        },
-                    )
-                    .await
+                    ),
+                    async {
+                        self.check_rpc_quota(
+                            crate::matching_quota::MatchingRpc::ListTaskListPartitions,
+                            None,
+                            Some(&request.get_ref().domain),
+                        )?;
+                        let r = request.get_ref().clone();
+                        let task_list = r.task_list.unwrap_or_default();
+                        // Go resolves `request.GetDomain()` through the domain cache; the
+                        // single-process store is keyed by name and yields the UUID.
+                        let domain_id = self.domain_id_by_name(&r.domain).await?;
+                        // Go Identifier returns an untyped error, wrapped by handleErr.
+                        let name =
+                            TaskListName::parse(&task_list.name).map_err(Status::internal)?;
+                        #[cfg(test)]
+                        self.injected_engine_fault("ListTaskListPartitions")?;
+                        // Go getAllPartitions returns root first, then numbered write
+                        // partitions, regardless of whether those managers are loaded.
+                        let activity_task_list_partitions = self
+                            .task_list_partition_metadata(&domain_id, &name, 1)
+                            .await?;
+                        let decision_task_list_partitions = self
+                            .task_list_partition_metadata(&domain_id, &name, 0)
+                            .await?;
+                        Ok(Response::new(m::ListTaskListPartitionsResponse {
+                            activity_task_list_partitions,
+                            decision_task_list_partitions,
+                        }))
+                    },
+                )
+                .await
         })
         .await;
         if let Some(id) = diagnostic_id {
