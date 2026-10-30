@@ -100,3 +100,19 @@ fn hex(bytes: &[u8]) -> String {
     }
     output
 }
+
+#[test]
+fn native_zero_isolation_metrics_keep_explicit_map_value() {
+    use cadence_proto::native::api::{IsolationGroupMetrics, TaskListStatus};
+    let status = TaskListStatus {
+        isolation_group_metrics: std::collections::HashMap::from([(
+            "a".to_owned().into(),
+            IsolationGroupMetrics::default(),
+        )]),
+        ..Default::default()
+    };
+    // Go emits tag 6 entry {key "a", value empty message}; an absent value
+    // makes the pinned Go decoder keep nil and protobufjs reject the reply.
+    assert_eq!(status.encode_to_vec(), vec![0x32, 5, 0x0a, 1, b'a', 0x12, 0]);
+    assert_eq!(status.encoded_len(), 7);
+}

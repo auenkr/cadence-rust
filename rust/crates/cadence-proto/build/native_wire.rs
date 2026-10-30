@@ -86,10 +86,15 @@ pub(super) fn implementation(messages: &Messages, definition: &Definition) -> St
             writeln!(length, "if let Some({variant}(value)) = &{union} {{ len += {wire}::encoded_len({tag}, value); }}").unwrap();
             writeln!(merge, "{tag} => {{ if let Some({variant}(value)) = &mut {union} {{ {wire}::merge(wire_type, value, buf, ctx) }} else {{ let mut value = Default::default(); {wire}::merge(wire_type, &mut value, buf, ctx)?; {union} = Some({variant}(value)); Ok(()) }} }},").unwrap();
         } else if let Some((key, value)) = map(messages, field) {
+            let message_value = value.r#type() as i32 == 11
+                && !value.type_name().starts_with(".google.protobuf.");
             let key = codec(key);
             let value = codec(value);
-            writeln!(encode, "::prost::encoding::hash_map::encode({key}::encode, {key}::encoded_len, {value}::encode, {value}::encoded_len, {tag}, &{name}, buf);").unwrap();
-            writeln!(length, "len += ::prost::encoding::hash_map::encoded_len({key}::encoded_len, {value}::encoded_len, {tag}, &{name});").unwrap();
+            // Go always emits a nonnil message value, even when it is zero. prost
+            // omits default map values, which a pinned Go decoder reads as nil.
+            let module = if message_value { "crate::native::wire::message_map" } else { "::prost::encoding::hash_map" };
+            writeln!(encode, "{module}::encode({key}::encode, {key}::encoded_len, {value}::encode, {value}::encoded_len, {tag}, &{name}, buf);").unwrap();
+            writeln!(length, "len += {module}::encoded_len({key}::encoded_len, {value}::encoded_len, {tag}, &{name});").unwrap();
             writeln!(merge, "{tag} => {{ ::prost::encoding::check_wire_type(::prost::encoding::WireType::LengthDelimited, wire_type)?; ::prost::encoding::hash_map::merge({key}::merge, {value}::merge, &mut {name}, buf, ctx) }},").unwrap();
         } else if field.label() as i32 == 3 {
             if packed(field) {

@@ -40,6 +40,63 @@ pub mod wire {
         DecodeError,
     };
 
+    /// Map encoding for message values that always writes the value field,
+    /// matching Go's marshaler. Decoding stays with prost's `hash_map::merge`.
+    pub mod message_map {
+        use prost::{
+            bytes::BufMut,
+            encoding::{self, WireType},
+        };
+        use std::collections::HashMap;
+        use std::hash::Hash;
+
+        pub fn encode<K, V, B, KE, KL, VE, VL>(
+            key_encode: KE,
+            key_encoded_len: KL,
+            val_encode: VE,
+            val_encoded_len: VL,
+            tag: u32,
+            values: &HashMap<K, V>,
+            buf: &mut B,
+        ) where
+            K: Eq + Hash,
+            B: BufMut,
+            KE: Fn(u32, &K, &mut B),
+            KL: Fn(u32, &K) -> usize,
+            VE: Fn(u32, &V, &mut B),
+            VL: Fn(u32, &V) -> usize,
+        {
+            for (key, value) in values {
+                let len = key_encoded_len(1, key) + val_encoded_len(2, value);
+                encoding::encode_key(tag, WireType::LengthDelimited, buf);
+                encoding::encode_varint(len as u64, buf);
+                key_encode(1, key, buf);
+                val_encode(2, value, buf);
+            }
+        }
+
+        pub fn encoded_len<K, V, KL, VL>(
+            key_encoded_len: KL,
+            val_encoded_len: VL,
+            tag: u32,
+            values: &HashMap<K, V>,
+        ) -> usize
+        where
+            K: Eq + Hash,
+            KL: Fn(u32, &K) -> usize,
+            VL: Fn(u32, &V) -> usize,
+        {
+            encoding::key_len(tag) * values.len()
+                + values
+                    .iter()
+                    .map(|(key, value)| {
+                        let len = key_encoded_len(1, key) + val_encoded_len(2, value);
+                        encoding::encoded_len_varint(len as u64) + len
+                    })
+                    .sum::<usize>()
+        }
+    }
+
     pub fn encode_string(tag: u32, value: &GoString, buf: &mut impl BufMut) {
         encoding::encode_key(tag, WireType::LengthDelimited, buf);
         encoding::encode_varint(value.as_bytes().len() as u64, buf);
