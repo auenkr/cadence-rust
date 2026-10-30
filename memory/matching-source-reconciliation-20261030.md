@@ -174,3 +174,35 @@ and `pending`; no jobs had started yet. There are therefore no Clippy/test exit
 codes or counts to report. No PostgreSQL mixed gate has been dispatched; it must
 wait for this exact candidate workspace run to pass. The queued-activity commit
 `f009e8d` remains excluded.
+
+## Diagnostic and cleanup acceptance review (2026-10-30)
+
+Reviewed source commit `5ee69b5572688c2dba2245c7b411c7182c5b9b16` and its
+`tests/matching-service-compat.cjs` changes against the readiness and PostgreSQL
+gate flow. No source fix was needed:
+
+- On Frontend readiness timeout, the harness writes
+  `list-task-list-partitions-readiness-<stage>.json` before throwing. It records
+the Frontend timeout outcome and original error, direct Rust RPC address,
+request, timestamps, outcome, full decoded response or gRPC code/details,
+requested owner, trace setting, and Rust log path. The PostgreSQL lane enables
+`CADENCE_PROBE_LIST_PARTITIONS`, and the workflow's `always()` artifact upload
+retains `out/`, including `out/gate/run` evidence.
+- The Frontend readiness error remains the thrown readiness failure, including
+alongside direct probe status in its message. Outer probe cleanup logs bounded
+SIGKILL shutdown failures when a probe failure already exists, then rethrows
+the saved original probe failure.
+- Existing scenario and SDK assertions remain after readiness in the same
+`try` body. A readiness timeout still fails the gate; no success condition or
+acceptance assertion was removed or converted to diagnostic-only behavior.
+- Primary and secondary post-SIGKILL waits are bounded to five seconds. No
+unbounded forced-shutdown wait remains in the modified cleanup paths.
+
+No local Cargo, Go, formatter, build, test, or runtime command was run. The one
+requested inspection of rust-ci run
+<https://github.com/auenkr/cadence-rust/actions/runs/41055162424> reported
+`in_progress` on exact head `5ee69b5572688c2dba2245c7b411c7182c5b9b16`.
+Fresh-target selection had succeeded; Clippy was in progress and formatting and
+tests were pending, so there was no conclusion or test count. No further status
+polling was performed. PostgreSQL mixed validation remains gated on a successful
+workspace CI result; no mixed-cluster gate was started.
