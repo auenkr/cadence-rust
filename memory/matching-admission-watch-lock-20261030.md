@@ -6,8 +6,8 @@ Read-only source audit of candidate `3a958668c040b289b495f9b76b2209969db7e2a0`
 (`t3/matching-startup-stage-diagnostics`) against PostgreSQL mixed-gate run
 [41034380907](https://github.com/auenkr/cadence-rust/actions/runs/41034380907).
 The retained Rust log ends at `Matching startup: opening admission` (2,462 bytes);
-fd 1/2 are regular file-backed in the harness according to
-[`matching-startup-stream-diagnostic-20261030.md`](matching-startup-stream-diagnostic-20261030.md).
+fd 1/2 are regular file-backed in the harness according to the source/log audit
+at [`matching-startup-stream-diagnostic-20261030.md`](https://github.com/auenkr/cadence-rust/blob/2a7459e68b49f75a46e9c69a808210ef053326d1/memory/matching-startup-stream-diagnostic-20261030.md).
 No build, test, formatter, runtime, CI, or gate was run for this audit.
 
 ## Exact admission path
