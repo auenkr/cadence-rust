@@ -79,6 +79,7 @@ async function captureProcessEvidence({ pid, grpcPort, workDir, label, reason })
     const which = run(['which', 'gdb'], CMD_TIMEOUT_MS, 256);
     evidence.gdb = which.status === 0
       ? run(['gdb', '-p', String(pid), '-batch', '-nx', '-ex', 'set pagination off',
+        '-ex', 'set print frame-arguments none',
         '-ex', 'thread apply all bt 12'], GDB_TIMEOUT_MS, MAX_GDB_TEXT)
       : 'gdb not available';
   }
