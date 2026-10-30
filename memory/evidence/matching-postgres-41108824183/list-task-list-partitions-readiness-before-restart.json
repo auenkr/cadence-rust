@@ -1,0 +1,66 @@
+{
+  "frontendReadiness": {
+    "outcome": "timeout",
+    "error": "Deadline exceeded after 20.000s,remote_addr=127.0.0.1:16413"
+  },
+  "directRustProbe": {
+    "rpc": "MatchingAPI.ListTaskListPartitions",
+    "address": "127.0.0.1:18097",
+    "request": {
+      "domain": "service-compat-8e663adf-36f5-45e3-8c66-7dd426750178",
+      "taskList": {
+        "name": "before-restart-ready-8e663adf-36f5-45e3-8c66-7dd426750178"
+      }
+    },
+    "startedAt": "2026-10-30T19:00:42.791Z",
+    "completedAt": "2026-10-30T19:00:52.791Z",
+    "diagnosticsAssembledAt": "2026-10-30T19:00:52.792Z",
+    "outcome": "error",
+    "error": {
+      "code": 4,
+      "details": "Deadline exceeded after 10.000s,name resolution: 0.001s,Waiting for LB pick"
+    },
+    "response": null,
+    "requestedPartitionOwner": "",
+    "traceEnabled": true,
+    "transportDiagnostic": {
+      "grpcTarget": "127.0.0.1:18097",
+      "grpcTargetScheme": "bare host:port; grpc-js default resolver selection",
+      "grpcChannelConnectivityTimeline": [
+        {
+          "phase": "pre-rpc",
+          "state": "IDLE",
+          "observedAt": "2026-10-30T19:00:42.790Z",
+          "elapsedMs": 0
+        },
+        {
+          "phase": "during-rpc",
+          "state": "CONNECTING",
+          "observedAt": "2026-10-30T19:00:42.791Z",
+          "elapsedMs": 1
+        },
+        {
+          "phase": "post-rpc",
+          "state": "CONNECTING",
+          "observedAt": "2026-10-30T19:00:52.792Z",
+          "elapsedMs": 10002
+        }
+      ],
+      "omittedConnectivitySamples": 0,
+      "tcpProbe": {
+        "connected": true,
+        "elapsedMs": 0
+      },
+      "http2Probe": {
+        "connected": true,
+        "settingsReceived": false,
+        "error": "ETIMEDOUT",
+        "elapsedMs": 2000
+      },
+      "proxyEnvironmentVariablesPresent": [],
+      "noProxyConfigured": false,
+      "tlsCredentials": "insecure"
+    }
+  },
+  "traceLog": "rust-server-before-restart.log"
+}
