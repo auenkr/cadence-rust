@@ -1785,6 +1785,22 @@ compatibility stages incl mixed Go services/Rust Matching PASSED;
 /tmp/cadence-rewrite-full.exit = 0. See matching-rewrite-next.md.
 Further source audits saved in matching-db-lock-next.md and matching-rate-next.md.
 
+## 2026-10-30: Matching compatibility harness secondary restart readiness
+
+`tests/matching-service-compat.cjs` now accepts the target Rust process and
+gRPC port in `waitForRustReady`, so secondary restart readiness probes,
+process-evidence capture, and TLS evidence use the restarted secondary endpoint
+and PID. The helper still requires the Go Frontend `DescribeTaskList` discovery
+probe and directly verifies the target endpoint. Audited all secondary start
+sites: the initial instance retains `rust-server-secondary.log`, and each of
+the six restart paths now writes a unique secondary log and invokes the
+parameterized readiness helper. Existing recovery assertions remain in place.
+
+Source-only candidate at `t3/fix-secondary-restart-readiness`. Review was limited
+to source inspection and `git diff --check`; no Node syntax check, build, runtime,
+or tests were run, and no CI was dispatched or polled. This corrects harness
+readiness attribution only and does not establish Matching service parity.
+
 ## 2026-10-16: Matching lease backoff no longer blocks reader state
 
 Separate writer serialization and DB metadata gates keep queue state free during

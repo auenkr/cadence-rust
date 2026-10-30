@@ -470,7 +470,8 @@ async function run() {
   }
   function startRust(label) {
     for (const file of [ready, stop]) if (fs.existsSync(file)) fs.unlinkSync(file);
-    const output = fs.openSync(path.join(work, `rust-server-${label}.log`), 'w');
+    const logPath = path.join(work, `rust-server-${label}.log`);
+    const output = fs.openSync(logPath, 'w');
     const command = productionMode ? [productionBinary, [
       'start', '--config', rustConfig, '--services', 'matching', '--port', '0',
       '--history-grpc-port', historyGrpcPort, '--matching-grpc-port', rustGrpcPort,
@@ -480,11 +481,13 @@ async function run() {
       { ...process.env, CADENCE_MATCHING_DELIVERY_FIXTURE: fixture }];
     const child = spawn(command[0], command[1], { cwd: path.resolve(__dirname, '..'), env: command[2], stdio: ['ignore', output, output] });
     fs.closeSync(output);
+    child.logPath = logPath;
     exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
     return child;
   }
-  function startSecondaryRust() {
-    const output = fs.openSync(path.join(work, 'rust-server-secondary.log'), 'w');
+  function startSecondaryRust(label = 'secondary') {
+    const logPath = path.join(work, `rust-server-${label}.log`);
+    const output = fs.openSync(logPath, 'w');
     const child = spawn(productionBinary, [
       'start', '--config', process.env.CADENCE_RUST_MATCHING_SECONDARY_CONFIG || rustConfig, '--services', 'matching', '--port', '0',
       '--history-grpc-port', historyGrpcPort,
@@ -493,6 +496,7 @@ async function run() {
       '--data-dir', path.join(path.dirname(rustDataDir), 'rust-matching-secondary-data'),
     ], { cwd: path.resolve(__dirname, '..'), env: process.env, stdio: ['ignore', output, output] });
     fs.closeSync(output);
+    child.logPath = logPath;
     return child;
   }
   function directMatchingClient(address) {
@@ -648,7 +652,7 @@ async function run() {
       }
     });
   }
-  async function waitForRustReady(label) {
+  async function waitForRustReady(label, targetProcess = rust, targetGrpcPort = rustGrpcPort) {
     const readinessWaitStartedAt = Date.now();
     const deadline = readinessWaitStartedAt + 180000;
     let lastReadinessError;
@@ -664,12 +668,12 @@ async function run() {
       if (processEvidenceAttempted && !finalFailure) return;
       processEvidenceAttempted = true;
       try {
-        await captureProcessEvidence({ pid: rust.pid, grpcPort: rustGrpcPort, workDir: work, label, reason });
+        await captureProcessEvidence({ pid: targetProcess.pid, grpcPort: targetGrpcPort, workDir: work, label, reason });
         processEvidenceCaptured = true;
       } catch (_) { /* diagnostics must not alter readiness */ }
     };
-    const primaryAddress = `127.0.0.1:${rustGrpcPort}`;
-    const primaryReadinessClient = productionMode ? directMatchingClient(primaryAddress) : null;
+    const targetAddress = `127.0.0.1:${targetGrpcPort}`;
+    const readinessClient = productionMode ? directMatchingClient(targetAddress) : null;
     while (Date.now() < deadline) {
       if (productionMode) {
         // Probe the exact Rust endpoint independently of Go Frontend routing.
@@ -680,7 +684,7 @@ async function run() {
           nextDirectProbeAt = Date.now() + 5000;
           try {
             lastDirectDiagnostic = await directPartitionDiagnostic(
-              primaryReadinessClient, primaryAddress, domain, `primary-ready-${id}`);
+              readinessClient, targetAddress, domain, `${label}-ready-${id}`);
             directReadiness = lastDirectDiagnostic.error?.details || 'ListTaskListPartitions responded';
             if (lastDirectDiagnostic.error && Date.now() - readinessWaitStartedAt >= 20000) {
               await captureReadinessFailure(directReadiness);
@@ -700,9 +704,9 @@ async function run() {
           // A secondary Matching node can satisfy the Frontend probe while the
           // restarted primary is still binding its listener. Verify the exact
           // process endpoint before callers use its direct client.
-          await directPartitionOwner(primaryReadinessClient, domain, `primary-ready-${id}`);
-          await recordVerifiedMatchingTls(work, rustGrpcPort, label, rust.pid);
-          primaryReadinessClient.close();
+          await directPartitionOwner(readinessClient, domain, `${label}-ready-${id}`);
+          await recordVerifiedMatchingTls(work, targetGrpcPort, label, targetProcess.pid);
+          readinessClient.close();
           return;
         } catch (error) {
           lastReadinessError = error;
@@ -712,22 +716,22 @@ async function run() {
       } else if (fs.existsSync(ready)) {
         return;
       }
-      if (rust.exitCode !== null || rust.signalCode !== null) {
+      if (targetProcess.exitCode !== null || targetProcess.signalCode !== null) {
         await captureReadinessFailure(
-          `Rust Matching exited before readiness (exit=${rust.exitCode}, signal=${rust.signalCode}); direct primary gRPC status: ${directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
+          `Rust Matching exited before readiness (exit=${targetProcess.exitCode}, signal=${targetProcess.signalCode}); direct target gRPC status: ${directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
           true);
-        primaryReadinessClient?.close();
-        throw new Error(`Rust Matching ${label} exited before readiness; see ${work}/rust-server-${label}.log`);
+        readinessClient?.close();
+        throw new Error(`Rust Matching ${label} exited before readiness; see ${targetProcess.logPath || path.join(work, `rust-server-${label}.log`)}`);
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    primaryReadinessClient?.close();
+    readinessClient?.close();
     let finalDirectDiagnostic = lastDirectDiagnostic || null;
     if (productionMode && process.env.CADENCE_PROBE_LIST_PARTITIONS === '1') {
-      const diagnosticClient = directMatchingClient(primaryAddress);
+      const diagnosticClient = directMatchingClient(targetAddress);
       try {
         finalDirectDiagnostic = await directPartitionDiagnostic(
-          diagnosticClient, primaryAddress, domain, `primary-ready-${id}`);
+          diagnosticClient, targetAddress, domain, `${label}-ready-${id}`);
       } finally {
         diagnosticClient.close();
       }
@@ -735,13 +739,13 @@ async function run() {
         `${JSON.stringify({ frontendReadiness: {
           outcome: 'timeout',
           error: lastReadinessError?.details || lastReadinessError?.message || 'none',
-        }, directRustProbe: finalDirectDiagnostic, traceLog: `rust-server-${label}.log`,
+        }, directRustProbe: finalDirectDiagnostic, traceLog: path.basename(targetProcess.logPath || path.join(work, `rust-server-${label}.log`)),
         }, null, 2)}\n`);
     }
     await captureReadinessFailure(
-      `final readiness failure; direct primary gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
+      `final readiness failure; direct target gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}`,
       true);
-    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its primary gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct primary gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; see ${work}/rust-server-${label}.log`);
+    throw new Error(`Rust Matching ${label} did not become ready through Go Frontend and its target gRPC endpoint; last Go Frontend error: ${lastReadinessError?.details || lastReadinessError?.message || 'none'}; direct target gRPC status: ${finalDirectDiagnostic?.error?.details || directReadiness}; see ${targetProcess.logPath || path.join(work, `rust-server-${label}.log`)}`);
   }
   let exited;
   let rust = startRust('before-restart');
@@ -837,11 +841,11 @@ async function run() {
     if (!process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT || !process.env.CADENCE_RUST_MATCHING_SECONDARY_TCHANNEL) {
       throw new Error('two-instance failure recovery requires secondary Matching ports');
     }
-    secondaryRust = startSecondaryRust();
+    secondaryRust = startSecondaryRust('secondary');
     let lastConvergenceError = '';
     const convergenceDeadline = Date.now() + 30000;
     while (Date.now() < convergenceDeadline) {
-      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${work}/rust-server-secondary.log`);
+      if (secondaryRust.exitCode !== null || secondaryRust.signalCode !== null) throw new Error(`secondary Rust Matching exited; see ${secondaryRust.logPath}`);
       try {
         await call('WorkflowAPI', 'DescribeTaskList', { domain, taskList: { name: `secondary-ready-${id}` }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true });
         break;
@@ -1106,7 +1110,7 @@ async function run() {
     const survivorDeadline = Date.now() + 45000;
     let survivorVisible = false;
     while (Date.now() < survivorDeadline) {
-      if (survivor.exitCode !== null || survivor.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${ownerIndex === 0 ? `${work}/rust-server-secondary.log` : `${work}/rust-server-before-restart.log`}`);
+      if (survivor.exitCode !== null || survivor.signalCode !== null) throw new Error(`surviving Rust Matching exited; see ${survivor.logPath}`);
       try {
         await call('WorkflowAPI', 'DescribeTaskList', {
           domain, taskList: { name: crashList }, taskListType: 'TASK_LIST_TYPE_DECISION', includeTaskListStatus: true,
@@ -1176,7 +1180,8 @@ async function run() {
       rust = startRust('after-failure-recovery');
       await waitForRustReady('after-failure-recovery');
     } else {
-      secondaryRust = startSecondaryRust();
+      secondaryRust = startSecondaryRust('secondary-after-failure-recovery');
+      await waitForRustReady('after-failure-recovery', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
       const secondaryReadyDeadline = Date.now() + 30000;
       let secondaryReady = false;
       while (Date.now() < secondaryReadyDeadline) {
@@ -1318,8 +1323,8 @@ async function run() {
         rust = startRust('after-activity-owner-crash');
         await waitForRustReady('after-activity-owner-crash');
       } else {
-        secondaryRust = startSecondaryRust();
-        await waitForRustReady('after-activity-owner-crash');
+        secondaryRust = startSecondaryRust('secondary-after-activity-owner-crash');
+        await waitForRustReady('after-activity-owner-crash', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
       }
       const restartedActivityAddress = activityOwnerIndex === 0 ? primaryAddress : secondaryAddress;
       const activityRejoinKeys = Array.from({ length: 64 }, (_, index) =>
@@ -1413,7 +1418,8 @@ async function run() {
         rust = startRust('after-semaphore-owner-crash');
         await waitForRustReady('after-semaphore-owner-crash');
       } else {
-        secondaryRust = startSecondaryRust();
+        secondaryRust = startSecondaryRust('secondary-after-semaphore-owner-crash');
+        await waitForRustReady('after-semaphore-owner-crash', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
         const rejoinDeadline = Date.now() + 30000;
         let rejoined = false;
         while (Date.now() < rejoinDeadline) {
@@ -1462,7 +1468,8 @@ async function run() {
         rust = startRust('after-semaphore-release-recovery');
         await waitForRustReady('after-semaphore-release-recovery');
       } else {
-        secondaryRust = startSecondaryRust();
+        secondaryRust = startSecondaryRust('secondary-after-semaphore-release-recovery');
+        await waitForRustReady('after-semaphore-release-recovery', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
         const readyDeadline = Date.now() + 30000;
         let ready = false;
         while (Date.now() < readyDeadline) {
@@ -1655,7 +1662,8 @@ async function run() {
       rust = startRust('after-graceful-drain');
       await waitForRustReady('after-graceful-drain');
     } else {
-      secondaryRust = startSecondaryRust();
+      secondaryRust = startSecondaryRust('secondary-after-graceful-drain');
+      await waitForRustReady('after-graceful-drain', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
       const secondaryMembershipPeer = directMatchingClient('127.0.0.1:' + process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
       const membershipDeadline = Date.now() + 60000;
       let membershipRestored = false;
@@ -2049,7 +2057,8 @@ async function run() {
           await waitForRustReady('after-durable-restart');
           return { hostIndex, killedPid, restartedPid: rust.pid, killSignal: killed.signal };
         }
-        secondaryRust = startSecondaryRust();
+        secondaryRust = startSecondaryRust('secondary-after-durable-restart');
+        await waitForRustReady('after-durable-restart', secondaryRust, process.env.CADENCE_RUST_MATCHING_SECONDARY_GRPC_PORT);
         const readyDeadline = Date.now() + 30000;
         let ready = false;
         while (Date.now() < readyDeadline) {
@@ -2223,7 +2232,7 @@ async function run() {
         else if (forcedSecondaryExit === null) throw shutdownError;
       }
       if (secondaryExit && secondaryExit.code !== 0) {
-        const shutdownError = new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${work}/rust-server-secondary.log`);
+        const shutdownError = new Error(`secondary Rust Matching exited ${JSON.stringify(secondaryExit)}; see ${secondaryRust.logPath}`);
         if (probeFailure) console.error('SECONDARY RUST SHUTDOWN FAILURE after probe failure:', shutdownError);
         else throw shutdownError;
       }
