@@ -132,3 +132,52 @@ the binary SHA256, and the baseline topology fields showing `goMatchingStarted:
 false` and Go services `frontend,history,worker`. Record the run URL, head SHA,
 binary SHA256, and conclusion here. A passing adapter test or Rust CI run alone
 does not validate this scenario.
+
+## Candidate integration and CI handoff — 2026-10-30
+
+Integrated the reviewed four-commit chain from `origin/t3/matching-pg-observer-fix`
+onto the coherent readiness-diagnostics base `5ee69b5572688c2dba2245c7b411c7182c5b9b16`
+on branch `t3/matching-queued-activity-candidate-5ee69b5`. The frozen acceptance
+branch was not changed. Cherry-picks were clean; the documentation-only source
+commit `01bf00dd04d72f131e9d1a527d83e2904783bf4b` was not part of the requested
+four-commit chain.
+
+The source commits and candidate commits are:
+
+| Source commit | Candidate commit |
+| --- | --- |
+| `3a1da7b06bdbec4ddaa5858f003f4f986870540c` | `65c39458d` |
+| `f07ef0a37fa391cc1492d4e2563df9ef95e50068` | `33b42cc9a` |
+| `d63c12d68d57e49cd81f182c610b27eedef131b7` | `734d72a8d` |
+| `f009e8d70763e0a30a0b933646f25131d180709d` | `2d4c2624e` |
+
+The reviewed diff is limited to the mixed Matching crash probe, existing Go SDK
+fixture, Cassandra task observer type forwarding/self-check, and this evidence
+file. Source assertions cover one durable activity row and positive activity
+range before kill, SIGKILL of the API-reported owner, exact scheduled/started/
+completed activity counts with zero activity failures/timeouts, one workflow
+completion, queue drain, and 64 activity task-list ownership samples queried
+through both Rust endpoints after restart. The PostgreSQL observer already
+binds its task type in both row and range queries; the Cassandra observer fix
+forwards activity type `1` while retaining decision default `0`.
+
+Candidate validation status: **UNVERIFIED**. No local Cargo, Go, formatting,
+test, build, or runtime command was run. No CI run was dispatched for the
+candidate. The source diff review and `git diff --check` are static review only.
+
+The previously running workspace CI job was inspected once after integration:
+[`rust-ci` run 41055162424](https://github.com/auenkr/cadence-rust/actions/runs/41055162424),
+head `5ee69b5572688c2dba2245c7b411c7182c5b9b16`, conclusion **success**. Its
+`rust-ci-logs` artifact records an empty package selection (workspace), fresh
+target `/home/runner/work/_temp/cargo-target-final`, clippy exit `0`, then test
+exit `0`; aggregated test summaries are 57 suites, 1,829 passed, 0 failed, 28
+ignored. The metrics artifact records binary SHA256
+`fb7222e35ac7d5e8509c3c261379ab1d03fca2b5788c78d85a7e8a60b4735689` for
+`matching_metrics_emission_oracle`, and repeats the same head SHA. This is base
+workspace evidence only; it does not validate the integrated candidate.
+
+Per the integration handoff, dispatch the existing PostgreSQL production gate
+at immutable ref `5ee69b5572688c2dba2245c7b411c7182c5b9b16` only after the
+workspace artifact checks above. That run is base evidence, not candidate
+validation. Keep this candidate marked unverified until the requested mixed
+PostgreSQL scenario has evidence from a gate built from the candidate source.
