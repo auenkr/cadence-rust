@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { randomUUID, X509Certificate } = require('node:crypto');
 const fs = require('node:fs');
+const http2 = require('node:http2');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
@@ -497,6 +498,34 @@ async function run() {
   function directMatchingClient(address) {
     return new matchingApi.MatchingAPI(address, matchingCredentials);
   }
+  function http2SettingsDiagnostic(address) {
+    const startedAt = Date.now();
+    const caFile = process.env.CADENCE_MATCHING_GRPC_CA_FILE;
+    const origin = `${caFile ? 'https' : 'http'}://${address}`;
+    return new Promise(resolve => {
+      let session;
+      let timer;
+      let settled = false;
+      let connected = false;
+      const finish = result => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        try { session?.destroy(); } catch (_) {}
+        resolve({ connected, settingsReceived: false, ...result, elapsedMs: Date.now() - startedAt });
+      };
+      try {
+        const options = caFile ? { ca: fs.readFileSync(caFile) } : undefined;
+        session = http2.connect(origin, options);
+        timer = setTimeout(() => finish({ settingsReceived: false, error: 'ETIMEDOUT' }), 2000);
+        session.once('connect', () => { connected = true; });
+        session.once('remoteSettings', () => finish({ settingsReceived: true }));
+        session.once('error', error => finish({ settingsReceived: false, error: error.code || 'HTTP2_ERROR' }));
+      } catch (error) {
+        finish({ settingsReceived: false, error: error.code || 'HTTP2_ERROR' });
+      }
+    });
+  }
   function directDecisionPoll(client, domainId, taskListName, suffix) {
     const metadata = new grpc.Metadata();
     metadata.set('rpc-service', 'cadence-matching');
@@ -547,6 +576,8 @@ async function run() {
     };
     const diagnosticStartedAt = Date.now();
     sampleConnectivity('pre-rpc');
+    // Observe the HTTP/2 handshake concurrently with the RPC attempt.
+    const http2ProbePromise = http2SettingsDiagnostic(address);
     // Probe the endpoint at the same time as the RPC. Running this after the
     // callback hid whether the listener was reachable during the RPC attempt.
     const tcpProbePromise = new Promise(probeResolve => {
@@ -576,7 +607,7 @@ async function run() {
       const finish = async (error, response, rpcCallbackAt) => {
         clearInterval(connectivitySampler);
         sampleConnectivity('post-rpc');
-        const tcpProbe = await tcpProbePromise;
+        const [tcpProbe, http2Probe] = await Promise.all([tcpProbePromise, http2ProbePromise]);
         const diagnosticsAssembledAt = new Date().toISOString();
         const partitions = response?.decisionTaskListPartitions || [];
         resolve({
@@ -595,6 +626,7 @@ async function run() {
             grpcChannelConnectivityTimeline: connectivityTimeline,
             omittedConnectivitySamples,
             tcpProbe,
+            http2Probe,
             proxyEnvironmentVariablesPresent: ['grpc_proxy', 'https_proxy', 'http_proxy', 'GRPC_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY']
               .filter(name => Boolean(process.env[name])),
             noProxyConfigured: Boolean(process.env.no_proxy || process.env.NO_PROXY),
