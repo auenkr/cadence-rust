@@ -1276,6 +1276,10 @@ impl RingpopNode {
     ) -> JoinGroupResult {
         sender.attempts = sender.attempts.wrapping_add(1);
         let targets = sender.selection.select_group(joined);
+        eprintln!(
+            "Matching Ringpop JOIN attempt {} started: targets={:?}",
+            sender.attempts, targets
+        );
         let timeout = sender.selection.options.timeout_nanos;
         let mut tasks = tokio::task::JoinSet::new();
         for target in targets {
@@ -1296,6 +1300,10 @@ impl RingpopNode {
                 result.failures.push(target);
             }
         }
+        eprintln!(
+            "Matching Ringpop JOIN attempt {} completed: successes={:?} failures={:?}",
+            result.attempt, result.successes, result.failures
+        );
         result
     }
 
