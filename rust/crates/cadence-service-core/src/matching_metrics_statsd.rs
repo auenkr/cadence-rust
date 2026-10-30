@@ -705,6 +705,46 @@ mod tests {
     }
 
     #[test]
+    fn dropping_sink_drains_pending_timer_and_aggregate() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let sink = StatsdMetricSink::new(
+            StatsdMetricsConfig {
+                host_port: receiver.local_addr().unwrap().to_string(),
+                flush_interval: Duration::from_secs(3600),
+                reporting_interval: Duration::from_secs(3600),
+                ..Default::default()
+            },
+            "scope",
+            BTreeMap::new(),
+        )
+        .unwrap();
+        sink.record(MetricEvent {
+            name: "pending_timer",
+            kind: MetricKind::Timer,
+            value: MetricValue::Duration(Duration::from_millis(7)),
+            tags: BTreeMap::new(),
+            histogram: None,
+        });
+        sink.record(MetricEvent {
+            name: "pending_counter",
+            kind: MetricKind::Counter,
+            value: MetricValue::Count(2),
+            tags: BTreeMap::new(),
+            histogram: None,
+        });
+        drop(sink);
+        let mut packet = [0; 1024];
+        let size = receiver.recv(&mut packet).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&packet[..size]).unwrap(),
+            "scope.pending_timer.cadence_service.cadence-matching:7|ms\nscope.pending_counter.cadence_service.cadence-matching:2|c\n"
+        );
+    }
+
+    #[test]
     fn go_duration_strings_and_low_bucket_selection_match_tally() {
         assert_eq!(go_duration_string(1_414_213), "1.414213ms");
         assert_eq!(go_duration_string(2_000_000), "2ms");
