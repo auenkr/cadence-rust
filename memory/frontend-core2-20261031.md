@@ -657,3 +657,8 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   adapters only. The Go-compatible SQL payload encoder is groundwork, not a
   manager. The new admin stop broadcast is an ownership seam; no Go-equivalent
   quota collection or admin watcher implementations yet consume it.
+- Documentation-head follow-up run
+  https://github.com/auenkr/cadence-rust/actions/runs/41189260596 checked
+  `32de07ee30ed50ca64d302d62d7ef236c028485b` and concluded `success`.
+  The preceding code head `54c2e54c45141b5499ee4d896dad9a639631ff27` is the
+  exact head that validated the validator/lifecycle code in run 41188887361.
