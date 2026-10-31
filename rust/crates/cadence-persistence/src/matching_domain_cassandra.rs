@@ -9,7 +9,7 @@ use crate::matching_domain_metadata::{
     DomainMetadataPersistence, MatchingDomainMetadata,
 };
 use chrono::{DateTime, Utc};
-use scylla::statement::batch::{Batch, BatchType};
+use scylla::statement::{batch::{Batch, BatchType}, Statement};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -103,7 +103,7 @@ impl CassandraDomainMetadataPersistence {
 
     fn batch_lwt(&self, queries: &[&str], values: Vec<BoundValues>) -> Result<bool, String> {
         let mut batch = Batch::new(BatchType::Logged);
-        for query in queries { batch.append_statement(*query); }
+        for query in queries { batch.append_statement(Statement::new(*query)); }
         let session = self.driver.session();
         let result = self.driver.run(session.batch(&batch, values)).map_err(|e| e.to_string())?;
         let rows = result.into_rows_result().map_err(|e| e.to_string())?;
