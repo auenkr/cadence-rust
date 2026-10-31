@@ -223,6 +223,9 @@ impl<B: WorkflowBackend> Handler<B> {
             return Ok(value);
         }
         if operation == WorkflowOperation::GetWorkflowExecutionHistory {
+            if value.is_null() {
+                return Err(cadence_api::validation::err_request_not_set().into());
+            }
             let request: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
                 serde_json::from_value(value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
@@ -239,6 +242,7 @@ impl<B: WorkflowBackend> Handler<B> {
         if matches!(
             operation,
             WorkflowOperation::QueryWorkflow
+                | WorkflowOperation::DiagnoseWorkflowExecution
                 | WorkflowOperation::DescribeWorkflowExecution
                 | WorkflowOperation::TerminateWorkflowExecution
                 | WorkflowOperation::ResetWorkflowExecution
@@ -253,6 +257,36 @@ impl<B: WorkflowBackend> Handler<B> {
                 "workflowExecution"
             };
             validate_execution_field(&value, field, &self.validator)?;
+            if operation == WorkflowOperation::DiagnoseWorkflowExecution
+                && value
+                    .get("workflowExecution")
+                    .and_then(|execution| execution.get("runId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .is_empty()
+            {
+                return Err(CadenceError::BadRequest(BadRequestError::new(
+                    "Execution is not set on request.",
+                )));
+            }
+            if operation == WorkflowOperation::QueryWorkflow {
+                let query = value.get("query").filter(|query| !query.is_null());
+                let Some(query) = query else {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "WorkflowQuery is not set on request.",
+                    )));
+                };
+                if query
+                    .get("queryType")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "QueryType is not set on request.",
+                    )));
+                }
+            }
             if operation == WorkflowOperation::SignalWorkflowExecution
                 && value
                     .get("signalName")
@@ -261,6 +295,35 @@ impl<B: WorkflowBackend> Handler<B> {
                     .is_empty()
             {
                 return Err(cadence_api::validation::err_signal_name_not_set().into());
+            }
+        }
+        if operation == WorkflowOperation::RecordActivityTaskHeartbeatByID {
+            if value.is_null() {
+                return Err(cadence_api::validation::err_request_not_set().into());
+            }
+            validate_domain(&value)?;
+            for (field, message) in [
+                ("workflowId", "WorkflowId is not set on request."),
+                ("activityId", "ActivityID is not set on request."),
+            ] {
+                if value
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(message)));
+                }
+            }
+        }
+        if operation == WorkflowOperation::RecordActivityTaskHeartbeat {
+            if value.is_null() {
+                return Err(cadence_api::validation::err_request_not_set().into());
+            }
+            if value.get("taskToken").is_none_or(Value::is_null) {
+                return Err(CadenceError::BadRequest(BadRequestError::new(
+                    "Task token not set on request.",
+                )));
             }
         }
         Ok(value)
@@ -400,6 +463,46 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(missing_signal.to_string(), "SignalName is not set on request.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_requires_query_and_query_type_after_execution_validation() {
+        let handler = Handler::new(FakeBackend::default());
+        let request = serde_json::json!({
+            "domain": "shop",
+            "execution": {"workflowId": "checkout"}
+        });
+        assert_eq!(
+            handler.dispatch("QueryWorkflow", request.clone()).await.unwrap_err().to_string(),
+            "WorkflowQuery is not set on request."
+        );
+        let request = serde_json::json!({
+            "domain": "shop",
+            "execution": {"workflowId": "checkout"},
+            "query": {"queryArgs": ""}
+        });
+        assert_eq!(
+            handler.dispatch("QueryWorkflow", request).await.unwrap_err().to_string(),
+            "QueryType is not set on request."
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn diagnose_requires_complete_execution_before_backend() {
+        let handler = Handler::new(FakeBackend::default());
+        let error = handler
+            .dispatch(
+                "DiagnoseWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "checkout"}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Execution is not set on request.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }
