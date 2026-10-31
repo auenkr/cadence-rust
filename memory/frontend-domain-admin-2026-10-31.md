@@ -28,6 +28,13 @@
   still an audit gap.
 - These modules have unit cases mirroring Go behavior. No Cargo command has
   been run locally.
+- Added Go-compatible `UpdateDomain` classification and guards in
+  `handler_domain.rs`: failover is selected by active-cluster presence,
+  non-empty active-active attribute scopes, or positive timeout; mixed
+  failover/config requests are rejected; local domains reject presence of any
+  replication field and any failover timeout, including zero/negative values.
+- Completed the previously unterminated domain unit-test module and added
+  cases for those request-shape rules. This commit still needs CI verification.
 
 ## CI evidence
 
@@ -37,6 +44,10 @@
   rebase and before the Admin/Schedule files were added. Last observed status:
   in progress. This run is stale for current source and does not validate the
   current branch. Dispatch a fresh `cadence-frontend` run after the next push.
+- Run [41173158817](https://github.com/auenkr/cadence-rust/actions/runs/41173158817)
+  is at head `f3b3611f7da78ab156b6fd14ef7e7026339683c1` and was in progress at
+  the last check; it also predates the current domain update guards. It is not
+  evidence for the updated source. A fresh run will be dispatched after push.
 
 ## Known gaps — do not claim service parity
 
