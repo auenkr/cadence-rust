@@ -493,6 +493,12 @@ migration forward.
   changes `cadence-persistence` and `cadence-service-core`, so the package CI
   needs to be rerun after the next push. `git diff --check` passed; Cargo was
   not run locally.
+- CI [41181224995](https://github.com/auenkr/cadence-rust/actions/runs/41181224995)
+  at `7b84b0be0` failed in the repository formatting gate before tests. The
+  failure was the existing `handler_domain.rs` import wrapping after core2
+  rebase; corrected it manually. Run [41181380560](https://github.com/auenkr/cadence-rust/actions/runs/41181380560)
+  targets `faeff2796` and is the current validation candidate; poll for its
+  conclusion and inspect any follow-up failures.
 
 - Rebased the implementation branch onto the then-current
   `origin/frontend-core2` at `3bc2dcca8`; conflict resolution kept the newer

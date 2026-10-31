@@ -4,9 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cadence_api::{
     enums::DomainStatus,
-    errors::{
-        BadRequestError, DomainAlreadyExistsError, EntityNotExistsError, ServiceBusyError,
-    },
+    errors::{BadRequestError, DomainAlreadyExistsError, EntityNotExistsError, ServiceBusyError},
     service_types::{
         DeprecateDomainRequest, DescribeDomainRequest, DescribeDomainResponse, ListDomainsRequest,
         ListDomainsResponse, UpdateDomainRequest, UpdateDomainResponse,
