@@ -2901,7 +2901,7 @@ mod tests {
 
         assert_eq!(
             workflow_payload_sizes(WorkflowOperation::StartWorkflowExecution, &request).unwrap(),
-            vec![57]
+            vec![55]
         );
     }
 
