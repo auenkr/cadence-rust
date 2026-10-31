@@ -994,6 +994,14 @@ Frontend parity until these are implemented and validated.
 - Added reverse UUID-to-domain-name lookup to `WorkflowDomainLookup`, backed
   by `FrontendDomainManager::describe`, with success and not-found assertions.
   Go resolves this name before evaluating per-domain blob warning/error limits
-  on token-based activity responses; the policy remains to be applied to those
-  response paths in the next source slice. This addition is unvalidated until
-  an exact-head Frontend CI run finishes.
+  on token-based activity responses. The handler now observes Go warning/error
+  thresholds for activity heartbeat/completion/failure payloads and mirrors
+  Go's oversized-payload conversion: completion/heartbeat become failed
+  activity requests, failed details are truncated and retagged, and heartbeat
+  returns `cancelRequested=true`. Added corresponding Go-shaped regression
+  cases. The change is source-only and must be compiled/tested on exact-head CI.
+- Package CI run
+  [41197054841](https://github.com/auenkr/cadence-rust/actions/runs/41197054841)
+  checked `d4beeea26e7a9e3aba877ff14904df1f92dd9672` and was still in progress
+  at this save; it predates the activity payload changes. Dispatch another
+  package run after pushing them.

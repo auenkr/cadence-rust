@@ -1079,12 +1079,15 @@ impl<B: WorkflowBackend> Handler<B> {
             // the long-poll budget.
             return Ok(serde_json::json!({}));
         }
+        let public_request = request.clone();
         let request = self.prepare_backend_request(operation, request, caller)?;
         if operation == WorkflowOperation::RestartWorkflowExecution {
             return self
                 .restart_workflow_execution(request, target_cluster, caller)
                 .await;
         }
+        let (backend_operation, request, heartbeat_overflow) = self
+            .prepare_activity_blob_request(operation, &public_request, request)?;
         let poll_guard = if matches!(
             operation,
             WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
@@ -1101,12 +1104,120 @@ impl<B: WorkflowBackend> Handler<B> {
         };
         let result = self
             .backend
-            .invoke_on_cluster(operation, request, target_cluster)
+            .invoke_on_cluster(backend_operation, request, target_cluster)
             .await;
         if let Some(guard) = poll_guard {
             guard.disarm();
         }
+        if heartbeat_overflow {
+            result?;
+            return Ok(serde_json::json!({"cancelRequested": true}));
+        }
         result
+    }
+
+    fn prepare_activity_blob_request(
+        &self,
+        operation: WorkflowOperation,
+        public_request: &Value,
+        mut backend_request: Value,
+    ) -> Result<(WorkflowOperation, Value, bool), CadenceError> {
+        let Some(payload_field) = activity_blob_payload_field(operation) else {
+            return Ok((operation, backend_request, false));
+        };
+        let (Some(policy), Some(domains)) = (&self.blob_size_policy, &self.domain_lookup) else {
+            return Ok((operation, backend_request, false));
+        };
+        let token_request = backend_request
+            .get(activity_backend_request_field(operation))
+            .unwrap_or(&backend_request);
+        let token = decode_workflow_task_token(&serde_json::json!({
+            "taskToken": token_request.get("taskToken").cloned().unwrap_or(Value::Null)
+        }))?;
+        let Some(domain) = domains.domain_name(&token.domain_id)? else {
+            return Ok((operation, backend_request, false));
+        };
+        let bytes = request_bytes(public_request, payload_field)?;
+        let error_limit = policy.error_limit(&domain);
+        let configured_warning_limit = policy.warning_limit(&domain);
+        let warning_limit = configured_warning_limit.min(error_limit);
+        let outcome = if bytes.len() > error_limit {
+            BlobSizeOutcome::Exceeded
+        } else if bytes.len() > warning_limit {
+            BlobSizeOutcome::Warning
+        } else {
+            BlobSizeOutcome::WithinWarningLimit
+        };
+        policy.observe(WorkflowBlobSizeMeasurement {
+            operation: operation.name(),
+            domain,
+            workflow_id: token.workflow_id.clone(),
+            run_id: token.run_id.clone(),
+            actual_size: bytes.len(),
+            warning_limit,
+            error_limit,
+            configured_warning_above_error: configured_warning_limit > error_limit,
+            outcome,
+        });
+        if outcome != BlobSizeOutcome::Exceeded {
+            return Ok((operation, backend_request, false));
+        }
+
+        let truncated = cadence_api::b64::encode_bytes(&bytes[..bytes.len().min(error_limit)]);
+        let identity = public_request.get("identity").cloned().unwrap_or(Value::Null);
+        let token_value = token_request.get("taskToken").cloned().unwrap_or(Value::Null);
+        if matches!(
+            operation,
+            WorkflowOperation::RespondActivityTaskCompleted
+                | WorkflowOperation::RespondActivityTaskCompletedByID
+                | WorkflowOperation::RecordActivityTaskHeartbeat
+                | WorkflowOperation::RecordActivityTaskHeartbeatByID
+                | WorkflowOperation::RespondActivityTaskCanceled
+                | WorkflowOperation::RespondActivityTaskCanceledByID
+        ) {
+            let reason = match operation {
+                WorkflowOperation::RecordActivityTaskHeartbeat
+                | WorkflowOperation::RecordActivityTaskHeartbeatByID => {
+                    "HEARTBEAT_EXCEEDS_LIMIT"
+                }
+                WorkflowOperation::RespondActivityTaskCompleted
+                | WorkflowOperation::RespondActivityTaskCompletedByID => {
+                    "COMPLETE_RESULT_EXCEEDS_LIMIT"
+                }
+                _ => "CANCEL_DETAILS_EXCEEDS_LIMIT",
+            };
+            backend_request = serde_json::json!({
+                "domainUUID": token.domain_id.clone(),
+                "failedRequest": {
+                    "taskToken": token_value,
+                    "reason": reason,
+                    "details": truncated,
+                    "identity": identity,
+                },
+            });
+            let heartbeat_overflow = matches!(
+                operation,
+                WorkflowOperation::RecordActivityTaskHeartbeat
+                    | WorkflowOperation::RecordActivityTaskHeartbeatByID
+            );
+            return Ok((
+                WorkflowOperation::RespondActivityTaskFailed,
+                backend_request,
+                heartbeat_overflow,
+            ));
+        }
+
+        let failed_request = backend_request
+            .get_mut("failedRequest")
+            .and_then(Value::as_object_mut);
+        if let Some(failed_request) = failed_request {
+            failed_request.insert(
+                "reason".into(),
+                Value::String("FAILURE_DETAILS_EXCEEDS_LIMIT".into()),
+            );
+            failed_request.insert("details".into(), Value::String(truncated));
+        }
+        Ok((operation, backend_request, false))
     }
 
     async fn restart_workflow_execution(
@@ -2083,6 +2194,43 @@ fn memo_payload_size(memo: Option<&cadence_api::types::Memo>) -> usize {
         })
 }
 
+fn activity_blob_payload_field(operation: WorkflowOperation) -> Option<&'static str> {
+    match operation {
+        WorkflowOperation::RecordActivityTaskHeartbeat
+        | WorkflowOperation::RecordActivityTaskHeartbeatByID => Some("details"),
+        WorkflowOperation::RespondActivityTaskCompleted
+        | WorkflowOperation::RespondActivityTaskCompletedByID => Some("result"),
+        WorkflowOperation::RespondActivityTaskFailed
+        | WorkflowOperation::RespondActivityTaskFailedByID
+        | WorkflowOperation::RespondActivityTaskCanceled
+        | WorkflowOperation::RespondActivityTaskCanceledByID => Some("details"),
+        _ => None,
+    }
+}
+
+fn activity_backend_request_field(operation: WorkflowOperation) -> &'static str {
+    match operation {
+        WorkflowOperation::RecordActivityTaskHeartbeat
+        | WorkflowOperation::RecordActivityTaskHeartbeatByID => "heartbeatRequest",
+        WorkflowOperation::RespondActivityTaskCompleted
+        | WorkflowOperation::RespondActivityTaskCompletedByID => "completeRequest",
+        WorkflowOperation::RespondActivityTaskFailed
+        | WorkflowOperation::RespondActivityTaskFailedByID => "failedRequest",
+        WorkflowOperation::RespondActivityTaskCanceled
+        | WorkflowOperation::RespondActivityTaskCanceledByID => "cancelRequest",
+        _ => unreachable!("not an activity response operation"),
+    }
+}
+
+fn request_bytes(request: &Value, field: &str) -> Result<Vec<u8>, CadenceError> {
+    let Some(value) = request.get(field).filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_value::<EncodedTaskToken>(serde_json::json!({"taskToken": value}))
+        .map(|encoded| encoded.task_token)
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
+}
+
 fn workflow_payload_execution(request: &Value) -> (String, String) {
     let execution = request
         .get("workflowExecution")
@@ -2456,6 +2604,10 @@ mod tests {
     impl WorkflowDomainLookup for StaticDomainLookup {
         fn domain_id(&self, domain: &str) -> Result<String, CadenceError> {
             Ok(format!("uuid:{domain}"))
+        }
+
+        fn domain_name(&self, domain_id: &str) -> Result<Option<String>, CadenceError> {
+            Ok(domain_id.strip_prefix("uuid:").map(str::to_owned))
         }
     }
 
@@ -3627,6 +3779,109 @@ mod tests {
                 outcome: BlobSizeOutcome::Warning,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn activity_payload_limits_fail_oversized_completion_like_go() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "uuid:shop".into(),
+                workflow_id: "order-1".into(),
+                run_id: "run-1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        handler
+            .dispatch(
+                "RespondActivityTaskCompleted",
+                serde_json::json!({
+                    "taskToken": cadence_api::b64::encode_bytes(&token),
+                    "result": "AQID",
+                    "identity": "worker"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
+        assert_eq!(calls[0].1["failedRequest"]["reason"], "COMPLETE_RESULT_EXCEEDS_LIMIT");
+        assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
+        assert_eq!(calls[0].1["failedRequest"]["identity"], "worker");
+    }
+
+    #[tokio::test]
+    async fn oversized_heartbeat_fails_activity_and_returns_cancel_requested() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "uuid:shop".into(),
+                workflow_id: "order-1".into(),
+                run_id: "run-1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let response = handler
+            .dispatch(
+                "RecordActivityTaskHeartbeat",
+                serde_json::json!({
+                    "taskToken": cadence_api::b64::encode_bytes(&token),
+                    "details": "AQID",
+                    "identity": "worker"
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"cancelRequested": true}));
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
+        assert_eq!(calls[0].1["failedRequest"]["reason"], "HEARTBEAT_EXCEEDS_LIMIT");
+        assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
+    }
+
+    #[tokio::test]
+    async fn oversized_failure_details_are_truncated_and_retagged() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "uuid:shop".into(),
+                workflow_id: "order-1".into(),
+                run_id: "run-1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        handler
+            .dispatch(
+                "RespondActivityTaskFailed",
+                serde_json::json!({
+                    "taskToken": cadence_api::b64::encode_bytes(&token),
+                    "reason": "worker failure",
+                    "details": "AQID",
+                    "identity": "worker"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
+        assert_eq!(calls[0].1["failedRequest"]["reason"], "FAILURE_DETAILS_EXCEEDS_LIMIT");
+        assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
     }
 
     #[test]
