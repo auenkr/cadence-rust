@@ -1881,3 +1881,15 @@ predates the subsequent dynamic-config and failover corrections. No local Cargo
 command was run. Remaining Frontend work is listed in
 `frontend-core2-20261031.md`; this slice is not a service parity claim.
 - Frontend continuation: ported Go `frontend.warmupDuration` readiness transition and shutdown suppression; fresh exact-head Frontend CI passed at `3682a3f69d0c1abd47b20b0db0191b0f6010de91` (run 41187035454). Durable Frontend managers and actual quota/admin worker owners remain open; see `frontend-core2-20261031.md`.
+
+## 2026-10-31: Frontend domain/admin/schedule handler continuation
+
+On `frontend-domain-admin`, added Go-compatible domain update request
+classification (including mixed config/failover rejection and local-domain
+replication-field presence checks) and schedule create/update validation
+helpers. Schedule behavior now distinguishes a missing action from an
+incomplete StartWorkflow action, validates update no-op and field replacement
+rules, and checks cron/time range, policies, and reserved search attributes.
+Changes are in `handler_domain.rs` and `handler_schedule.rs`; exact Go RPC
+runtime wiring, most Admin operations, mixed service validation, and current
+CI verification remain open. See `memory/frontend-domain-admin-2026-10-31.md`.
