@@ -1,4 +1,5 @@
-//! Read-only access to Go's PostgreSQL domain metadata for Matching.
+//! Go-compatible PostgreSQL domain and metadata operations used by the
+//! Matching cache and Frontend's configured persistence manager.
 //!
 //! This reader uses the task store's bounded pool, honors Go's default domain
 //! shard and pagination order, and never changes the shared schema.
@@ -333,6 +334,47 @@ impl PostgresDomainMetadataStore {
             encoding,
             &self.active_cluster_name,
         )
+    }
+}
+
+impl crate::matching_domain_metadata::GoSqlDomainPersistence for PostgresDomainMetadataStore {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::create_domain(self, metadata)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::update_domain(self, metadata, expected_notification_version)
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::delete_domain(self, domain_id)
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::get_metadata_version(self)
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::get_domain(self, name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        PostgresDomainMetadataStore::list_domains(self, page_size, page_token)
     }
 }
 
