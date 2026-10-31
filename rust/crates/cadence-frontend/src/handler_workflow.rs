@@ -259,6 +259,23 @@ impl<B: WorkflowBackend> Handler<B> {
             }
             self.validator
                 .validate_execution(request.execution.as_ref())?;
+            if !request.next_page_token.is_empty() {
+                let token = crate::handler_workflow_history::deserialize_history_token(
+                    &request.next_page_token,
+                )
+                .map_err(|_| {
+                    CadenceError::BadRequest(BadRequestError::new(
+                        "Invalid NextPageToken.",
+                    ))
+                })?;
+                crate::handler_workflow_history::validate_history_run_id(
+                    request
+                        .execution
+                        .as_ref()
+                        .map_or("", |execution| execution.run_id.as_str()),
+                    &token,
+                )?;
+            }
             return Ok(value);
         }
         if matches!(
@@ -517,6 +534,16 @@ mod tests {
 
     #[derive(Default)]
     struct FakeBackend(Mutex<Vec<WorkflowOperation>>);
+
+    #[derive(serde::Serialize)]
+    struct EncodedHistoryToken {
+        #[serde(
+            rename = "nextPageToken",
+            serialize_with = "cadence_api::b64::serialize_bytes"
+        )]
+        next_page_token: Vec<u8>,
+    }
+
     impl WorkflowBackend for FakeBackend {
         fn invoke<'a>(
             &'a self,
@@ -720,6 +747,54 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(task_list_error.to_string(), "TaskList is not set on request.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_token_errors_match_go_before_backend() {
+        let handler = Handler::new(FakeBackend::default());
+        let invalid = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "checkout"},
+                    "nextPageToken": "e30="
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(invalid.to_string(), "Invalid NextPageToken.");
+
+        let token = crate::handler_workflow_history::HistoryContinuationToken {
+            run_id: "token-run".into(),
+            ..Default::default()
+        };
+        let bytes = crate::handler_workflow_history::serialize_history_token(Some(&token))
+            .unwrap()
+            .unwrap();
+        let encoded = serde_json::to_value(EncodedHistoryToken {
+            next_page_token: bytes,
+        })
+        .unwrap()["nextPageToken"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mismatch = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "checkout", "runId": "request-run"},
+                    "nextPageToken": encoded
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            mismatch.to_string(),
+            "RunID in the request does not match the NextPageToken."
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }

@@ -209,6 +209,39 @@ pub fn allow_domain(
     }
 }
 
+/// Apply the generated method's rate-limit classification. Go deliberately
+/// observes but ignores denied worker request limits; user, visibility, async
+/// and worker-poll APIs return the policy error.
+pub fn allow_operation(
+    operation: &str,
+    info: &QuotaInfo,
+    max_worker_poll_delay: Duration,
+    user: &dyn Policy,
+    worker: &dyn Policy,
+    visibility: &dyn Policy,
+    asynchronous: &dyn Policy,
+    bypass: &dyn CallerBypass,
+) -> Result<(), CadenceError> {
+    let Some(rule) = operation_rule(operation) else {
+        return Ok(());
+    };
+    let result = allow_domain(
+        rule.class,
+        info,
+        max_worker_poll_delay,
+        user,
+        worker,
+        visibility,
+        asynchronous,
+        bypass,
+    );
+    if rule.reject_when_limited {
+        result
+    } else {
+        Ok(())
+    }
+}
+
 fn rate_limited() -> CadenceError {
     CadenceError::ServiceBusy(ServiceBusyError::new(
         "Too many outstanding requests to the cadence service",
@@ -305,6 +338,39 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("Too many outstanding requests"));
+    }
+
+    #[test]
+    fn generated_wrapper_ignores_worker_rate_denials_but_rejects_user_denials() {
+        let denied = setup(false, Ok(()));
+        let bypass = Bypass(AtomicBool::new(false));
+        let info = QuotaInfo::default();
+        assert!(allow_operation(
+            "RespondActivityTaskCompleted",
+            &info,
+            Duration::ZERO,
+            &denied,
+            &denied,
+            &denied,
+            &denied,
+            &bypass,
+        )
+        .is_ok());
+        assert_eq!(
+            allow_operation(
+                "StartWorkflowExecution",
+                &info,
+                Duration::ZERO,
+                &denied,
+                &denied,
+                &denied,
+                &denied,
+                &bypass,
+            )
+            .unwrap_err()
+            .to_string(),
+            "Too many outstanding requests to the cadence service"
+        );
     }
 
     #[test]

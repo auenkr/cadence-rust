@@ -144,6 +144,11 @@ these fixes; no green CI evidence covers the current changes.
   uses nested async request fields, sticky task-list base names, and decodes
   task-token requests before resolving their domain UUID through an injected
   `DomainNameLookup`.
+- Added `allow_operation` to apply Go's generated behavior: denied user,
+  visibility, async and poll requests return the rate-limit error, while worker
+  calls count the limit but ignore denial. History dispatch now decodes a
+  supplied continuation token and returns Go's invalid-token and run-ID
+  mismatch errors before backend invocation.
 - CI run
   [41175955180](https://github.com/auenkr/cadence-rust/actions/runs/41175955180)
   at `a26cf95b4e110bb4a2ec5902771d4e2a7552e0b4` was cancelled when a newer
