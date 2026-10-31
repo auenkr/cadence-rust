@@ -405,13 +405,7 @@ name = "cadence-frontend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "cadence-proto",
  "cadence-service-core",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
- "tonic",
 ]
 
 [[package]]
@@ -622,7 +616,14 @@ name = "cadence-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
+ "cadence-proto",
  "cadence-service-core",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tonic",
 ]
 
 [[package]]

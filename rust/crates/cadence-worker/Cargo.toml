@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 cadence-service-core = { path = "../cadence-service-core" }
 cadence-proto = { path = "../cadence-proto" }
 serde = { version = "1", features = ["derive"] }

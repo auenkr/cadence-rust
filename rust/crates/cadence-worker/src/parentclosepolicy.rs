@@ -10,6 +10,7 @@ pub const TERMINATE_REASON: &str = "by parent close policy";
 
 /// Cadence workflow execution identifiers use Go's exported-field JSON names.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct WorkflowExecution {
     #[serde(rename = "WorkflowID")]
     pub workflow_id: String,
@@ -18,7 +19,8 @@ pub struct WorkflowExecution {
 }
 
 /// A child execution and the policy inherited from its parent workflow.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct RequestDetail {
     #[serde(rename = "DomainID")]
     pub domain_id: String,
@@ -35,6 +37,7 @@ pub struct RequestDetail {
 
 /// Signal payload consumed by the parent-close-policy system workflow.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
 pub struct Request {
     #[serde(rename = "ParentExecution")]
     pub parent_execution: WorkflowExecution,
