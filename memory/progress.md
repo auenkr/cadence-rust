@@ -2025,3 +2025,9 @@ fresh exact-head package validation is required. See
 Run [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
 failed at Clippy on a redundant `&str.clone()` in the merged Matching adapter;
 removed it and recorded the repair in the Frontend integration log.
+Then merged current `origin/frontend-core2` (`ce13c6b89`) and `origin/master`
+(`51260ba6a`); the workflow-api ref remains an ancestor. Existing run
+[41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105)
+is still in progress at old source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`
+and predates these latest merges. The pushed handoff head needs fresh exact-head
+Frontend package CI. See `memory/frontend-domain-admin-2026-10-31.md`.

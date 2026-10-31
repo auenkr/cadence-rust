@@ -1382,3 +1382,42 @@ migration forward.
   when creating `CassandraDomainMetadataStore`. Removed the redundant call to
   preserve the core2 API usage. Fresh package CI is required; no Cargo command
   ran locally.
+
+## Successor handoff — 2026-10-31
+
+- Branch `frontend-domain-admin` includes the requested workflow-api branch and
+  the latest fetched upstream refs. After the previous integration refresh,
+  `origin/frontend-core2` advanced to `ce13c6b8998b60be2c72150feca8372070d1e69e`;
+  merged it, retaining the new named Go task-list validator cases and core2
+  evidence. `origin/master` advanced to
+  `51260ba6a301d8ebb431832adc995a039526ba18`; merged its
+  `frontend-worker-orchestration-20261031.md`. The workflow-api ref
+  `cbb69d675a00355a1e4e69e07b5affaf4bb36e6d` is an ancestor. No merge conflict
+  remained in this refresh. Verify all three ancestry checks after pushing.
+- Latest existing Frontend package run is
+  [41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105),
+  targeting source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`. At handoff it
+  is `in_progress`, last observed in the Go raw-byte string oracle; it does not
+  include the subsequently merged validator tests/current core2 and master
+  docs. Earlier run [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
+  failed Clippy at that SHA because of a redundant `&str.clone()`; the fix is
+  commit `ce2aab17b`.
+- **Current tree is not CI-validated and must not be marked green.** Dispatch
+  `gh workflow run rust-ci.yml --ref frontend-domain-admin -f package=cadence-frontend`
+  after pushing the handoff commit, check `gh run list/view`, fix any failures,
+  and record the exact pushed source SHA and final conclusion here before more
+  feature work.
+- Next implementation slice: port Go's failover-history persistence across
+  restart. `InMemoryDomainStore.failover_history` currently reads the in-memory
+  `DomainRecord.failover_audit`, while `PersistedFrontendDomainManager` only
+  persists the flattened domain metadata. Define durable representation and
+  read/write behavior matching Go's audit/history contract, then add tests for
+  restart/reopen and paging. After that continue History-backed Admin DLQ/raw
+  history, dynamic-config writes/authorization, live membership, search
+  attribute backend mutation, and scheduler workflow dispatch/retry/lifecycle.
+- Remaining parity blockers: durable failover audit/history; complete Admin
+  History RPCs and raw-history pagination; backed dynamic config and
+  authorization; live membership; search-attribute persistence mutation;
+  scheduler workflow wiring and RPC lifecycle/retries/metrics; complete Domain
+  failover cooldown/replication semantics; and mixed Go/Rust failure,
+  restart/recovery acceptance. No service-parity claim is made.
