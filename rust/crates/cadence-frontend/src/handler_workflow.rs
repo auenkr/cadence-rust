@@ -247,6 +247,7 @@ pub struct Handler<B> {
     version_check: Option<VersionCheck>,
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
+    visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
@@ -276,6 +277,13 @@ pub trait RequestRateLimit: Send + Sync {
 /// needs the configured visibility dialect and registered search attributes.
 pub trait VisibilityQueryValidator: Send + Sync {
     fn validate_query(&self, query: &str) -> Result<String, CadenceError>;
+}
+
+/// Go's `DisableListVisibilityByFilter` dynamic property is evaluated for
+/// every open/closed visibility request that selects a workflow, type, or
+/// status filter. The policy is injected because it depends on live config.
+pub trait VisibilityFilterPolicy: Send + Sync {
+    fn filters_disabled(&self, domain: &str) -> bool;
 }
 
 /// Live `frontend.validSearchAttributes` property used by Go's local
@@ -309,6 +317,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            visibility_filter_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -330,6 +339,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            visibility_filter_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -356,6 +366,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            visibility_filter_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -418,6 +429,14 @@ impl<B: WorkflowBackend> Handler<B> {
         validator: Arc<dyn VisibilityQueryValidator>,
     ) -> Self {
         self.visibility_query_validator = Some(validator);
+        self
+    }
+
+    pub fn with_visibility_filter_policy(
+        mut self,
+        policy: Arc<dyn VisibilityFilterPolicy>,
+    ) -> Self {
+        self.visibility_filter_policy = Some(policy);
         self
     }
 
@@ -1002,6 +1021,26 @@ impl<B: WorkflowBackend> Handler<B> {
                 }
             }
         }
+        if matches!(
+            operation,
+            WorkflowOperation::ListOpenWorkflowExecutions
+                | WorkflowOperation::ListClosedWorkflowExecutions
+        ) {
+            let has_filter = ["executionFilter", "typeFilter", "statusFilter"]
+                .iter()
+                .any(|key| value.get(*key).is_some_and(|filter| !filter.is_null()));
+            if has_filter
+                && self.visibility_filter_policy.as_ref().is_some_and(|policy| {
+                    policy.filters_disabled(
+                        value.get("domain").and_then(Value::as_str).unwrap_or_default(),
+                    )
+                })
+            {
+                return Err(CadenceError::BadRequest(BadRequestError::new(
+                    "No permission to do this operation.",
+                )));
+            }
+        }
         Ok(value)
     }
 }
@@ -1399,6 +1438,14 @@ mod tests {
         fn validate_query(&self, query: &str) -> Result<String, CadenceError> {
             self.0.lock().unwrap().push(query.to_owned());
             Ok(format!("validated:{query}"))
+        }
+    }
+
+    struct DisabledVisibilityFilters(&'static str);
+
+    impl VisibilityFilterPolicy for DisabledVisibilityFilters {
+        fn filters_disabled(&self, domain: &str) -> bool {
+            domain == self.0
         }
     }
 
@@ -2295,5 +2342,46 @@ mod tests {
         );
         assert_eq!(response["query"], "validated:WorkflowType = 'checkout'");
         assert_eq!(response["futureSdkField"], "kept");
+    }
+
+    #[tokio::test]
+    async fn filtered_visibility_list_obeys_domain_dynamic_filter_gate() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_visibility_filter_policy(Arc::new(DisabledVisibilityFilters("shop")));
+        let error = handler
+            .dispatch(
+                "ListOpenWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "shop",
+                    "startTimeFilter": {"earliestTime": 1, "latestTime": 2},
+                    "executionFilter": {"workflowId": "wf"}
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "No permission to do this operation.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unfiltered_visibility_list_is_not_blocked_by_filter_gate() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_visibility_filter_policy(Arc::new(DisabledVisibilityFilters("shop")));
+        handler
+            .dispatch(
+                "ListOpenWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "shop",
+                    "startTimeFilter": {"earliestTime": 1, "latestTime": 2}
+                }),
+            )
+            .await
+            .unwrap();
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1["domainUUID"], "uuid:shop");
     }
 }

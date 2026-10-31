@@ -486,3 +486,35 @@ these fixes; no green CI evidence covers the current changes.
 - Superseded run [41181861730](https://github.com/auenkr/cadence-rust/actions/runs/41181861730)
   for `c0fd8529700a44c5f8eafb690325ea89a8f65c7f` was cancelled after the next
   code checkpoint was pushed, so it is not validation evidence.
+
+## Workflow implementation continuation — 2026-10-31
+
+- The current `t3/frontend-workflow-api` HEAD before this continuation was
+  `2fb3fa9269f8217c9b084e0382805786e35f5526`, already based on
+  `origin/frontend-core`; `origin/frontend-core2` is at
+  `def795959ee2b7771c34644a2c6a227fef2748ad`. The branch therefore required no
+  additional rebase. No frontend-core2 client/persistence source was modified.
+- Exact-head CI run
+  [41182354458](https://github.com/auenkr/cadence-rust/actions/runs/41182354458)
+  checked `2fb3fa9269f8217c9b084e0382805786e35f5526` and concluded `failure` at
+  Frontend rustfmt. Formatting is being requested through the workflow's
+  `format_frontend_files=true` mode; no Cargo/rustfmt command was run locally.
+  Formatting CI run
+  [41182558949](https://github.com/auenkr/cadence-rust/actions/runs/41182558949)
+  targets that same HEAD and was still `in_progress` at this save.
+- Added `VisibilityFilterPolicy` to the workflow handler so filtered open and
+  closed visibility requests can consult Go's live
+  `DisableListVisibilityByFilter(domain)` setting after request validation and
+  before backend dispatch. A denied filtered request returns Go's exact
+  `BadRequestError` text, `No permission to do this operation.` New tests cover
+  the denial and the unfiltered path. `git diff --check` passed; these tests
+  require the next package CI run.
+- This continuation is incomplete. The Generic `WorkflowBackend::invoke`
+  remains only an operation seam and no production implementation is installed
+  by the shared launcher. Stateful wrappers and operation-specific JSON
+  shaping do not by themselves establish production Thrift/gRPC dispatch or
+  all method parity. Archive reads, history pagination/raw/archive retrieval,
+  poll/respond transformation, restart/diagnose behavior, visibility result
+  routing/filter configuration, and async ThriftRW publishing still need the
+  corresponding injected service interfaces and implementations. No current
+  source has a green exact-head CI result yet.
