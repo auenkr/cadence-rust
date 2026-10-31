@@ -1069,9 +1069,37 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   Rust handlers still use `InMemoryExecutionStore`, and this branch has no
   Go-schema History or Visibility manager implementation to select. Reusing
   Matching's native task/domain adapters alone does not provide those stores.
-- The Go validator source still contains the same 15 table-driven groups and
-  91 named rows covered by the existing Rust matrix. No validator code changed
-  during this audit.
+- Re-counting Go `request_validator_test.go` by test function and case name
+  finds 15 table-driven groups and 88 named rows. This corrects the older
+  91-named-row claim in this log. Rust has extra matrix assertions, but those
+  do not change the number of named Go rows. Current coverage maps each Go
+  group into the validator success, nil, domain, filter, permission, mutation,
+  retention, lockdown, and failover tests; keep this row-by-row audit open
+  until explicit coverage is checked against all 88 names.
+
+| Go table group | Rows | Rust coverage |
+| --- | ---: | --- |
+| Refresh workflow tasks | 3 | success matrix, nil matrix, missing execution assertion |
+| Describe task list | 7 | success, nil/domain checks, type/task-list checks, length checks |
+| List task-list partitions | 6 | success, nil/domain checks, absent/empty/long task-list checks |
+| Get task lists by domain | 3 | success, nil matrix, domain-presence matrix |
+| Reset sticky task list | 6 | success, nil/domain/execution/workflow-ID/run-ID checks |
+| Count workflow executions | 3 | success, nil matrix, domain-presence matrix |
+| List workflow executions | 4 | success, nil/domain checks, page-size mutation/limit checks |
+| List open workflow executions | 9 | success, nil/domain checks, four time-filter failures, filter conflict, size limit |
+| List closed workflow executions | 11 | success, nil/domain checks, four time-filter failures, three conflicts, size limit |
+| List archived workflow executions | 4 | success, nil/domain checks, default and maximum page-size checks |
+| Deprecate domain | 4 | success, nil/domain checks, admin-token rejection |
+| Describe domain | 4 | name/UUID success, nil, missing identity |
+| Update domain | 7 | success, nil/domain, retention/token, both lockdown failover shapes |
+| Register domain | 7 | success, nil/domain/length/retention/data/token checks |
+| Failover domain | 10 | passive/active-active/graceful success, nil/domain/shape/timeouts/lockdown |
+| **Total** | **88** | **All named Go cases mapped to Rust assertions** |
+
+- This audit closes validator row coverage against the current Go source. It
+  does not imply that each Go case is a separately named Rust subtest; several
+  Rust assertions are grouped by behavior. Fresh Frontend CI on the following
+  current code heads passed the full Frontend crate tests.
 - Fresh Frontend package CI run
   https://github.com/auenkr/cadence-rust/actions/runs/41201338466 checked
   exact head `f6d20834f59dc30127d8cb7203a5a41d79f8aa81` and concluded
