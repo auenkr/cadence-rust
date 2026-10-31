@@ -68,7 +68,15 @@ pub fn attributes_for_request(
         "PollForActivityTask" | "PollForDecisionTask" => Process,
         _ => return None,
     };
-    let domain = request
+    let request_fields = if matches!(
+        operation,
+        "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync"
+    ) {
+        request.get("request").unwrap_or(request)
+    } else {
+        request
+    };
+    let domain = request_fields
         .get("domain")
         .and_then(Value::as_str)
         .unwrap_or_default()
@@ -92,8 +100,8 @@ pub fn attributes_for_request(
         permission: Some(permission),
         actor: actor.to_owned(),
         domain,
-        task_list: request.get("taskList").cloned(),
-        workflow_type: request.get("workflowType").cloned(),
+        task_list: request_fields.get("taskList").cloned(),
+        workflow_type: request_fields.get("workflowType").cloned(),
         // Go's NewFilteredRequestBody JSON-serializes the full API request.
         request_body: Some(request_body),
     })
@@ -247,13 +255,16 @@ mod tests {
             "request": {"domain": "shop", "input": "secret", "signalInput": "secret"}
         });
         assert_eq!(
-            attributes_for_request(
+            {
+                let attributes = attributes_for_request(
                 "SignalWithStartWorkflowExecutionAsync",
                 &async_request,
                 "worker"
             )
-            .unwrap()
-            .request_body,
+                .unwrap();
+                assert_eq!(attributes.domain, "shop");
+                attributes.request_body
+            },
             Some(serde_json::json!({"request": {"domain": "shop"}}))
         );
 

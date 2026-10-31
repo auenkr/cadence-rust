@@ -64,6 +64,14 @@ pub struct MetricTag {
 /// Tags emitted by Go's per-operation metered wrapper helpers. Methods without
 /// a helper intentionally produce an empty list.
 pub fn request_tags(operation: &str, request: &serde_json::Value) -> Vec<MetricTag> {
+    let request = if matches!(
+        operation,
+        "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync"
+    ) {
+        request.get("request").unwrap_or(request)
+    } else {
+        request
+    };
     let mut tags = Vec::new();
     let mut add = |key, value: String| tags.push(MetricTag { key, value });
     let domain = || string_field(request, "domain");
@@ -307,6 +315,27 @@ mod tests {
                 MetricTag { key: "wf-domain-name", value: "d".into() },
                 MetricTag { key: "wf-id", value: "w".into() },
                 MetricTag { key: "wf-run-id", value: "r".into() },
+            ]
+        );
+
+        let async_tags = request_tags(
+            "StartWorkflowExecutionAsync",
+            &serde_json::json!({
+                "request": {
+                    "domain": "async-domain",
+                    "workflowId": "async-workflow",
+                    "workflowType": {"name": "async-type"},
+                    "cronSchedule": "@daily"
+                }
+            }),
+        );
+        assert_eq!(
+            async_tags,
+            vec![
+                MetricTag { key: "wf-domain-name", value: "async-domain".into() },
+                MetricTag { key: "wf-id", value: "async-workflow".into() },
+                MetricTag { key: "wf-type", value: "async-type".into() },
+                MetricTag { key: "wf-cron-schedule", value: "@daily".into() },
             ]
         );
     }

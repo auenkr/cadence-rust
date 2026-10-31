@@ -205,22 +205,42 @@ impl<B: WorkflowBackend> Handler<B> {
         operation: WorkflowOperation,
         value: Value,
     ) -> Result<Value, CadenceError> {
-        if operation == WorkflowOperation::StartWorkflowExecution {
+        if matches!(
+            operation,
+            WorkflowOperation::StartWorkflowExecution
+                | WorkflowOperation::StartWorkflowExecutionAsync
+                | WorkflowOperation::SignalWithStartWorkflowExecution
+                | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+        ) {
+            let request_value = if matches!(
+                operation,
+                WorkflowOperation::StartWorkflowExecutionAsync
+                    | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+            ) {
+                value.get("request").cloned().unwrap_or(Value::Null)
+            } else {
+                value.clone()
+            };
+            if request_value.is_null() {
+                return Err(cadence_api::validation::err_request_not_set().into());
+            }
             let request: cadence_api::types::StartWorkflowExecutionRequest =
-                serde_json::from_value(value.clone()).map_err(|error| {
+                serde_json::from_value(request_value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
             self.validator.validate_start(Some(&request))?;
-            return Ok(value);
-        }
-        if operation == WorkflowOperation::StartWorkflowExecutionAsync {
-            // The Go async request anonymously embeds StartWorkflowExecutionRequest,
-            // so JSON and the generated transport shape are flattened.
-            let request: cadence_api::types::StartWorkflowExecutionRequest =
-                serde_json::from_value(value.clone()).map_err(|error| {
-                    CadenceError::BadRequest(BadRequestError::new(error.to_string()))
-                })?;
-            self.validator.validate_start(Some(&request))?;
+            if matches!(
+                operation,
+                WorkflowOperation::SignalWithStartWorkflowExecution
+                    | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+            ) && request_value
+                .get("signalName")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err(cadence_api::validation::err_signal_name_not_set().into());
+            }
             return Ok(value);
         }
         if operation == WorkflowOperation::GetWorkflowExecutionHistory {
@@ -257,18 +277,23 @@ impl<B: WorkflowBackend> Handler<B> {
             } else {
                 "workflowExecution"
             };
-            validate_execution_field(&value, field, &self.validator)?;
-            if operation == WorkflowOperation::DiagnoseWorkflowExecution
-                && value
-                    .get("workflowExecution")
+            if operation == WorkflowOperation::DiagnoseWorkflowExecution {
+                let execution = value.get(field);
+                let workflow_id = execution
+                    .and_then(|execution| execution.get("workflowId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let run_id = execution
                     .and_then(|execution| execution.get("runId"))
                     .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .is_empty()
-            {
-                return Err(CadenceError::BadRequest(BadRequestError::new(
-                    "Execution is not set on request.",
-                )));
+                    .unwrap_or_default();
+                if workflow_id.is_empty() || run_id.is_empty() {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "Execution is not set on request.",
+                    )));
+                }
+            } else {
+                validate_execution_field(&value, field, &self.validator)?;
             }
             if operation == WorkflowOperation::QueryWorkflow {
                 let query = value.get("query").filter(|query| !query.is_null());
@@ -346,7 +371,16 @@ fn validate_ratelimit_wrapper_request(
     }
     use crate::wrappers::ratelimited::RequestClass;
     if rule.class != RequestClass::Worker {
-        if request
+        let domain = if matches!(
+            operation,
+            WorkflowOperation::StartWorkflowExecutionAsync
+                | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+        ) {
+            request.get("request").unwrap_or(request)
+        } else {
+            request
+        };
+        if domain
             .get("domain")
             .and_then(Value::as_str)
             .unwrap_or_default()
@@ -487,7 +521,7 @@ mod tests {
         let error = handler
             .dispatch(
                 "StartWorkflowExecutionAsync",
-                serde_json::json!({"domain": "d"}),
+                serde_json::json!({"request": {"domain": "d"}}),
             )
             .await
             .unwrap_err();
@@ -544,17 +578,19 @@ mod tests {
     #[tokio::test]
     async fn diagnose_requires_complete_execution_before_backend() {
         let handler = Handler::new(FakeBackend::default());
-        let error = handler
-            .dispatch(
-                "DiagnoseWorkflowExecution",
-                serde_json::json!({
-                    "domain": "shop",
-                    "workflowExecution": {"workflowId": "checkout"}
-                }),
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(error.to_string(), "Execution is not set on request.");
+        for execution in [
+            serde_json::json!({"workflowId": "checkout"}),
+            serde_json::json!({"runId": "run-1"}),
+        ] {
+            let error = handler
+                .dispatch(
+                    "DiagnoseWorkflowExecution",
+                    serde_json::json!({"domain": "shop", "workflowExecution": execution}),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.to_string(), "Execution is not set on request.");
+        }
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 

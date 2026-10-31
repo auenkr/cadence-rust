@@ -125,6 +125,11 @@ these fixes; no green CI evidence covers the current changes.
   async requests as Go's `json:"-"` fields do. Metering normalizes errors
   outside Go's typed error switch to the generic internal error and increments
   failures.
+- Async start and signal-with-start wrappers carry an explicit nested
+  `request` in the Cadence Thrift shape. Handler validation, rate-limit
+  preflight, authorization attributes and metered tags now unwrap that request
+  for Go's promoted domain/workflow/task-list fields while preserving the
+  original envelope for dispatch.
 - CI run
   [41175955180](https://github.com/auenkr/cadence-rust/actions/runs/41175955180)
   at `a26cf95b4e110bb4a2ec5902771d4e2a7552e0b4` was cancelled when a newer
