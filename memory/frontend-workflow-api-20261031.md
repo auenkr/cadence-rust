@@ -948,3 +948,9 @@ Frontend parity until these are implemented and validated.
   state lookup errors. Updated the bad-binary error to Go's exact BadRequest
   rather than empty success and added tests for error ordering, wait expiry and
   fail-open behavior. These latest poll changes have not yet been CI-tested.
+- Poll isolation continuation run
+  [41195893803](https://github.com/auenkr/cadence-rust/actions/runs/41195893803)
+  succeeded at `aefa69ce8c61e5e3680c073f76f4bf494d3aa58d`. It passed Clippy,
+  formatting and tests in the runner workspace with the poll ordering/error
+  changes. The rustfmt artifact was downloaded; an exact committed-head run is
+  pending.

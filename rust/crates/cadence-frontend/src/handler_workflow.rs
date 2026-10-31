@@ -654,10 +654,7 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
-    pub fn with_poll_isolation_waiter(
-        mut self,
-        waiter: Arc<dyn PollIsolationGroupWaiter>,
-    ) -> Self {
+    pub fn with_poll_isolation_waiter(mut self, waiter: Arc<dyn PollIsolationGroupWaiter>) -> Self {
         self.poll_isolation_waiter = Some(waiter);
         self
     }
@@ -3831,8 +3828,7 @@ mod tests {
     async fn poll_isolation_wait_exhaustion_returns_empty_without_matching_call() {
         let waiter = Arc::new(RejectPollIsolationWait::default());
         let backend = CapturingBackend::default();
-        let handler = Handler::new(backend)
-            .with_poll_isolation_waiter(waiter.clone());
+        let handler = Handler::new(backend).with_poll_isolation_waiter(waiter.clone());
         let caller = CallerMetadata {
             isolation_group: "drained-workers".into(),
             deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
