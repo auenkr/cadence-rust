@@ -1893,3 +1893,7 @@ rules, and checks cron/time range, policies, and reserved search attributes.
 Changes are in `handler_domain.rs` and `handler_schedule.rs`; exact Go RPC
 runtime wiring, most Admin operations, mixed service validation, and current
 CI verification remain open. See `memory/frontend-domain-admin-2026-10-31.md`.
+
+The same checkpoint adds the Go-shaped `DescribeCluster` response builder in
+`handler_admin.rs`; live membership collection and transport wiring are not
+included in this helper-level slice.

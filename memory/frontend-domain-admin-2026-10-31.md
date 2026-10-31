@@ -62,8 +62,11 @@
   schedule validation changed the source.
 - Fresh package run [41173422606](https://github.com/auenkr/cadence-rust/actions/runs/41173422606)
   targets head `9a920ed2c8ae7b060b83d5b98e022cda0e0e9dfd`. Its conclusion is
-  pending; inspect with `gh run view 41173422606` before treating any code as
-  CI-verified.
+  cancelled after Admin source changed.
+- Fresh package run [41173547050](https://github.com/auenkr/cadence-rust/actions/runs/41173547050)
+  targets head `e6f7d159923b3295e455f0959c7b3af4973aaa2e`. Its conclusion is
+  pending; inspect with `gh run view 41173547050` before treating the new Admin
+  code as CI-verified.
 
 ## Known gaps — do not claim service parity
 
