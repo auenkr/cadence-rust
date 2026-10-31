@@ -1155,3 +1155,6 @@ Frontend parity until these are implemented and validated.
   Cassandra domain persistence import corrections and typed History client
   methods. The current branch includes later memory-only commits, so dispatch
   a final exact-head package run before treating the current tree as validated.
+- Exact-head package run [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
+  is dispatched with `clean_target=true` for `db22d15a3be324ee2ccb301f9f8b27fd9dd9323e`;
+  status and conclusion are pending.
