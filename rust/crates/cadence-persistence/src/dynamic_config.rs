@@ -687,8 +687,10 @@ pub fn string_domain(values: impl PropertyValueSource, domain: &str, default: &s
             .and_then(|value| value.as_str().map(str::to_owned))
             .unwrap_or_else(|| default.into());
     }
-    match selected(values.snapshot_values(), Some(domain)).and_then(|value| value.as_str()) {
-        Some(value) => value.to_owned(),
+    match selected(values.snapshot_values(), Some(domain))
+        .and_then(|value| value.as_str().map(str::to_owned))
+    {
+        Some(value) => value,
         None => default.to_owned(),
     }
 }
