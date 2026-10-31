@@ -334,7 +334,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     } else {
         cadence_persistence::version_history::EMPTY_VERSION
     };
-    match state.domains.create_with_version(
+    match state.domain_manager.create_with_version(
         info,
         configuration,
         replication,
@@ -345,7 +345,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             state.executions.register_domain(
                 &req.name,
                 &state
-                    .domains
+                    .domain_manager
                     .domain_id(&req.name)
                     .expect("registered domain"),
             );
@@ -372,7 +372,7 @@ async fn handle_describe_domain(state: &AppState, body: &Struct) -> HandlerResul
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.describe(&req) {
+    match state.domain_manager.describe(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(e) => Err(AppError::entity_not_exists(e.message)),
     }
@@ -382,7 +382,7 @@ async fn handle_list_domains(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::service_types::ListDomainsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(e.to_string()))?;
     let response = state
-        .domains
+        .domain_manager
         .list_page(&request)
         .map_err(|e| AppError::bad_request(e.message))?;
     Ok(wrap_success(&response))
@@ -496,7 +496,7 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.update(
+    match state.domain_manager.update(
         &req,
         &state.cluster_metadata,
         &state.domain_policy(&req.name),
@@ -522,7 +522,7 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
         ));
     }
     let current = state
-        .domains
+        .domain_manager
         .describe(&DescribeDomainRequest {
             name: Some(req.name.clone()),
             uuid: None,
@@ -534,7 +534,7 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
                 .to_string(),
         ));
     }
-    match state.domains.deprecate(&req) {
+    match state.domain_manager.deprecate(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(AppError::entity_not_exists(e.message)),
     }
@@ -1568,7 +1568,7 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domains.failover(
+    match state.domain_manager.failover(
         &req,
         &state.current_cluster_name,
         &state.cluster_metadata,
@@ -1609,7 +1609,7 @@ async fn handle_list_failover_history(state: &AppState, body: &Struct) -> Handle
         .map(|p| p.next_page_token.clone())
         .unwrap_or_default();
     match state
-        .domains
+        .domain_manager
         .failover_history(&domain_id, page_size, &page_token)
     {
         Ok((events, next_page_token)) => Ok(wrap_success(&ListFailoverHistoryResponse {

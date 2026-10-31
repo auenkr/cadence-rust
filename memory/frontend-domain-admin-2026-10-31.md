@@ -598,3 +598,9 @@ migration forward.
   implement a manager that commits against the configured Go SQL/Cassandra
   domain tables. Global-domain replication queue transmission and consumption
   remain open.
+- Extended the new `FrontendDomainManager` seam to Thrift/YARPC Domain CRUD,
+  update, failover, and failover-history routes. Those methods had still called
+  `state.domains` directly, which would bypass any injected persistence-backed
+  manager even after JSON paths used the seam. The remaining direct domain-store
+  uses in Admin are cache/isolated config operations and require their own
+  persistence contracts. `git diff --check` passes; no Cargo command was run.
