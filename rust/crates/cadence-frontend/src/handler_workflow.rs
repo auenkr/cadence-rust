@@ -10,6 +10,7 @@
 use cadence_api::errors::{BadRequestError, CadenceError};
 use cadence_api::{service_types, tasks};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -247,6 +248,7 @@ pub struct Handler<B> {
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
+    search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
     health_status: Arc<AtomicU8>,
 }
@@ -276,6 +278,12 @@ pub trait VisibilityQueryValidator: Send + Sync {
     fn validate_query(&self, query: &str) -> Result<String, CadenceError>;
 }
 
+/// Live `frontend.validSearchAttributes` property used by Go's local
+/// GetSearchAttributes handler and visibility validators.
+pub trait SearchAttributeProvider: Send + Sync {
+    fn valid_search_attributes(&self) -> HashMap<String, cadence_api::enums::IndexedValueType>;
+}
+
 #[derive(Clone)]
 struct VersionCheck {
     enabled: bool,
@@ -302,6 +310,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             domain_lookup: None,
+            search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -322,6 +331,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             domain_lookup: None,
+            search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -347,6 +357,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             domain_lookup: None,
+            search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -415,6 +426,14 @@ impl<B: WorkflowBackend> Handler<B> {
     /// domain names; only the outbound service request receives the UUID.
     pub fn with_domain_lookup(mut self, lookup: Arc<dyn WorkflowDomainLookup>) -> Self {
         self.domain_lookup = Some(lookup);
+        self
+    }
+
+    pub fn with_search_attribute_provider(
+        mut self,
+        provider: Arc<dyn SearchAttributeProvider>,
+    ) -> Self {
+        self.search_attributes = Some(provider);
         self
     }
 
@@ -549,6 +568,15 @@ impl<B: WorkflowBackend> Handler<B> {
                     "javaSdk": "1.5.0"
                 }
             }));
+        }
+        if operation == WorkflowOperation::GetSearchAttributes {
+            if let Some(provider) = &self.search_attributes {
+                let response = tasks::GetSearchAttributesResponse {
+                    keys: Some(provider.valid_search_attributes()),
+                };
+                return serde_json::to_value(response)
+                    .map_err(|error| CadenceError::Unknown(error.to_string()));
+            }
         }
         let request = self.validate_request(operation, request)?;
         let request = self.prepare_backend_request(operation, request)?;
@@ -1374,6 +1402,19 @@ mod tests {
         }
     }
 
+    struct StaticSearchAttributes;
+
+    impl SearchAttributeProvider for StaticSearchAttributes {
+        fn valid_search_attributes(
+            &self,
+        ) -> HashMap<String, cadence_api::enums::IndexedValueType> {
+            HashMap::from([(
+                "CustomKeywordField".to_owned(),
+                cadence_api::enums::IndexedValueType::Keyword,
+            )])
+        }
+    }
+
     #[test]
     fn operation_names_round_trip_and_include_list_tasklist_surface() {
         assert_eq!(WorkflowOperation::ALL.len(), 40);
@@ -1459,6 +1500,20 @@ mod tests {
                     "javaSdk": "1.5.0"
                 }
             })
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_attributes_uses_local_dynamic_config_provider() {
+        let handler = Handler::new(FakeBackend::default())
+            .with_search_attribute_provider(Arc::new(StaticSearchAttributes));
+        assert_eq!(
+            handler
+                .dispatch("GetSearchAttributes", Value::Null)
+                .await
+                .unwrap(),
+            serde_json::json!({"keys": {"CustomKeywordField": "KEYWORD"}})
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }

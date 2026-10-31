@@ -467,3 +467,8 @@ these fixes; no green CI evidence covers the current changes.
   historical `DomainUIID` JSON spelling and its nested `request` field, based
   on `go/common/types/history.go`. This is included in the pending next CI
   checkpoint.
+- Added a live search-attribute provider seam and local GetSearchAttributes
+  response construction from Go's `frontend.validSearchAttributes` behavior,
+  plus a unit test. Production config must inject this provider; absent one,
+  the bootstrap/test backend path remains available. These latest edits have
+  not yet been pushed or validated.
