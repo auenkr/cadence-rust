@@ -953,3 +953,27 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   `archival_status` member. Preserved the existing raw archival status instead
   of reading a nonexistent field. This run predates the SQLite manager wiring
   now in the working tree and provides no test evidence.
+
+### SQL and manager checkpoint — 2026-10-31
+
+- The latest SQL domain continuation adds transactional SQLite `domains` and
+  `domain_metadata` writes and shares the `GoSqlDomainPersistence` adapter with
+  MySQL and PostgreSQL. The configured SQL factory already exposes all three
+  implementations to `GoSqlFrontendDomainManager`; exact-head integration and
+  Go file/database interoperability evidence are still needed before treating
+  those manager paths as complete.
+- Run
+  https://github.com/auenkr/cadence-rust/actions/runs/41196972641 checked
+  `73501c8c6a2b4f70e29d2a4998a0d74c0ca5141` and failed at Clippy before tests.
+  The three findings were two redundant closures and one elidable lifetime in
+  `domains.rs`. They are fixed in pushed head
+  `a84001cf702f65cb2769d2a4998a0d74c0ca5141`.
+- Exact-head Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41197272110 was
+  dispatched for `a84001cf702f65cb2769d2a4998a0d74c0ca5141`; its final
+  conclusion must be recorded after completion.
+- Still open: Cassandra domain/metadata writes and selection; production SQL
+  and Cassandra Visibility, History, and Execution managers; registration and
+  tests for the Go seven global quota collection owners. The Go validator
+  matrix remains covered by the earlier fresh-target 91-case evidence; no
+  validator code changed here.
