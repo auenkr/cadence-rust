@@ -829,7 +829,7 @@ pub async fn count_dlq_messages(
             .into_iter()
             .map(|entry| cadence_api::admin::HistoryDLQCountEntry {
                 source_cluster: entry.source_cluster,
-                message_count: entry.message_count,
+                message_count: entry.count,
             })
             .collect(),
         domain,
