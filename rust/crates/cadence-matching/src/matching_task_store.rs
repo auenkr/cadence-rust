@@ -182,6 +182,7 @@ pub fn open_configured_default_store(
         let config = cassandra_config(nosql)?;
         let driver =
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        let domain_all_consistency_delete = all_consistency_delete.clone();
         let task_store = Arc::new(
             cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
                 driver.clone(),
@@ -198,7 +199,8 @@ pub fn open_configured_default_store(
         > = Arc::new(
             cadence_persistence::matching_domain_metadata::CassandraFrontendDomainPersistence::new(
                 domain_metadata.clone(),
-            ),
+            )
+            .with_all_consistency_delete(domain_all_consistency_delete),
         );
         return Ok(ConfiguredMatchingStores {
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
