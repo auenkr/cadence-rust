@@ -23,6 +23,19 @@
   registration paths. No CI evidence is claimed for the merge until a
   package-specific run completes on its exact head. Cargo remains prohibited
   on the development host.
+- Package run
+  [41191670284](https://github.com/auenkr/cadence-rust/actions/runs/41191670284)
+  failed at exact head `f7c54ce5b74c59aa3b086031592e0f995a47f646` in Clippy
+  compilation: `cadence-service-core` was missing its direct `tracing`
+  dependency and the newly added limiter collection trait lacked the `Debug`
+  bound required by `AppState`. Both merge regressions are fixed in source and
+  lockfile; the follow-up CI run is pending.
+- Added an injectable poll admission boundary so production can match Go's
+  decision bad-binary check and drained-isolation wait before Matching is
+  called. A Go-shaped regression test checks the domain, isolation group,
+  checksum, decision-poll flag, empty response and skipped backend dispatch.
+  This remains unvalidated pending package CI and still needs runtime policy
+  wiring plus request-deadline/cancellation integration.
 
 ## Current branch and skeleton state
 

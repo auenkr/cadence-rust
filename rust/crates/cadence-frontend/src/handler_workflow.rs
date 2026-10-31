@@ -251,6 +251,7 @@ pub struct Handler<B> {
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
+    poll_admission: Option<Arc<dyn PollAdmissionPolicy>>,
     async_publisher: Option<Arc<dyn AsyncWorkflowPublisher>>,
     outstanding_poll_canceller: Option<Arc<dyn OutstandingPollCanceller>>,
     blob_size_policy: Option<Arc<dyn WorkflowBlobSizePolicy>>,
@@ -279,6 +280,20 @@ pub struct CallerMetadata {
 /// The implementation owns both the dynamic enable flag and the state lookup.
 pub trait IsolationGroupState: Send + Sync {
     fn is_drained(&self, domain: &str, isolation_group: &str) -> Result<bool, String>;
+}
+
+/// Poll-specific preflight performed by Go before entering Matching. The
+/// implementation checks decision-poll bad binaries and waits for an enabled
+/// isolation group to become healthy. `false` returns Go's empty poll response
+/// when the caller's wait budget expires.
+pub trait PollAdmissionPolicy: Send + Sync {
+    fn admit<'a>(
+        &'a self,
+        domain: &'a str,
+        isolation_group: &'a str,
+        binary_checksum: &'a str,
+        decision_poll: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>>;
 }
 
 /// Runtime queue integration for the two Go asynchronous workflow methods.
@@ -415,6 +430,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
             blob_size_policy: None,
@@ -443,6 +459,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
             blob_size_policy: None,
@@ -476,6 +493,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
             blob_size_policy: None,
@@ -564,6 +582,11 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_isolation_group_state(mut self, state: Arc<dyn IsolationGroupState>) -> Self {
         self.isolation_group_state = Some(state);
+        self
+    }
+
+    pub fn with_poll_admission(mut self, policy: Arc<dyn PollAdmissionPolicy>) -> Self {
+        self.poll_admission = Some(policy);
         self
     }
 
@@ -847,7 +870,34 @@ impl<B: WorkflowBackend> Handler<B> {
                 return Ok(serde_json::json!({}));
             }
         }
+        let poll_domain = if matches!(
+            operation,
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
+        ) {
+            request.get("domain").and_then(Value::as_str).map(str::to_owned)
+        } else {
+            None
+        };
         let request = self.prepare_backend_request(operation, request, caller)?;
+        if let (Some(policy), Some(domain)) = (&self.poll_admission, poll_domain) {
+            let binary_checksum = request
+                .get("pollRequest")
+                .and_then(|poll| poll.get("binaryChecksum"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            if !policy
+                .admit(
+                    &domain,
+                    &caller.isolation_group,
+                    &binary_checksum,
+                    operation == WorkflowOperation::PollForDecisionTask,
+                )
+                .await?
+            {
+                return Ok(serde_json::json!({}));
+            }
+        }
         if operation == WorkflowOperation::RestartWorkflowExecution {
             return self
                 .restart_workflow_execution(request, target_cluster, caller)
@@ -1952,6 +2002,27 @@ mod tests {
     struct RecordingPollCanceller {
         calls: Mutex<Vec<(Value, Option<String>)>>,
         called: tokio::sync::Notify,
+    }
+
+    #[derive(Default)]
+    struct RejectPollAdmission(Mutex<Vec<(String, String, String, bool)>>);
+
+    impl PollAdmissionPolicy for RejectPollAdmission {
+        fn admit<'a>(
+            &'a self,
+            domain: &'a str,
+            isolation_group: &'a str,
+            binary_checksum: &'a str,
+            decision_poll: bool,
+        ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>> {
+            self.0.lock().unwrap().push((
+                domain.to_owned(),
+                isolation_group.to_owned(),
+                binary_checksum.to_owned(),
+                decision_poll,
+            ));
+            Box::pin(async { Ok(false) })
+        }
     }
 
     impl OutstandingPollCanceller for RecordingPollCanceller {
@@ -3308,6 +3379,41 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.to_string(), "TaskList is not set on request.");
         }
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn drained_poll_wait_returns_empty_response_without_matching_dispatch() {
+        let admission = Arc::new(RejectPollAdmission::default());
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_poll_admission(admission.clone());
+        let caller = CallerMetadata {
+            isolation_group: "blue-workers".into(),
+            ..Default::default()
+        };
+        let response = handler
+            .dispatch_with_metadata(
+                "PollForDecisionTask",
+                serde_json::json!({
+                    "domain": "shop",
+                    "taskList": {"name": "orders"},
+                    "binaryChecksum": "bad-build"
+                }),
+                &caller,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, serde_json::json!({}));
+        assert_eq!(
+            *admission.0.lock().unwrap(),
+            vec![(
+                "shop".into(),
+                "blue-workers".into(),
+                "bad-build".into(),
+                true
+            )]
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 

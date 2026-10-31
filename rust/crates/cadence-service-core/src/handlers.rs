@@ -40,7 +40,7 @@ use std::pin::Pin;
 
 /// A Frontend owned global quota collection. Go calls `OnStop` on each of its
 /// seven collections before opening the request drain window.
-pub trait FrontendLimiterCollection: Send + Sync {
+pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
     fn on_stop(
         &self,
@@ -2512,6 +2512,7 @@ mod frontend_drain_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
 
+    #[derive(Debug)]
     struct TestLimiter(Arc<AtomicUsize>);
 
     impl FrontendLimiterCollection for TestLimiter {
