@@ -899,3 +899,10 @@ Frontend parity until these are implemented and validated.
   rustfmt for the workflow/client edits and already-changed shared core files.
   This run passed Clippy and tests in the runner workspace after formatting,
   but the artifact itself has not yet been validated at a committed head.
+- Exact-head run
+  [41194204118](https://github.com/auenkr/cadence-rust/actions/runs/41194204118)
+  checked `84053080f39ba75fe6ce7c68c6934f97446d3bf2` and failed the
+  formatting gate. The remaining diff was in `handler_workflow_async.rs`, a
+  module omitted from the workflow's Frontend format-patch input and explicit
+  formatting check. The CI workflow now includes that file in both lists; a
+  runner-generated format patch and exact-head rerun are pending.
