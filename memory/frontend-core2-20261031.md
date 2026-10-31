@@ -136,6 +136,33 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   request-admission test that checks health turns unhealthy before the HTTP
   router rejects new calls. This strengthens the drain contract but does not
   supply the absent global quota-collection lifecycle owners.
+- Added exact-error assertions for the Go open/closed visibility time-filter
+  matrix, open/closed filter conflicts, and missing-domain precedence. This
+  supplements the earlier coverage that asserted only that selected cases
+  failed.
+
+## Follow-up continuation
+
+- At `be0432cc7dcffc39469bad1d7e09b6bebc34231d`, CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41178553763 was still
+  `in_progress` at the last check. Its runner was executing a large shared
+  Matching + Frontend gate and had not yet reached the Frontend package tests.
+- This follow-up adds exact message checks for all Go open/closed start-time
+  filter failures, the conflicting filter cases, and empty-domain validation.
+  Run fresh exact-head formatting, Clippy and Frontend tests on Actions before
+  treating this update as validated.
+- Persistence remains the largest open item. Frontend opens the configured
+  default SQL/Cassandra store through Matching's native adapter and performs a
+  read-only domain metadata bootstrap. It still has no write-capable durable
+  domain/metadata manager, no configured visibility manager, and no durable
+  History or execution managers. Go's advanced/default visibility datastore
+  selection is not connected to a manager.
+- Shutdown currently flips readiness, waits the configured failure-detection
+  interval, rejects new Frontend HTTP/gRPC requests, waits the request-drain
+  interval, then tears down Matching runtime/membership where present and
+  aborts listeners. The launcher does not own Go-equivalent Frontend workflow
+  and admin handler stop hooks or global quota-collection owners, so the full
+  `service.go` stop sequence is still incomplete.
 
 ## Remaining gaps (this branch is not Frontend complete)
 

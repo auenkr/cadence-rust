@@ -930,7 +930,7 @@ mod tests {
         ] {
             let mut request = ListOpenWorkflowExecutionsRequest {
                 domain: "domain".into(),
-                start_time_filter: Some(filter),
+                start_time_filter: Some(filter.clone()),
                 ..Default::default()
             };
             assert!(validator
@@ -1236,5 +1236,111 @@ mod tests {
                 ..Default::default()
             }))
             .unwrap();
+    }
+
+    #[test]
+    fn go_visibility_matrix_checks_exact_time_filter_and_filter_conflict_errors() {
+        let validator = RequestValidator::default();
+        let expected = [
+            (StartTimeFilter::default(), "EarliestTime in StartTimeFilter is required"),
+            (
+                StartTimeFilter {
+                    earliest_time: Some(1),
+                    ..Default::default()
+                },
+                "LatestTime in StartTimeFilter is required",
+            ),
+            (
+                StartTimeFilter {
+                    latest_time: Some(2),
+                    ..Default::default()
+                },
+                "EarliestTime in StartTimeFilter is required",
+            ),
+            (
+                StartTimeFilter {
+                    earliest_time: Some(3),
+                    latest_time: Some(2),
+                },
+                "EarliestTime in StartTimeFilter should not be larger than LatestTime",
+            ),
+        ];
+        for (filter, message) in expected {
+            let mut request = ListOpenWorkflowExecutionsRequest {
+                domain: "domain".into(),
+                start_time_filter: Some(filter),
+                ..Default::default()
+            };
+            assert_eq!(
+                validator
+                    .validate_list_open_workflow_executions_request(Some(&mut request))
+                    .unwrap_err()
+                    .message,
+                message
+            );
+            let mut request = ListClosedWorkflowExecutionsRequest {
+                domain: "domain".into(),
+                start_time_filter: Some(filter),
+                ..Default::default()
+            };
+            assert_eq!(
+                validator
+                    .validate_list_closed_workflow_executions_request(Some(&mut request))
+                    .unwrap_err()
+                    .message,
+                message
+            );
+        }
+
+        let time_filter = StartTimeFilter {
+            earliest_time: Some(1),
+            latest_time: Some(2),
+        };
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(time_filter.clone()),
+            execution_filter: Some(WorkflowExecutionFilter::default()),
+            type_filter: Some(WorkflowTypeFilter::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut open))
+                .unwrap_err()
+                .message,
+            "Only one of ExecutionFilter or TypeFilter is allowed"
+        );
+
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(time_filter),
+            execution_filter: Some(WorkflowExecutionFilter::default()),
+            status_filter: Some(cadence_api::enums::WorkflowExecutionCloseStatus::Failed),
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err()
+                .message,
+            "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed"
+        );
+
+        let mut open = ListOpenWorkflowExecutionsRequest::default();
+        assert_eq!(
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut open))
+                .unwrap_err()
+                .message,
+            "Domain not set on request."
+        );
+        let mut closed = ListClosedWorkflowExecutionsRequest::default();
+        assert_eq!(
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err()
+                .message,
+            "Domain not set on request."
+        );
     }
 }
