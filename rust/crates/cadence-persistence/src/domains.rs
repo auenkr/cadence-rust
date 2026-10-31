@@ -1992,8 +1992,9 @@ mod tests {
             decoded.get(10),
             Some(cadence_thrift::value::Value::I32(0))
         ));
+        // Field 20 is the nested DomainTaskAttributes struct; its info is field 30.
         assert!(matches!(
-            decoded.get(30),
+            decoded.get(20),
             Some(cadence_thrift::value::Value::Struct(_))
         ));
     }
@@ -2686,10 +2687,13 @@ mod go_sql_frontend_manager_tests {
             .unwrap();
         assert_eq!(persistence.get_metadata_version().unwrap(), 8);
 
-        // A fresh Frontend cache must read the Go-format row from SQL.
+        // Startup hydrates the empty cache from the Go-format rows, as the
+        // launcher's domain-cache loop does before serving Frontend reads.
+        let cache = InMemoryDomainStore::new();
+        cache.sync_matching_metadata(&persistence.list_domains(100, None).unwrap().domains);
         let restarted =
             PersistedFrontendDomainManager::new(
-                InMemoryDomainStore::new(),
+                cache,
                 persistence.clone(),
                 std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
             );
