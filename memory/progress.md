@@ -1872,3 +1872,16 @@ https://github.com/auenkr/cadence-rust/actions/runs/41174450063 at head
 predates the subsequent dynamic-config and failover corrections. No local Cargo
 command was run. Remaining Frontend work is listed in
 `frontend-core2-20261031.md`; this slice is not a service parity claim.
+
+## 2026-10-31: Frontend workflow API continuation
+
+On `t3/frontend-workflow-api`, corrected Go event-blob limit scope and memo map
+size accounting, and added open-visibility request mapping coverage. Package CI
+run https://github.com/auenkr/cadence-rust/actions/runs/41187401382 passed at
+source SHA `d78e835134d307733706b480f21b82821cdb896d` (Clippy, formatting, 83
+Frontend unit tests). Current branch head after the evidence update is
+`1a0926f0c770b2b052baac7b5f867b88b6c938c6`. No local Cargo command was run.
+Workflow method behavior and wrappers remain incomplete: the handler is not
+wired into production WorkflowService transport, history/archive/poll/respond
+transformations and the concrete History/Matching/visibility backend remain
+open. See `frontend-workflow-api-20261031.md`.
