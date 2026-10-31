@@ -414,3 +414,7 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   task persistence and read-only domain metadata code are not substitutes.
 - The lifecycle refactor needs exact-head `cadence-frontend` CI, including
   formatting, Clippy, tests, and runtime smoke. Cargo was not run locally.
+- Initial shared-drain run https://github.com/auenkr/cadence-rust/actions/runs/41183789672
+  checked the previous branch head `074c274ef904b67e1af48183f94a76c407b6433e`
+  and failed only the changed-Matching formatting gate. Applied its emitted
+  rustfmt hunk to `launcher.rs`; this run did not reach Clippy or tests.

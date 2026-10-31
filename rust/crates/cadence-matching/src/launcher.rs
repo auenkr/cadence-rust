@@ -1978,12 +1978,7 @@ async fn run_with_lifecycle(
                     // explicit until their owners are wired here.
                     || async {},
                     move || async move {
-                        stop_background_workers(
-                            &resource_state,
-                            snapshot_task,
-                            timer_task,
-                        )
-                        .await;
+                        stop_background_workers(&resource_state, snapshot_task, timer_task).await;
                     },
                 )
                 .await;
