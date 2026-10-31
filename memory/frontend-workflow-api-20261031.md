@@ -470,8 +470,13 @@ these fixes; no green CI evidence covers the current changes.
 - Added a live search-attribute provider seam and local GetSearchAttributes
   response construction from Go's `frontend.validSearchAttributes` behavior,
   plus a unit test. Production config must inject this provider; absent one,
-  the bootstrap/test backend path remains available. These latest edits have
-  not yet been pushed or validated.
+  the bootstrap/test backend path remains available.
 - Added a Go-envelope test matrix for Signal, Terminate, Reset, Cancel and
-  Query History operations. This matrix and the local search-attribute change
-  are uncommitted at this save; the older CI run on `c0fd852` predates both.
+  Query History operations. These changes were pushed at
+  `7b742b5fc554a4ad3457b85b196b215256392b91`. CI run
+  [41181996079](https://github.com/auenkr/cadence-rust/actions/runs/41181996079)
+  is in progress against that exact source SHA; no conclusion is available
+  yet. It includes formatting patch mode.
+- Superseded run [41181861730](https://github.com/auenkr/cadence-rust/actions/runs/41181861730)
+  for `c0fd8529700a44c5f8eafb690325ea89a8f65c7f` was cancelled after the next
+  code checkpoint was pushed, so it is not validation evidence.
