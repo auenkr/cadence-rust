@@ -8,6 +8,83 @@ pub const POLICY_REQUEST_CANCEL: i32 = 1;
 pub const POLICY_TERMINATE: i32 = 2;
 pub const TERMINATE_REASON: &str = "by parent close policy";
 
+/// Internal History RPC adapter used by Go's parent-close processor activity.
+/// This preserves the resolved domain UUID and parent-child validation fields
+/// that are absent from the public Frontend cancel/terminate APIs.
+#[derive(Clone)]
+pub struct HistoryClient {
+    inner: cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+}
+
+impl HistoryClient {
+    pub fn new(channel: tonic::transport::Channel) -> Self {
+        Self {
+            inner: cadence_proto::history::history_api_client::HistoryApiClient::new(channel),
+        }
+    }
+
+    pub async fn apply(&mut self, operation: &Operation) -> Result<(), tonic::Status> {
+        use cadence_proto::{api, history};
+
+        let execution = api::WorkflowExecution {
+            workflow_id: operation.workflow_id.clone(),
+            run_id: String::new(),
+        };
+        match operation.action {
+            Action::Terminate => {
+                let request = history::TerminateWorkflowExecutionRequest {
+                    request: Some(api::TerminateWorkflowExecutionRequest {
+                        domain: operation.domain_name.clone(),
+                        workflow_execution: Some(execution),
+                        reason: operation.reason.unwrap_or_default().to_owned(),
+                        details: None,
+                        identity: operation.identity.to_owned(),
+                        first_execution_run_id: operation.first_execution_run_id.clone(),
+                    }),
+                    domain_id: operation.domain_id.clone(),
+                    external_workflow_execution: operation.external_workflow_execution.as_ref().map(
+                        |parent| api::WorkflowExecution {
+                            workflow_id: parent.workflow_id.clone(),
+                            run_id: parent.run_id.clone(),
+                        },
+                    ),
+                    child_workflow_only: operation.child_workflow_only,
+                };
+                self.inner
+                    .terminate_workflow_execution(tonic::Request::new(request))
+                    .await?;
+            }
+            Action::RequestCancel => {
+                let request = history::RequestCancelWorkflowExecutionRequest {
+                    domain_id: operation.domain_id.clone(),
+                    cancel_request: Some(api::RequestCancelWorkflowExecutionRequest {
+                        domain: operation.domain_name.clone(),
+                        workflow_execution: Some(execution),
+                        identity: operation.identity.to_owned(),
+                        request_id: String::new(),
+                        cause: String::new(),
+                        first_execution_run_id: operation.first_execution_run_id.clone(),
+                    }),
+                    external_execution_info: operation.external_workflow_execution.as_ref().map(
+                        |parent| api::ExternalExecutionInfo {
+                            workflow_execution: Some(api::WorkflowExecution {
+                                workflow_id: parent.workflow_id.clone(),
+                                run_id: parent.run_id.clone(),
+                            }),
+                            initiated_id: 0,
+                        },
+                    ),
+                    child_workflow_only: operation.child_workflow_only,
+                };
+                self.inner
+                    .request_cancel_workflow_execution(tonic::Request::new(request))
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Cadence workflow execution identifiers use Go's exported-field JSON names.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default)]

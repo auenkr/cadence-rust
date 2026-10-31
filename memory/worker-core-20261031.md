@@ -30,6 +30,13 @@ heartbeats return the server cancellation flag. This is transport support only
 and cannot safely enable pollers until replay, decision generation and
 registered activity execution exist.
 
+Parent-close policy now has an internal History API adapter for its cancel and
+terminate operations. It sends the resolved domain UUID, first execution run
+ID, Go identity/reason, and the child-only parent execution guard on the
+internal History envelope. Error classification, domain-cache lookup,
+cross-cluster forwarding and processor lifecycle are still outstanding; this
+adapter is not yet wired into an executable processor.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 
@@ -93,8 +100,8 @@ Implemented in this slice:
   `41205587991`, `41205654608`, `41205770812`, and `41205897788` were
   superseded/cancelled or failed as source commits advanced; `41205897788`
   failed only on the corrected lint.
-- Continuation package CI after the scanner/client changes is pending; record
-  its exact head, URL and conclusion here before relying on it.
+- Continuation package CI after the scanner/client/parent-close changes is
+  pending; record its exact head, URL and conclusion here before relying on it.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
