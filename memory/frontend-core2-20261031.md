@@ -192,6 +192,41 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   failure/restart/recovery gate, or Frontend parity audit has run for this
   branch.
 
+## Persistence and lifecycle continuation — 2026-10-31
+
+- Rechecked the current launcher and persistence code. The configured default
+  Cassandra/MySQL/PostgreSQL domain persistence adapter is write-capable and
+  Frontend installs `GoSqlFrontendDomainManager` over it. It persists domain
+  and singleton metadata rows using Matching's native store selection. This
+  closes the earlier note that called domain/metadata writes absent; it does
+  not imply that all Go manager semantics or store roles are complete.
+- Added explicit `PersistenceStoreRole` variants for Go's domain, metadata,
+  history, and execution managers. They resolve to `defaultStore`, while
+  `visibility` resolves only to `visibilityStore`; config unit coverage checks
+  all roles select the configured SQL backend. This gives subsequent manager
+  wiring one role-specific selection API. Exact-head GitHub Actions validation
+  is pending after push.
+- Remaining production persistence gap is unchanged in substance: the
+  Frontend state and handlers use `InMemoryExecutionStore`; no SQL/Cassandra
+  execution/history managers are opened. No database visibility manager is
+  opened for `visibilityStore` (or a configured advanced-visibility manager).
+  The domain manager continues to rely on an in-memory cache alongside its
+  durable domain rows.
+- Shutdown's listener owner now calls the shared Go-ordered drain hooks for
+  health, handler admission, registered limiter collections, and background
+  resources. The production launcher registers no real global quota collection
+  owners, and the admin handler's domain DLQ/failover watcher workers are not
+  implemented in Rust. Therefore the sequencing helper is present, but
+  `service.go` lifecycle parity remains open.
+- Validator review confirms the Rust tests exercise the 16 Go entry points,
+  the Go error-string set, successful calls, representative limits/mutations,
+  filter cases, permission checks, failover bounds, and live dynamic updates.
+  The test suite is not yet a row-for-row port of all 88 named Go table cases;
+  do not call the requested full matrix complete based only on unique-message
+  coverage.
+- CI run to validate the role-selection change will be recorded here after
+  completion. No Cargo command was run locally.
+
 ## Source pointers
 
 - Go: `go/service/frontend/api/request_validator.go`,
