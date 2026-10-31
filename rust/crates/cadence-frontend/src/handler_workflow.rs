@@ -289,6 +289,18 @@ pub trait AsyncWorkflowPublisher: Send + Sync {
     ) -> WorkflowFuture<'a>;
 }
 
+#[derive(serde::Serialize)]
+struct DiagnosticsStarterWorkflowInput<'a> {
+    #[serde(rename = "Domain")]
+    domain: &'a str,
+    #[serde(rename = "Identity")]
+    identity: &'a str,
+    #[serde(rename = "WorkflowID")]
+    workflow_id: &'a str,
+    #[serde(rename = "RunID")]
+    run_id: &'a str,
+}
+
 pub trait RequestAuthorization: Send + Sync {
     fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError>;
 }
@@ -863,15 +875,16 @@ impl<B: WorkflowBackend> Handler<B> {
             .unwrap_or_default();
         let diagnostic_domain = "cadence-system";
         let diagnostic_workflow_id = format!("{domain}-{run_id}");
-        let input = serde_json::to_vec(&serde_json::json!({
-            "Domain": domain,
-            "Identity": request
-                .get("identity")
-                .cloned()
-                .unwrap_or_else(|| Value::String(String::new())),
-            "WorkflowID": workflow_id,
-            "RunID": run_id,
-        }))
+        let identity = request
+            .get("identity")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let input = serde_json::to_vec(&DiagnosticsStarterWorkflowInput {
+            domain,
+            identity,
+            workflow_id,
+            run_id,
+        })
         .map_err(|error| CadenceError::Unknown(error.to_string()))?;
         let start_request = serde_json::json!({
             "requestId": uuid::Uuid::new_v4().to_string(),
@@ -882,10 +895,7 @@ impl<B: WorkflowBackend> Handler<B> {
             "input": cadence_api::b64::encode_bytes(&input),
             "executionStartToCloseTimeoutSeconds": 86400,
             "taskStartToCloseTimeoutSeconds": 300,
-            "identity": request
-                .get("identity")
-                .cloned()
-                .unwrap_or_else(|| Value::String(String::new())),
+            "identity": identity,
             "workflowIdReusePolicy": 1
         });
         let start_request = self.validate_request(
@@ -1669,6 +1679,8 @@ mod tests {
     #[derive(Default)]
     struct RestartBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
 
+    struct AlreadyStartedBackend;
+
     #[derive(Default)]
     struct RecordingAsyncPublisher(Mutex<Vec<crate::handler_workflow_async::AsyncWorkflowMessage>>);
 
@@ -1691,6 +1703,19 @@ mod tests {
             Box::pin(async move {
                 self.0.lock().unwrap().push((operation, request));
                 Ok(Value::Null)
+            })
+        }
+    }
+
+    impl WorkflowBackend for AlreadyStartedBackend {
+        fn invoke<'a>(&'a self, _: WorkflowOperation, _: Value) -> WorkflowFuture<'a> {
+            Box::pin(async {
+                Err(CadenceError::WorkflowAlreadyStarted(
+                    cadence_api::errors::WorkflowExecutionAlreadyStartedError {
+                        run_id: "diagnostic-run-existing".into(),
+                        ..Default::default()
+                    },
+                ))
             })
         }
     }
@@ -2692,12 +2717,33 @@ mod tests {
             start.workflow_id_reuse_policy,
             Some(cadence_api::enums::WorkflowIDReusePolicy::AllowDuplicate)
         );
-        assert_eq!(start.input, serde_json::to_vec(&serde_json::json!({
-            "Domain": "shop",
-            "Identity": "operator",
-            "WorkflowID": "order-20",
-            "RunID": "550e8400-e29b-41d4-a716-446655440000"
-        })).unwrap());
+        assert_eq!(
+            start.input,
+            br#"{"Domain":"shop","Identity":"operator","WorkflowID":"order-20","RunID":"550e8400-e29b-41d4-a716-446655440000"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnose_treats_already_started_as_success_with_existing_run_id() {
+        let handler = Handler::new(AlreadyStartedBackend);
+        let response = handler
+            .dispatch(
+                "DiagnoseWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-21",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response["diagnosticWorkflowExecution"]["runId"],
+            "diagnostic-run-existing"
+        );
     }
 
     #[tokio::test]

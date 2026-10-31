@@ -642,3 +642,10 @@ Frontend parity until these are implemented and validated.
   start/decision timeouts, and the Cadence Thrift JSON spelling is
   `workflowIdReusePolicy` (lowercase `d`), correcting both Diagnose and
   Restart. These fixes await CI.
+- Package CI run [41185708448](https://github.com/auenkr/cadence-rust/actions/runs/41185708448)
+  validated exact SHA `a1d170efd58e84cecb5ee15e2b6b38c1c968e748` and concluded
+  `success` (Clippy, format, tests). It validated async request IDs/timeouts,
+  Diagnose and Restart's `workflowIdReusePolicy` JSON spelling. The subsequent
+  Diagnose field-order fix (Go serializes `Domain`, `Identity`, `WorkflowID`,
+  `RunID` in struct order) and duplicate-start regression test need another CI
+  run.
