@@ -1082,6 +1082,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   formatting, Clippy, and tests. It validates the documentation checkpoint;
   no production persistence or lifecycle implementation changed in that
   commit, so the gaps below remain open.
+- The follow-up documentation-only head
+  `4821a2347a27018dcf28a311e0d4ce1560392099` passed Frontend CI at
+  https://github.com/auenkr/cadence-rust/actions/runs/41202085074 (formatting,
+  Clippy, and tests; conclusion `success`). No Cargo command ran locally.
 - Lifecycle wiring still invokes the Go stop stages in order, but the Rust
   process has no AdminHandler background-worker owners and registers no
   production global quota collections. The admin stop signal and limiter stop
