@@ -1768,6 +1768,30 @@ shard-distributor-matching:
             persistence.store_name_for(PersistenceStoreRole::Visibility),
             Ok(None)
         );
+
+        let cassandra: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: primary\ndatastores:\n  primary: {nosql: {pluginName: cassandra, hosts: '127.0.0.1'}}\n",
+        )
+        .unwrap();
+        for role in [
+            PersistenceStoreRole::Domain,
+            PersistenceStoreRole::Metadata,
+            PersistenceStoreRole::History,
+            PersistenceStoreRole::Execution,
+        ] {
+            assert_eq!(cassandra.store_name_for(role), Ok(Some("primary")));
+            assert_eq!(
+                cassandra
+                    .datastore_for(role)
+                    .unwrap()
+                    .unwrap()
+                    .nosql
+                    .as_ref()
+                    .unwrap()
+                    .plugin_name,
+                "cassandra"
+            );
+        }
     }
 
     #[test]
