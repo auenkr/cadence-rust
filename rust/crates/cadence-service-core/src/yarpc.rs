@@ -850,43 +850,6 @@ fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     }
 }
 
-fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
-    let req: cadence_api::admin::RefreshWorkflowTasksRequest =
-        decode_args(body).map_err(AppError::bad_request)?;
-    let domain = if req.domain.is_empty() {
-        state
-            .domains
-            .describe(&DescribeDomainRequest {
-                name: None,
-                uuid: Some(req.domain_id.clone()),
-            })
-            .map_err(|error| AppError::entity_not_exists(error.message))?
-            .domain_info
-            .map(|info| info.name)
-            .unwrap_or_default()
-    } else {
-        req.domain
-    };
-    if domain.is_empty() {
-        return Err(AppError::bad_request(
-            "Domain not set on request.".to_string(),
-        ));
-    }
-    let execution = req.workflow_execution.unwrap_or_default();
-    cadence_api::validation::check_execution(Some(&execution))
-        .map_err(|error| AppError::bad_request(error.message))?;
-    let executions = require_domain_thrift(state, &domain)?;
-    match executions.refresh_tasks(&domain, &execution) {
-        Ok(()) => Ok(Struct { fields: Vec::new() }),
-        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
-            Err(AppError::entity_not_exists(error.message))
-        }
-        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
-            Err(AppError::workflow_already_completed(error.message))
-        }
-    }
-}
-
 fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::admin::{
         GetWorkflowExecutionRawHistoryV2Request as Request,
@@ -963,7 +926,7 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
                 next_page_token,
                 history_batches: vec![cadence_api::types::DataBlob {
                     encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
-                    data: cadence_thrift::history_blob::encode(events),
+                    data: cadence_thrift::history_blob::encode(events).data,
                 }],
                 version_history: Some(target_history),
             }))
@@ -2187,7 +2150,6 @@ pub async fn dispatch(
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
-        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
