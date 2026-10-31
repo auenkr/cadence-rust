@@ -936,3 +936,15 @@ Frontend parity until these are implemented and validated.
   shared Go SQL domain persistence contract; the production Frontend factory
   still does not select or wrap them as `FrontendDomainManager`. An exact-head
   Frontend CI dispatch after these cherry-picks is pending.
+- Package run
+  [41195541814](https://github.com/auenkr/cadence-rust/actions/runs/41195541814)
+  validated exact SHA `4912bed1d9dc28a1f7c12caee8cffbfc148e06de` and concluded
+  `success` for the archive handler and pre-core2-SQL source. Core2 SQL commits
+  subsequently cherry-picked were not part of this run.
+- Poll handling now has a distinct `PollIsolationGroupWaiter` boundary. The
+  handler performs domain lookup and Go's decision bad-binary check before the
+  isolation wait, returns an empty response if the wait expires or the
+  remaining deadline falls below two seconds, and fails open on isolation
+  state lookup errors. Updated the bad-binary error to Go's exact BadRequest
+  rather than empty success and added tests for error ordering, wait expiry and
+  fail-open behavior. These latest poll changes have not yet been CI-tested.

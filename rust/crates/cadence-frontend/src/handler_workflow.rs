@@ -289,6 +289,7 @@ pub struct Handler<B> {
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
+    poll_isolation_waiter: Option<Arc<dyn PollIsolationGroupWaiter>>,
     poll_admission: Option<Arc<dyn PollAdmissionPolicy>>,
     async_publisher: Option<Arc<dyn AsyncWorkflowPublisher>>,
     outstanding_poll_canceller: Option<Arc<dyn OutstandingPollCanceller>>,
@@ -325,10 +326,9 @@ pub trait IsolationGroupState: Send + Sync {
     fn is_drained(&self, domain: &str, isolation_group: &str) -> Result<bool, String>;
 }
 
-/// Poll-specific preflight performed by Go before entering Matching. The
-/// implementation checks decision-poll bad binaries and waits for an enabled
-/// isolation group to become healthy. `false` returns Go's empty poll response
-/// when the caller's wait budget expires.
+/// Poll-specific bad-binary preflight performed by Go before its isolation
+/// group wait and before entering Matching. Bad deployments return Go's
+/// `BadRequestError` instead of an empty poll result.
 pub trait PollAdmissionPolicy: Send + Sync {
     fn admit<'a>(
         &'a self,
@@ -336,6 +336,18 @@ pub trait PollAdmissionPolicy: Send + Sync {
         isolation_group: &'a str,
         binary_checksum: &'a str,
         decision_poll: bool,
+    ) -> Pin<Box<dyn Future<Output = Result<(), CadenceError>> + Send + 'a>>;
+}
+
+/// Wait for a drained poll isolation group to become healthy, as Go's
+/// `waitUntilIsolationGroupHealthy` does. `false` means the caller's poll
+/// deadline elapsed and the public response must be empty.
+pub trait PollIsolationGroupWaiter: Send + Sync {
+    fn wait_until_healthy<'a>(
+        &'a self,
+        domain: &'a str,
+        isolation_group: &'a str,
+        deadline: Option<std::time::Instant>,
     ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>>;
 }
 
@@ -473,6 +485,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_isolation_waiter: None,
             poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
@@ -504,6 +517,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_isolation_waiter: None,
             poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
@@ -540,6 +554,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            poll_isolation_waiter: None,
             poll_admission: None,
             async_publisher: None,
             outstanding_poll_canceller: None,
@@ -636,6 +651,14 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_poll_admission(mut self, policy: Arc<dyn PollAdmissionPolicy>) -> Self {
         self.poll_admission = Some(policy);
+        self
+    }
+
+    pub fn with_poll_isolation_waiter(
+        mut self,
+        waiter: Arc<dyn PollIsolationGroupWaiter>,
+    ) -> Self {
+        self.poll_isolation_waiter = Some(waiter);
         self
     }
 
@@ -1003,36 +1026,41 @@ impl<B: WorkflowBackend> Handler<B> {
         } else {
             None
         };
-        let request = self.prepare_backend_request(operation, request, caller)?;
-        if let (Some(policy), Some(domain)) = (&self.poll_admission, poll_domain) {
+        if let (Some(policy), Some(domain)) = (&self.poll_admission, poll_domain.as_deref()) {
+            if let Some(domains) = &self.domain_lookup {
+                domains.domain_id(domain)?;
+            }
             let binary_checksum = request
-                .get("pollRequest")
-                .and_then(|poll| poll.get("binaryChecksum"))
+                .get("binaryChecksum")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            if !policy
+                .unwrap_or_default();
+            policy
                 .admit(
-                    &domain,
+                    domain,
                     &caller.isolation_group,
-                    &binary_checksum,
+                    binary_checksum,
                     operation == WorkflowOperation::PollForDecisionTask,
                 )
-                .await?
-            {
+                .await?;
+        }
+        if let (Some(waiter), Some(domain)) = (&self.poll_isolation_waiter, poll_domain.as_deref())
+        {
+            // Go logs state lookup failures and assumes the isolation group
+            // is healthy so a cache outage cannot reject worker polls.
+            let healthy = waiter
+                .wait_until_healthy(domain, &caller.isolation_group, caller.deadline)
+                .await
+                .unwrap_or(true);
+            if !healthy {
                 return Ok(serde_json::json!({}));
             }
         }
-        if matches!(
-            operation,
-            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
-        ) {
-            // Go repeats this check after the isolation-group wait because
-            // the wait consumes part of the caller's long-poll budget.
-            if validate_long_poll_deadline(caller.deadline).is_err() {
-                return Ok(serde_json::json!({}));
-            }
+        if poll_domain.is_some() && validate_long_poll_deadline(caller.deadline).is_err() {
+            // Go returns an empty poll result if its isolation wait exhausted
+            // the long-poll budget.
+            return Ok(serde_json::json!({}));
         }
+        let request = self.prepare_backend_request(operation, request, caller)?;
         if operation == WorkflowOperation::RestartWorkflowExecution {
             return self
                 .restart_workflow_execution(request, target_cluster, caller)
@@ -2182,6 +2210,37 @@ mod tests {
     #[derive(Default)]
     struct RejectPollAdmission(Mutex<Vec<(String, String, String, bool)>>);
 
+    #[derive(Default)]
+    struct RejectPollIsolationWait(Mutex<Vec<(String, String)>>);
+
+    struct FailingPollIsolationWait;
+
+    impl PollIsolationGroupWaiter for RejectPollIsolationWait {
+        fn wait_until_healthy<'a>(
+            &'a self,
+            domain: &'a str,
+            isolation_group: &'a str,
+            _: Option<std::time::Instant>,
+        ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((domain.to_owned(), isolation_group.to_owned()));
+            Box::pin(async { Ok(false) })
+        }
+    }
+
+    impl PollIsolationGroupWaiter for FailingPollIsolationWait {
+        fn wait_until_healthy<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: Option<std::time::Instant>,
+        ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>> {
+            Box::pin(async { Err(CadenceError::Unknown("isolation state unavailable".into())) })
+        }
+    }
+
     impl PollAdmissionPolicy for RejectPollAdmission {
         fn admit<'a>(
             &'a self,
@@ -2189,14 +2248,18 @@ mod tests {
             isolation_group: &'a str,
             binary_checksum: &'a str,
             decision_poll: bool,
-        ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<(), CadenceError>> + Send + 'a>> {
             self.0.lock().unwrap().push((
                 domain.to_owned(),
                 isolation_group.to_owned(),
                 binary_checksum.to_owned(),
                 decision_poll,
             ));
-            Box::pin(async { Ok(false) })
+            Box::pin(async {
+                Err(CadenceError::BadRequest(BadRequestError::new(
+                    "binary bad-build already marked as bad deployment",
+                )))
+            })
         }
     }
 
@@ -3726,7 +3789,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drained_poll_wait_returns_empty_response_without_matching_dispatch() {
+    async fn bad_binary_poll_returns_go_bad_request_before_matching_dispatch() {
         let admission = Arc::new(RejectPollAdmission::default());
         let handler = Handler::new(CapturingBackend::default())
             .with_domain_lookup(Arc::new(StaticDomainLookup))
@@ -3736,7 +3799,7 @@ mod tests {
             deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
             ..Default::default()
         };
-        let response = handler
+        let error = handler
             .dispatch_with_metadata(
                 "PollForDecisionTask",
                 serde_json::json!({
@@ -3747,8 +3810,11 @@ mod tests {
                 &caller,
             )
             .await
-            .unwrap();
-        assert_eq!(response, serde_json::json!({}));
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "binary bad-build already marked as bad deployment"
+        );
         assert_eq!(
             *admission.0.lock().unwrap(),
             vec![(
@@ -3759,6 +3825,60 @@ mod tests {
             )]
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_isolation_wait_exhaustion_returns_empty_without_matching_call() {
+        let waiter = Arc::new(RejectPollIsolationWait::default());
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend)
+            .with_poll_isolation_waiter(waiter.clone());
+        let caller = CallerMetadata {
+            isolation_group: "drained-workers".into(),
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            ..Default::default()
+        };
+        let response = handler
+            .dispatch_with_metadata(
+                "PollForActivityTask",
+                serde_json::json!({
+                    "domain": "shop",
+                    "taskList": {"name": "orders"}
+                }),
+                &caller,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, serde_json::json!({}));
+        assert_eq!(
+            waiter.0.lock().unwrap().as_slice(),
+            &[("shop".into(), "drained-workers".into())]
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_isolation_state_lookup_error_fails_open_like_go() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_poll_isolation_waiter(Arc::new(FailingPollIsolationWait));
+        let caller = CallerMetadata {
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            ..Default::default()
+        };
+        let response = handler
+            .dispatch_with_metadata(
+                "PollForDecisionTask",
+                serde_json::json!({
+                    "domain": "shop",
+                    "taskList": {"name": "orders"}
+                }),
+                &caller,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, Value::Null);
+        assert_eq!(handler.backend.0.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
