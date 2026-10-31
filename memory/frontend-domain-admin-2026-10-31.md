@@ -412,3 +412,7 @@ migration forward.
   onto its current fetched head before dispatching exact-head package CI.
   Domain/Admin/Schedule parity gaps remain extensive; no service completion
   claim is made.
+- During post-rebase review, repaired `handler_admin::AdminError`'s missing
+  `EntityNotExists`/`InternalServiceError` type imports and made Display cover
+  all three variants. `git diff --check` passes. This source correction needs a
+  fresh package run; Cargo remains CI-only.
