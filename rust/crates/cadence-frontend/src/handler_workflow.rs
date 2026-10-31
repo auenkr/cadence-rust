@@ -673,10 +673,7 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
-    pub fn with_archived_history_reader(
-        mut self,
-        reader: Arc<dyn ArchivedHistoryReader>,
-    ) -> Self {
+    pub fn with_archived_history_reader(mut self, reader: Arc<dyn ArchivedHistoryReader>) -> Self {
         self.archived_history_reader = Some(reader);
         self
     }
@@ -856,10 +853,7 @@ impl<B: WorkflowBackend> Handler<B> {
                     .map(|domains| domains.domain_id(domain))
                     .transpose()?
                     .unwrap_or_default();
-                if let Some(response) = reader
-                    .get_if_archived(domain_id, request.clone())
-                    .await?
-                {
+                if let Some(response) = reader.get_if_archived(domain_id, request.clone()).await? {
                     return Ok(response);
                 }
             }
@@ -2318,7 +2312,8 @@ mod tests {
             &'a self,
             domain_id: String,
             request: Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, CadenceError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, CadenceError>> + Send + 'a>>
+        {
             self.0.lock().unwrap().push((domain_id, request));
             Box::pin(async {
                 Ok(Some(serde_json::json!({

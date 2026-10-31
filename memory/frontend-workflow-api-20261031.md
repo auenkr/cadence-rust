@@ -918,3 +918,8 @@ Frontend parity until these are implemented and validated.
   the request, UUID and skip behavior. The adapter still must implement Go's
   archival config/retention selection and archive read; live History paging is
   still missing. This source change has not yet been validated by CI.
+- Archived History CI run
+  [41194839075](https://github.com/auenkr/cadence-rust/actions/runs/41194839075)
+  succeeded at `3af6e5659a72c570de6986eeabfda8851faa02d3`; the runner applied
+  its formatting patch before Clippy, format and package tests. The patch was
+  retrieved for committing. Exact committed-head validation is pending.
