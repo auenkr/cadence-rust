@@ -915,7 +915,7 @@ impl FromThrift for AsyncWorkflowConfiguration {
 impl ToThrift for AsyncWorkflowConfiguration {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.bool(10, self.enabled);
+        f.obool(10, self.enabled);
         f.sstr(20, &self.predefined_queue_name);
         f.sstr(30, &self.queue_type);
         f.ostruct(40, self.queue_config.as_ref());
@@ -1021,9 +1021,9 @@ impl FromThrift for MaintainCorruptWorkflowRequest {
 impl ToThrift for MaintainCorruptWorkflowResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.bool(10, self.history_deleted);
-        f.bool(20, self.executions_deleted);
-        f.bool(30, self.visibility_deleted);
+        f.obool(10, self.history_deleted);
+        f.obool(20, self.executions_deleted);
+        f.obool(30, self.visibility_deleted);
         f.finish()
     }
 }

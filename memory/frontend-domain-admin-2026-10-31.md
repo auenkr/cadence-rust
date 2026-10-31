@@ -503,3 +503,9 @@ migration forward.
   persistence-backed deletion, replication transmission and audit records are
   still not implemented. It supersedes the prior exact-head CI candidate and
   must be validated at the next pushed head.
+- The exact-head package CI run [41180348859](https://github.com/auenkr/cadence-rust/actions/runs/41180348859)
+  at `093abbdef55af2ba5659892b9406e58af6c6b66f` failed in Clippy before
+  Frontend checks: core2's `Fields` API has `obool`, not `bool`; four new
+  Thrift converter calls used the removed method. Replaced them with `obool`.
+  The subsequent candidate [41180550214](https://github.com/auenkr/cadence-rust/actions/runs/41180550214)
+  at `dc34713bf` predates this fix and is superseded. Fresh CI is required.
