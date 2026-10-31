@@ -302,3 +302,21 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   the crate formatting step. The runner emitted 22 rustfmt hunks in
   `lifecycle.rs` and `request_validator.rs`; applied those exact hunks locally
   and queued a new exact-head package run. Unit tests were skipped.
+
+## Validator matrix checkpoint — 2026-10-31
+
+- Exact-head package CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41181055161 passed on
+  `97ee38218fbf77970269d3937eb8e82199787285` (formatting, Clippy, and all
+  Frontend tests). Rust parity tests cover all 91 named cases in
+  `go/service/frontend/api/request_validator_test.go`, grouped into Rust test
+  functions.
+- Fresh uncached package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41181338783 also passed
+  on `97ee38218fbf77970269d3937eb8e82199787285`; CI selected its fresh runner
+  target, skipped rust-cache, and passed formatting, Clippy, and Frontend tests.
+- This closes the request-validator test-matrix item. Production SQL/Cassandra
+  domain, metadata, visibility, History, and execution managers remain absent.
+  Frontend stop hooks for separately owned workflow/admin handlers and global
+  limiter collections also remain unwired; this package CI run does not validate
+  those gaps.
