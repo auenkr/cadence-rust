@@ -1095,3 +1095,13 @@ migration forward.
   [41206134407](https://github.com/auenkr/cadence-rust/actions/runs/41206134407)
   is still running against `8a1dd43aed112ff951c9c949180079f0347387c1` and does
   not validate this added ack-level slice. No local Cargo command was run.
+
+## Integration head CI formatting repair — 2026-10-31
+
+- Integration head `bdf92466121dc8d3bdd87e0fa543378d05e25a88` was checked by
+  exact-head package run [41206837226](https://github.com/auenkr/cadence-rust/actions/runs/41206837226).
+  It failed before Cargo at the changed Matching runtime formatting check:
+  `cadence-service-core/src/admin.rs` needed the DLQ ack update call split
+  across lines. Applied that formatting-only repair. No cargo ran locally.
+- `git diff --check` passed. Dispatch a fresh `cadence-frontend` package run
+  for the pushed repair; the earlier run does not validate it.

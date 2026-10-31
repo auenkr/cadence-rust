@@ -937,8 +937,10 @@ pub async fn purge_dlq_messages(
         Ok(()) => {
             // Go logs, but does not fail the purge, when the acknowledgement
             // metadata update fails after the range delete succeeds.
-            let _ = persistence
-                .update_domain_replication_dlq_ack_level("domainReplication".into(), end_message_id);
+            let _ = persistence.update_domain_replication_dlq_ack_level(
+                "domainReplication".into(),
+                end_message_id,
+            );
             ok_json(cadence_api::admin::PurgeDLQMessagesResponse {})
         }
         Err(error) => crate::handlers::error_response(
