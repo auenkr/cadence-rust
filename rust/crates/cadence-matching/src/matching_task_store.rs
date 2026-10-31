@@ -31,10 +31,12 @@ fn configured_default_datastore(
         );
     }
     let name = persistence
-        .store_name_for(crate::config::PersistenceStoreRole::Default)?
+        .store_name_for(crate::config::PersistenceStoreRole::Default)
+        .map_err(anyhow::Error::msg)?
         .expect("the default persistence role is required");
     let datastore = persistence
-        .datastore_for(crate::config::PersistenceStoreRole::Default)?
+        .datastore_for(crate::config::PersistenceStoreRole::Default)
+        .map_err(anyhow::Error::msg)?
         .expect("a configured default store has a datastore");
     Ok((name, datastore))
 }

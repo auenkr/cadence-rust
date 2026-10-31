@@ -1158,6 +1158,11 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - Added a factory-level regression case proving a separately configured
   `visibilityStore` does not change which backend the default-store factory
   opens. Exact-head Frontend CI is required for this test.
+- First exact-head run
+  https://github.com/auenkr/cadence-rust/actions/runs/41204204522 checked
+  `39f8b3fb2e13ff199cf3711bbdd4f5c7c9411f97` and failed Clippy compilation:
+  the selector's `String` error was not converted into `anyhow::Error`. The
+  adapter now maps these errors explicitly; run CI again at the repaired head.
 - Lifecycle stop order is present in the shared runtime, but production still
   constructs no seven global quota collection owners and the AdminHandler is
   still a stub, so its Go DLQ/failover worker owners are absent. The validator
