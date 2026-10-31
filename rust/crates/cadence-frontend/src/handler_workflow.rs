@@ -212,6 +212,25 @@ pub trait WorkflowDomainLookup: Send + Sync {
     fn domain_id(&self, domain: &str) -> Result<String, CadenceError>;
 }
 
+/// Domain lookup adapter for the persistence boundary installed by the
+/// Frontend runtime. This keeps public handlers on the shared domain manager
+/// cache while preserving its typed EntityNotExists error.
+pub struct PersistenceWorkflowDomainLookup {
+    manager: Arc<dyn cadence_persistence::FrontendDomainManager>,
+}
+
+impl PersistenceWorkflowDomainLookup {
+    pub fn new(manager: Arc<dyn cadence_persistence::FrontendDomainManager>) -> Self {
+        Self { manager }
+    }
+}
+
+impl WorkflowDomainLookup for PersistenceWorkflowDomainLookup {
+    fn domain_id(&self, domain: &str) -> Result<String, CadenceError> {
+        self.manager.domain_id(domain).map_err(Into::into)
+    }
+}
+
 pub type WorkflowFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
 
@@ -2492,6 +2511,26 @@ mod tests {
         );
         assert_eq!(response["executions"][0]["executionTime"], 123);
         assert_eq!(response["nextPageToken"], "AQI=");
+    }
+
+    #[test]
+    fn persistence_domain_lookup_preserves_cached_domain_uuid() {
+        let manager = Arc::new(cadence_persistence::InMemoryDomainStore::new());
+        manager
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "cached-domain".into(),
+                    uuid: "cached-domain-uuid".into(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
+        let lookup = PersistenceWorkflowDomainLookup::new(manager);
+        assert_eq!(lookup.domain_id("cached-domain").unwrap(), "cached-domain-uuid");
+        assert!(matches!(lookup.domain_id("missing"), Err(CadenceError::EntityNotExists(_))));
     }
 
     #[tokio::test]
