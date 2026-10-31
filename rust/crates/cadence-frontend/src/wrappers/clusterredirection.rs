@@ -212,6 +212,9 @@ pub struct ForwardRecord {
     pub domain: String,
     pub source_cluster: String,
     pub target_cluster: String,
+    /// Set when the active cluster returned by DomainNotActive was attached
+    /// to Go's forwarding-policy metric scope.
+    pub active_cluster: Option<String>,
     pub active_active: bool,
     pub strong_consistency: bool,
     pub elapsed_micros: u128,
@@ -285,37 +288,31 @@ where
 
     let start = Instant::now();
     let mut result = call(&target);
-    metrics.record_forward(&ForwardRecord {
-        operation: operation.into(),
-        domain: domain.name.clone(),
-        source_cluster: current_cluster.into(),
-        target_cluster: target.clone(),
-        active_active: domain.active_active,
-        strong_consistency: consistency == Consistency::Strong,
-        elapsed_micros: start.elapsed().as_micros(),
-        succeeded: result.is_ok(),
-    });
+    let mut active_cluster_metric = None;
 
     if let Err(CadenceError::DomainNotActive(ref error)) = result {
+        if should_forward_after_inactive {
+            active_cluster_metric = Some(error.active_cluster.clone());
+        }
         if should_forward_after_inactive
             && !error.active_cluster.is_empty()
             && error.active_cluster != target
         {
             let fallback = error.active_cluster.clone();
-            let fallback_start = Instant::now();
             result = call(&fallback);
-            metrics.record_forward(&ForwardRecord {
-                operation: operation.into(),
-                domain: domain.name.clone(),
-                source_cluster: current_cluster.into(),
-                target_cluster: fallback,
-                active_active: domain.active_active,
-                strong_consistency: consistency == Consistency::Strong,
-                elapsed_micros: fallback_start.elapsed().as_micros(),
-                succeeded: result.is_ok(),
-            });
         }
     }
+    metrics.record_forward(&ForwardRecord {
+        operation: operation.into(),
+        domain: domain.name.clone(),
+        source_cluster: current_cluster.into(),
+        target_cluster: target,
+        active_cluster: active_cluster_metric,
+        active_active: domain.active_active,
+        strong_consistency: consistency == Consistency::Strong,
+        elapsed_micros: start.elapsed().as_micros(),
+        succeeded: result.is_ok(),
+    });
     result
 }
 
@@ -386,36 +383,30 @@ where
 
     let start = Instant::now();
     let mut result = call(target.clone()).await;
-    metrics.record_forward(&ForwardRecord {
-        operation: operation.into(),
-        domain: domain.name.clone(),
-        source_cluster: current_cluster.into(),
-        target_cluster: target.clone(),
-        active_active: domain.active_active,
-        strong_consistency: consistency == Consistency::Strong,
-        elapsed_micros: start.elapsed().as_micros(),
-        succeeded: result.is_ok(),
-    });
+    let mut active_cluster_metric = None;
     if let Err(CadenceError::DomainNotActive(ref error)) = result {
+        if should_forward_after_inactive {
+            active_cluster_metric = Some(error.active_cluster.clone());
+        }
         if should_forward_after_inactive
             && !error.active_cluster.is_empty()
             && error.active_cluster != target
         {
             let fallback = error.active_cluster.clone();
-            let fallback_start = Instant::now();
-            result = call(fallback.clone()).await;
-            metrics.record_forward(&ForwardRecord {
-                operation: operation.into(),
-                domain: domain.name.clone(),
-                source_cluster: current_cluster.into(),
-                target_cluster: fallback,
-                active_active: domain.active_active,
-                strong_consistency: consistency == Consistency::Strong,
-                elapsed_micros: fallback_start.elapsed().as_micros(),
-                succeeded: result.is_ok(),
-            });
+            result = call(fallback).await;
         }
     }
+    metrics.record_forward(&ForwardRecord {
+        operation: operation.into(),
+        domain: domain.name.clone(),
+        source_cluster: current_cluster.into(),
+        target_cluster: target,
+        active_cluster: active_cluster_metric,
+        active_active: domain.active_active,
+        strong_consistency: consistency == Consistency::Strong,
+        elapsed_micros: start.elapsed().as_micros(),
+        succeeded: result.is_ok(),
+    });
     result
 }
 
@@ -701,7 +692,11 @@ mod tests {
             targets,
             vec![String::from("cluster-b"), String::from("cluster-c")]
         );
-        assert_eq!(metrics.0.lock().unwrap().len(), 2);
+        let records = metrics.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].target_cluster, "cluster-b");
+        assert_eq!(records[0].active_cluster.as_deref(), Some("cluster-c"));
+        assert!(records[0].succeeded);
     }
 
     #[tokio::test]
@@ -753,7 +748,11 @@ mod tests {
             *targets.lock().unwrap(),
             ["cluster-b".to_owned(), "cluster-c".to_owned()]
         );
-        assert_eq!(metrics.0.lock().unwrap().len(), 2);
+        let records = metrics.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].target_cluster, "cluster-b");
+        assert_eq!(records[0].active_cluster.as_deref(), Some("cluster-c"));
+        assert!(records[0].succeeded);
     }
 
     #[tokio::test]
