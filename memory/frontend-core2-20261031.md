@@ -1488,3 +1488,35 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   (conclusion `success`, formatting/Clippy/tests and configured Go oracle
   checks). This is a documentation-only checkpoint. The open production
   execution/history/visibility managers and lifecycle owners remain unchanged.
+
+## Continuation — 2026-10-31
+
+- Exact-head package CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41217415528 passed at
+  `a998f52602ad296417381c586802dcc4ebb7d8b7` (formatting, Frontend Clippy,
+  Frontend tests and configured Go oracle checks). No Cargo command ran locally.
+- The evidence checkpoint commit `3e35973d3ade3515ab0a2fadd10cc2a65c22aed8`
+  passed the same package workflow at
+  https://github.com/auenkr/cadence-rust/actions/runs/41218095091 (conclusion
+  `success`). This was a memory-only change; it does not alter source parity.
+- The validator coverage audit is complete for the 88 named rows across the
+  15 Go test tables in `request_validator_test.go`; Rust tests exercise all 16
+  public validator methods. The exact-head run above is the latest CI evidence
+  for that matrix.
+- Persistence was rechecked against the actual Frontend call graph. `AppState`
+  still stores `InMemoryExecutionStore`, and YARPC/HTTP handlers return that
+  concrete type directly. `ConfiguredMatchingStores` opens the configured
+  default backend and supplies a write-capable Go-schema domain/metadata
+  adapter; it does not expose Go-compatible execution, history, or visibility
+  managers. Role selection (`defaultStore` for domain/metadata/history/
+  execution and `visibilityStore` for visibility) is present, but no manager
+  consumes the History, Execution, or Visibility roles. This gap therefore
+  remains open; a JSON mirror or role-name-only manager would be incompatible
+  with Go's SQL/Cassandra rows, blobs, and transactions.
+- Lifecycle review confirms the production shutdown path performs health
+  failure, the configured failure-detection wait, API/Admin admission stop,
+  registered limiter stops, final request drain, listener stop, and resource
+  worker stop in Go order. The service graph registers no concrete global
+  quota-collection owners, and Admin's domain DLQ/failover watcher workers are
+  not implemented. Their stop hooks are available but these lifecycle owners
+  remain open.
