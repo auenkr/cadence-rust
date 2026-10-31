@@ -184,6 +184,27 @@ pub trait GoSqlDomainPersistence: Send + Sync {
 /// update so SQL backends can preserve the original compare-and-set fence.
 pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     fn metadata_version(&self) -> Result<i64, String>;
+
+    /// Read a Go-compatible domain row to hydrate Frontend's cache after a
+    /// process restart. Backends that implement `GoSqlDomainPersistence`
+    /// should delegate to that shared read path.
+    fn get_domain(
+        &self,
+        _name: Option<&str>,
+        _id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        Err("domain reads are unavailable for this persistence backend".into())
+    }
+
+    /// List Go-compatible domain rows for paginated Frontend reads.
+    fn list_domains(
+        &self,
+        _page_size: usize,
+        _page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, String> {
+        Err("domain listing is unavailable for this persistence backend".into())
+    }
+
     fn create_domain(
         &self,
         metadata: &MatchingDomainMetadata,

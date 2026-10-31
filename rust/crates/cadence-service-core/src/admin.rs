@@ -824,16 +824,26 @@ pub async fn count_dlq_messages(
         }
     };
     ok_json(cadence_api::admin::CountDLQMessagesResponse {
-        history: response
-            .entries
-            .into_iter()
-            .map(|entry| cadence_api::admin::HistoryDLQCountEntry {
-                source_cluster: entry.source_cluster,
-                message_count: entry.count,
-            })
-            .collect(),
+        history: history_dlq_count_entries(
+            response
+                .entries
+                .into_iter()
+                .map(|entry| (entry.source_cluster, entry.count)),
+        ),
         domain,
     })
+}
+
+fn history_dlq_count_entries(
+    entries: impl IntoIterator<Item = (String, i64)>,
+) -> Vec<cadence_api::admin::HistoryDLQCountEntry> {
+    entries
+        .into_iter()
+        .map(|(source_cluster, message_count)| cadence_api::admin::HistoryDLQCountEntry {
+            source_cluster,
+            message_count,
+        })
+        .collect()
 }
 
 /// Single-host DLQ reads: callers must name the queue type, like Go.
@@ -1706,6 +1716,26 @@ mod tests {
         assert_eq!(read_dlq_page_size(0), 1_000);
         assert_eq!(read_dlq_page_size(-1), 1_000);
         assert_eq!(read_dlq_page_size(12), 12);
+    }
+
+    #[test]
+    fn history_dlq_counts_preserve_source_cluster_and_count() {
+        assert_eq!(
+            history_dlq_count_entries([
+                ("cluster-a".to_string(), 4),
+                ("cluster-b".to_string(), 9),
+            ]),
+            vec![
+                cadence_api::admin::HistoryDLQCountEntry {
+                    source_cluster: "cluster-a".into(),
+                    message_count: 4,
+                },
+                cadence_api::admin::HistoryDLQCountEntry {
+                    source_cluster: "cluster-b".into(),
+                    message_count: 9,
+                },
+            ]
+        );
     }
 
     #[test]

@@ -469,6 +469,14 @@ impl ToThrift for ReadDLQMessagesRequest {
     }
 }
 
+fn dlq_type_from_go_thrift(value: i32) -> DLQType {
+    match value {
+        0 => DLQType::Replication,
+        1 => DLQType::Domain,
+        _ => DLQType::Invalid,
+    }
+}
+
 impl ToThrift for ReadDLQMessagesResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
@@ -487,7 +495,7 @@ impl ToThrift for ReadDLQMessagesResponse {
 impl FromThrift for ReadDLQMessagesResponse {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            dlq_type: s.opt_enum(10)?,
+            dlq_type: s.opt_i32(10)?.map(dlq_type_from_go_thrift),
             replication_tasks: s.opt_list(20)?.unwrap_or_default(),
             next_page_token: s.bytes_or_empty(30)?,
         })
@@ -497,11 +505,7 @@ impl FromThrift for ReadDLQMessagesResponse {
 impl FromThrift for PurgeDLQMessagesRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            dlq_type: s.opt_i32(10)?.map(|value| match value {
-                0 => DLQType::Replication,
-                1 => DLQType::Domain,
-                _ => DLQType::Invalid,
-            }),
+            dlq_type: s.opt_i32(10)?.map(dlq_type_from_go_thrift),
             shard_id: s.opt_i32(20)?.unwrap_or_default(),
             source_cluster: s.req_string(30, "")?,
             inclusive_end_message_id: s.opt_i64(40)?,
@@ -539,11 +543,7 @@ impl FromThrift for PurgeDLQMessagesResponse {
 
 impl FromThrift for MergeDLQMessagesRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        let dlq_type = s.opt_i32(10)?.map(|value| match value {
-            0 => DLQType::Replication,
-            1 => DLQType::Domain,
-            _ => DLQType::Invalid,
-        });
+        let dlq_type = s.opt_i32(10)?.map(dlq_type_from_go_thrift);
         Ok(Self {
             dlq_type,
             shard_id: s.opt_i32(20)?.unwrap_or_default(),
@@ -6733,6 +6733,24 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 #[cfg(test)]
 mod timeout_wire_tests {
     use super::*;
+
+    #[test]
+    fn dlq_response_decoder_uses_go_thrift_enum_values() {
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(0));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Replication));
+
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(1));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Domain));
+
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(99));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Invalid));
+    }
 
     #[test]
     fn dlq_read_and_purge_use_replicator_idl_field_ids() {
