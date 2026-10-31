@@ -40,6 +40,12 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   client and lifecycle edits; request a fresh final run after pushing them.
   No Cargo command was run locally.
 
+- Follow-up run https://github.com/auenkr/cadence-rust/actions/runs/41174765836
+  validated head `d8a0bafb9a20d4e7660e3a8bc69d2f9bad6210b2` and concluded
+  `failure` before Clippy/tests because rustfmt required the new
+  `string_domain` signature on one line. This was a formatting-only CI failure;
+  corrected in the next commit. Request a fresh package run after pushing.
+
 ## Remaining gaps (this branch is not Frontend complete)
 
 - Wire the shared dynamic overlay into the production Frontend validator

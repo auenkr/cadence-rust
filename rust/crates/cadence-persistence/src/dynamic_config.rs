@@ -676,11 +676,7 @@ pub fn string(values: impl PropertyValueSource, default: &str) -> String {
 
 /// Go `GetStringPropertyFilteredByDomain` with the same filtered-first and
 /// last-unfiltered-fallback selection used by the numeric domain getters.
-pub fn string_domain(
-    values: impl PropertyValueSource,
-    domain: &str,
-    default: &str,
-) -> String {
+pub fn string_domain(values: impl PropertyValueSource, domain: &str, default: &str) -> String {
     let filters = BTreeMap::from([("domainName".into(), Value::String(domain.into()))]);
     if let Some(result) = values.runtime_value(
         RuntimePropertyType::String,
