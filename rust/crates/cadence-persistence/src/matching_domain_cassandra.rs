@@ -76,7 +76,7 @@ impl CassandraDomainMetadataPersistence {
         let ack_levels = if let Some(row) = ack_rows.next() {
             row.map_err(|error| error.to_string())?.0
         } else {
-            let empty = HashMap::new();
+            let empty = HashMap::<String, i64>::new();
             let result = self.driver.run(session.query_unpaged(
                 DOMAIN_QUEUE_METADATA_INSERT,
                 (DOMAIN_REPLICATION_QUEUE_TYPE, empty, 0_i64, current_time),

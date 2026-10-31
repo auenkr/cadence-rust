@@ -1022,3 +1022,10 @@ migration forward.
   view; full Admin RPC authorization, dynamic-config backing, metrics/retries,
   and mixed Go/Rust failure, restart and recovery validation. No Frontend parity
   claim is made.
+- The formatting repair was pushed as `12389c226581dc880168ef95c180c5ffd6a21812`.
+  Its CI run [41202688205](https://github.com/auenkr/cadence-rust/actions/runs/41202688205)
+  passed formatting but Clippy found three persistence compile errors exposed
+  by the core2 rebase: missing `DomainReplicationQueueMessage` import in MySQL,
+  missing newly added isolation/async config fields in SQL metadata decoding,
+  and ambiguous Cassandra `HashMap` key/value types. All three source repairs
+  are now applied and need exact-head CI. The run did not reach Rust tests.

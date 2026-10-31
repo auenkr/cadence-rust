@@ -1735,6 +1735,8 @@ fn thrift_to_metadata(
             .map_err(protocol_error)?
             .unwrap_or_default(),
         bad_binaries: decoded_bad_binaries.clone(),
+        isolation_groups: decoded_isolation_groups.clone(),
+        async_workflow_config: decoded_async_workflow_config.clone(),
     };
     let replication = DomainReplicationConfiguration {
         active_cluster_name,
