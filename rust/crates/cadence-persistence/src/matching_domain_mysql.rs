@@ -660,6 +660,149 @@ pub fn next_domain_replication_message_id(
         .wrapping_add(1)
 }
 
+impl MySqlDomainMetadataStore {
+    /// Insert one Go `domain_audit_log` row (`DATETIME(6)`, UTC wall clock).
+    pub(crate) fn create_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::domain_audit::format_wallclock_datetime;
+        let created = format_wallclock_datetime(log.created_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let updated = format_wallclock_datetime(log.last_updated_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let params = (
+            log.domain_id.clone(),
+            log.event_id.clone(),
+            log.state_before.data.clone(),
+            log.state_before.encoding.clone(),
+            log.state_after.data.clone(),
+            log.state_after.encoding.clone(),
+            log.operation_type,
+            created,
+            updated,
+            log.identity.clone(),
+            log.identity_type.clone(),
+            log.comment.clone(),
+        );
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec_drop(
+                            "INSERT INTO domain_audit_log (domain_id, event_id, state_before, \
+                             state_before_encoding, state_after, state_after_encoding, \
+                             operation_type, created_time, last_updated_time, identity, \
+                             identity_type, comment) \
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            params,
+                        )
+                        .await
+                })
+            })
+            .map_err(query_error)
+    }
+
+    /// Read one Go-compatible audit page, newest first. Timestamps come back
+    /// through `DATE_FORMAT` so they parse with the same RFC3339 reader as SQLite.
+    pub(crate) fn get_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
+        use crate::domain_audit::{
+            audit_page_next_token, audit_page_window, format_wallclock_datetime,
+            now_unix_nanos, parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
+        };
+        type AuditRow = (
+            String,
+            String,
+            Vec<u8>,
+            String,
+            Vec<u8>,
+            String,
+            i32,
+            String,
+            String,
+            String,
+            String,
+            String,
+        );
+        if page_size == 0 {
+            return Err(MatchingDomainMetadataError::InvalidPageSize);
+        }
+        let limit =
+            i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+        let (max_nanos, min_event_id) = audit_page_window(page_token, now_unix_nanos())
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let max = format_wallclock_datetime(max_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let min = format_wallclock_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let domain_id = domain_id.to_string();
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        let rows: Vec<AuditRow> = self
+            .pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec(
+                            "SELECT event_id, domain_id, state_before, state_before_encoding, \
+                             state_after, state_after_encoding, operation_type, \
+                             DATE_FORMAT(created_time, '%Y-%m-%dT%H:%i:%s.%fZ'), \
+                             DATE_FORMAT(last_updated_time, '%Y-%m-%dT%H:%i:%s.%fZ'), \
+                             identity, identity_type, comment FROM domain_audit_log \
+                             WHERE domain_id = ? AND operation_type = ? AND created_time >= ? \
+                             AND (created_time < ? OR (created_time = ? AND event_id > ?)) \
+                             ORDER BY created_time DESC, event_id ASC LIMIT ?",
+                            (
+                                domain_id,
+                                operation_type,
+                                min,
+                                max.clone(),
+                                max,
+                                min_event_id,
+                                limit,
+                            ),
+                        )
+                        .await
+                })
+            })
+            .map_err(query_error)?;
+        let mut logs = Vec::with_capacity(rows.len());
+        for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in
+            rows
+        {
+            logs.push(DomainAuditLog {
+                event_id,
+                domain_id,
+                operation_type: op,
+                created_time_nanos: parse_sqlite_datetime(&created)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                last_updated_time_nanos: parse_sqlite_datetime(&updated)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                identity,
+                identity_type: id_type,
+                comment,
+                state_before: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sb,
+                    encoding: sbe,
+                },
+                state_after: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sa,
+                    encoding: sae,
+                },
+            });
+        }
+        Ok(DomainAuditLogPage {
+            next_page_token: audit_page_next_token(&logs, page_size),
+            logs,
+        })
+    }
+}
+
 impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMetadataStore {
     fn create_domain(
         &self,
@@ -702,6 +845,34 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMeta
 }
 
 impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainMetadataStore {
+    fn supports_domain_audit_log(&self) -> bool {
+        true
+    }
+
+    fn create_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::create_domain_audit_log(self, log).map_err(|e| e.to_string())
+    }
+
+    fn get_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        MySqlDomainMetadataStore::get_domain_audit_logs(
+            self,
+            domain_id,
+            operation_type,
+            page_size,
+            page_token,
+        )
+        .map_err(|e| e.to_string())
+    }
+
     fn metadata_version(&self) -> Result<i64, String> {
         self.get_metadata_version().map_err(|error| error.to_string())
     }

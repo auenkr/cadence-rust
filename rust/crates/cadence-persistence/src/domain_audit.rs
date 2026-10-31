@@ -271,6 +271,46 @@ pub fn failover_event(log: &DomainAuditLog) -> Result<Option<FailoverEvent>, Str
     }))
 }
 
+/// MySQL `DATETIME(6)` and Postgres `TIMESTAMP` hold UTC wall-clock time
+/// without a zone; Go writes `time.Time.UTC()` at microsecond precision.
+pub fn format_wallclock_datetime(nanos: i64) -> Result<String, String> {
+    let (secs, sub) = (nanos.div_euclid(1_000_000_000), nanos.rem_euclid(1_000_000_000));
+    let time = chrono::DateTime::from_timestamp(secs, sub as u32)
+        .ok_or_else(|| format!("timestamp out of range: {nanos}"))?;
+    Ok(time.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+}
+
+/// Upper bound and event cursor for one audit page, matching Go's
+/// `GetDomainAuditLogs`: the first page is `created_time < now` (the max event
+/// ID is the largest UUID), later pages resume after the token's pair.
+pub fn audit_page_window(
+    page_token: Option<&[u8]>,
+    now_nanos: i64,
+) -> Result<(i64, String), String> {
+    match page_token {
+        Some(token) => decode_page_token(token),
+        None => Ok((now_nanos, "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string())),
+    }
+}
+
+/// Go emits a cursor only when the page is full, pointing at the last row even
+/// when the next page turns out to be empty.
+pub fn audit_page_next_token(logs: &[DomainAuditLog], page_size: usize) -> Option<Vec<u8>> {
+    if logs.len() < page_size {
+        return None;
+    }
+    logs.last()
+        .map(|log| encode_page_token(log.created_time_nanos, &log.event_id))
+}
+
+/// Current time in unix nanoseconds, saturating at the i64 range.
+pub fn now_unix_nanos() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_nanos()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
