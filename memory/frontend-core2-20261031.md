@@ -804,3 +804,40 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   including the cache-sharing assertion. This validates the injectable
   in-memory adapter only; production persistence and real limiter owners remain
   open.
+
+## Frontend core2 continuation — 2026-10-31
+
+- Rechecked branch `frontend-core2` at `afac9869a8701599ee4e1d3e1ace4f7df317a16`.
+  Exact-head package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41193709763 concluded
+  `success` (formatting, Frontend Clippy/tests and Frontend runtime smoke).
+  No Cargo command ran locally. This validates the existing checkpoint only;
+  this continuation did not add persistence implementation.
+- Reconfirmed the validator matrix evidence: fresh-target CI run
+  `41181338783` passed all 91 named Go request-validator cases. No validator
+  source or matrix tests changed after that run.
+- The manager boundary remains incomplete. `AppState.domain_manager` still
+  defaults to `InMemoryDomainStore`; Matching's selected Cassandra/MySQL/
+  PostgreSQL adapters expose domain metadata reads only. No SQL/Cassandra
+  transactional domain CRUD/metadata manager is selected for Frontend.
+  `AppState.executions` remains `InMemoryExecutionStore`; there is no durable
+  production HistoryManager, ExecutionManager, or VisibilityManager selected
+  from `persistence.defaultStore` / `visibilityStore`. Task-table adapters,
+  metadata readers, and snapshot files do not supply these manager contracts.
+- Lifecycle currently executes health failure, handler/admin admission stop,
+  registered limiter shutdown, request drain, and listener/resource teardown
+  in Go order. The process constructs no Go-equivalent global quota collections,
+  so the limiter registry is empty in production; quota collection construction
+  and shutdown ownership remain open.
+- The synchronous `FrontendDomainManager` seam is not yet a safe place to call
+  the existing async MySQL pool from request handlers. Do not add a cache-first
+  write-through decorator: it cannot preserve Go's transactional metadata
+  notification versions or roll back cache state after persistence failure.
+  The next persistence implementation needs a transaction-capable manager
+  contract and shared selected-backend factory, followed by per-backend
+  implementations and restart/Go interoperability tests.
+- Remaining requested work: SQL/Cassandra domain plus metadata transactions;
+  VisibilityManager selection and durable methods; HistoryManager and
+  ExecutionManager implementations on Go schemas; real Frontend quota owner
+  construction; mixed Go/Rust workflow failure/restart/recovery gates. Frontend
+  core2 is still incomplete and must not be marked done.
