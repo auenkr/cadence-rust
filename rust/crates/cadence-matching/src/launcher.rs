@@ -1940,6 +1940,8 @@ async fn run_with_lifecycle(
                     (Some(Err(fatal.into_error())), None)
                 },
             };
+            let mut serving_shutdown_errors = Vec::new();
+            let mut frontend_resources_stopped = false;
             shutdown_trace(&format!(
                 "stop trigger received signal={} listener_or_fatal={}",
                 signal_result.is_some(),
@@ -1985,6 +1987,33 @@ async fn run_with_lifecycle(
                     },
                 )
                 .await;
+                // `cadence-frontend` is a dedicated Frontend process. Go
+                // calls Resource.Stop immediately after the Frontend drain;
+                // tear down its listener and TChannel resources here, before
+                // any remaining shared-runtime membership cleanup.
+                if !run_matching {
+                    shutdown_trace("Frontend resource stop begin");
+                    serving.abort_all();
+                    while let Some(result) = serving.join_next().await {
+                        match result {
+                            Ok((name, Ok(()))) => serving_shutdown_errors.push(format!(
+                                "{name} listener stopped unexpectedly during Frontend shutdown"
+                            )),
+                            Ok((name, Err(error))) => serving_shutdown_errors.push(format!(
+                                "{name} listener failed during Frontend shutdown: {error:#}"
+                            )),
+                            Err(error) if error.is_cancelled() => {}
+                            Err(error) => serving_shutdown_errors
+                                .push(format!("joining Frontend listener task: {error}")),
+                        }
+                    }
+                    if let Some(task) = matching_tchannel_task.take() {
+                        task.abort();
+                        let _ = task.await;
+                    }
+                    shutdown_trace("Frontend resource stop complete");
+                    frontend_resources_stopped = true;
+                }
             } else {
                 stop_background_workers(&state, snapshot_task, timer_task).await;
             }
@@ -2034,29 +2063,31 @@ async fn run_with_lifecycle(
                 } else {
                     Ok(())
                 };
-            let mut serving_shutdown_errors = Vec::new();
-            shutdown_trace("listener abort begin");
-            serving.abort_all();
-            while let Some(result) = serving.join_next().await {
-                match result {
-                    Ok((name, Ok(()))) => serving_shutdown_errors
-                        .push(format!("{name} listener stopped unexpectedly during drain")),
-                    Ok((name, Err(error))) => {
-                        serving_shutdown_errors
-                            .push(format!("{name} listener failed during drain: {error:#}"));
-                    }
-                    Err(error) if error.is_cancelled() => {}
-                    Err(error) => {
-                        serving_shutdown_errors.push(format!("joining listener task: {error}"))
+            if !frontend_resources_stopped {
+                shutdown_trace("listener abort begin");
+                serving.abort_all();
+                while let Some(result) = serving.join_next().await {
+                    match result {
+                        Ok((name, Ok(()))) => serving_shutdown_errors.push(format!(
+                            "{name} listener stopped unexpectedly during drain"
+                        )),
+                        Ok((name, Err(error))) => {
+                            serving_shutdown_errors
+                                .push(format!("{name} listener failed during drain: {error:#}"));
+                        }
+                        Err(error) if error.is_cancelled() => {}
+                        Err(error) => {
+                            serving_shutdown_errors.push(format!("joining listener task: {error}"))
+                        }
                     }
                 }
+                shutdown_trace("listener join complete");
+                if let Some(task) = matching_tchannel_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
+                shutdown_trace("tchannel abort complete");
             }
-            shutdown_trace("listener join complete");
-            if let Some(task) = matching_tchannel_task.take() {
-                task.abort();
-                let _ = task.await;
-            }
-            shutdown_trace("tchannel abort complete");
             // Runtime shutdown joins every writer actor after stopping its
             // owners, so no SQL fatal notification can arrive after this
             // final sample. Keep the sample after listener teardown to catch
