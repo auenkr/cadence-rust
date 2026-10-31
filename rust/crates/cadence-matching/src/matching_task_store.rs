@@ -179,17 +179,23 @@ pub fn open_configured_default_store(
                 all_consistency_delete,
             ),
         );
+        let domain_metadata =
+            cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                driver,
+                active_cluster_name,
+            );
+        let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> =
+            Arc::new(
+                cadence_persistence::matching_domain_metadata::CassandraFrontendDomainPersistence::new(
+                    domain_metadata.clone(),
+                ),
+            );
         return Ok(ConfiguredMatchingStores {
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
             task_store,
-            domain_metadata_source: Some(Arc::new(
-                cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
-                    driver,
-                    active_cluster_name,
-                ),
-            )),
-            domain_persistence: None,
+            domain_metadata_source: Some(Arc::new(domain_metadata)),
+            domain_persistence: Some(domain_persistence),
         });
     }
     let sql = datastore.sql.as_ref().ok_or_else(|| {

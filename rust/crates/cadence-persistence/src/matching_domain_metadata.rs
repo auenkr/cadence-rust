@@ -266,9 +266,311 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
 }
 
 /// Read-only Matching view over Go's Cassandra `domains_by_name_v2` tables.
+#[derive(Clone)]
 pub struct CassandraDomainMetadataStore {
     driver: std::sync::Arc<crate::cassandra::CassandraBlockingSession>,
     current_cluster: String,
+}
+
+/// Read/write Frontend domain persistence for Go's Cassandra schema. The Go
+/// plugin writes the UUID lookup and name-index rows separately, with a
+/// conditional batch that advances the shared notification version. This
+/// adapter retains those row shapes and compare-and-set boundaries.
+#[derive(Clone)]
+pub struct CassandraFrontendDomainPersistence {
+    metadata: CassandraDomainMetadataStore,
+}
+
+impl CassandraFrontendDomainPersistence {
+    #[must_use]
+    pub fn new(metadata: CassandraDomainMetadataStore) -> Self {
+        Self { metadata }
+    }
+
+    fn cql_error(error: impl std::fmt::Display) -> MatchingDomainMetadataError {
+        MatchingDomainMetadataError::Cassandra(error.to_string())
+    }
+
+    fn domain_udts(
+        metadata: &MatchingDomainMetadata,
+    ) -> (
+        crate::cassandra::CassandraDomainUdt,
+        crate::cassandra::CassandraDomainConfigUdt,
+        crate::cassandra::CassandraDomainReplicationConfigUdt,
+    ) {
+        use crate::cassandra::{
+            CassandraClusterReplicationConfigUdt, CassandraDomainConfigUdt,
+            CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
+        };
+        let info = CassandraDomainUdt {
+            id: uuid::Uuid::parse_str(&metadata.info.uuid).unwrap_or_default(),
+            name: metadata.info.name.clone(),
+            status: metadata.status_raw,
+            description: Some(metadata.info.description.clone()),
+            data: Some(metadata.info.data.clone()),
+            owner_email: Some(metadata.info.owner_email.clone()),
+        };
+        let config = CassandraDomainConfigUdt {
+            retention: metadata.configuration.workflow_execution_retention_period_in_days,
+            emit_metric: metadata.configuration.emit_metric,
+            archival_bucket: Some(metadata.archival_bucket.clone()),
+            archival_status: Some(i32::from(metadata.archival_status_raw)),
+            history_archival_status: Some(i32::from(metadata.history_archival_status_raw)),
+            history_archival_uri: Some(metadata.configuration.history_archival_uri.clone()),
+            visibility_archival_status: Some(i32::from(
+                metadata.visibility_archival_status_raw,
+            )),
+            visibility_archival_uri: Some(
+                metadata.configuration.visibility_archival_uri.clone(),
+            ),
+            bad_binaries: metadata.bad_binaries.as_ref().map(|blob| blob.data.clone()),
+            bad_binaries_encoding: metadata
+                .bad_binaries
+                .as_ref()
+                .map(|blob| blob.encoding.as_bytes().to_vec()),
+            isolation_groups: metadata
+                .isolation_groups
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            isolation_groups_encoding: metadata
+                .isolation_groups
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+            async_workflow_config: metadata
+                .async_workflow_config
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            async_workflow_config_encoding: metadata
+                .async_workflow_config
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+        };
+        let replication = CassandraDomainReplicationConfigUdt {
+            active_cluster_name: Some(metadata.replication.active_cluster_name.clone()),
+            clusters: Some(
+                metadata
+                    .replication
+                    .clusters
+                    .iter()
+                    .map(|cluster| CassandraClusterReplicationConfigUdt {
+                        cluster_name: Some(cluster.cluster_name.clone()),
+                    })
+                    .collect(),
+            ),
+            active_clusters_config: metadata
+                .active_clusters_config
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            active_clusters_config_encoding: metadata
+                .active_clusters_config
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+        };
+        (info, config, replication)
+    }
+
+    fn applied(result: scylla::response::query_result::QueryResult) -> Result<bool, MatchingDomainMetadataError> {
+        let rows = result
+            .into_rows_result()
+            .map_err(Self::cql_error)?;
+        let mut columns = rows
+            .rows::<(bool,)>()
+            .map_err(Self::cql_error)?;
+        columns
+            .next()
+            .transpose()
+            .map_err(Self::cql_error)?
+            .map(|(applied,)| applied)
+            .ok_or_else(|| Self::cql_error("Cassandra LWT response did not include [applied]"))
+    }
+
+    fn executor(&self) -> crate::matching_cassandra_exec::ScyllaExecutor {
+        crate::matching_cassandra_exec::ScyllaExecutor::new(self.metadata.driver.clone())
+    }
+}
+
+impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        use chrono::Utc;
+        let id = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let driver = &self.metadata.driver;
+        let session = driver.session();
+        let id_applied = driver
+            .run(session.query_unpaged(
+                "INSERT INTO domains (id, domain, created_time) VALUES (?, {name: ?}, ?) IF NOT EXISTS",
+                (id, metadata.info.name.as_str(), Utc::now()),
+            ))
+            .map_err(Self::cql_error)?;
+        if !Self::applied(id_applied)? {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "CreateDomain operation failed because of UUID collision: {id}"
+            )));
+        }
+
+        let notification_version = self.metadata.metadata_version()?;
+        let (info, config, replication) = Self::domain_udts(metadata);
+        let (history_status, visibility_status) = (
+            i32::from(metadata.history_archival_status_raw),
+            i32::from(metadata.visibility_archival_status_raw),
+        );
+        let name = metadata.info.name.clone();
+        let insert = CqlStatement::new(
+            "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS",
+        );
+        let update_metadata = CqlStatement::new(
+            "UPDATE domains_by_name_v2 SET notification_version = ? WHERE domains_partition = ? AND name = ? IF notification_version = ?",
+        );
+        let end_time = metadata.failover_end_time_nanos.unwrap_or_default();
+        let executor = self.executor();
+        let outcome = executor
+            .batch_lwt(
+                &[insert, update_metadata],
+                vec![
+                    vec![
+                        bound(0_i32),
+                        bound(name.clone()),
+                        bound(info),
+                        bound(config),
+                        bound(replication),
+                        bound(metadata.is_global_domain),
+                        bound(metadata.config_version),
+                        bound(metadata.failover_version),
+                        bound(metadata.failover_notification_version),
+                        bound(metadata.previous_failover_version),
+                        bound(end_time),
+                        bound(metadata.last_updated_time_nanos),
+                        bound(notification_version),
+                        bound(Utc::now()),
+                    ],
+                    vec![
+                        bound(if notification_version > 0 {
+                            notification_version + 1
+                        } else {
+                            1
+                        }),
+                        bound(0_i32),
+                        bound("cadence-domain-metadata".to_string()),
+                        bound((notification_version > 0).then_some(notification_version)),
+                    ],
+                ],
+            )
+            .map_err(Self::cql_error)?;
+        if !outcome.applied {
+            let _ = executor.exec(
+                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+                vec![bound(id)],
+            );
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "Domain {} already exists or domain metadata changed",
+                metadata.info.name
+            )));
+        }
+        Ok(notification_version)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        let (info, config, replication) = Self::domain_udts(metadata);
+        let executor = self.executor();
+        let outcome = executor
+            .batch_lwt(
+                &[
+                    CqlStatement::new(
+                        "UPDATE domains_by_name_v2 SET domain = ?, config = ?, replication_config = ?, is_global_domain = ?, config_version = ?, failover_version = ?, failover_notification_version = ?, previous_failover_version = ?, failover_end_time = ?, last_updated_time = ?, notification_version = ? WHERE domains_partition = ? AND name = ?",
+                    ),
+                    CqlStatement::new(
+                        "UPDATE domains_by_name_v2 SET notification_version = ? WHERE domains_partition = ? AND name = ? IF notification_version = ?",
+                    ),
+                ],
+                vec![
+                    vec![
+                        bound(info),
+                        bound(config),
+                        bound(replication),
+                        bound(metadata.is_global_domain),
+                        bound(metadata.config_version),
+                        bound(metadata.failover_version),
+                        bound(metadata.failover_notification_version),
+                        bound(metadata.previous_failover_version),
+                        bound(metadata.failover_end_time_nanos.unwrap_or_default()),
+                        bound(metadata.last_updated_time_nanos),
+                        bound(expected_notification_version),
+                        bound(0_i32),
+                        bound(metadata.info.name.clone()),
+                    ],
+                    vec![
+                        bound(if expected_notification_version > 0 {
+                            expected_notification_version + 1
+                        } else {
+                            1
+                        }),
+                        bound(0_i32),
+                        bound("cadence-domain-metadata".to_string()),
+                        bound((expected_notification_version > 0)
+                            .then_some(expected_notification_version)),
+                    ],
+                ],
+            )
+            .map_err(Self::cql_error)?;
+        if outcome.applied {
+            Ok(())
+        } else {
+            Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_notification_version}"
+            )))
+        }
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        let metadata = self.metadata.get_domain(None, Some(domain_id))?;
+        let id = uuid::Uuid::parse_str(domain_id)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let executor = self.executor();
+        executor
+            .exec(
+                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+                vec![bound(id)],
+            )
+            .map_err(Self::cql_error)?;
+        executor
+            .exec(
+                &CqlStatement::new(
+                    "DELETE FROM domains_by_name_v2 WHERE domains_partition = ? AND name = ?",
+                ),
+                vec![bound(0_i32), bound(metadata.info.name)],
+            )
+            .map_err(Self::cql_error)
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        self.metadata.metadata_version()
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        self.metadata.get_domain(name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        self.metadata.list_domains(page_size, page_token)
+    }
 }
 
 impl CassandraDomainMetadataStore {

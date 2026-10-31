@@ -86,7 +86,7 @@ pub struct CassandraTaskListUdt {
     pub adaptive_partition_config: Option<CassandraTaskListPartitionConfigUdt>,
 }
 
-#[derive(Debug, Clone, DeserializeValue)]
+#[derive(Debug, Clone, DeserializeValue, SerializeValue)]
 pub struct CassandraDomainUdt {
     pub id: Uuid,
     pub name: String,
@@ -122,7 +122,7 @@ impl CassandraNullableDomainUdt {
     }
 }
 
-#[derive(Debug, Clone, Default, DeserializeValue)]
+#[derive(Debug, Clone, Default, DeserializeValue, SerializeValue)]
 pub struct CassandraDomainConfigUdt {
     pub retention: i32,
     pub emit_metric: bool,
@@ -140,12 +140,12 @@ pub struct CassandraDomainConfigUdt {
     pub async_workflow_config_encoding: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, DeserializeValue)]
+#[derive(Debug, Clone, Default, DeserializeValue, SerializeValue)]
 pub struct CassandraClusterReplicationConfigUdt {
     pub cluster_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, DeserializeValue)]
+#[derive(Debug, Clone, Default, DeserializeValue, SerializeValue)]
 pub struct CassandraDomainReplicationConfigUdt {
     pub active_cluster_name: Option<String>,
     pub clusters: Option<Vec<CassandraClusterReplicationConfigUdt>>,

@@ -33,6 +33,10 @@ on:
         description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
         type: boolean
         default: false
+      format_persistence_files:
+        description: "Apply rustfmt to Frontend persistence adapter files and upload the patch"
+        type: boolean
+        default: false
       go_sdk_compile:
         description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
         type: boolean
@@ -434,6 +438,29 @@ jobs:
             rust/crates/cadence-matching/src/matching_rpc_tests.rs \
             rust/crates/cadence-matching/src/matching_writer.rs \
             > "$RUNNER_TEMP/query-format.patch"
+      - name: Format Frontend persistence adapter files
+        if: inputs.format_persistence_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          files=(
+            crates/cadence-persistence/src/cassandra.rs
+            crates/cadence-persistence/src/matching_domain_metadata.rs
+            crates/cadence-matching/src/matching_task_store.rs
+          )
+          rustfmt --edition 2021 --config skip_children=true "${files[@]}"
+          git -C "$GITHUB_WORKSPACE" diff --binary -- \
+            rust/crates/cadence-persistence/src/cassandra.rs \
+            rust/crates/cadence-persistence/src/matching_domain_metadata.rs \
+            rust/crates/cadence-matching/src/matching_task_store.rs \
+            > "$RUNNER_TEMP/frontend-persistence-format.patch"
+      - name: Upload Frontend persistence formatting patch
+        if: always() && inputs.format_persistence_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-persistence-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/frontend-persistence-format.patch
       - name: Upload query formatting patch
         if: inputs.format_query_files == true
         uses: actions/upload-artifact@v4
