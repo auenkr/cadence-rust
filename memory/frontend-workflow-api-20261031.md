@@ -667,3 +667,9 @@ Frontend parity until these are implemented and validated.
   completed `success` for exact SHA `91a9a1a8268f6f42cc775454ffcc6f2e98710183`
   (Clippy, format, 81 tests). This is prior to the new query-size policy and
   duplicate-start regression; the next run must validate them.
+- Query payload policy CI run
+  [41186429646](https://github.com/auenkr/cadence-rust/actions/runs/41186429646)
+  tested exact SHA `3fa99c9a55666922bf884783c8dd57cb10f4668d` and concluded
+  `success` (Clippy, format, tests). It includes the per-domain query argument
+  limit and exact BadRequest test. It does not validate a production visibility
+  or History backend.
