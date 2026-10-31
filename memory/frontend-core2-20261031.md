@@ -1499,6 +1499,11 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   passed the same package workflow at
   https://github.com/auenkr/cadence-rust/actions/runs/41218095091 (conclusion
   `success`). This was a memory-only change; it does not alter source parity.
+- The current memory-only head `3592ec58828b723c85e7b25ad2df655026a07a8a`
+  also passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41218465489
+  (conclusion `success`; formatting, Clippy, Frontend tests, and configured Go
+  oracle checks).
 - The validator coverage audit is complete for the 88 named rows across the
   15 Go test tables in `request_validator_test.go`; Rust tests exercise all 16
   public validator methods. The exact-head run above is the latest CI evidence
