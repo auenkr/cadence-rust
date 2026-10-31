@@ -256,3 +256,19 @@ migration forward.
   targets exact head `6e6298dd2`; status was pending at dispatch. This run
   includes package Clippy, formatting, and tests. No local Cargo command was
   run.
+
+## Admin queue method Thrift dispatch
+
+- Added converters and YARPC routes for `ResetQueue` and `DescribeQueue` at
+  `260de4e0c`. Both validate shard range and required task type; queue
+  descriptions report current decision/activity/timer/backoff/schedule depths.
+  `ResetQueue` still follows the existing single-host no-op behavior because
+  the persistence queues do not expose reset operations yet.
+- CI run [41178056604](https://github.com/auenkr/cadence-rust/actions/runs/41178056604)
+  targets the branch at the time of dispatch (`260de4e0c`) and includes the
+  package gate with CI formatting enabled. Pending at this checkpoint. No local
+  Cargo command was run.
+- Admin queue parity is still partial: reset is not backed by queue state;
+  DLQ operations, replication methods and raw-history YARPC paging are still
+  not routed. Domain replication queue transmission and scheduler workflow
+  interactions remain gaps.
