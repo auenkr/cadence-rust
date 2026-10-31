@@ -118,9 +118,10 @@
   runner; `frontend-format-patch` was applied and committed as
   `809ecc73b`. A clean-target package validation was dispatched at that exact
   source head as run [41174859526](https://github.com/auenkr/cadence-rust/actions/runs/41174859526)
-  and is in progress. The formatter-enabled run's tests cover the new unit
-  cases, while run 41174859526 is the clean-target gate for the committed,
-  formatted source.
+  and completed `success` at exact head
+  `809ecc73b6f25b5444272712e534f5a611eefb69`. It passed clean-target Frontend
+  package Clippy, Formatting, and Test. The formatter-enabled run's tests also
+  cover the new unit cases. This does not validate mixed Go/Rust behavior.
 
 The handlers remain a partial port. Domain methods are not wired to real
 persistence/runtime clients; update cooldown/failover transmission and domain
