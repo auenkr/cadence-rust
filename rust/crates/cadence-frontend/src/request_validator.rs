@@ -600,6 +600,122 @@ mod tests {
     }
 
     #[test]
+    fn go_task_list_validator_tables_cover_every_named_row() {
+        // Keep the Go table row names here so omissions are visible when the
+        // upstream request_validator_test.go table changes.
+        let mut validator = RequestValidator::default();
+        validator.config.max_task_list_name_length = 5;
+        let describe_cases = [
+            (
+                "success",
+                "domain",
+                Some("tl"),
+                Some(cadence_api::TaskListType::Activity),
+                None,
+            ),
+            ("not set", "", None, None, Some("Request is nil.")),
+            (
+                "domain not set",
+                "",
+                Some("tl"),
+                Some(cadence_api::TaskListType::Activity),
+                Some("Domain not set on request."),
+            ),
+            (
+                "task list type not set",
+                "domain",
+                Some("tl"),
+                None,
+                Some("TaskListType is not set on request."),
+            ),
+            (
+                "task list not set",
+                "domain",
+                None,
+                Some(cadence_api::TaskListType::Activity),
+                Some("TaskList is not set on request."),
+            ),
+            (
+                "task list name not set",
+                "domain",
+                Some(""),
+                Some(cadence_api::TaskListType::Activity),
+                Some("TaskList is not set on request."),
+            ),
+            (
+                "task list name too long",
+                "domain",
+                Some("taskListName"),
+                Some(cadence_api::TaskListType::Activity),
+                Some("TaskList length exceeds limit."),
+            ),
+        ];
+        for (name, domain, task_list_name, task_list_type, expected_error) in describe_cases {
+            let request = (name != "not set").then(|| DescribeTaskListRequest {
+                domain: domain.into(),
+                task_list: task_list_name.map(|name| TaskList {
+                    name: name.into(),
+                    ..Default::default()
+                }),
+                task_list_type,
+                ..Default::default()
+            });
+            let result = validator.validate_describe_task_list_request(request.as_ref());
+            match expected_error {
+                Some(expected) => {
+                    assert_eq!(result.unwrap_err().message, expected, "Go row: {name}")
+                }
+                None => assert!(result.is_ok(), "Go row: {name}"),
+            }
+        }
+
+        let partition_cases = [
+            ("success", "domain", Some("tl"), None),
+            ("not set", "", None, Some("Request is nil.")),
+            (
+                "domain not set",
+                "",
+                Some("tl"),
+                Some("Domain not set on request."),
+            ),
+            (
+                "task list not set",
+                "domain",
+                None,
+                Some("TaskList is not set on request."),
+            ),
+            (
+                "task list name not set",
+                "domain",
+                Some(""),
+                Some("TaskList is not set on request."),
+            ),
+            (
+                "task list name too long",
+                "domain",
+                Some("taskListName"),
+                Some("TaskList length exceeds limit."),
+            ),
+        ];
+        for (name, domain, task_list_name, expected_error) in partition_cases {
+            let request = (name != "not set").then(|| ListTaskListPartitionsRequest {
+                domain: domain.into(),
+                task_list: task_list_name.map(|name| TaskList {
+                    name: name.into(),
+                    ..Default::default()
+                }),
+            });
+            let result = validator.validate_list_task_list_partitions_request(request.as_ref());
+            match expected_error {
+                Some(expected) => {
+                    assert_eq!(result.unwrap_err().message, expected, "Go row: {name}")
+                }
+                None => assert!(result.is_ok(), "Go row: {name}"),
+            }
+        }
+    }
+
+    #[test]
     fn reset_sticky_requires_execution_and_validates_identifiers() {
         let validator = RequestValidator::default();
         let err = validator

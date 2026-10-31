@@ -1525,3 +1525,17 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   quota-collection owners, and Admin's domain DLQ/failover watcher workers are
   not implemented. Their stop hooks are available but these lifecycle owners
   remain open.
+
+## Validator row-level follow-up — 2026-10-31
+
+- Added directly named Rust cases for every row in Go's `DescribeTaskList` and
+  `ListTaskListPartitions` validator tables (13 rows combined). The tests now
+  check each exact success/error result and include the Go row name in any
+  failure, including the missing task-list-type case that was only implicitly
+  covered by validator logic before. The other 13 Go test tables remain covered
+  by the existing grouped matrix and the audit of 88 named rows.
+- `git diff --check` passed. Formatting, Clippy, and Frontend unit tests are
+  green at source head `e124daed576ece6854d9a66153206a10778a5a8f`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41219259467
+  (conclusion `success`; formatting, Clippy, tests, and Frontend smoke/oracle
+  gates). No Cargo command was run locally.
