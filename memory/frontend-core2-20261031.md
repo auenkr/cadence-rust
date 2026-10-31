@@ -742,3 +742,28 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   not a history-node database manager. This inventory defines the required
   seams for the next implementation slice and prevents the read-only Matching
   source or those in-memory stores being counted as production persistence.
+
+## Follow-up — Frontend stop-owner registry
+
+- Exact-head CI run https://github.com/auenkr/cadence-rust/actions/runs/41191113835
+  checked `cab683530c738e5ce5f223a6e56599c7faf4742f` and concluded `success`.
+  Formatting, Clippy and Frontend package tests passed. This run predates the
+  stop-owner registry changes below.
+- Replaced the launcher's empty limiter-stop hook with an `AppState` registry
+  for service-owned global limiter collections. Shutdown now drains registered
+  owners under Go's shared one-second deadline, logs failures independently,
+  and invokes this step between handler stop and request drain. A unit test
+  checks exactly-once stopping and registry removal. The current Frontend
+  construction path still registers no actual quota collections, so this
+  closes the lifecycle owner seam but not Go's seven collection
+  construction/use parity. Do not mark lifecycle complete until real
+  collections are constructed and registered.
+- Persistence remains unimplemented: all five required production managers
+  (domain, metadata, visibility, history, execution) and Go SQL/Cassandra
+  selection are still open. `AppState` continues to reference concrete
+  in-memory stores; this follow-up does not claim to close that requirement.
+- The Go validator matrix remains closed by fresh uncached CI run
+  `41181338783` (all 91 named cases). No validator changes are part of this
+  follow-up.
+- Dispatch a fresh exact-head package workflow after pushing the limiter-owner
+  change; record its final result below.
