@@ -1427,3 +1427,26 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   (conclusion `success`). This validates formatting, Clippy, and Frontend tests
   against the memory update; it does not close any of the persistence or
   lifecycle gaps above.
+
+## Persistence port source anchors — 2026-10-31
+
+- The Go SQL execution manager's transactional state contract is implemented
+  in `go/common/persistence/sql/sql_execution_store.go`; the physical
+  `executions` and `current_executions` rows are defined by
+  `go/common/persistence/sql/sqlplugin/interfaces.go`. SQL history nodes are
+  stored separately in `history_node` by the SQL event store. These rows carry
+  Go serialization blobs and shard/range conditions; persisting Rust JSON
+  snapshots in a parallel table would not be compatible.
+- Go SQL visibility stores one row per run in
+  `go/schema/{sqlite,mysql/v8,postgres}/visibility/schema.sql` and updates it
+  through `go/common/persistence/sql/sql_visibility_store.go`.
+  Cassandra's `go/schema/cassandra/visibility/schema.cql` instead partitions
+  `open_executions`, `closed_executions`, and `closed_executions_v2` by domain
+  and `domain_partition = 0`; the write/delete ordering and CQL are in
+  `go/common/persistence/nosql/nosqlplugin/cassandra/visibility.go` and
+  `visibility_cql.go`.
+- Rust currently has no internal mutable-state model corresponding to Go's
+  `InternalWorkflowSnapshot`/`InternalWorkflowMutation`; the service state
+  holds `InMemoryExecutionStore` directly. Any production port must add those
+  Go-compatible persistence types and route workflow mutations through the
+  selected managers, rather than bolting on a serialization mirror.
