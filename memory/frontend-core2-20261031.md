@@ -241,6 +241,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
 - Current uncommitted work adds exact error checks for missing task-list type,
   missing/oversized task lists, reset-sticky domain/execution, and failover
   request shape/lockdown. Its CI validation remains pending.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41179169677 at
+  `74930ac159f709255b8ea0d17238463d1d3046ef` concluded `failure` during
+  Clippy/test compilation. The only compiler errors were the new matrix's
+  incorrect `FailoverDomainRequest` field and moved time-filter fixture; both
+  are corrected in the next commit. No Frontend tests ran on that head.
 - The branch still has no write-capable durable Frontend domain/metadata,
   visibility, History, or execution manager and no full Go handler/quota stop
   owners. Read-only domain bootstrap and listener drain are not full parity.

@@ -1267,7 +1267,7 @@ mod tests {
         for (filter, message) in expected {
             let mut request = ListOpenWorkflowExecutionsRequest {
                 domain: "domain".into(),
-                start_time_filter: Some(filter),
+                start_time_filter: Some(filter.clone()),
                 ..Default::default()
             };
             assert_eq!(
@@ -1424,7 +1424,7 @@ mod tests {
             active_clusters: None,
             reason: None,
             failover_timeout_in_seconds: None,
-            first_execution_run_id: String::new(),
+            skip_destination_cluster_check: false,
         };
         assert_eq!(
             validator
