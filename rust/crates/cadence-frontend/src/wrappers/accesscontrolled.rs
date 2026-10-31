@@ -3,15 +3,92 @@
 #![allow(clippy::result_large_err)]
 
 use cadence_api::errors::{AccessDeniedError, CadenceError};
+use serde_json::Value;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Permission {
+    Read,
+    Write,
+    Admin,
+    Process,
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Attributes {
     pub operation: String,
+    pub permission: Option<Permission>,
     pub domain: String,
     pub workflow_id: String,
     pub run_id: String,
     pub task_list: String,
     pub identity: String,
+    pub workflow_type: Option<Value>,
+    pub request_body: Option<Value>,
+}
+
+/// Build the authorization input used by Go's generated Workflow API wrapper.
+/// Methods absent from that wrapper return `None` and bypass authorization.
+pub fn attributes_for_request(operation: &str, request: &Value) -> Option<Attributes> {
+    use Permission::{Admin, Process, Read, Write};
+    let permission = match operation {
+        "CountWorkflowExecutions"
+        | "DescribeDomain"
+        | "DescribeSchedule"
+        | "DescribeTaskList"
+        | "DescribeWorkflowExecution"
+        | "GetTaskListsByDomain"
+        | "GetWorkflowExecutionHistory"
+        | "ListArchivedWorkflowExecutions"
+        | "ListClosedWorkflowExecutions"
+        | "ListOpenWorkflowExecutions"
+        | "ListSchedules"
+        | "ListTaskListPartitions"
+        | "ListWorkflowExecutions"
+        | "QueryWorkflow"
+        | "ScanWorkflowExecutions" => Read,
+        "CreateSchedule"
+        | "DeleteSchedule"
+        | "FailoverDomain"
+        | "PauseSchedule"
+        | "RefreshWorkflowTasks"
+        | "RequestCancelWorkflowExecution"
+        | "ResetWorkflowExecution"
+        | "RestartWorkflowExecution"
+        | "SignalWithStartWorkflowExecution"
+        | "SignalWithStartWorkflowExecutionAsync"
+        | "SignalWorkflowExecution"
+        | "StartWorkflowExecution"
+        | "StartWorkflowExecutionAsync"
+        | "TerminateWorkflowExecution"
+        | "UnpauseSchedule"
+        | "UpdateSchedule" => Write,
+        "DeleteDomain" | "DeprecateDomain" | "RegisterDomain" | "UpdateDomain" => Admin,
+        "PollForActivityTask" | "PollForDecisionTask" => Process,
+        _ => return None,
+    };
+    let domain = request
+        .get("domain")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let task_list = request
+        .get("taskList")
+        .and_then(|value| value.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Some(Attributes {
+        operation: operation.to_owned(),
+        permission: Some(permission),
+        domain,
+        workflow_id: String::new(),
+        run_id: String::new(),
+        task_list,
+        identity: String::new(),
+        workflow_type: request.get("workflowType").cloned(),
+        // Go's NewFilteredRequestBody JSON-serializes the full API request.
+        request_body: Some(request.clone()),
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,6 +136,24 @@ where
     }
 }
 
+/// Apply the generated Go API authorization policy to a request. Endpoints
+/// without an access-control wrapper pass through unchanged.
+pub fn authorize_request<A, M>(
+    operation: &str,
+    request: &Value,
+    authorizer: &A,
+    metrics: &M,
+) -> Result<(), CadenceError>
+where
+    A: Authorizer,
+    M: AuthorizationMetrics,
+{
+    match attributes_for_request(operation, request) {
+        Some(attributes) => authorize(authorizer, metrics, &attributes),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +195,35 @@ mod tests {
         let metrics = Metrics::default();
         assert!(authorize(&Auth(Decision::Allow), &metrics, &Attributes::default()).is_ok());
         assert_eq!(metrics.denied.get(), 0);
+    }
+
+    #[test]
+    fn generated_api_permissions_and_authorization_bypass_match_go() {
+        let request = serde_json::json!({
+            "domain": "shop",
+            "workflowType": {"name": "checkout"},
+            "taskList": {"name": "orders"}
+        });
+        let start = attributes_for_request("StartWorkflowExecution", &request).unwrap();
+        assert_eq!(start.permission, Some(Permission::Write));
+        assert_eq!(start.domain, "shop");
+        assert_eq!(start.task_list, "orders");
+        assert_eq!(start.workflow_type, request.get("workflowType").cloned());
+        assert_eq!(start.request_body, Some(request.clone()));
+
+        assert_eq!(
+            attributes_for_request("PollForActivityTask", &request)
+                .unwrap()
+                .permission,
+            Some(Permission::Process)
+        );
+        assert_eq!(
+            attributes_for_request("CountWorkflowExecutions", &request)
+                .unwrap()
+                .permission,
+            Some(Permission::Read)
+        );
+        assert!(attributes_for_request("RespondActivityTaskCompleted", &request).is_none());
+        assert!(attributes_for_request("Health", &request).is_none());
     }
 }

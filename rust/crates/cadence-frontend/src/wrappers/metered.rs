@@ -50,7 +50,9 @@ impl Counter {
 
 pub trait Metrics {
     fn increment(&self, counter: Counter);
+    fn increment_requests(&self, _operation: &str) {}
     fn record_operation(&self, _operation: &str, _elapsed: std::time::Duration, _tags: &[MetricTag]) {}
+    fn record_latency_histogram(&self, _operation: &str, _elapsed: std::time::Duration) {}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -223,9 +225,12 @@ pub fn measure<T>(
     metrics: &dyn Metrics,
     call: impl FnOnce() -> Result<T, CadenceError>,
 ) -> Result<T, CadenceError> {
+    metrics.increment_requests(operation);
     let start = std::time::Instant::now();
     let result = call();
-    metrics.record_operation(operation, start.elapsed(), tags);
+    let elapsed = start.elapsed();
+    metrics.record_operation(operation, elapsed, tags);
+    metrics.record_latency_histogram(operation, elapsed);
     result.map_err(|error| handle_error(error, metrics))
 }
 

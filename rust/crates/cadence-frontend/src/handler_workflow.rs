@@ -206,16 +206,25 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> Result<Value, CadenceError> {
         if operation == WorkflowOperation::StartWorkflowExecution {
             let request: cadence_api::types::StartWorkflowExecutionRequest =
-                serde_json::from_value(value).map_err(|error| {
+                serde_json::from_value(value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
             self.validator.validate_start(Some(&request))?;
-            return serde_json::to_value(request)
-                .map_err(|error| CadenceError::Unknown(error.to_string()));
+            return Ok(value);
+        }
+        if operation == WorkflowOperation::StartWorkflowExecutionAsync {
+            // The Go async request anonymously embeds StartWorkflowExecutionRequest,
+            // so JSON and the generated transport shape are flattened.
+            let request: cadence_api::types::StartWorkflowExecutionRequest =
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+                })?;
+            self.validator.validate_start(Some(&request))?;
+            return Ok(value);
         }
         if operation == WorkflowOperation::GetWorkflowExecutionHistory {
             let request: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
-                serde_json::from_value(value).map_err(|error| {
+                serde_json::from_value(value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
             if request.domain.is_empty() {
@@ -225,11 +234,67 @@ impl<B: WorkflowBackend> Handler<B> {
             }
             self.validator
                 .validate_execution(request.execution.as_ref())?;
-            return serde_json::to_value(request)
-                .map_err(|error| CadenceError::Unknown(error.to_string()));
+            return Ok(value);
+        }
+        if matches!(
+            operation,
+            WorkflowOperation::QueryWorkflow
+                | WorkflowOperation::DescribeWorkflowExecution
+                | WorkflowOperation::TerminateWorkflowExecution
+                | WorkflowOperation::ResetWorkflowExecution
+                | WorkflowOperation::RequestCancelWorkflowExecution
+                | WorkflowOperation::RestartWorkflowExecution
+                | WorkflowOperation::SignalWorkflowExecution
+        ) {
+            validate_domain(&value)?;
+            let field = if operation == WorkflowOperation::QueryWorkflow {
+                "execution"
+            } else {
+                "workflowExecution"
+            };
+            validate_execution_field(&value, field, &self.validator)?;
+            if operation == WorkflowOperation::SignalWorkflowExecution
+                && value
+                    .get("signalName")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .is_empty()
+            {
+                return Err(cadence_api::validation::err_signal_name_not_set().into());
+            }
         }
         Ok(value)
     }
+}
+
+fn validate_domain(request: &Value) -> Result<(), CadenceError> {
+    if request.is_null() {
+        return Err(cadence_api::validation::err_request_not_set().into());
+    }
+    if request
+        .get("domain")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        return Err(cadence_api::validation::err_domain_not_set().into());
+    }
+    Ok(())
+}
+
+fn validate_execution_field(
+    request: &Value,
+    field: &str,
+    validator: &crate::request_validator::RequestValidator,
+) -> Result<(), CadenceError> {
+    let execution = request
+        .get(field)
+        .cloned()
+        .map(serde_json::from_value::<cadence_api::types::WorkflowExecution>)
+        .transpose()
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))?;
+    validator.validate_execution(execution.as_ref())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -274,7 +339,8 @@ mod tests {
             "taskList": {"name": "tasks"},
             "requestId": "550e8400-e29b-41d4-a716-446655440000",
             "executionStartToCloseTimeoutSeconds": 60,
-            "taskStartToCloseTimeoutSeconds": 10
+            "taskStartToCloseTimeoutSeconds": 10,
+            "futureSdkField": "preserved"
         });
         assert_eq!(
             handler.dispatch("StartWorkflowExecution", request.clone()).await.unwrap(),
@@ -296,6 +362,44 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, CadenceError::BadRequest(_)));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn asynchronous_start_validates_embedded_request_before_backend() {
+        let backend = FakeBackend::default();
+        let handler = Handler::new(backend);
+        let error = handler
+            .dispatch(
+                "StartWorkflowExecutionAsync",
+                serde_json::json!({"domain": "d"}),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CadenceError::BadRequest(_)));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn signal_and_describe_validate_in_go_order_before_backend() {
+        let handler = Handler::new(FakeBackend::default());
+        let missing_domain = handler
+            .dispatch("DescribeWorkflowExecution", serde_json::json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(missing_domain.to_string(), "Domain not set on request.");
+
+        let missing_signal = handler
+            .dispatch(
+                "SignalWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "wf"}
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(missing_signal.to_string(), "SignalName is not set on request.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }
