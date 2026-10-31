@@ -105,6 +105,13 @@
   missing `FromThrift` trait qualification in Admin DLQ decoding, and an
   outdated raw-history blob encoding assignment. These issues are being fixed
   before the next package run; this run is not a passing validation.
+- Follow-up package run
+  [41207707904](https://github.com/auenkr/cadence-rust/actions/runs/41207707904)
+  tested commit `1c1b64632bdf2079c8d71c14a29dcf453ba961fd` and failed on one
+  remaining dispatch mismatch: the retained Admin `RefreshWorkflowTasks`
+  handler is synchronous, but the merged dispatch called it with `.await`.
+  Removed the `.await`; dispatch a fresh package run before considering this
+  merge compile repair validated.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.

@@ -2023,7 +2023,7 @@ pub async fn dispatch(
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
-        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body).await,
+        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
