@@ -1884,4 +1884,3 @@ command was run. Remaining Frontend work is listed in
   `f94256cc23ec2da40eee4e47d35f638efffe442b` (formatting, Clippy, tests).
   Runtime smoke was skipped. Full scope and remaining gaps are in
   `frontend-core2-20261031.md`.
-
