@@ -86,12 +86,9 @@ mod tests {
             }
         });
         let headers = HashMap::from([("x-cadence-trace".into(), "trace-1".into())]);
-        let message = encode_async_workflow_request(
-            "StartWorkflowExecutionAsync",
-            &request,
-            &headers,
-        )
-        .unwrap();
+        let message =
+            encode_async_workflow_request("StartWorkflowExecutionAsync", &request, &headers)
+                .unwrap();
         assert_eq!(message.domain, "shop");
         assert_eq!(message.partition_key, "order-17");
         assert_eq!(message.request_type, 0);

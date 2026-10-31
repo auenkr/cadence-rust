@@ -906,3 +906,9 @@ Frontend parity until these are implemented and validated.
   module omitted from the workflow's Frontend format-patch input and explicit
   formatting check. The CI workflow now includes that file in both lists; a
   runner-generated format patch and exact-head rerun are pending.
+- Formatter workflow run
+  [41194496198](https://github.com/auenkr/cadence-rust/actions/runs/41194496198)
+  passed at `06dcbc8afd2483d2dfcf01df0aeae6cdc0ad12c3` after adding
+  `handler_workflow_async.rs` to its patch/check lists. The artifact contains
+  the async handler formatting delta. Clippy, format and Frontend tests passed
+  in the runner workspace; exact committed-head validation remains pending.
