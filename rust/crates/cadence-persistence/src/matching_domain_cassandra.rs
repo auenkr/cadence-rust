@@ -18,12 +18,14 @@ use uuid::Uuid;
 const DOMAIN_PARTITION: i32 = 0;
 const DOMAIN_METADATA_NAME: &str = "cadence-domain-metadata";
 const DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
+const DOMAIN_REPLICATION_DLQ_TYPE: i32 = -1;
 const DOMAIN_QUEUE_METADATA_SELECT: &str = "SELECT cluster_ack_level, version FROM queue_metadata WHERE queue_type=?";
 const DOMAIN_QUEUE_METADATA_INSERT: &str = "INSERT INTO queue_metadata (queue_type, cluster_ack_level, version, created_time) VALUES (?, ?, ?, ?) IF NOT EXISTS";
 const DOMAIN_QUEUE_METADATA_UPDATE: &str = "UPDATE queue_metadata SET cluster_ack_level=?, version=?, last_updated_time=? WHERE queue_type=? IF version=?";
 const DOMAIN_QUEUE_LAST_ID: &str = "SELECT message_id FROM queue WHERE queue_type=? ORDER BY message_id DESC LIMIT 1";
 const DOMAIN_QUEUE_INSERT: &str = "INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?) IF NOT EXISTS";
 const DOMAIN_QUEUE_READ: &str = "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? LIMIT ?";
+const DOMAIN_DLQ_READ: &str = "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? AND message_id<=? LIMIT ?";
 const CREATE_DOMAIN: &str = "INSERT INTO domains (id, domain, created_time) VALUES (?, {name: ?}, ?) IF NOT EXISTS";
 const CREATE_DOMAIN_V2: &str = "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
 const UPDATE_DOMAIN_V2: &str = "UPDATE domains_by_name_v2 SET domain=?, config=?, replication_config=?, config_version=?, failover_version=?, failover_notification_version=?, previous_failover_version=?, failover_end_time=?, last_updated_time=?, notification_version=? WHERE domains_partition=? AND name=?";
@@ -136,6 +138,52 @@ impl CassandraDomainMetadataPersistence {
                 Ok(crate::matching_domain_metadata::DomainReplicationQueueMessage { id, payload })
             })
             .collect()
+    }
+
+    pub fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: i32,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, String> {
+        let session = self.driver.session();
+        let result = self.driver.run(session.query_unpaged(
+            DOMAIN_DLQ_READ,
+            (DOMAIN_REPLICATION_DLQ_TYPE, first_message_id, last_message_id, max_count),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        rows.rows::<(i64, Vec<u8>)>().map_err(|error| error.to_string())?
+            .map(|row| {
+                let (id, payload) = row.map_err(|error| error.to_string())?;
+                Ok(crate::matching_domain_metadata::DomainReplicationDlqMessage { id, payload })
+            })
+            .collect()
+    }
+
+    pub fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), String> {
+        let session = self.driver.session();
+        self.driver.run(session.query_unpaged(
+            "DELETE FROM queue WHERE queue_type=? AND message_id>? AND message_id<=?",
+            (DOMAIN_REPLICATION_DLQ_TYPE, first_message_id, last_message_id),
+        )).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        let session = self.driver.session();
+        let result = self.driver.run(session.query_unpaged(
+            "SELECT COUNT(*) FROM queue WHERE queue_type=?",
+            (DOMAIN_REPLICATION_DLQ_TYPE,),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        rows.maybe_first_row::<(i64,)>()
+            .map_err(|error| error.to_string())?
+            .map(|(size,)| size)
+            .ok_or_else(|| "Cassandra domain replication DLQ count returned no row".to_string())
     }
 
     /// Persist a monotonic consumer ack using the queue metadata version CAS.
@@ -383,6 +431,37 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             last_message_id,
             max_count,
         )
+    }
+
+    fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, String> {
+        let max_count = i32::try_from(max_count).map_err(|error| error.to_string())?;
+        CassandraDomainMetadataPersistence::read_domain_replication_dlq(
+            self,
+            first_message_id,
+            last_message_id,
+            max_count,
+        )
+    }
+
+    fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), String> {
+        CassandraDomainMetadataPersistence::delete_domain_replication_dlq_range(
+            self,
+            first_message_id,
+            last_message_id,
+        )
+    }
+
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        CassandraDomainMetadataPersistence::domain_replication_dlq_size(self)
     }
 
     fn get_domain_replication_ack_levels(

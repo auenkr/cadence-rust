@@ -775,19 +775,33 @@ pub fn domain_replication_messages_response(
 
 /// Single-host DLQ counts: no dead letters exist.
 pub async fn count_dlq_messages(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::CountDLQMessagesRequest>,
 ) -> Response {
-    let _ = req;
-    ok_json(cadence_api::admin::CountDLQMessagesResponse {
-        history: vec![],
-        domain: 0,
-    })
+    let _ = req.force_fetch;
+    let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "domain replication DLQ is unavailable for this persistence backend".into(),
+        );
+    };
+    match persistence.domain_replication_dlq_size() {
+        Ok(domain) => ok_json(cadence_api::admin::CountDLQMessagesResponse {
+            history: vec![],
+            domain,
+        }),
+        Err(error) => crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
+    }
 }
 
 /// Single-host DLQ reads: callers must name the queue type, like Go.
 pub async fn read_dlq_messages(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ReadDLQMessagesRequest>,
 ) -> Response {
     if req.dlq_type.is_none() {
@@ -796,13 +810,85 @@ pub async fn read_dlq_messages(
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
     }
-    ok_json(serde_json::json!({ "replicationTasks": [], "nextPageToken": "" }))
+    if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History Admin client is not configured.".into(),
+        );
+    }
+    let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "domain replication DLQ is unavailable for this persistence backend".into(),
+        );
+    };
+    let first_message_id = match decode_domain_dlq_page_token(&req.next_page_token) {
+        Ok(Some(id)) => id,
+        Ok(None) => -1,
+        Err(error) => {
+            return crate::handlers::error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX);
+    let page_size = if req.maximum_page_size > 0 {
+        req.maximum_page_size as usize
+    } else {
+        100
+    };
+    match persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size) {
+        Ok(rows) => {
+            let mut tasks = Vec::with_capacity(rows.len());
+            for row in &rows {
+                let task = (|| {
+                    let thrift = cadence_thrift::value::read_struct(
+                        &mut cadence_thrift::protocol::Reader::new(&row.payload),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    cadence_api::types::ReplicationTask::from_thrift(&thrift)
+                        .map_err(|error| error.to_string())
+                })();
+                match task {
+                    Ok(mut task) => {
+                        task.source_task_id = Some(row.id);
+                        tasks.push(task);
+                    }
+                    Err(error) => {
+                        return crate::handlers::error_response(
+                            "InternalServiceError",
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("failed to decode domain DLQ task: {error}"),
+                        )
+                    }
+                }
+            }
+            let next_page_token = if rows.len() >= page_size {
+                encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
+            } else {
+                vec![]
+            };
+            ok_json(serde_json::json!({
+                "replicationTasks": tasks,
+                "nextPageToken": next_page_token,
+            }))
+        }
+        Err(error) => crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
+    }
 }
 
 /// Single-host DLQ purge: nothing to purge.
 pub async fn purge_dlq_messages(
-    State(_state): State<StdArc<AppState>>,
-    Json(req): Json<cadence_api::admin::ReadDLQMessagesRequest>,
+    State(state): State<StdArc<AppState>>,
+    Json(req): Json<cadence_api::admin::PurgeDLQMessagesRequest>,
 ) -> Response {
     if req.dlq_type.is_none() {
         return bad_request(BadRequestError::new("Queue type is not set."));
@@ -810,7 +896,43 @@ pub async fn purge_dlq_messages(
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
     }
-    ok_json(cadence_api::admin::PurgeDLQMessagesResponse {})
+    if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History Admin client is not configured.".into(),
+        );
+    }
+    let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "domain replication DLQ is unavailable for this persistence backend".into(),
+        );
+    };
+    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX);
+    match persistence.delete_domain_replication_dlq_range(-1, end_message_id) {
+        Ok(()) => ok_json(cadence_api::admin::PurgeDLQMessagesResponse {}),
+        Err(error) => crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
+    }
+}
+
+fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
+    if token.is_empty() {
+        return Ok(None);
+    }
+    if token.len() != 8 {
+        return Err(format!("invalid next page token {token:?}"));
+    }
+    Ok(Some(i64::from_le_bytes(token.try_into().expect("8-byte token"))))
+}
+
+fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
+    message_id.to_le_bytes().to_vec()
 }
 
 /// Single-host DLQ merge: nothing to merge.

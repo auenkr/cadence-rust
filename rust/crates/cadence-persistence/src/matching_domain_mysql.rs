@@ -18,6 +18,7 @@ use std::{
 const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const GO_DOMAIN_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
 const GO_DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
+const GO_DOMAIN_REPLICATION_DLQ_TYPE: i32 = -1;
 type DomainMetadataRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
 #[derive(Clone)]
@@ -465,6 +466,74 @@ impl MySqlDomainMetadataStore {
             .map_err(query_error)
     }
 
+    /// Read the Go domain replication DLQ (`queue_type = -1`) between an
+    /// exclusive lower bound and inclusive upper bound.
+    pub fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let rows: Vec<(i64, Vec<u8>)> = connection
+                        .exec(
+                            "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? AND message_id<=? ORDER BY message_id ASC LIMIT ?",
+                            (GO_DOMAIN_REPLICATION_DLQ_TYPE, first_message_id, last_message_id, max_count as u64),
+                        )
+                        .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|(id, payload)| crate::matching_domain_metadata::DomainReplicationDlqMessage { id, payload })
+                        .collect())
+                })
+            })
+            .map_err(query_error)
+    }
+
+    pub fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec_drop(
+                            "DELETE FROM queue WHERE queue_type=? AND message_id>? AND message_id<=?",
+                            (GO_DOMAIN_REPLICATION_DLQ_TYPE, first_message_id, last_message_id),
+                        )
+                        .await?;
+                    Ok(())
+                })
+            })
+            .map_err(query_error)
+    }
+
+    pub fn domain_replication_dlq_size(&self) -> Result<i64, MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec_first::<i64, _, _>(
+                            "SELECT COUNT(*) FROM queue WHERE queue_type=?",
+                            (GO_DOMAIN_REPLICATION_DLQ_TYPE,),
+                        )
+                        .await?
+                        .ok_or_else(|| mysql_async::Error::Other(Box::new(std::io::Error::other("queue count returned no row"))))
+                })
+            })
+            .map_err(query_error)
+    }
+
     /// Store a consumer's monotonically increasing acknowledgement level in
     /// Go's JSON `queue_metadata` row. Delayed acknowledgements are ignored.
     pub fn update_domain_replication_ack_level(
@@ -658,6 +727,39 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
             max_count,
         )
         .map_err(|error| error.to_string())
+    }
+
+    fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, String> {
+        MySqlDomainMetadataStore::read_domain_replication_dlq(
+            self,
+            first_message_id,
+            last_message_id,
+            max_count,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::delete_domain_replication_dlq_range(
+            self,
+            first_message_id,
+            last_message_id,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        MySqlDomainMetadataStore::domain_replication_dlq_size(self)
+            .map_err(|error| error.to_string())
     }
 
     fn get_domain_replication_ack_levels(

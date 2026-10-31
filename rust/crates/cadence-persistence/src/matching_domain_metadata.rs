@@ -139,6 +139,13 @@ pub struct DomainReplicationQueueMessage {
     pub payload: Vec<u8>,
 }
 
+/// A durable domain task stored in Go's domain replication DLQ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReplicationDlqMessage {
+    pub id: i64,
+    pub payload: Vec<u8>,
+}
+
 /// Go SQL domain and singleton metadata persistence operations. Matching's
 /// cache and Frontend's domain manager share the same Go schema; keeping this
 /// contract beside the wire-compatible metadata type lets both services use
@@ -216,6 +223,27 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
         _message_id: i64,
     ) -> Result<(), String> {
         Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn read_domain_replication_dlq(
+        &self,
+        _first_message_id: i64,
+        _last_message_id: i64,
+        _max_count: usize,
+    ) -> Result<Vec<DomainReplicationDlqMessage>, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn delete_domain_replication_dlq_range(
+        &self,
+        _first_message_id: i64,
+        _last_message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
     }
 }
 

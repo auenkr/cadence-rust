@@ -18,6 +18,7 @@ use std::{
 
 const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const GO_DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
+const GO_DOMAIN_REPLICATION_DLQ_TYPE: i32 = -1;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 type DomainRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
@@ -137,6 +138,73 @@ impl PostgresDomainMetadataStore {
             .collect::<Result<Vec<_>, MatchingDomainMetadataError>>()?;
         transaction.commit().map_err(domain_error)?;
         Ok(messages)
+    }
+
+    pub fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let rows = transaction
+            .query(
+                "SELECT message_id, message_payload FROM queue WHERE queue_type=$1 AND message_id>$2 AND message_id<=$3 ORDER BY message_id ASC LIMIT $4",
+                &[&GO_DOMAIN_REPLICATION_DLQ_TYPE, &first_message_id, &last_message_id, &(max_count as i64)],
+            )
+            .map_err(domain_error)?;
+        let messages = rows
+            .into_iter()
+            .map(|row| {
+                Ok(crate::matching_domain_metadata::DomainReplicationDlqMessage {
+                    id: row.try_get(0).map_err(domain_error)?,
+                    payload: row.try_get(1).map_err(domain_error)?,
+                })
+            })
+            .collect::<Result<Vec<_>, MatchingDomainMetadataError>>()?;
+        transaction.commit().map_err(domain_error)?;
+        Ok(messages)
+    }
+
+    pub fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        transaction
+            .execute(
+                "DELETE FROM queue WHERE queue_type=$1 AND message_id>$2 AND message_id<=$3",
+                &[&GO_DOMAIN_REPLICATION_DLQ_TYPE, &first_message_id, &last_message_id],
+            )
+            .map_err(domain_error)?;
+        transaction.commit().map_err(domain_error)
+    }
+
+    pub fn domain_replication_dlq_size(&self) -> Result<i64, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let size = transaction
+            .query_one(
+                "SELECT COUNT(*) FROM queue WHERE queue_type=$1",
+                &[&GO_DOMAIN_REPLICATION_DLQ_TYPE],
+            )
+            .map_err(domain_error)?
+            .try_get(0)
+            .map_err(domain_error)?;
+        transaction.commit().map_err(domain_error)?;
+        Ok(size)
     }
 
     /// Store a consumer's monotonically increasing acknowledgement level in
@@ -618,6 +686,39 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
             max_count,
         )
         .map_err(|error| error.to_string())
+    }
+
+    fn read_domain_replication_dlq(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, String> {
+        PostgresDomainMetadataStore::read_domain_replication_dlq(
+            self,
+            first_message_id,
+            last_message_id,
+            max_count,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain_replication_dlq_range(
+        &self,
+        first_message_id: i64,
+        last_message_id: i64,
+    ) -> Result<(), String> {
+        PostgresDomainMetadataStore::delete_domain_replication_dlq_range(
+            self,
+            first_message_id,
+            last_message_id,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        PostgresDomainMetadataStore::domain_replication_dlq_size(self)
+            .map_err(|error| error.to_string())
     }
 
     fn get_domain_replication_ack_levels(
