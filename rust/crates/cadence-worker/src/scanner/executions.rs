@@ -67,7 +67,7 @@ pub struct ScannerConfigActivityParams {
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct ScanShardActivityParams {
-    pub shards: Vec<i32>,
+    pub shards: Option<Vec<i32>>,
     pub page_size: i32,
     pub blobstore_flush_threshold: i32,
     pub scanner_config: Option<CustomScannerConfig>,
@@ -82,6 +82,19 @@ pub struct FixerWorkflowParams {
     #[serde(rename = "ScannerWorkflowRunID")]
     pub scanner_workflow_run_id: String,
     pub fixer_workflow_config_overwrites: FixerWorkflowConfigOverrides,
+}
+
+/// Go `FixerCorruptedKeysActivityParams` payload, including optional range
+/// restart position used by heartbeat recovery.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct FixerCorruptedKeysActivityParams {
+    #[serde(rename = "ScannerWorkflowWorkflowID")]
+    pub scanner_workflow_workflow_id: String,
+    #[serde(rename = "ScannerWorkflowRunID")]
+    pub scanner_workflow_run_id: String,
+    #[serde(rename = "StartingShardID")]
+    pub starting_shard_id: Option<i32>,
 }
 
 pub fn resolve_scanner_config(
@@ -262,7 +275,7 @@ mod tests {
     #[test]
     fn scan_activity_preserves_null_custom_config_map() {
         let params = super::ScanShardActivityParams {
-            shards: vec![4, 5],
+            shards: Some(vec![4, 5]),
             page_size: 100,
             blobstore_flush_threshold: 1_000,
             scanner_config: None,
@@ -295,6 +308,23 @@ mod tests {
                     "BlobstoreFlushThreshold": null,
                     "ActivityBatchSize": null
                 }
+            })
+        );
+    }
+
+    #[test]
+    fn fixer_corrupted_keys_payload_keeps_go_ids_and_nil_starting_shard() {
+        let params = super::FixerCorruptedKeysActivityParams {
+            scanner_workflow_workflow_id: "scan-id".to_owned(),
+            scanner_workflow_run_id: "run-id".to_owned(),
+            starting_shard_id: None,
+        };
+        assert_eq!(
+            serde_json::to_value(params).unwrap(),
+            serde_json::json!({
+                "ScannerWorkflowWorkflowID": "scan-id",
+                "ScannerWorkflowRunID": "run-id",
+                "StartingShardID": null
             })
         );
     }
