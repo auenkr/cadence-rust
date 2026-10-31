@@ -1477,3 +1477,8 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   Continue with Go-compatible execution/history/visibility managers and
   configured Cassandra/SQL selection, then instantiate the real lifecycle
   owners; the green run above is not evidence that these gaps are closed.
+- Evidence-update commit `2a3e1151d833962c7adf45a5dfe4f044c2afac9d` also
+  passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41216539671
+  (conclusion `success`, formatting/Clippy/tests and configured Go oracle
+  checks). It contains only this memory update; no Cargo command ran locally.
