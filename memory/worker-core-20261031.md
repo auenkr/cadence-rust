@@ -244,6 +244,11 @@ list/range/map representations, pointer override fields, and the optional
 starting shard used for fixer restart; this wire fixture work is still waiting
 for CI. Acronym-bearing Go `...WorkflowID` and `...RunID` keys are explicitly
 retained in fixer workflow parameters.
+Scanner workflow contract constants now also mirror the Go short/long
+activity schedule-to-start, start-to-close and heartbeat timeouts, retry
+initial/max/expiration values, non-retriable error names, and the fixer dynamic
+config version gate. Those constants and the wire payload fixtures remain
+pending package CI.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

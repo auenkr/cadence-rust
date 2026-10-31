@@ -9,6 +9,28 @@ use std::collections::BTreeMap;
 
 pub type CustomScannerConfig = BTreeMap<String, String>;
 
+pub const ERR_SCAN_WORKFLOW_NOT_CLOSED: &str =
+    "scan workflow is not closed, only can run fix on output of finished scan workflow";
+pub const ERR_SERIALIZATION: &str = "encountered serialization error";
+pub const ERR_MISSING_HOOKS: &str = "hooks are not provided for this scanner";
+
+pub const SHORT_ACTIVITY_SCHEDULE_TO_START_SECONDS: u64 = 60;
+pub const SHORT_ACTIVITY_START_TO_CLOSE_SECONDS: u64 = 5 * 60;
+pub const SHORT_ACTIVITY_RETRY_INITIAL_SECONDS: u64 = 1;
+pub const SHORT_ACTIVITY_RETRY_MAXIMUM_SECONDS: u64 = 5 * 60;
+pub const SHORT_ACTIVITY_RETRY_EXPIRATION_SECONDS: u64 = 10 * 60;
+pub const LONG_ACTIVITY_SCHEDULE_TO_START_SECONDS: u64 = 60;
+pub const LONG_ACTIVITY_START_TO_CLOSE_SECONDS: u64 = 48 * 60 * 60;
+pub const LONG_ACTIVITY_HEARTBEAT_SECONDS: u64 = 60;
+pub const LONG_ACTIVITY_RETRY_INITIAL_SECONDS: u64 = 1;
+pub const LONG_ACTIVITY_RETRY_MAXIMUM_SECONDS: u64 = 5 * 60;
+pub const LONG_ACTIVITY_RETRY_EXPIRATION_SECONDS: u64 = 48 * 60 * 60;
+pub const SHARD_ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI: u64 = 1_700;
+
+/// Go `supportsFixerConfig` uses this version gate for historical runs.
+pub const FIXER_CONFIG_CHANGE_VERSION_ID: &str = "dynamic fixer config";
+pub const FIXER_CONFIG_CHANGE_MIN_VERSION: i32 = 1;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct GenericScannerConfig {
@@ -327,5 +349,26 @@ mod tests {
                 "StartingShardID": null
             })
         );
+    }
+
+    #[test]
+    fn shard_activity_timeouts_retry_errors_and_fixer_version_match_go() {
+        assert_eq!(super::ERR_SCAN_WORKFLOW_NOT_CLOSED, "scan workflow is not closed, only can run fix on output of finished scan workflow");
+        assert_eq!(super::ERR_SERIALIZATION, "encountered serialization error");
+        assert_eq!(super::ERR_MISSING_HOOKS, "hooks are not provided for this scanner");
+        assert_eq!(super::SHORT_ACTIVITY_SCHEDULE_TO_START_SECONDS, 60);
+        assert_eq!(super::SHORT_ACTIVITY_START_TO_CLOSE_SECONDS, 300);
+        assert_eq!(super::SHORT_ACTIVITY_RETRY_INITIAL_SECONDS, 1);
+        assert_eq!(super::SHORT_ACTIVITY_RETRY_MAXIMUM_SECONDS, 300);
+        assert_eq!(super::SHORT_ACTIVITY_RETRY_EXPIRATION_SECONDS, 600);
+        assert_eq!(super::LONG_ACTIVITY_SCHEDULE_TO_START_SECONDS, 60);
+        assert_eq!(super::LONG_ACTIVITY_START_TO_CLOSE_SECONDS, 172_800);
+        assert_eq!(super::LONG_ACTIVITY_HEARTBEAT_SECONDS, 60);
+        assert_eq!(super::LONG_ACTIVITY_RETRY_INITIAL_SECONDS, 1);
+        assert_eq!(super::LONG_ACTIVITY_RETRY_MAXIMUM_SECONDS, 300);
+        assert_eq!(super::LONG_ACTIVITY_RETRY_EXPIRATION_SECONDS, 172_800);
+        assert_eq!(super::SHARD_ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI, 1_700);
+        assert_eq!(super::FIXER_CONFIG_CHANGE_VERSION_ID, "dynamic fixer config");
+        assert_eq!(super::FIXER_CONFIG_CHANGE_MIN_VERSION, 1);
     }
 }
