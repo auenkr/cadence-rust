@@ -457,3 +457,10 @@ migration forward.
   remain necessary. CI run [41179895028](https://github.com/auenkr/cadence-rust/actions/runs/41179895028)
   at `83171ac866d417a39db3a6fc888f4b4c719e6a5a` was in progress against the
   preceding code and will be superseded by exact-head validation.
+- Added Thrift `MaintainCorruptWorkflow` dispatch backed by the shared execution
+  mutation and mapped its not-found/already-completed errors, plus request and
+  response converters and a Go-shaped request round trip. Current limitation:
+  corrupt-run detection/history data are only as complete as the single-host
+  execution store. CI run [41179991180](https://github.com/auenkr/cadence-rust/actions/runs/41179991180)
+  targets the previous head and must be inspected for cancellation/result;
+  dispatch a fresh exact-head package run after this commit.
