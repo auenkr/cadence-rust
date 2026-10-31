@@ -662,3 +662,31 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   `32de07ee30ed50ca64d302d62d7ef236c028485b` and concluded `success`.
   The preceding code head `54c2e54c45141b5499ee4d896dad9a639631ff27` is the
   exact head that validated the validator/lifecycle code in run 41188887361.
+
+## Persistence manager contract inventory — continuation
+
+Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.go`
+(`DomainManager`, `ExecutionManager`, `HistoryManager`) and
+`go/common/persistence/visibility_manager_interfaces.go` (`VisibilityManager`);
+`go/common/persistence/data_store_interfaces.go` defines the lower-level stores.
+
+- Go `DomainManager` owns Create/Get/Update/Delete/DeleteByName/List and
+  `GetMetadata`. Its `domain_metadata` notification version participates in
+  domain create/update transactions; there is not a separate Go interface
+  literally named `MetadataManager` in this code version.
+- Go `ExecutionManager` owns workflow mutable-state/current-execution writes,
+  history/replication tasks and scans. Go `HistoryManager` owns append/read,
+  raw/batched reads, branch fork/delete and tree reads. Go `VisibilityManager`
+  is a separate secondary datastore with started/closed/uninitialized/upsert,
+  list/query/scan/count and delete methods.
+- Configuration selects the primary manager datastore through
+  `persistence.defaultStore`; visibility has its own `persistence.visibilityStore`
+  (and advanced visibility selector). Matching's configured native adapters
+  currently open task persistence on the default store and provide a read-only
+  domain metadata source. They are not Go manager implementations.
+- Rust currently backs `AppState.domains` with `InMemoryDomainStore` and
+  `AppState.executions` with `InMemoryExecutionStore`. `visibility.rs` evaluates
+  query expressions in memory; `history_branch.rs` contains branch helpers,
+  not a history-node database manager. This inventory defines the required
+  seams for the next implementation slice and prevents the read-only Matching
+  source or those in-memory stores being counted as production persistence.
