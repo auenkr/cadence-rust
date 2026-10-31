@@ -905,3 +905,38 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   connection refusal. This is not a smoke pass and does not establish
   production persistence. Re-run fresh-target Frontend package CI without that
   database-dependent smoke after recording this evidence.
+
+## Frontend continuation — 2026-10-31
+
+- Confirmed the complete 91-case Go request-validator matrix remains covered by
+  fresh-target CI run `41181338783`, with later failover/lockdown rows covered
+  by `41188887361`; no validator source or matrix test changed after those runs.
+- Added `GoSqlFrontendDomainManager`, which stages mutations against a private
+  domain-cache snapshot, writes Go-compatible SQL domain blobs through the
+  existing MySQL/PostgreSQL transaction contract, and publishes the cache only
+  after the database commit. Frontend startup selects this manager when the
+  configured default SQL store exposes the native SQL domain contract. The
+  adapter preserves opaque metadata blobs on updates and uses the configured
+  Go domain page-token format.
+- This closes the MySQL/PostgreSQL domain+metadata write path at the manager
+  boundary only after exact-head package CI passes. It does not yet cover
+  Cassandra domain writes, SQLite domain transactions, or wire durable
+  Visibility, History, and Execution managers. The Frontend `AppState` still
+  uses in-memory execution/visibility state, and quota lifecycle registration
+  still has no real collection owners.
+- Lifecycle drain order is already wired and covered by service-core tests:
+  readiness/health failure, configured failure-detection delay, handler/admin
+  admission stop, limiter owner stop, request drain, then listener/resource
+  teardown. The remaining lifecycle gap is constructing/owning the Go-equivalent
+  global quota collections in production.
+- Last package run before this continuation:
+  https://github.com/auenkr/cadence-rust/actions/runs/41195564510 validated
+  `32a305dfd12c26fdd366726d0ad2acac551079eb` and concluded `success` for
+  Frontend formatting, Clippy, and tests. Runtime smoke was skipped on that run;
+  the earlier `41195127536` smoke failed because its development YAML requires
+  an unavailable Cassandra endpoint. No Cargo command ran on the host.
+- Exact-head CI for this continuation is pending; record its final URL, head,
+  and conclusion here. Remaining work: Cassandra/SQLite domain+metadata
+  transactions, production Visibility/History/Execution managers with Go SQL
+  and Cassandra selection, actual global quota collection owners, and mixed
+  Go/Rust failure/restart/recovery validation.

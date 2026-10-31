@@ -20,6 +20,7 @@ const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 type DomainRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
+#[derive(Clone)]
 pub struct PostgresDomainMetadataStore {
     pool: Arc<PostgresConnectionPool>,
     active_cluster_name: String,
