@@ -252,6 +252,7 @@ pub struct Handler<B> {
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
     async_publisher: Option<Arc<dyn AsyncWorkflowPublisher>>,
+    outstanding_poll_canceller: Option<Arc<dyn OutstandingPollCanceller>>,
     blob_size_policy: Option<Arc<dyn WorkflowBlobSizePolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
@@ -287,6 +288,16 @@ pub trait AsyncWorkflowPublisher: Send + Sync {
     fn publish<'a>(
         &'a self,
         message: crate::handler_workflow_async::AsyncWorkflowMessage,
+    ) -> WorkflowFuture<'a>;
+}
+
+/// Matching's explicit zombie-poller cancellation after a Frontend long-poll
+/// is dropped. RPC cancellation alone does not notify the Matching service.
+pub trait OutstandingPollCanceller: Send + Sync {
+    fn cancel_poll<'a>(
+        &'a self,
+        request: Value,
+        target_cluster: Option<String>,
     ) -> WorkflowFuture<'a>;
 }
 
@@ -405,6 +416,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
@@ -432,6 +444,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
@@ -464,6 +477,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
@@ -555,6 +569,14 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_async_publisher(mut self, publisher: Arc<dyn AsyncWorkflowPublisher>) -> Self {
         self.async_publisher = Some(publisher);
+        self
+    }
+
+    pub fn with_outstanding_poll_canceller(
+        mut self,
+        canceller: Arc<dyn OutstandingPollCanceller>,
+    ) -> Self {
+        self.outstanding_poll_canceller = Some(canceller);
         self
     }
 
@@ -831,9 +853,28 @@ impl<B: WorkflowBackend> Handler<B> {
                 .restart_workflow_execution(request, target_cluster, caller)
                 .await;
         }
-        self.backend
+        let poll_guard = if matches!(
+            operation,
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
+        ) {
+            self.outstanding_poll_canceller.as_ref().map(|canceller| {
+                OutstandingPollGuard::new(
+                    Arc::clone(canceller),
+                    poll_cancellation_request(operation, &request),
+                    target_cluster.clone(),
+                )
+            })
+        } else {
+            None
+        };
+        let result = self
+            .backend
             .invoke_on_cluster(operation, request, target_cluster)
-            .await
+            .await;
+        if let Some(guard) = poll_guard {
+            guard.disarm();
+        }
+        result
     }
 
     async fn restart_workflow_execution(
@@ -1519,6 +1560,57 @@ impl<B: WorkflowBackend> Handler<B> {
     }
 }
 
+struct OutstandingPollGuard {
+    canceller: Arc<dyn OutstandingPollCanceller>,
+    cancellation: Option<(Value, Option<String>)>,
+}
+
+impl OutstandingPollGuard {
+    fn new(
+        canceller: Arc<dyn OutstandingPollCanceller>,
+        request: Value,
+        target_cluster: Option<String>,
+    ) -> Self {
+        Self {
+            canceller,
+            cancellation: Some((request, target_cluster)),
+        }
+    }
+
+    fn disarm(mut self) {
+        self.cancellation = None;
+    }
+}
+
+impl Drop for OutstandingPollGuard {
+    fn drop(&mut self) {
+        let Some((request, target_cluster)) = self.cancellation.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let canceller = Arc::clone(&self.canceller);
+        runtime.spawn(async move {
+            let _ = canceller.cancel_poll(request, target_cluster).await;
+        });
+    }
+}
+
+fn poll_cancellation_request(operation: WorkflowOperation, request: &Value) -> Value {
+    let task_list_type = match operation {
+        WorkflowOperation::PollForDecisionTask => 1,
+        WorkflowOperation::PollForActivityTask => 2,
+        _ => unreachable!("poll cancellation requested for non-poll operation"),
+    };
+    serde_json::json!({
+        "domainUUID": request.get("domainUUID").cloned().unwrap_or(Value::Null),
+        "pollerID": request.get("pollerID").cloned().unwrap_or(Value::Null),
+        "taskListType": task_list_type,
+        "taskList": request.get("pollRequest").and_then(|v| v.get("taskList")).cloned().unwrap_or(Value::Null),
+    })
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EncodedTaskToken {
@@ -1855,6 +1947,26 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingAsyncPublisher(Mutex<Vec<crate::handler_workflow_async::AsyncWorkflowMessage>>);
+
+    #[derive(Default)]
+    struct RecordingPollCanceller {
+        calls: Mutex<Vec<(Value, Option<String>)>>,
+        called: tokio::sync::Notify,
+    }
+
+    impl OutstandingPollCanceller for RecordingPollCanceller {
+        fn cancel_poll<'a>(
+            &'a self,
+            request: Value,
+            target_cluster: Option<String>,
+        ) -> WorkflowFuture<'a> {
+            Box::pin(async move {
+                self.calls.lock().unwrap().push((request, target_cluster));
+                self.called.notify_one();
+                Ok(Value::Null)
+            })
+        }
+    }
 
     impl AsyncWorkflowPublisher for RecordingAsyncPublisher {
         fn publish<'a>(
@@ -3236,6 +3348,47 @@ mod tests {
             );
         }
         assert_ne!(calls[0].1["pollerID"], calls[1].1["pollerID"]);
+    }
+
+    #[tokio::test]
+    async fn dropped_poll_dispatch_cancels_matching_poller_with_go_fields() {
+        let canceller = Arc::new(RecordingPollCanceller::default());
+        let request = serde_json::json!({
+            "domainUUID": "domain-uuid",
+            "pollerID": "poller-id",
+            "pollRequest": {"taskList": {"name": "orders"}}
+        });
+        let cancel = poll_cancellation_request(WorkflowOperation::PollForActivityTask, &request);
+        assert_eq!(
+            cancel,
+            serde_json::json!({
+                "domainUUID": "domain-uuid",
+                "pollerID": "poller-id",
+                "taskListType": 2,
+                "taskList": {"name": "orders"}
+            })
+        );
+
+        drop(OutstandingPollGuard::new(
+            canceller.clone(),
+            cancel,
+            Some("cluster-b".into()),
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(1), canceller.called.notified())
+            .await
+            .unwrap();
+        assert_eq!(
+            canceller.calls.lock().unwrap().as_slice(),
+            &[(
+                serde_json::json!({
+                    "domainUUID": "domain-uuid",
+                    "pollerID": "poller-id",
+                    "taskListType": 2,
+                    "taskList": {"name": "orders"}
+                }),
+                Some("cluster-b".into())
+            )]
+        );
     }
 
     #[tokio::test]

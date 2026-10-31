@@ -781,10 +781,25 @@ Frontend parity until these are implemented and validated.
   tested SHA `bb7608bf08f094be8830ba50cbfab68733edaf06` and concluded
   `success`: Frontend Clippy/formatting passed and all 98 Frontend unit tests
   passed. The run does not cover the uncommitted blob-warning threshold test.
+- The subsequent blob warning threshold test is pushed in
+  `d288b9a568407ffb536be0b5507e9d14c815288d`. CI run
+  [41190921494](https://github.com/auenkr/cadence-rust/actions/runs/41190921494)
+  was `in_progress` at this save and will be superseded by the poll-cancellation
+  follow-up below.
+- Added an injectable `OutstandingPollCanceller` and a drop guard around
+  Matching poll dispatch. Dropping the Frontend long-poll now schedules the
+  explicit cancellation callback with domain UUID, poller ID, task list/type,
+  and the same selected cluster; normal completion disarms the guard. A test
+  checks Go's enum mapping and callback delivery. This cancellation hook is a
+  seam only: the runtime still must bind it to the typed Matching client and
+  transport disconnect path. These edits are uncommitted and have no CI result.
+- `origin/frontend-core2` advanced to `8dc83ffed`; the new commits are memory
+  documentation only. Its latest note confirms there are still no Frontend
+  durable managers or History/Matching operation adapters to merge.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
-  `Handler` or compose its wrappers; poll cancellation/health-wait and response
-  shaping, history/archive paging, archived visibility, and typed persistence
-  calls remain absent. No Frontend + Go History + Rust Matching SDK gate has
-  been added or run. Current package CI validates only the handler's unit-test
+  `Handler` or compose its wrappers; poll health-wait and response shaping,
+  history/archive paging, archived visibility, and typed persistence calls
+  remain absent. No Frontend + Go History + Rust Matching SDK gate has been
+  added or run. Current package CI validates only the handler's unit-test
   backend and is not mixed-service proof.
