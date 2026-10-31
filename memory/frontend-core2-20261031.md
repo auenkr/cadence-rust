@@ -234,6 +234,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Clippy before formatting/tests. The failure is a missing `Duration` import in
   `cadence-frontend/src/lifecycle.rs`; fixed in this checkpoint. Dispatch a
   fresh package run after pushing this commit and record its conclusion.
+- Follow-up run https://github.com/auenkr/cadence-rust/actions/runs/41184260635
+  checked `61224ce3ce73eeb51de639f04c9ca4a6ecf421bf` and concluded `failure` in
+  Frontend formatting: rustfmt sorts the shared lifecycle re-export before
+  imports. Applied the runner's one-line ordering patch. The run passed its Go
+  oracle gates and Clippy; formatting stopped the test job.
 - Validator audit: Go has 16 validation entry points and 15 table-driven test
   groups; Rust now has nil-request coverage for every entry point and expanded
   error, mutation, success, filter, permission, and failover matrices. Do not
