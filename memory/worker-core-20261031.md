@@ -157,6 +157,12 @@ Implemented in this slice:
 
 ## Validation evidence
 
+- Package CI at exact source head `b12f88ce155f72968b0b1af81cebe3daa209971c`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41209783259 completed
+  with conclusion `success`. This validated scanner round-robin shard batching
+  and prior crate source at that head. Scanner config and shard-selection
+  commits `e38a1282d` and `06ac7d0e2` are newer and remain unvalidated until a
+  fresh package CI run completes.
 - Package CI at exact source head `bb2042376618231a51e048aaaa64877eddf118d6`:
   https://github.com/auenkr/cadence-rust/actions/runs/41209390273 completed
   with conclusion `success` (Worker Clippy, formatting and tests).
