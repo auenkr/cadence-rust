@@ -200,6 +200,19 @@ async fn persist_frontend_snapshot(
     }
 }
 
+async fn stop_background_workers(
+    state: &handlers::AppState,
+    snapshot_task: Option<tokio::task::JoinHandle<()>>,
+    timer_task: tokio::task::JoinHandle<()>,
+) {
+    state.stop_background_workers();
+    for task in [snapshot_task, Some(timer_task)].into_iter().flatten() {
+        if let Err(error) = task.await {
+            eprintln!("stopping Frontend background worker failed: {error}");
+        }
+    }
+}
+
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
@@ -1936,9 +1949,6 @@ async fn run_with_lifecycle(
                 // Go Frontend changes RPC health before waiting for Ringpop/YARPC
                 // failure detection, then rejects new calls and leaves the
                 // final (at most one second) window for in-flight requests.
-                state
-                    .frontend_ready
-                    .store(false, std::sync::atomic::Ordering::Release);
                 let shutdown_drain = {
                     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
                     let nanos = cadence_persistence::dynamic_config::duration(
@@ -1948,22 +1958,37 @@ async fn run_with_lifecycle(
                     );
                     std::time::Duration::from_nanos(nanos.max(0) as u64)
                 };
-                let request_drain = shutdown_drain.min(std::time::Duration::from_secs(1));
-                let failure_detection = shutdown_drain.saturating_sub(request_drain);
-                tokio::time::sleep(failure_detection).await;
-                state
-                    .frontend_accepting
-                    .store(false, std::sync::atomic::Ordering::Release);
-                tokio::time::sleep(request_drain).await;
-            }
-            // Go Frontend closes stopC after the final request-drain window;
-            // this stops service-owned timer/snapshot loops before resources
-            // and listeners are torn down below.
-            state.stop_background_workers();
-            for task in [snapshot_task, Some(timer_task)].into_iter().flatten() {
-                if let Err(error) = task.await {
-                    eprintln!("stopping Frontend background worker failed: {error}");
-                }
+                let health_state = state.clone();
+                let handler_state = state.clone();
+                let resource_state = state.clone();
+                cadence_service_core::frontend_lifecycle::shutdown(
+                    shutdown_drain,
+                    move || async move {
+                        health_state
+                            .frontend_ready
+                            .store(false, std::sync::atomic::Ordering::Release);
+                    },
+                    move || async move {
+                        handler_state
+                            .frontend_accepting
+                            .store(false, std::sync::atomic::Ordering::Release);
+                    },
+                    // Global quota collections are not constructed by the
+                    // current Rust Frontend runtime. Keep the Go hook slot
+                    // explicit until their owners are wired here.
+                    || async {},
+                    move || async move {
+                        stop_background_workers(
+                            &resource_state,
+                            snapshot_task,
+                            timer_task,
+                        )
+                        .await;
+                    },
+                )
+                .await;
+            } else {
+                stop_background_workers(&state, snapshot_task, timer_task).await;
             }
             let mut fatal_writer = serving_result
                 .as_ref()

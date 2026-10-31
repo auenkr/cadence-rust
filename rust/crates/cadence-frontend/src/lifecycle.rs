@@ -1,26 +1,7 @@
 //! Frontend lifecycle state mirrors Go daemon states and health transitions.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::Duration;
-
-/// Go `frontend.Service.Stop` splits shutdownDrainDuration into the period
-/// peers need to observe unhealthy status and a final request-drain window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DrainPlan {
-    pub failure_detection: Duration,
-    pub request_drain: Duration,
-}
-
-impl DrainPlan {
-    #[must_use]
-    pub fn from_go_shutdown_drain_duration(duration: Duration) -> Self {
-        let request_drain = duration.min(Duration::from_secs(1));
-        Self {
-            failure_detection: duration.saturating_sub(request_drain),
-            request_drain,
-        }
-    }
-}
+pub use cadence_service_core::frontend_lifecycle::DrainPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]

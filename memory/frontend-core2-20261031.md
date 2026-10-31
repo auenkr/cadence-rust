@@ -394,3 +394,23 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   `success`. Go oracle checks, changed Matching formatting, Frontend formatting,
   Clippy, Frontend tests, and the Go-development-config runtime smoke all passed.
   The run confirms the shutdown worker ownership and formatting correction.
+
+## Shared Frontend drain sequence — continuation
+
+- Extracted the Go `service.go` health/failure-detection/handler-stop/
+  limiter-stop/request-drain/resource-stop order into
+  `cadence-service-core::frontend_lifecycle` and wired the running launcher
+  through it. The public `cadence-frontend::lifecycle::DrainPlan` now reuses
+  that shared timing implementation. Added tests for Go's duration split and
+  hook order.
+- The launcher maps health to readiness failure, handler stop to the shared
+  admission gate, and resource stop to signaling/joining the timer and optional
+  snapshot workers. The limiter hook is currently empty because the Rust
+  Frontend runtime has no global quota collection owners; this remains an
+  explicit lifecycle gap, not a completed Go stop-hook port.
+- Persistence audit remains unchanged: no production write-capable Frontend
+  domain/metadata, visibility, History, or execution manager, and no manager
+  set selected from both defaultStore and visibilityStore. Existing Matching
+  task persistence and read-only domain metadata code are not substitutes.
+- The lifecycle refactor needs exact-head `cadence-frontend` CI, including
+  formatting, Clippy, tests, and runtime smoke. Cargo was not run locally.
