@@ -707,6 +707,14 @@ fn handle_describe_cluster() -> HandlerResult {
     )))
 }
 
+fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::GetDomainReplicationMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::domain_replication_messages_response(state, request)
+        .map(|response| wrap_success(&response))
+        .map_err(AppError::internal)
+}
+
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2111,6 +2119,7 @@ pub async fn dispatch(
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
+        "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
         "ResetQueue" => handle_reset_queue(state, body).await,
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body),

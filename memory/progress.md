@@ -2002,3 +2002,7 @@ is pending; full History-backed branch pagination remains open.
 Exact-head package CI [41216594378](https://github.com/auenkr/cadence-rust/actions/runs/41216594378)
 passed at `5da2b0b9fc3e483aac3742735882305af0ed1420`. This validates the Thrift
 raw-history UUID normalization and malformed persistence cursor rejection.
+
+Added YARPC `GetDomainReplicationMessages` by delegating to the shared durable
+domain queue helper, including its cursor and ack semantics. Package CI is
+pending for this change.

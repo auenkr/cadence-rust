@@ -1266,3 +1266,7 @@ migration forward.
 - Admin queue inventory found YARPC `GetDomainReplicationMessages` missing even
   though the durable JSON helper implements the queue read/ack contract. I am
   wiring the Thrift route to that same helper next.
+- Added the Thrift/YARPC `GetDomainReplicationMessages` route through the
+  existing durable queue read/ack helper, so the two transports share cursor,
+  ack-level and decode behavior. Exact-head package CI is pending; no local
+  Cargo command ran.
