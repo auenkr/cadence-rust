@@ -1986,3 +1986,7 @@ package CI is pending for this source change.
 Merged the latest `origin/frontend-core2` update at `271fdab4e` into the
 integration branch, preserving its shutdown idempotency change. The current
 integration head requires fresh package CI.
+
+Exact-head CI 41215905318 passed formatting and found two borrowed-string
+arguments in the new YARPC History client error paths. Fixed both; the run did
+not reach tests and a fresh package CI run is required.

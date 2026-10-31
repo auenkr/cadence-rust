@@ -1241,3 +1241,9 @@ migration forward.
   retained core2's newer shutdown idempotency lifecycle and current persistence
   checkpoint. `origin/t3/frontend-workflow-api` and `origin/master` remain
   ancestors. The queue change and merge need exact-head CI together.
+- Exact-head package run
+  [41215905318](https://github.com/auenkr/cadence-rust/actions/runs/41215905318)
+  targeted `887e36328520dd728f5ab67e0608332f2ddefc32`. Formatting passed;
+  Clippy stopped on two borrowed-string arguments to `AppError::internal` in
+  the new Thrift History proxies. Converted both to owned strings. No tests
+  ran; fresh exact-head package CI is required.

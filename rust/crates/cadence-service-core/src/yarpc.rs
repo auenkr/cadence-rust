@@ -723,7 +723,7 @@ async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let channel = state
         .history_admin_channel
         .clone()
-        .ok_or_else(|| AppError::internal("History client is not configured."))?;
+        .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
     client
         .reset_queue(crate::admin::history_admin_request(
@@ -754,7 +754,7 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
     let channel = state
         .history_admin_channel
         .clone()
-        .ok_or_else(|| AppError::internal("History client is not configured."))?;
+        .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
     let response = client
         .describe_queue(crate::admin::history_admin_request(
