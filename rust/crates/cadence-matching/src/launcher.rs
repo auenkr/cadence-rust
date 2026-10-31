@@ -524,12 +524,9 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     crate::grpc_tls::install_tls_crypto_provider();
     let cli = Cli::parse_as(bin_name);
+    let (config, env, zone, root) = (cli.config, cli.env, cli.zone, cli.root);
     match cli.command {
         Command::Start {
-            config,
-            env,
-            zone,
-            root,
             services,
             port,
             grpc_port,
@@ -543,6 +540,23 @@ pub async fn run(
             // keeps the in-memory domain view used by standalone compatibility
             // tests; an explicit YAML config must provide Matching's real
             // supported persistence backend.
+            let process_root = root
+                .map(std::path::PathBuf::from)
+                .unwrap_or(std::env::current_dir()?);
+            // Go resolves a relative config dir under root and defaults it to
+            // `<root>/config`; embedded development settings remain the fallback
+            // when no config was named and that directory does not exist.
+            let config = match config {
+                Some(path) if std::path::Path::new(&path).is_relative() => {
+                    let joined = process_root.join(&path);
+                    Some(if joined.exists() { joined.to_string_lossy().into_owned() } else { path })
+                }
+                Some(path) => Some(path),
+                None => {
+                    let default_dir = process_root.join("config");
+                    default_dir.is_dir().then(|| default_dir.to_string_lossy().into_owned())
+                }
+            };
             let embedded_development = config.is_none();
             let cfg = match config {
                 Some(path) if std::path::Path::new(&path).is_dir() => {
@@ -562,9 +576,6 @@ pub async fn run(
             };
             cfg.validate()?;
             cfg.persistence.validate_go().map_err(anyhow::Error::msg)?;
-            let process_root = root
-                .map(std::path::PathBuf::from)
-                .unwrap_or(std::env::current_dir()?);
             let dynamic_config_provider = cfg.dynamic_config_provider();
             let mut openfeature_lifecycle: Option<OpenFeatureLifecycle> = None;
             let mut runtime_property_provider: Option<
@@ -968,16 +979,26 @@ pub async fn run(
             } else {
                 handlers::health_router()
             };
-            let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
-            println!(
-                "cadence-server running on {addr}: {}",
-                wanted
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            let listener = tokio::net::TcpListener::bind(addr).await?;
+            // Go creates an HTTP transport only when `rpc.http` is configured, so a
+            // Matching-only process binds the legacy JSON API port only on request.
+            let http_port = port.or_else(|| {
+                (!wanted.iter().all(|s| *s == service::ServiceName::Matching)).then_some(8080)
+            });
+            let listener = match http_port {
+                Some(http_port) => {
+                    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], http_port));
+                    println!(
+                        "cadence-server running on {addr}: {}",
+                        wanted
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                    Some(tokio::net::TcpListener::bind(addr).await?)
+                }
+                None => None,
+            };
             let grpc_port = grpc_port
                 .or_else(|| frontend_rpc.map(|r| r.grpc_port).filter(|p| *p > 0))
                 .unwrap_or(7833);
@@ -1012,12 +1033,18 @@ pub async fn run(
             }
             // The listener task is spawned and must own its configuration.
             let matching_rpc = cfg.services.get("matching").map(|s| s.rpc.clone());
+            // Go binds gRPC and TChannel to `rpc.bindOnIP` when set; the wildcard
+            // fallback keeps unconfigured deployments reachable on every interface.
+            let matching_bind_ip: std::net::IpAddr = match matching_rpc.as_ref() {
+                Some(r) if r.bind_on_local_host && !r.bind_on_ip.is_empty() => {
+                    anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive")
+                }
+                Some(r) if r.bind_on_local_host => std::net::Ipv4Addr::LOCALHOST.into(),
+                Some(r) if !r.bind_on_ip.is_empty() => matching_listen_ip(Some(r))?,
+                _ => std::net::Ipv4Addr::UNSPECIFIED.into(),
+            };
             let matching_addr = std::net::SocketAddr::from((
-                if matching_rpc.as_ref().is_some_and(|r| r.bind_on_local_host) {
-                    [127, 0, 0, 1]
-                } else {
-                    [0, 0, 0, 0]
-                },
+                matching_bind_ip,
                 matching_grpc_port
                     .or_else(|| {
                         matching_rpc
@@ -1660,14 +1687,16 @@ pub async fn run(
                 app
             };
             let mut serving = tokio::task::JoinSet::new();
-            serving.spawn(async move {
-                (
-                    "HTTP API",
-                    axum::serve(listener, app)
-                        .await
-                        .map_err(anyhow::Error::from),
-                )
-            });
+            if let Some(listener) = listener {
+                serving.spawn(async move {
+                    (
+                        "HTTP API",
+                        axum::serve(listener, app)
+                            .await
+                            .map_err(anyhow::Error::from),
+                    )
+                });
+            }
             if run_frontend {
                 serving.spawn(async move {
                     (
@@ -1914,7 +1943,8 @@ pub async fn run(
         Command::Version => {
             println!("cadence-server (rust) {}", cadence_api::API_COMPAT_VERSION);
         }
-        Command::CheckConfig { config } => {
+        Command::CheckConfig => {
+            let config = config.ok_or_else(|| anyhow::anyhow!("--config is required"))?;
             let cfg = config::Config::from_file(&config)?;
             cfg.validate()?;
             cfg.persistence.validate_go().map_err(anyhow::Error::msg)?;

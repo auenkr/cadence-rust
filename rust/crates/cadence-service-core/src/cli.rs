@@ -8,6 +8,20 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
     about = "Cadence workflow engine (Rust port)"
 )]
 pub struct Cli {
+    /// Root directory of the execution environment (Go `--root`, `CADENCE_ROOT`).
+    #[arg(long, short = 'r', global = true, env = "CADENCE_ROOT")]
+    pub root: Option<String>,
+    /// Config file, or config dir relative to root or absolute (Go `--config`,
+    /// `CADENCE_CONFIG_DIR`); without it `<root>/config` is used when present,
+    /// else the embedded development settings.
+    #[arg(long, short = 'c', global = true, env = "CADENCE_CONFIG_DIR")]
+    pub config: Option<String>,
+    /// Environment layer (`<env>.yaml`), Go `--env`, `CADENCE_ENVIRONMENT`.
+    #[arg(long, short = 'e', global = true, env = "CADENCE_ENVIRONMENT")]
+    pub env: Option<String>,
+    /// Zone layer (`<env>_<zone>.yaml`), Go `--zone`/`--az`, `CADENCE_AVAILABILITY_ZONE`.
+    #[arg(long, visible_alias = "az", global = true, env = "CADENCE_AVAILABILITY_ZONE")]
+    pub zone: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -16,26 +30,12 @@ pub struct Cli {
 pub enum Command {
     /// Start one or more services (default: all).
     Start {
-        /// YAML config file with Cadence keys; defaults to embedded development settings.
-        #[arg(long)]
-        config: Option<String>,
-        /// Environment layer for a `--config` directory (`<env>.yaml`); defaults to
-        /// `$CADENCE_ENVIRONMENT`, then `development` (Go `--env`).
-        #[arg(long)]
-        env: Option<String>,
-        /// Zone layer for a `--config` directory (`<env>_<zone>.yaml`); defaults to
-        /// `$CADENCE_AVAILABILITY_ZONE` (Go `--zone`).
-        #[arg(long)]
-        zone: Option<String>,
-        /// Process root used to resolve relative dynamic-config paths (Go --root semantics).
-        #[arg(long)]
-        root: Option<String>,
         /// Services to run. Empty means all.
-        #[arg(long, value_delimiter = ',')]
+        #[arg(long, short = 's', value_delimiter = ',')]
         services: Vec<String>,
-        /// HTTP port for the JSON API.
-        #[arg(long, default_value_t = 8080)]
-        port: u16,
+        /// HTTP port for the JSON API (default 8080, none for a Matching-only process).
+        #[arg(long)]
+        port: Option<u16>,
         /// Cadence protobuf gRPC frontend port.
         #[arg(long)]
         grpc_port: Option<u16>,
@@ -58,11 +58,8 @@ pub enum Command {
     },
     /// Print API compatibility info.
     Version,
-    /// Check a config file parses and validates.
-    CheckConfig {
-        #[arg(long)]
-        config: String,
-    },
+    /// Check the file named by `--config` parses and validates.
+    CheckConfig,
 }
 
 impl Cli {
