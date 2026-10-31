@@ -1192,3 +1192,22 @@ migration forward.
   checked `2bf8ce9909da0c46f7dadeb3c4ae6b600bd7fccd` and also failed before
   Cargo: one line in the merge helper needed rustfmt's single-line layout.
   Applied that exact correction; fresh exact-head package CI is pending.
+
+## Frontend integration sync and CI repair — 2026-10-31
+
+- Fetched and merged the updated `origin/frontend-core2` tip at
+  `896265ca4`; `origin/t3/frontend-workflow-api` and `origin/master` are also
+  ancestors of the resulting integration branch. The sync commit is
+  `fc8a59227914d58b977dc7e2395e13d0c3b2bf70`. No file-level conflict remained
+  in this checkout because the prior integration already contained the earlier
+  resolutions; core2 added its latest memory evidence. Pushed to
+  `origin/frontend-domain-admin`.
+- Exact-head package run
+  [41214814048](https://github.com/auenkr/cadence-rust/actions/runs/41214814048)
+  failed in Clippy compilation at `fc8a59227914d58b977dc7e2395e13d0c3b2bf70`:
+  YARPC Domain delete matched an obsolete error shape, and MergeDLQMessages
+  lacked the Thrift request/response conversions. No Cargo tests ran.
+- Fixed delete error classification (`NotFound` remains EntityNotExists; other
+  persistence errors are internal) and added the MergeDLQ request/response
+  converters with the replicator IDL field IDs and enum values. Added wire
+  field and round-trip coverage. This source has not been CI validated yet.

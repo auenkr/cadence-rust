@@ -1951,3 +1951,13 @@ open. See `frontend-workflow-api-20261031.md`.
   Merge passes the requested maximum through. Exact-head CI for this source is
   pending. Durable failover audit, History-backed Admin calls, scheduler
   workflow routing, live membership, and mixed Go/Rust acceptance remain open.
+
+## Frontend integration sync and CI repair — 2026-10-31
+
+Merged current `frontend-core2` with the workflow API and master ancestry into
+`frontend-domain-admin` at `fc8a59227914d58b977dc7e2395e13d0c3b2bf70`. Package CI
+41214814048 exposed two YARPC compile gaps: the durable domain delete error
+mapping and MergeDLQ Thrift conversions. Both were repaired; fresh package CI is
+pending. Domain audit durability, History-backed Admin operations, scheduler
+workflow routing, and real membership remain open. See
+`memory/frontend-domain-admin-2026-10-31.md`.

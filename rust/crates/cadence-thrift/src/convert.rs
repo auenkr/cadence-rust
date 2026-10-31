@@ -13,7 +13,8 @@ use cadence_api::admin::{
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
-    MaintainCorruptWorkflowResponse, MembershipInfo, PersistenceFeature, PersistenceInfo,
+    MaintainCorruptWorkflowResponse, MembershipInfo, MergeDLQMessagesRequest,
+    MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
     ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
@@ -429,6 +430,60 @@ impl FromThrift for AddSearchAttributeRequest {
 impl ToThrift for AddSearchAttributeResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
+    }
+}
+
+impl FromThrift for MergeDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let dlq_type = s.opt_i32(10)?.map(|value| match value {
+            0 => DLQType::Replication,
+            1 => DLQType::Domain,
+            _ => DLQType::Invalid,
+        });
+        Ok(Self {
+            dlq_type,
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+            maximum_page_size: s.opt_i32(50)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(60)?,
+        })
+    }
+}
+
+impl ToThrift for MergeDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+            }),
+        );
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.oi32(50, Some(self.maximum_page_size));
+        f.sbytes(60, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for MergeDLQMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            next_page_token: s.bytes_or_empty(10)?,
+        })
+    }
+}
+
+impl ToThrift for MergeDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.next_page_token);
+        f.finish()
     }
 }
 
@@ -6573,6 +6628,33 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 #[cfg(test)]
 mod timeout_wire_tests {
     use super::*;
+
+    #[test]
+    fn merge_dlq_uses_replicator_idl_field_ids_and_enum_values() {
+        let request = MergeDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 7,
+            source_cluster: "cluster-b".into(),
+            inclusive_end_message_id: Some(99),
+            maximum_page_size: 12,
+            next_page_token: vec![0, 255],
+        };
+        let encoded = request.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(7));
+        assert_eq!(encoded.opt_string(30).unwrap().as_deref(), Some("cluster-b"));
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(99));
+        assert_eq!(encoded.opt_i32(50).unwrap(), Some(12));
+        assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![0, 255]);
+        assert_eq!(MergeDLQMessagesRequest::from_thrift(&encoded).unwrap(), request);
+
+        let response = MergeDLQMessagesResponse {
+            next_page_token: vec![1, 2, 3],
+        };
+        let encoded = response.to_thrift();
+        assert_eq!(encoded.bytes_or_empty(10).unwrap(), vec![1, 2, 3]);
+        assert_eq!(MergeDLQMessagesResponse::from_thrift(&encoded).unwrap(), response);
+    }
 
     #[test]
     fn timeout_attributes_preserve_pinned_thrift_fields_and_opaque_bytes() {

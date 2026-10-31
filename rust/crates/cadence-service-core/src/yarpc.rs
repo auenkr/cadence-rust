@@ -194,10 +194,12 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    state
-        .domain_manager
-        .delete(&req.name)
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    state.domain_manager.delete(&req.name).map_err(|error| match error {
+        cadence_persistence::FrontendDomainError::NotFound(error) => {
+            AppError::entity_not_exists(error.message)
+        }
+        other => AppError::internal(other.to_string()),
+    })?;
     state.executions.unregister_domain(&req.name);
     Ok(Struct { fields: Vec::new() })
 }
