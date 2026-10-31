@@ -14,7 +14,7 @@ use cadence_api::{
         PersistenceInfo, RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigResponse,
     },
     enums::IndexedValueType,
-    errors::BadRequestError,
+    errors::{BadRequestError, EntityNotExistsError, InternalServiceError},
     types::SupportedClientVersions,
 };
 use cadence_service_core::admin::DynamicConfigOverlay;
@@ -22,6 +22,7 @@ use cadence_service_core::admin::DynamicConfigOverlay;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminError {
     BadRequest(BadRequestError),
+    EntityNotExists(EntityNotExistsError),
     Internal(InternalServiceError),
 }
 
@@ -30,6 +31,7 @@ impl std::fmt::Display for AdminError {
         match self {
             Self::BadRequest(e) => std::fmt::Display::fmt(e, f),
             Self::EntityNotExists(e) => std::fmt::Display::fmt(e, f),
+            Self::Internal(e) => std::fmt::Display::fmt(e, f),
         }
     }
 }
