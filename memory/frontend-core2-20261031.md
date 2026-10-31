@@ -639,3 +639,21 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   checked `456a6110730af157ba6342c5bece94da6186f426` and failed Clippy on an
   unused `mut` left in the visibility page-size test by the fixture correction.
   Removed it; request another exact-head Frontend run after pushing.
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41188887361
+  validated `54c2e54c45141b5499ee4d896dad9a639631ff27` and concluded
+  `success`. Formatting, Frontend Clippy and tests passed, including the new
+  active-active/active-passive graceful failover and lockdown rows, handler
+  shutdown hook test, and existing Go validator matrix cases.
+- Source audit on `go/service/frontend/api/request_validator_test.go` found 15
+  table groups, 88 named rows, and 24 unique `expectedError` messages; Rust
+  assertions contain all 24 messages, and all 16 validation entry points have
+  nil-request coverage. Success, mutation, ordering, visibility, permission,
+  failover and lockdown cases are covered across the Rust tests. Treat this
+  test-matrix slice as CI-validated at `54c2e54`; it does not close persistence.
+- Current persistence status remains incomplete: there are no Frontend-owned
+  durable DomainManager/MetadataManager, VisibilityManager, HistoryManager or
+  ExecutionManager implementations connected to service handlers. Configured
+  SQL/Cassandra opening and read-only domain metadata readers are Matching
+  adapters only. The Go-compatible SQL payload encoder is groundwork, not a
+  manager. The new admin stop broadcast is an ownership seam; no Go-equivalent
+  quota collection or admin watcher implementations yet consume it.
