@@ -701,3 +701,11 @@ migration forward.
   The package CI run [41194722171](https://github.com/auenkr/cadence-rust/actions/runs/41194722171)
   at `48e7220a675177dd864d5bc6bf49540dcafb12d2` was cancelled when core2
   advanced. Push the rebased source and dispatch exact-head package CI.
+- Package run [41194839384](https://github.com/auenkr/cadence-rust/actions/runs/41194839384)
+  completed **failure** at exact rebased head
+  `3427f41471afc357349bbb6479499375dabbf96a`. Clippy found duplicate legacy
+  MySQL writer methods after applying the SQL adapter commit; removed that old
+  `write_domain` block and retained core2's newer transactional create/update/
+  delete methods. Core2 also changed the in-memory domain create error type;
+  adapted the convenience method to propagate it into `FrontendDomainError`.
+  No local Cargo command was run. Push this repair and redispatch package CI.

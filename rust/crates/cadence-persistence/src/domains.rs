@@ -482,7 +482,7 @@ impl InMemoryDomainStore {
         replication: DomainReplicationConfiguration,
         is_global_domain: bool,
     ) -> Result<DescribeDomainResponse, FrontendDomainError> {
-        self.create_with_version(
+        Ok(self.create_with_version(
             info,
             configuration,
             replication,
@@ -492,7 +492,7 @@ impl InMemoryDomainStore {
             } else {
                 crate::version_history::EMPTY_VERSION
             },
-        )
+        )?)
     }
 
     pub fn create_with_version(
