@@ -934,3 +934,13 @@ migration forward.
   audit rows and queue persistence also are not connected to the durable
   manager. I am auditing the Go queue/read contracts before implementing the
   next bounded queue slice; no parity claim is made.
+- Exact-head run [41200242121](https://github.com/auenkr/cadence-rust/actions/runs/41200242121)
+  completed **success** at `87935eb960ab4312368addd4cca837a27c83f5a5` after
+  the core2 rebase (Frontend Clippy, formatting, tests and runtime smoke).
+- The queue audit confirmed Go's producer writes ThriftRW-encoded
+  `ReplicationTask` payloads into the shared persistence queue and Admin reads
+  from the retrieved cursor, consults per-cluster ack levels only for the
+  default cursor, and treats ack updates as warning-only. Rust does not yet
+  have the compatible replication task codec or a configured queue manager;
+  replacing the disabled-queue response with an in-memory queue would not
+  satisfy the durable or wire-compatible requirement.
