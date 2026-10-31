@@ -35,6 +35,17 @@ use cadence_persistence::{
     InMemoryDomainStore, InMemoryExecutionStore, TaskError, WorkflowMutationError,
 };
 use serde::Deserialize;
+use std::future::Future;
+use std::pin::Pin;
+
+/// A Frontend owned global quota collection. Go calls `OnStop` on each of its
+/// seven collections before opening the request drain window.
+pub trait FrontendLimiterCollection: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn on_stop(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
+}
 
 /// Recently seen pollers: (task-list, identity, kind) -> poll record.
 /// Mirrors the poller list Go's matching service reports.
@@ -86,6 +97,9 @@ pub struct AppState {
     /// the Go domain DLQ and failover watchers). This is separate from the
     /// API admission gate stopped by WorkflowHandler.Stop.
     pub frontend_admin_shutdown: tokio::sync::watch::Sender<bool>,
+    /// Global limiter collections are service owned and stop between handler
+    /// admission shutdown and the final request drain, as in Go Service.Stop.
+    pub frontend_limiters: Arc<std::sync::Mutex<Vec<Arc<dyn FrontendLimiterCollection>>>>,
     /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
     /// The launcher signals this only after request draining has completed.
     pub background_shutdown: tokio::sync::watch::Sender<bool>,
@@ -118,6 +132,7 @@ impl Default for AppState {
             frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
+            frontend_limiters: Arc::new(std::sync::Mutex::new(Vec::new())),
             background_shutdown: tokio::sync::watch::channel(false).0,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
@@ -142,6 +157,41 @@ impl AppState {
     /// Admin modules subscribe when they own a long-lived task.
     pub fn stop_frontend_admin_handler(&self) {
         self.frontend_admin_shutdown.send_replace(true);
+    }
+
+    /// Register a collection when the Frontend dependency graph constructs it.
+    pub fn register_frontend_limiter(&self, limiter: Arc<dyn FrontendLimiterCollection>) {
+        self.frontend_limiters
+            .lock()
+            .expect("frontend limiter registry lock")
+            .push(limiter);
+    }
+
+    /// Stop all constructed global limiter collections with Go's shared
+    /// one-second deadline. Failures are logged independently so one broken
+    /// collection cannot prevent the remaining owners from stopping.
+    pub async fn stop_frontend_limiters(&self) {
+        let limiters = std::mem::take(
+            &mut *self
+                .frontend_limiters
+                .lock()
+                .expect("frontend limiter registry lock"),
+        );
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        for limiter in limiters {
+            match tokio::time::timeout_at(deadline, limiter.on_stop()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => tracing::error!(
+                    limiter = limiter.name(),
+                    error = %error,
+                    "failed to stop Frontend global rate limiter collection"
+                ),
+                Err(_) => tracing::error!(
+                    limiter = limiter.name(),
+                    "timed out stopping Frontend global rate limiter collection"
+                ),
+            }
+        }
     }
 
     /// Stop service-owned background loops, matching Go Frontend's `close(s.stopC)`.
@@ -2459,7 +2509,23 @@ mod frontend_drain_tests {
     use super::*;
     use axum::body::Body;
     use http::{Request, StatusCode};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
+
+    struct TestLimiter(Arc<AtomicUsize>);
+
+    impl FrontendLimiterCollection for TestLimiter {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+
+        fn on_stop(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        }
+    }
 
     #[tokio::test]
     async fn stop_background_workers_broadcasts_the_go_stop_signal() {
@@ -2490,6 +2556,19 @@ mod frontend_drain_tests {
         state.stop_frontend_admin_handler();
         admin_shutdown.changed().await.unwrap();
         assert!(*admin_shutdown.borrow());
+    }
+
+    #[tokio::test]
+    async fn frontend_stop_invokes_registered_limiter_owners_once() {
+        let state = AppState::default();
+        let stopped = Arc::new(AtomicUsize::new(0));
+        state.register_frontend_limiter(Arc::new(TestLimiter(stopped.clone())));
+
+        state.stop_frontend_limiters().await;
+        state.stop_frontend_limiters().await;
+
+        assert_eq!(stopped.load(Ordering::SeqCst), 1);
+        assert!(state.frontend_limiters.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

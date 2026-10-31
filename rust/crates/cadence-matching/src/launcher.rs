@@ -1987,6 +1987,7 @@ async fn run_with_lifecycle(
                 };
                 let health_state = state.clone();
                 let handler_state = state.clone();
+                let limiter_state = state.clone();
                 let resource_state = state.clone();
                 cadence_service_core::frontend_lifecycle::shutdown(
                     shutdown_drain,
@@ -2002,10 +2003,9 @@ async fn run_with_lifecycle(
                         handler_state.stop_frontend_handler();
                         handler_state.stop_frontend_admin_handler();
                     },
-                    // Global quota collections are not constructed by the
-                    // current Rust Frontend runtime. Keep the Go hook slot
-                    // explicit until their owners are wired here.
-                    || async {},
+                    move || async move {
+                        limiter_state.stop_frontend_limiters().await;
+                    },
                     move || async move {
                         // Go closes the Frontend stop channel and stops its
                         // resource-owned timer/admin workers after the final

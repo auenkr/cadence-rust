@@ -639,3 +639,131 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   checked `456a6110730af157ba6342c5bece94da6186f426` and failed Clippy on an
   unused `mut` left in the visibility page-size test by the fixture correction.
   Removed it; request another exact-head Frontend run after pushing.
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41188887361
+  validated `54c2e54c45141b5499ee4d896dad9a639631ff27` and concluded
+  `success`. Formatting, Frontend Clippy and tests passed, including the new
+  active-active/active-passive graceful failover and lockdown rows, handler
+  shutdown hook test, and existing Go validator matrix cases.
+- Source audit on `go/service/frontend/api/request_validator_test.go` found 15
+  table groups, 88 named rows, and 24 unique `expectedError` messages; Rust
+  assertions contain all 24 messages, and all 16 validation entry points have
+  nil-request coverage. Success, mutation, ordering, visibility, permission,
+  failover and lockdown cases are covered across the Rust tests. Treat this
+  test-matrix slice as CI-validated at `54c2e54`; it does not close persistence.
+- Current persistence status remains incomplete: there are no Frontend-owned
+  durable DomainManager/MetadataManager, VisibilityManager, HistoryManager or
+  ExecutionManager implementations connected to service handlers. Configured
+  SQL/Cassandra opening and read-only domain metadata readers are Matching
+  adapters only. The Go-compatible SQL payload encoder is groundwork, not a
+  manager. The new admin stop broadcast is an ownership seam; no Go-equivalent
+  quota collection or admin watcher implementations yet consume it.
+- Documentation-head follow-up run
+  https://github.com/auenkr/cadence-rust/actions/runs/41189260596 checked
+  `32de07ee30ed50ca64d302d62d7ef236c028485b` and concluded `success`.
+  The preceding code head `54c2e54c45141b5499ee4d896dad9a639631ff27` is the
+  exact head that validated the validator/lifecycle code in run 41188887361.
+
+## Continuation requested after review — 2026-10-31
+
+- Re-ran the Frontend package workflow on the current branch head
+  `07cfbe0ed071a28c45b0b6a1c7ce36344a14d6d6`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41189844045
+  concluded `success`. No Cargo command was run locally. This verifies the
+  current source baseline; it does not validate new persistence behavior.
+- Re-audited the remaining requested work. The Go validator matrix is already
+  closed by uncached CI run `41181338783` (success, head
+  `97ee38218fbf77970269d3937eb8e82199787285`, all 91 Go table cases). The
+  later failover/lockdown rows passed on `54c2e54` in run `41188887361`.
+- Go lifecycle order is represented in the launcher (health failure, discovery
+  delay, reject requests/stop Admin signal, limiter hook, one-second drain,
+  then stop background workers/resources). The limiter hook is still empty:
+  the Rust Frontend does not construct the seven Go global quota collection
+  owners. The admin signal is available but no Go-equivalent watcher owners
+  have been wired. Lifecycle parity therefore remains open.
+- Production persistence remains open. Frontend `AppState` still holds
+  `InMemoryDomainStore` and `InMemoryExecutionStore`. Configured default-store
+  opening is currently for Matching task persistence plus read-only Go domain
+  metadata. No write-capable SQL/Cassandra DomainManager/metadata manager,
+  configured visibility manager, durable HistoryManager, or durable
+  ExecutionManager is selected and connected to Frontend state. The SQL
+  metadata encoder and Matching task adapters are not production Frontend
+  managers. No code change in this continuation closed these gaps.
+- Next implementation must add manager interfaces/adapters and wire Frontend
+  calls through the selected Go `defaultStore` and `visibilityStore`, then
+  connect real Frontend lifecycle owners and rerun exact-head CI. Do not mark
+  this task complete until both workstreams are implemented and validated.
+- The documentation checkpoint at `8dc83ffed0db23faacb3a15329fedfc3b25399d4`
+  passed a fresh Frontend package workflow:
+  https://github.com/auenkr/cadence-rust/actions/runs/41190182638
+  (head `8dc83ffed0db23faacb3a15329fedfc3b25399d4`, conclusion `success`).
+  This run covers the baseline source and docs only; it does not close either
+  outstanding implementation gap.
+- Backend selection finding for the next persistence slice: Go's SQLite SQL
+  plugin exposes `LockDomainMetadata` but has no `UpdateDomainMetadata`
+  implementation (`go/common/persistence/sql/sqlplugin/sqlite/domain.go`).
+  Go SQL domain CRUD/version transactions are implemented in the MySQL and
+  PostgreSQL plugins (`.../mysql/domain.go`, `.../postgres/domain.go`); do not
+  treat the SQLite Matching metadata reader as a production DomainManager.
+  The write-capable production SQL adapter must share the existing MySQL/
+  PostgreSQL connection and transaction behavior, while Cassandra must follow
+  `go/common/persistence/nosql/nosql_domain_store.go` and
+  `go/common/persistence/nosql/nosqlplugin/cassandra/domain.go`.
+- Package CI run https://github.com/auenkr/cadence-rust/actions/runs/41190773742
+  checked head `5b97a257884c6f544ba11a6bc31eb18c00c8c534` and concluded
+  `success` (Go oracles, formatting, Clippy, tests and Frontend runtime smoke).
+  The follow-up path correction in `bd0b585f6` changes documentation only;
+  run exact-head CI for that current branch revision before using it as the
+  latest green evidence.
+
+## Persistence manager contract inventory — continuation
+
+Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.go`
+(`DomainManager`, `ExecutionManager`, `HistoryManager`) and
+`go/common/persistence/visibility_manager_interfaces.go` (`VisibilityManager`);
+`go/common/persistence/data_store_interfaces.go` defines the lower-level stores.
+
+- Go `DomainManager` owns Create/Get/Update/Delete/DeleteByName/List and
+  `GetMetadata`. Its `domain_metadata` notification version participates in
+  domain create/update transactions; there is not a separate Go interface
+  literally named `MetadataManager` in this code version.
+- Go `ExecutionManager` owns workflow mutable-state/current-execution writes,
+  history/replication tasks and scans. Go `HistoryManager` owns append/read,
+  raw/batched reads, branch fork/delete and tree reads. Go `VisibilityManager`
+  is a separate secondary datastore with started/closed/uninitialized/upsert,
+  list/query/scan/count and delete methods.
+- Configuration selects the primary manager datastore through
+  `persistence.defaultStore`; visibility has its own `persistence.visibilityStore`
+  (and advanced visibility selector). Matching's configured native adapters
+  currently open task persistence on the default store and provide a read-only
+  domain metadata source. They are not Go manager implementations.
+- Rust currently backs `AppState.domains` with `InMemoryDomainStore` and
+  `AppState.executions` with `InMemoryExecutionStore`. `visibility.rs` evaluates
+  query expressions in memory; `history_branch.rs` contains branch helpers,
+  not a history-node database manager. This inventory defines the required
+  seams for the next implementation slice and prevents the read-only Matching
+  source or those in-memory stores being counted as production persistence.
+
+## Follow-up — Frontend stop-owner registry
+
+- Exact-head CI run https://github.com/auenkr/cadence-rust/actions/runs/41191113835
+  checked `cab683530c738e5ce5f223a6e56599c7faf4742f` and concluded `success`.
+  Formatting, Clippy and Frontend package tests passed. This run predates the
+  stop-owner registry changes below.
+- Replaced the launcher's empty limiter-stop hook with an `AppState` registry
+  for service-owned global limiter collections. Shutdown now drains registered
+  owners under Go's shared one-second deadline, logs failures independently,
+  and invokes this step between handler stop and request drain. A unit test
+  checks exactly-once stopping and registry removal. The current Frontend
+  construction path still registers no actual quota collections, so this
+  closes the lifecycle owner seam but not Go's seven collection
+  construction/use parity. Do not mark lifecycle complete until real
+  collections are constructed and registered.
+- Persistence remains unimplemented: all five required production managers
+  (domain, metadata, visibility, history, execution) and Go SQL/Cassandra
+  selection are still open. `AppState` continues to reference concrete
+  in-memory stores; this follow-up does not claim to close that requirement.
+- The Go validator matrix remains closed by fresh uncached CI run
+  `41181338783` (all 91 named cases). No validator changes are part of this
+  follow-up.
+- Dispatch a fresh exact-head package workflow after pushing the limiter-owner
+  change; record its final result below.
