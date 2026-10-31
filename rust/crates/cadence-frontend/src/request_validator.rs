@@ -369,29 +369,39 @@ impl RequestValidator {
         if request.workflow_execution_retention_period_in_days > max_retention {
             return Err(Self::bad("RetentionDays is invalid."));
         }
-        let required_keys = if let Some(dynamic) = &self.dynamic {
-            dynamic
-                .lock()
-                .ok()
-                .map(|dynamic| {
-                    cadence_persistence::dynamic_config::string_list(
-                        dynamic.property_values("system.requiredDomainDataKeys"),
-                    )
-                })
-                .filter(|keys| !keys.is_empty())
-                .unwrap_or_else(|| self.config.required_domain_data_keys.clone())
-        } else {
-            self.config.required_domain_data_keys.clone()
-        };
+        let default_required_keys = self
+            .config
+            .required_domain_data_keys
+            .iter()
+            .cloned()
+            .map(|key| (key, serde_json::Value::Bool(true)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let required_keys = self
+            .dynamic
+            .as_ref()
+            .and_then(|dynamic| dynamic.lock().ok())
+            .and_then(|dynamic| {
+                Some(cadence_persistence::dynamic_config::map_property(
+                    dynamic.property_values("system.requiredDomainDataKeys"),
+                    default_required_keys.clone(),
+                ))
+            })
+            .unwrap_or(default_required_keys);
         let required_keys_go_format = format!(
             "map[{}]",
             required_keys
                 .iter()
-                .map(|key| format!("{key}:true"))
+                .map(|(key, value)| {
+                    let value = match value {
+                        serde_json::Value::String(value) => value.clone(),
+                        _ => value.to_string(),
+                    };
+                    format!("{key}:{value}")
+                })
                 .collect::<Vec<_>>()
                 .join(" ")
         );
-        for key in &required_keys {
+        for key in required_keys.keys() {
             if !request
                 .data
                 .as_ref()
@@ -835,7 +845,7 @@ mod tests {
             validator
                 .validate_update_domain_request(Some(&UpdateDomainRequest {
                     name: "d".into(),
-                    configuration: Some(cadence_api::types::DomainConfiguration {
+                    configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
                         workflow_execution_retention_period_in_days: Some(6),
                         ..Default::default()
                     }),
@@ -1027,9 +1037,7 @@ mod tests {
             })),
             "No permission to do this operation.",
         );
-        let active_active = cadence_api::types::ActiveClusters {
-            attribute_scopes: std::collections::HashMap::new(),
-        };
+        let active_active = cadence_api::types::ActiveClusters::default();
         validator
             .validate_failover_domain_request(Some(&FailoverDomainRequest {
                 domain_name: "domain".into(),
@@ -1099,6 +1107,27 @@ mod tests {
             .validate_list_workflow_executions_request(Some(&mut page))
             .unwrap();
         assert_eq!(page.page_size, 7);
+        overlay.lock().unwrap().update(
+            false,
+            "system.requiredDomainDataKeys",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(
+                    EncodingType::JSON,
+                    serde_json::to_vec(&serde_json::json!({"tier": true})).unwrap(),
+                )),
+                filters: vec![],
+            }],
+        );
+        assert_eq!(
+            dynamic
+                .validate_register_domain_request(Some(&RegisterDomainRequest {
+                    name: "d".into(),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "domain data error, missing required key tier . All required keys: map[tier:true]"
+        );
     }
 
     #[test]

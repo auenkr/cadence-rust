@@ -121,6 +121,17 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   changed Matching runtime formatting gate, before Clippy. CI identified three
   rustfmt-only hunks in `launcher.rs` and `grpc_matching.rs`; applied them from
   the runner's emitted diff. The run did not validate compilation or tests.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41178156520 at
+  `db60040f1fe2b34ffc61ee4598caf34f3496af46` passed formatting and entered
+  Clippy, then failed Rust test compilation because new cases used
+  `DomainConfiguration` instead of `DomainConfigurationUpdate` and the wrong
+  `ActiveClusters` field. Corrected those test fixtures. The run's formatter
+  artifact is not a passing test result.
+- Added a Go-shaped `RequiredDomainDataKeys` map getter to persistence dynamic
+  config, preserving the typed config default when absent and accepting an
+  explicit empty-map override. The validator now uses Go map membership and
+  formats the missing-key error with Go's map representation. Exact-head CI
+  must validate this code and the expanded success matrix.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
