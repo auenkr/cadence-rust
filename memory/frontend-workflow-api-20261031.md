@@ -1104,3 +1104,10 @@ Frontend parity until these are implemented and validated.
   response shaping, archive/read seams, blob size policy and history page
   completeness helpers exist but are not connected to the real registered RPC
   runtime. No mixed Go History + Rust Matching + Rust Frontend SDK gate exists.
+- CI run [41199308250](https://github.com/auenkr/cadence-rust/actions/runs/41199308250)
+  was automatically canceled when the new head was dispatched; target SHA was
+  `1b3ef3fabd2cc2f6fc1a2b69e7ee3995723d6d65`, conclusion `cancelled`.
+- Fresh package run [41199648120](https://github.com/auenkr/cadence-rust/actions/runs/41199648120)
+  is running at `21d7bb3e7818e463d6c4cb3c3001f60f76d11be8` with
+  `package=cadence-frontend` and `clean_target=true`. It has not completed CI
+  oracles yet; conclusion is pending.
