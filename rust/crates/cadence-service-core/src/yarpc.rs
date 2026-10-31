@@ -737,6 +737,92 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     }))
 }
 
+fn handle_get_global_isolation_groups(state: &AppState, body: &Struct) -> HandlerResult {
+    let _: cadence_api::admin::GetGlobalIsolationGroupsRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    Ok(wrap_success(
+        &cadence_api::admin::GetGlobalIsolationGroupsResponse {
+            isolation_groups: state.domains.global_isolation_groups(),
+        },
+    ))
+}
+
+fn handle_update_global_isolation_groups(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::UpdateGlobalIsolationGroupsRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    state
+        .domains
+        .update_global_isolation_groups(req.isolation_groups);
+    Ok(wrap_success(
+        &cadence_api::admin::UpdateGlobalIsolationGroupsResponse {},
+    ))
+}
+
+fn handle_get_domain_isolation_groups(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::GetDomainIsolationGroupsRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain is not set on request."));
+    }
+    let groups = state
+        .domains
+        .domain_isolation_groups(&req.domain)
+        .map_err(|error| AppError::entity_not_exists(error.message))?;
+    Ok(wrap_success(
+        &cadence_api::admin::GetDomainIsolationGroupsResponse {
+            isolation_groups: groups,
+        },
+    ))
+}
+
+fn handle_update_domain_isolation_groups(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::UpdateDomainIsolationGroupsRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain is not set on request."));
+    }
+    state
+        .domains
+        .update_domain_isolation_groups(&req.domain, req.isolation_groups)
+        .map_err(|error| AppError::entity_not_exists(error.message))?;
+    Ok(wrap_success(
+        &cadence_api::admin::UpdateDomainIsolationGroupsResponse {},
+    ))
+}
+
+fn handle_get_domain_async_workflow_configuration(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain is not set on request."));
+    }
+    let configuration = state
+        .domains
+        .domain_async_workflow_config(&req.domain)
+        .map_err(|error| AppError::entity_not_exists(error.message))?;
+    Ok(wrap_success(
+        &cadence_api::admin::GetDomainAsyncWorkflowConfiguratonResponse { configuration },
+    ))
+}
+
+fn handle_update_domain_async_workflow_configuration(
+    state: &AppState,
+    body: &Struct,
+) -> HandlerResult {
+    let req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain is not set on request."));
+    }
+    state
+        .domains
+        .update_domain_async_workflow_config(&req.domain, req.configuration)
+        .map_err(|error| AppError::entity_not_exists(error.message))?;
+    Ok(wrap_success(
+        &cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {},
+    ))
+}
+
 fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DeleteWorkflowRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2087,6 +2173,16 @@ pub async fn dispatch(
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
+        "GetGlobalIsolationGroups" => handle_get_global_isolation_groups(state, body),
+        "UpdateGlobalIsolationGroups" => handle_update_global_isolation_groups(state, body),
+        "GetDomainIsolationGroups" => handle_get_domain_isolation_groups(state, body),
+        "UpdateDomainIsolationGroups" => handle_update_domain_isolation_groups(state, body),
+        "GetDomainAsyncWorkflowConfiguraton" => {
+            handle_get_domain_async_workflow_configuration(state, body)
+        }
+        "UpdateDomainAsyncWorkflowConfiguraton" => {
+            handle_update_domain_async_workflow_configuration(state, body)
+        }
         "ResetQueue" => handle_reset_queue(state, body),
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
