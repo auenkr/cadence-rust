@@ -2745,6 +2745,8 @@ mod frontend_drain_tests {
 
         assert_eq!(stopped.load(Ordering::SeqCst), 1);
         assert!(state.frontend_limiters.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn scheduler_gate_reads_domain_filtered_dynamic_config_updates() {
         use cadence_api::{
