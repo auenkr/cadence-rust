@@ -1,5 +1,8 @@
 //! Failover-manager workflow registration names and shared helpers from Go `failovermanager`.
 
+pub mod domain;
+pub mod failover_v2;
+pub mod rebalance_v2;
 pub mod shared;
 
 pub const TASK_LIST: &str = "cadence-sys-failoverManager-tasklist";

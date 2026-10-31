@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::failovermanager::domain::{DomainStatus, DomainView};
+
 /// Go `constants.DomainDataKeyForManagedFailover`.
 pub const DOMAIN_DATA_KEY_FOR_MANAGED_FAILOVER: &str = "IsManagedByCadence";
 /// Go `constants.DomainDataKeyForFailoverTimeoutSeconds`.
@@ -118,14 +120,6 @@ pub fn build_active_clusters_from_updates(
     scopes
 }
 
-/// The domain fields eligibility depends on.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DomainFailoverView {
-    pub deprecated_or_deleted: bool,
-    pub is_global: bool,
-    pub data: BTreeMap<String, String>,
-}
-
 /// Go `isDomainFailoverManagedByCadence`: the data flag is `true` after trim and lowercase.
 pub fn is_domain_failover_managed_by_cadence(data: &BTreeMap<String, String>) -> bool {
     data.get(DOMAIN_DATA_KEY_FOR_MANAGED_FAILOVER)
@@ -133,11 +127,11 @@ pub fn is_domain_failover_managed_by_cadence(data: &BTreeMap<String, String>) ->
 }
 
 /// Go `isEligibleForFailover`. A missing domain is never eligible.
-pub fn is_eligible_for_failover(domain: Option<&DomainFailoverView>) -> bool {
+pub fn is_eligible_for_failover(domain: Option<&DomainView>) -> bool {
     match domain {
         None => false,
-        Some(domain) if domain.deprecated_or_deleted || !domain.is_global => false,
-        Some(domain) => is_domain_failover_managed_by_cadence(&domain.data),
+        Some(domain) if domain.status != DomainStatus::Registered || !domain.is_global => false,
+        Some(domain) => domain.managed_by_cadence(),
     }
 }
 
@@ -233,11 +227,16 @@ mod tests {
         }
     }
 
-    fn view(managed: &str, is_global: bool, status_bad: bool) -> DomainFailoverView {
-        DomainFailoverView {
-            deprecated_or_deleted: status_bad,
+    fn view(managed: &str, is_global: bool, status_bad: bool) -> DomainView {
+        DomainView {
+            status: if status_bad {
+                DomainStatus::Deprecated
+            } else {
+                DomainStatus::Registered
+            },
             is_global,
             data: BTreeMap::from([(DOMAIN_DATA_KEY_FOR_MANAGED_FAILOVER.into(), managed.into())]),
+            ..Default::default()
         }
     }
 
@@ -254,7 +253,7 @@ mod tests {
     fn eligibility_matches_go_table() {
         assert!(!is_eligible_for_failover(None));
         assert!(!is_eligible_for_failover(Some(
-            &DomainFailoverView::default()
+            &DomainView::default()
         )));
         assert!(is_eligible_for_failover(Some(&view("true", true, false))));
         assert!(is_eligible_for_failover(Some(&view(" TRUE ", true, false))));
