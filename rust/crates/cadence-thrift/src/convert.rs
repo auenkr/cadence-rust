@@ -9,7 +9,8 @@ use cadence_api::admin::{
     DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
     GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
     GetDomainIsolationGroupsResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
-    GetDomainReplicationMessagesResponse, ReplicationMessages,
+    GetDomainReplicationMessagesRequest, GetDomainReplicationMessagesResponse,
+    ReplicationMessages,
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
@@ -1154,6 +1155,16 @@ impl FromThrift for ReplicationMessages {
             replication_tasks: s.opt_list(10)?.unwrap_or_default(),
             last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
             has_more: s.opt_bool(30)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl FromThrift for GetDomainReplicationMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            last_retrieved_message_id: s.opt_i64(10)?,
+            last_processed_message_id: s.opt_i64(20)?,
+            cluster_name: s.req_string(30, "")?,
         })
     }
 }
@@ -5878,6 +5889,25 @@ mod tests {
         assert!(matches!(attributes.get(70), Some(Value::I64(8))));
         assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
         assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
+    }
+
+    #[test]
+    fn get_domain_replication_messages_request_uses_go_wire_field_ids() {
+        let request = GetDomainReplicationMessagesRequest {
+            last_retrieved_message_id: Some(13),
+            last_processed_message_id: Some(11),
+            cluster_name: "active-west".into(),
+        };
+        let mut thrift = Struct::default();
+        thrift.fields.extend([
+            (10, Value::I64(13)),
+            (20, Value::I64(11)),
+            (30, Value::Bytes(b"active-west".to_vec())),
+        ]);
+        assert_eq!(
+            GetDomainReplicationMessagesRequest::from_thrift(&thrift).unwrap(),
+            request
+        );
     }
 
     #[test]
