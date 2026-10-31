@@ -278,6 +278,12 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   required-domain-data expectation used JSON-array spelling while the Go map
   formatter correctly produced `map[tier:true]`; corrected the assertion for
   the next exact-head run.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41180458747
+  validated `915aa9c0a4f7deb973e9c5f4beeec8e62b55b181` and failed the
+  Frontend formatting check before Clippy or tests. Applied the runner's one
+  rustfmt hunk. Also added the remaining closed-workflow TypeFilter/StatusFilter
+  conflict pair and explicit missing-domain cases for all domain-scoped
+  validator methods; these are awaiting exact-head CI.
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41179758023 at
   `3bc2dcca870ea3875d0915f6769d9b09ae9dcbe4` passed Frontend Clippy but failed
   the crate formatting step. The runner emitted 22 rustfmt hunks in

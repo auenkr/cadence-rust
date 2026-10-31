@@ -809,6 +809,71 @@ mod tests {
     }
 
     #[test]
+    fn go_domain_presence_matrix_covers_every_domain_scoped_validator() {
+        let validator = RequestValidator::default();
+        let mut list = ListWorkflowExecutionsRequest::default();
+        let mut open = ListOpenWorkflowExecutionsRequest::default();
+        let mut closed = ListClosedWorkflowExecutionsRequest::default();
+        let mut archived = ListArchivedWorkflowExecutionsRequest::default();
+        let errors = [
+            validator
+                .validate_describe_task_list_request(Some(&DescribeTaskListRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_list_task_list_partitions_request(Some(
+                    &ListTaskListPartitionsRequest::default(),
+                ))
+                .unwrap_err(),
+            validator
+                .validate_get_task_lists_by_domain_request(Some(
+                    &GetTaskListsByDomainRequest::default(),
+                ))
+                .unwrap_err(),
+            validator
+                .validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_count_workflow_executions_request(Some(
+                    &CountWorkflowExecutionsRequest::default(),
+                ))
+                .unwrap_err(),
+            validator
+                .validate_list_workflow_executions_request(Some(&mut list))
+                .unwrap_err(),
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut open))
+                .unwrap_err(),
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err(),
+            validator
+                .validate_list_archived_workflow_executions_request(Some(&mut archived))
+                .unwrap_err(),
+            validator
+                .validate_register_domain_request(Some(&RegisterDomainRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_describe_domain_request(Some(&DescribeDomainRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_update_domain_request(Some(&UpdateDomainRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_delete_domain_request(Some(&DeleteDomainRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_deprecate_domain_request(Some(&DeprecateDomainRequest::default()))
+                .unwrap_err(),
+            validator
+                .validate_failover_domain_request(Some(&FailoverDomainRequest::default()))
+                .unwrap_err(),
+        ];
+        assert!(errors
+            .iter()
+            .all(|error| error.message == "Domain not set on request."));
+    }
+
+    #[test]
     fn go_request_validator_limit_filter_and_lockdown_matrix() {
         let mut validator = RequestValidator::default();
         validator.config.max_domain_name_length = 3;
@@ -854,6 +919,24 @@ mod tests {
             start_time_filter: Some(time_filter),
             execution_filter: Some(WorkflowExecutionFilter::default()),
             type_filter: Some(WorkflowTypeFilter::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err()
+                .message,
+            "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed"
+        );
+
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(StartTimeFilter {
+                earliest_time: Some(1),
+                latest_time: Some(2),
+            }),
+            type_filter: Some(WorkflowTypeFilter::default()),
+            status_filter: Some(cadence_api::enums::WorkflowExecutionCloseStatus::Failed),
             ..Default::default()
         };
         assert_eq!(
@@ -1073,6 +1156,20 @@ mod tests {
             })),
             "domain data error, missing required key tier . All required keys: map[tier:true]",
         );
+        validator.config.admin_protection = true;
+        validator.config.admin_operation_token = "token".into();
+        bad(
+            validator.validate_register_domain_request(Some(&RegisterDomainRequest {
+                name: "domain".into(),
+                security_token: "wrong".into(),
+                data: Some(std::collections::HashMap::from([(
+                    "tier".into(),
+                    "3".into(),
+                )])),
+                ..Default::default()
+            })),
+            "No permission to do this operation.",
+        );
         validator
             .validate_update_domain_request(Some(&UpdateDomainRequest {
                 name: "domain".into(),
@@ -1080,6 +1177,14 @@ mod tests {
                 ..Default::default()
             }))
             .unwrap();
+        bad(
+            validator.validate_update_domain_request(Some(&UpdateDomainRequest {
+                name: "domain".into(),
+                security_token: "wrong".into(),
+                ..Default::default()
+            })),
+            "No permission to do this operation.",
+        );
         bad(
             validator.validate_delete_domain_request(Some(&DeleteDomainRequest {
                 name: "domain".into(),
@@ -1602,8 +1707,7 @@ mod tests {
 
         validator.config.admin_protection = true;
         validator.config.lockdown = true;
-        let expected_lockdown =
-            "Domain is not accepting fail overs at this time due to lockdown.";
+        let expected_lockdown = "Domain is not accepting fail overs at this time due to lockdown.";
         for replication in [
             cadence_api::service_types::DomainReplicationConfigurationUpdate {
                 active_cluster_name: Some("cluster1".into()),
