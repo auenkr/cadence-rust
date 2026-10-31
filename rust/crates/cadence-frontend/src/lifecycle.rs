@@ -1,6 +1,7 @@
 //! Frontend lifecycle state mirrors Go daemon states and health transitions.
 
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
 pub use cadence_service_core::frontend_lifecycle::DrainPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -227,6 +227,35 @@ fresh target, plus the Frontend formatting patch for the new launcher and
 shared HTTP handler changes. Record exact head and final run conclusion below.
 - Previous skeleton analysis and baseline CI: `frontend-core-20261031.md`.
 
+## Continuation checkpoint — 2026-10-31 (frontend-core2)
+
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41183986922
+  checked `ac5d27af642fe7bd997ac3a0af2f178d9b7f0681` and concluded `failure` in
+  Clippy before formatting/tests. The failure is a missing `Duration` import in
+  `cadence-frontend/src/lifecycle.rs`; fixed in this checkpoint. Dispatch a
+  fresh package run after pushing this commit and record its conclusion.
+- Validator audit: Go has 16 validation entry points and 15 table-driven test
+  groups; Rust now has nil-request coverage for every entry point and expanded
+  error, mutation, success, filter, permission, and failover matrices. Do not
+  call the test matrix complete until a source-by-source audit confirms every
+  Go table row and CI passes the exact head.
+- Persistence remains open: configured Frontend startup currently reuses
+  Matching's default-store SQL/Cassandra handles only for Matching tasks and a
+  read-only domain-metadata source. `AppState` still owns concrete in-memory
+  domain and execution stores. There are no durable Frontend metadata,
+  visibility, History, or execution managers, nor Go-compatible selection of
+  the advanced visibility datastore. Task snapshots are development-only and
+  do not satisfy this requirement.
+- Lifecycle remains open: the readiness/failure-detection/admission/drain
+  ordering is wired through the shared launcher, and background timer/snapshot
+  workers stop after the request window. The Rust launcher has no handler/admin
+  lifecycle owners or global quota collection instances to stop, so the
+  limiter hook remains empty and complete `service.go` ownership parity is not
+  established.
+- No Cargo command was run locally. The next exact-head GitHub Actions run must
+  validate formatting, Clippy, Frontend tests, and the configured development
+  runtime smoke. Continue the implementation after confirming that result.
+
 ## Exact-head follow-up — 2026-10-31
 
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41178553763 at
