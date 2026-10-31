@@ -205,7 +205,7 @@ async fn handle_start(state: &AppState, body: &Struct) -> HandlerResult {
 }
 
 async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::enums::DomainStatus;
+    use cadence_api::enums::{ArchivalStatus, DomainStatus};
     use cadence_api::types::RegisterDomainRequest;
     let req: RegisterDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -214,9 +214,47 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             "Domain not set on request.".to_string(),
         ));
     }
+    // Match common/domain.handlerImpl.RegisterDomain ordering: a global
+    // registration is rejected on a secondary before existence/name checks,
+    // and an existing name wins over malformed-name validation.
+    if req.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return Err(AppError::bad_request(
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .to_string(),
+        ));
+    }
+    if state.domains.describe(&DescribeDomainRequest {
+        name: Some(req.name.clone()),
+        uuid: None,
+    }).is_ok() {
+        return Err(AppError {
+            exc_name: "DomainAlreadyExistsError",
+            value: cadence_api::errors::DomainAlreadyExistsError {
+                message: "Domain already exists.".to_string(),
+            }.to_thrift(),
+            message: "Domain already exists.".to_string(),
+        });
+    }
+    if !req.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(AppError::bad_request(
+            "Domain name can only include alphanumeric and dash characters.".to_string(),
+        ));
+    }
+    if req.name.len() > state.limits.ids.domain_max {
+        return Err(AppError::bad_request("Domain length exceeds limit.".to_string()));
+    }
     if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
         return Err(AppError::bad_request(
             "A valid retention period is not set on request.".to_string(),
+        ));
+    }
+    if (req.history_archival_status == Some(ArchivalStatus::Enabled)
+        && req.history_archival_uri.is_empty())
+        || (req.visibility_archival_status == Some(ArchivalStatus::Enabled)
+            && req.visibility_archival_uri.is_empty())
+    {
+        return Err(AppError::bad_request(
+            "Invalid to enable archival without specifying a uri.".to_string(),
         ));
     }
     let info = cadence_api::types::DomainInfo {
@@ -225,7 +263,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
         description: req.description.clone(),
         owner_email: req.owner_email.clone(),
         data: req.data.clone(),
-        uuid: uuid::Uuid::new_v4().to_string(),
+        uuid: uuid::Uuid::now_v7().to_string(),
     };
     let configuration = cadence_api::types::DomainConfiguration {
         workflow_execution_retention_period_in_days: req
@@ -417,6 +455,16 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
     if req.name.is_empty() {
         return Err(AppError::bad_request(
             "Domain not set on request.".to_string(),
+        ));
+    }
+    let current = state.domains.describe(&DescribeDomainRequest {
+        name: Some(req.name.clone()),
+        uuid: None,
+    }).map_err(|e| AppError::entity_not_exists(e.message))?;
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return Err(AppError::bad_request(
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .to_string(),
         ));
     }
     match state.domains.deprecate(&req) {
@@ -1599,7 +1647,7 @@ pub async fn dispatch(
         "ListClosedWorkflowExecutions" => handle_visibility_closed(state, body).await,
         "ListArchivedWorkflowExecutions" => handle_visibility_archived(state, body).await,
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
-        "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes())),
+        "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "UpdateDomain" => handle_update_domain(state, body).await,
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
         "DeleteDomain" => handle_delete_domain(state, body).await,
