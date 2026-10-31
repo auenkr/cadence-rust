@@ -1281,3 +1281,16 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   `success` (formatting, Clippy, and Matching tests). The Frontend run above
   validates the source commit; the commits after it only updated this evidence
   file. No Cargo command was run locally.
+
+## Frontend limiter lifecycle startup hook — 2026-10-31
+
+- Added the Go one-second startup deadline for registered Frontend global
+  limiter collections and invoke their `OnStart` equivalents before opening
+  Frontend handlers/listeners. Added a focused owner-start test.
+- Wired the shared launcher to start registered Frontend limiter owners when
+  Frontend is enabled. Production currently registers no limiter owners, so
+  this closes only the lifecycle hook seam; seven actual global quota owners
+  and AdminHandler worker owners remain missing.
+- This source edit is pending commit and exact-head CI. Cargo was not run
+  locally. The persistence managers and complete direct Go validator test
+  matrix remain the active gaps.
