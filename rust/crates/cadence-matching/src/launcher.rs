@@ -956,25 +956,16 @@ async fn run_with_lifecycle(
             // Go's timer queue must keep advancing while development snapshots
             // serialize or write large histories. Never block an async RPC worker
             // with snapshot CPU or filesystem work.
-            if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
+            let snapshot_task = if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
                 let snapshot_store = state.executions.clone();
                 let snapshot_domains = state.domains.clone();
                 let mut shutdown = state.background_shutdown.subscribe();
-                tokio::spawn(async move {
+                Some(tokio::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     loop {
                         tokio::select! {
-                            _ = interval.tick() => {
-                                // Await one write so snapshots cannot overlap
-                                // or race their atomic temporary-file rename.
-                                persist_frontend_snapshot(
-                                    snapshot_domains.clone(),
-                                    snapshot_store.clone(),
-                                    domains_path.clone(),
-                                    executions_path.clone(),
-                                ).await;
-                            }
+                            biased;
                             changed = shutdown.changed() => {
                                 if changed.is_err() || *shutdown.borrow() {
                                     // Go Resource.Stop runs after the drain;
@@ -988,23 +979,36 @@ async fn run_with_lifecycle(
                                     break;
                                 }
                             }
+                            _ = interval.tick() => {
+                                // Await one write so snapshots cannot overlap
+                                // or race their atomic temporary-file rename.
+                                persist_frontend_snapshot(
+                                    snapshot_domains.clone(),
+                                    snapshot_store.clone(),
+                                    domains_path.clone(),
+                                    executions_path.clone(),
+                                ).await;
+                            }
                         }
                     }
-                });
-            }
+                }))
+            } else {
+                None
+            };
             let timer_store = state.executions.clone();
             let mut shutdown = state.background_shutdown.subscribe();
-            tokio::spawn(async move {
+            let timer_task = tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     tokio::select! {
-                        _ = interval.tick() => {}
+                        biased;
                         changed = shutdown.changed() => {
                             if changed.is_err() || *shutdown.borrow() {
                                 break;
                             }
                         }
+                        _ = interval.tick() => {}
                     }
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -1955,6 +1959,11 @@ async fn run_with_lifecycle(
             // this stops service-owned timer/snapshot loops before resources
             // and listeners are torn down below.
             state.stop_background_workers();
+            for task in [snapshot_task, Some(timer_task)].into_iter().flatten() {
+                if let Err(error) = task.await {
+                    eprintln!("stopping Frontend background worker failed: {error}");
+                }
+            }
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
