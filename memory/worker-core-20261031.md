@@ -431,3 +431,11 @@ field names), with the Go-table cases from `esProcessor_test.go` and `indexer_te
 Still unported in indexer: Kafka consumer and message loops, `process`/`addMessageToES`
 and document generation from `indexer.Message`, the ES bulk processor and its ack/nack
 bookkeeping, dual migration indexer, and `Start`/`Stop`.
+
+Final exact-head CI for this checkpoint: `9dd25ac57`, run
+https://github.com/auenkr/cadence-rust/actions/runs/41224434697 — success, 110
+worker crate tests passed. Remaining Worker list, in handoff order: scheduler,
+diagnostics, the rest of failovermanager (legacy workflow, V2 workflow bodies,
+rebalance bodies, starter), the rest of esanalyzer (workflow and metric emission),
+indexer (Kafka and ES processor), domaindeprecation/archiver/replicator/asyncworkflow
+bodies, pollers, deterministic replay, lifecycle/drain, and the mixed Go/Rust gates.
