@@ -1111,3 +1111,10 @@ Frontend parity until these are implemented and validated.
   is running at `21d7bb3e7818e463d6c4cb3c3001f60f76d11be8` with
   `package=cadence-frontend` and `clean_target=true`. It has not completed CI
   oracles yet; conclusion is pending.
+- Fresh-target run [41199648120](https://github.com/auenkr/cadence-rust/actions/runs/41199648120)
+  checked `21d7bb3e7818e463d6c4cb3c3001f60f76d11be8` and concluded
+  `failure` during Clippy, before Frontend tests. The Cassandra integration
+  imported unused `CqlExecutor` at `matching_domain_metadata.rs:562`; removed
+  that import. Also added typed History client methods for `RefreshWorkflowTasks`
+  and `DescribeMutableState`, which Go Frontend uses through the History
+  boundary. Both source changes require fresh exact-head CI.

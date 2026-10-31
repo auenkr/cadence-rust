@@ -426,7 +426,7 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
         &self,
         metadata: &MatchingDomainMetadata,
     ) -> Result<i64, MatchingDomainMetadataError> {
-        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        use crate::matching_cassandra_exec::{bound, CqlStatement};
         use chrono::Utc;
         let id = uuid::Uuid::parse_str(&metadata.info.uuid)
             .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;

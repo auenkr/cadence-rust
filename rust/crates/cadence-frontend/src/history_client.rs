@@ -213,6 +213,33 @@ impl HistoryClient {
             .map(tonic::Response::into_inner)
     }
 
+    /// Requeue the workflow tasks after Frontend's explicit refresh operation.
+    /// Go sends this through the History client with the caller's normal RPC
+    /// timeout and cadence-history identity metadata.
+    pub async fn refresh_workflow_tasks(
+        &self,
+        request: cadence_proto::history::RefreshWorkflowTasksRequest,
+    ) -> Result<cadence_proto::history::RefreshWorkflowTasksResponse, tonic::Status> {
+        self.client
+            .clone()
+            .refresh_workflow_tasks(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    /// Expose the History diagnostic operation used by workflow diagnostics
+    /// and administrative callers through the typed History boundary.
+    pub async fn describe_mutable_state(
+        &self,
+        request: cadence_proto::history::DescribeMutableStateRequest,
+    ) -> Result<cadence_proto::history::DescribeMutableStateResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_mutable_state(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
     pub async fn respond_decision_task_completed(
         &self,
         request: cadence_proto::history::RespondDecisionTaskCompletedRequest,
