@@ -660,3 +660,27 @@ migration forward.
   This candidate still lacks a Cassandra writer, durable audit/replication
   queue behavior, race/fault recovery coverage, and exact-head CI. `git diff
   --check` passed; no local Cargo/rustfmt/tests ran.
+
+## Rebase repair and continuation — 2026-10-31
+
+- Resolved the duplicate PostgreSQL SQL domain mutation methods created when
+  this branch was rebased onto `origin/frontend-core2`. Restored core2's
+  create implementation, which reads the current metadata notification version,
+  serializes it into the new row, then locks and compare-and-updates the version
+  in the insert transaction. Retained its expected-version update and Go delete
+  semantics. Added the `DomainMetadataPersistence` adapter and explicit Debug
+  implementation required by the shared runtime trait. No local Cargo command
+  was run.
+- Prior manager run [41194319599](https://github.com/auenkr/cadence-rust/actions/runs/41194319599)
+  failed at pre-rebase head `9d4c10e991079df152582a08e11bd10ae39fc610`;
+  it is stale and does not validate the current rebased source.
+- Current follow-up must commit and push this repair with force-with-lease (the
+  branch was rebased and diverges from its prior remote history), dispatch
+  Frontend package CI, and record exact head/run conclusion.
+- Active blockers remain: Cassandra durable domain writes; global domain
+  replication queue send/consume and failover audit/history; admin
+  authorization and persistence/dynamic-config backing; search mapping writes;
+  DLQ and queue RPC behavior; complete History-client raw history pagination;
+  live membership; scheduler workflow interaction; RPC lifecycle/retries/
+  metrics; mixed Go/Rust failure/restart/recovery gates; complete Go method
+  audit. No parity claim is made.
