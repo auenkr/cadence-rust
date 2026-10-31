@@ -40,6 +40,10 @@
   `UpdateSchedule` validator for Go's first-error order, empty-update check,
   cron/time-range checks, complete replacement action, policy validation, and
   scheduler-reserved search-attribute keys.
+- Added a pure `DescribeCluster` response builder that preserves discovered ring
+  and member ordering, reachable-member identities, Go SDK version constraints,
+  persistence backend names and the advanced-visibility feature flag. Resolver
+  collection/error handling and the RPC adapter still need wiring.
 
 ## CI evidence
 
