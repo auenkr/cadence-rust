@@ -1137,7 +1137,7 @@ impl GoSqlFrontendDomainManager {
         metadata
     }
 
-    fn staged_record<'a>(staged: &'a InMemoryDomainStore, uuid: &str) -> Option<DomainRecord> {
+    fn staged_record(staged: &InMemoryDomainStore, uuid: &str) -> Option<DomainRecord> {
         let inner = staged.inner.read().expect("domain store lock");
         let name = inner.by_id.get(uuid)?;
         inner.by_name.get(name).cloned()
@@ -1239,7 +1239,7 @@ impl FrontendDomainManager for GoSqlFrontendDomainManager {
 
     fn update(&self, request: &UpdateDomainRequest, metadata: &cadence_common::cluster::Metadata, policy: &crate::domain_update::DomainPolicy) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
         let _guard = self.write_lock.lock().expect("domain persistence write lock");
-        let current = self.load(Some(&request.name), None).map_err(|error| Self::persistence_failover(error))?;
+        let current = self.load(Some(&request.name), None).map_err(Self::persistence_failover)?;
         let staged = self.staged_cache();
         staged.sync_matching_metadata(std::slice::from_ref(&current));
         let result = staged.update(request, metadata, policy)?;
@@ -1254,7 +1254,7 @@ impl FrontendDomainManager for GoSqlFrontendDomainManager {
 
     fn failover(&self, request: &cadence_api::types::FailoverDomainRequest, current_cluster: &str, metadata: &cadence_common::cluster::Metadata, policy: &crate::domain_update::DomainPolicy) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
         let _guard = self.write_lock.lock().expect("domain persistence write lock");
-        let current = self.load(Some(&request.domain_name), None).map_err(|error| Self::persistence_failover(error))?;
+        let current = self.load(Some(&request.domain_name), None).map_err(Self::persistence_failover)?;
         let staged = self.staged_cache();
         staged.sync_matching_metadata(std::slice::from_ref(&current));
         let result = staged.failover(request, current_cluster, metadata, policy)?;
