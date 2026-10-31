@@ -23,11 +23,7 @@ pub struct HistoryContinuationToken {
         deserialize_with = "cadence_api::b64::deserialize_opt_bytes"
     )]
     pub persistence_token: Option<Vec<u8>>,
-    #[serde(
-        rename = "transientDecision",
-        alias = "TransientDecision",
-        default
-    )]
+    #[serde(rename = "transientDecision", alias = "TransientDecision", default)]
     pub transient_decision: Option<Value>,
     #[serde(
         rename = "branchToken",
@@ -37,11 +33,7 @@ pub struct HistoryContinuationToken {
         deserialize_with = "cadence_api::b64::deserialize_opt_bytes"
     )]
     pub branch_token: Option<Vec<u8>>,
-    #[serde(
-        rename = "versionHistoryItem",
-        alias = "VersionHistoryItem",
-        default
-    )]
+    #[serde(rename = "versionHistoryItem", alias = "VersionHistoryItem", default)]
     pub version_history_item: Option<Value>,
 }
 
@@ -88,7 +80,10 @@ mod tests {
             version_history_item: Some(serde_json::json!({"eventID": 2, "version": 7})),
         };
         let expected = br#"{"runID":"run-1","firstEventID":1,"nextEventID":2,"isWorkflowRunning":true,"persistenceToken":"AQI=","transientDecision":null,"branchToken":"AwQ=","versionHistoryItem":{"eventID":2,"version":7}}"#;
-        assert_eq!(serialize_history_token(Some(&token)).unwrap().unwrap(), expected);
+        assert_eq!(
+            serialize_history_token(Some(&token)).unwrap().unwrap(),
+            expected
+        );
         assert_eq!(deserialize_history_token(expected).unwrap(), token);
         assert_eq!(serialize_history_token(None).unwrap(), None);
     }

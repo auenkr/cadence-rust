@@ -51,7 +51,13 @@ impl Counter {
 pub trait Metrics {
     fn increment(&self, counter: Counter);
     fn increment_requests(&self, _operation: &str) {}
-    fn record_operation(&self, _operation: &str, _elapsed: std::time::Duration, _tags: &[MetricTag]) {}
+    fn record_operation(
+        &self,
+        _operation: &str,
+        _elapsed: std::time::Duration,
+        _tags: &[MetricTag],
+    ) {
+    }
     fn record_latency_histogram(&self, _operation: &str, _elapsed: std::time::Duration) {}
 }
 
@@ -160,14 +166,20 @@ pub fn request_tags(operation: &str, request: &serde_json::Value) -> Vec<MetricT
 }
 
 fn string_field(value: &serde_json::Value, key: &str) -> String {
-    value.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_owned()
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn number_field(value: &serde_json::Value, key: &str) -> String {
-    value.get(key).map_or_else(String::new, |value| match value {
-        serde_json::Value::Number(number) => number.to_string(),
-        _ => String::new(),
-    })
+    value
+        .get(key)
+        .map_or_else(String::new, |value| match value {
+            serde_json::Value::Number(number) => number.to_string(),
+            _ => String::new(),
+        })
 }
 
 fn nested_string(value: &serde_json::Value, parent: &str, child: &str) -> String {
@@ -181,8 +193,9 @@ fn nested_string(value: &serde_json::Value, parent: &str, child: &str) -> String
 /// them as user errors.
 pub fn normalize_error(error: CadenceError) -> (CadenceError, Counter) {
     match error {
-        CadenceError::BadRequest(_)
-        | CadenceError::DomainNotActive(_) => (error, Counter::BadRequest),
+        CadenceError::BadRequest(_) | CadenceError::DomainNotActive(_) => {
+            (error, Counter::BadRequest)
+        }
         CadenceError::ServiceBusy(_) => (error, Counter::ServiceBusy),
         CadenceError::EntityNotExists(_) => (error, Counter::EntityNotExists),
         CadenceError::WorkflowAlreadyStarted(_) => (error, Counter::ExecutionAlreadyStarted),
@@ -192,9 +205,7 @@ pub fn normalize_error(error: CadenceError) -> (CadenceError, Counter) {
             (error, Counter::CancellationAlreadyRequested)
         }
         CadenceError::QueryFailed(_) => (error, Counter::QueryFailed),
-        CadenceError::ClientVersionNotSupported(_) => {
-            (error, Counter::ClientVersionNotSupported)
-        }
+        CadenceError::ClientVersionNotSupported(_) => (error, Counter::ClientVersionNotSupported),
         CadenceError::LimitExceeded(_) => (error, Counter::LimitExceeded),
         CadenceError::Internal(inner) => (
             CadenceError::Internal(InternalServiceError::new(format!(
@@ -269,7 +280,10 @@ mod tests {
         );
         assert_eq!(error.to_string(), "busy");
         assert_eq!(&*metrics.0.borrow(), &[Counter::ServiceBusy]);
-        assert_eq!(Counter::ServiceBusy.metric_name(), "cadence_errors_service_busy");
+        assert_eq!(
+            Counter::ServiceBusy.metric_name(),
+            "cadence_errors_service_busy"
+        );
     }
 
     #[test]
@@ -282,7 +296,10 @@ mod tests {
     #[test]
     fn uncategorized_error_uses_go_fallback() {
         let (error, counter) = normalize_error(CadenceError::Unknown("oops".into()));
-        assert_eq!(error.to_string(), "cadence internal uncategorized error, msg: oops");
+        assert_eq!(
+            error.to_string(),
+            "cadence internal uncategorized error, msg: oops"
+        );
         assert_eq!(counter, Counter::Failures);
     }
 
@@ -312,9 +329,18 @@ mod tests {
         assert_eq!(
             tags,
             vec![
-                MetricTag { key: "wf-domain-name", value: "d".into() },
-                MetricTag { key: "wf-id", value: "w".into() },
-                MetricTag { key: "wf-run-id", value: "r".into() },
+                MetricTag {
+                    key: "wf-domain-name",
+                    value: "d".into()
+                },
+                MetricTag {
+                    key: "wf-id",
+                    value: "w".into()
+                },
+                MetricTag {
+                    key: "wf-run-id",
+                    value: "r".into()
+                },
             ]
         );
 
@@ -332,10 +358,22 @@ mod tests {
         assert_eq!(
             async_tags,
             vec![
-                MetricTag { key: "wf-domain-name", value: "async-domain".into() },
-                MetricTag { key: "wf-id", value: "async-workflow".into() },
-                MetricTag { key: "wf-type", value: "async-type".into() },
-                MetricTag { key: "wf-cron-schedule", value: "@daily".into() },
+                MetricTag {
+                    key: "wf-domain-name",
+                    value: "async-domain".into()
+                },
+                MetricTag {
+                    key: "wf-id",
+                    value: "async-workflow".into()
+                },
+                MetricTag {
+                    key: "wf-type",
+                    value: "async-type".into()
+                },
+                MetricTag {
+                    key: "wf-cron-schedule",
+                    value: "@daily".into()
+                },
             ]
         );
     }

@@ -66,7 +66,9 @@ mod tests {
         }
         assert!(requires_version_check("StartWorkflowExecution"));
         assert_eq!(
-            check("StartWorkflowExecution", true, "", "", &Checker).unwrap_err().to_string(),
+            check("StartWorkflowExecution", true, "", "", &Checker)
+                .unwrap_err()
+                .to_string(),
             "client version not supported"
         );
     }

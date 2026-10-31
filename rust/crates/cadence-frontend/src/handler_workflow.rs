@@ -148,7 +148,10 @@ impl WorkflowOperation {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|operation| operation.name() == name)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|operation| operation.name() == name)
     }
 }
 
@@ -320,9 +323,7 @@ impl<B: WorkflowBackend> Handler<B> {
                     &request.next_page_token,
                 )
                 .map_err(|_| {
-                    CadenceError::BadRequest(BadRequestError::new(
-                        "Invalid NextPageToken.",
-                    ))
+                    CadenceError::BadRequest(BadRequestError::new("Invalid NextPageToken."))
                 })?;
                 crate::handler_workflow_history::validate_history_run_id(
                     request
@@ -434,63 +435,75 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         match operation {
             WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask => {
-                let request: tasks::ListTaskListPartitionsRequest = parse_request(
-                    serde_json::json!({
+                let request: tasks::ListTaskListPartitionsRequest =
+                    parse_request(serde_json::json!({
                         "domain": value.get("domain").cloned().unwrap_or(Value::Null),
                         "taskList": value.get("taskList").cloned().unwrap_or(Value::Null),
-                    }),
-                )?;
+                    }))?;
                 self.validator
                     .validate_list_task_list_partitions_request(Some(&request))?;
             }
             WorkflowOperation::CountWorkflowExecutions => {
                 let request: service_types::CountWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
-                self.validator.validate_count_workflow_executions_request(Some(&request))?;
+                self.validator
+                    .validate_count_workflow_executions_request(Some(&request))?;
             }
-            WorkflowOperation::ScanWorkflowExecutions | WorkflowOperation::ListWorkflowExecutions => {
+            WorkflowOperation::ScanWorkflowExecutions
+            | WorkflowOperation::ListWorkflowExecutions => {
                 let mut request: service_types::ListWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
-                self.validator.validate_list_workflow_executions_request(Some(&mut request))?;
+                self.validator
+                    .validate_list_workflow_executions_request(Some(&mut request))?;
                 set_i32_field(&mut value, "pageSize", request.page_size);
             }
             WorkflowOperation::ListOpenWorkflowExecutions => {
                 let mut request: service_types::ListOpenWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
-                self.validator.validate_list_open_workflow_executions_request(Some(&mut request))?;
+                self.validator
+                    .validate_list_open_workflow_executions_request(Some(&mut request))?;
                 set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
             }
             WorkflowOperation::ListClosedWorkflowExecutions => {
                 let mut request: service_types::ListClosedWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
-                self.validator.validate_list_closed_workflow_executions_request(Some(&mut request))?;
+                self.validator
+                    .validate_list_closed_workflow_executions_request(Some(&mut request))?;
                 set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
             }
             WorkflowOperation::ListArchivedWorkflowExecutions => {
                 let mut request: service_types::ListArchivedWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
-                self.validator.validate_list_archived_workflow_executions_request(Some(&mut request))?;
+                self.validator
+                    .validate_list_archived_workflow_executions_request(Some(&mut request))?;
                 set_i32_field(&mut value, "pageSize", request.page_size);
             }
             WorkflowOperation::DescribeTaskList => {
                 let request: tasks::DescribeTaskListRequest = parse_request(value.clone())?;
-                self.validator.validate_describe_task_list_request(Some(&request))?;
+                self.validator
+                    .validate_describe_task_list_request(Some(&request))?;
             }
             WorkflowOperation::ListTaskListPartitions => {
                 let request: tasks::ListTaskListPartitionsRequest = parse_request(value.clone())?;
-                self.validator.validate_list_task_list_partitions_request(Some(&request))?;
+                self.validator
+                    .validate_list_task_list_partitions_request(Some(&request))?;
             }
             WorkflowOperation::GetTaskListsByDomain => {
                 let request: tasks::GetTaskListsByDomainRequest = parse_request(value.clone())?;
-                self.validator.validate_get_task_lists_by_domain_request(Some(&request))?;
+                self.validator
+                    .validate_get_task_lists_by_domain_request(Some(&request))?;
             }
             WorkflowOperation::ResetStickyTaskList => {
-                let request: service_types::ResetStickyTaskListRequest = parse_request(value.clone())?;
-                self.validator.validate_reset_sticky_task_list_request(Some(&request))?;
+                let request: service_types::ResetStickyTaskListRequest =
+                    parse_request(value.clone())?;
+                self.validator
+                    .validate_reset_sticky_task_list_request(Some(&request))?;
             }
             WorkflowOperation::RefreshWorkflowTasks => {
-                let request: cadence_api::types::RefreshWorkflowTasksRequest = parse_request(value.clone())?;
-                self.validator.validate_refresh_workflow_tasks_request(Some(&request))?;
+                let request: cadence_api::types::RefreshWorkflowTasksRequest =
+                    parse_request(value.clone())?;
+                self.validator
+                    .validate_refresh_workflow_tasks_request(Some(&request))?;
             }
             _ => {}
         }
@@ -630,7 +643,10 @@ mod tests {
         }
 
         fn record_latency_histogram(&self, operation: &str, _: std::time::Duration) {
-            self.latency_samples.lock().unwrap().push(operation.to_owned());
+            self.latency_samples
+                .lock()
+                .unwrap()
+                .push(operation.to_owned());
         }
     }
 
@@ -675,7 +691,10 @@ mod tests {
     fn operation_names_round_trip_and_include_list_tasklist_surface() {
         assert_eq!(WorkflowOperation::ALL.len(), 40);
         for operation in WorkflowOperation::ALL {
-            assert_eq!(WorkflowOperation::from_name(operation.name()), Some(*operation));
+            assert_eq!(
+                WorkflowOperation::from_name(operation.name()),
+                Some(*operation)
+            );
         }
         assert!(WorkflowOperation::from_name("CountWorkflowExecutions").is_some());
         assert!(WorkflowOperation::from_name("ScanWorkflowExecutions").is_some());
@@ -697,7 +716,10 @@ mod tests {
             "futureSdkField": "preserved"
         });
         assert_eq!(
-            handler.dispatch("StartWorkflowExecution", request.clone()).await.unwrap(),
+            handler
+                .dispatch("StartWorkflowExecution", request.clone())
+                .await
+                .unwrap(),
             request
         );
         assert_eq!(
@@ -721,7 +743,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.to_string(), "Domain not set on request.");
-        assert_eq!(*metrics.requests.lock().unwrap(), ["DescribeWorkflowExecution"]);
+        assert_eq!(
+            *metrics.requests.lock().unwrap(),
+            ["DescribeWorkflowExecution"]
+        );
         assert_eq!(
             *metrics.counters.lock().unwrap(),
             [crate::wrappers::metered::Counter::BadRequest]
@@ -751,10 +776,7 @@ mod tests {
             crate::request_validator::RequestValidator::default(),
             metrics.clone(),
         );
-        let error = handler
-            .dispatch("Health", Value::Null)
-            .await
-            .unwrap_err();
+        let error = handler.dispatch("Health", Value::Null).await.unwrap_err();
 
         assert!(matches!(error, CadenceError::Internal(_)));
         assert_eq!(
@@ -813,7 +835,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(missing_signal.to_string(), "SignalName is not set on request.");
+        assert_eq!(
+            missing_signal.to_string(),
+            "SignalName is not set on request."
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
@@ -825,7 +850,11 @@ mod tests {
             "execution": {"workflowId": "checkout"}
         });
         assert_eq!(
-            handler.dispatch("QueryWorkflow", request.clone()).await.unwrap_err().to_string(),
+            handler
+                .dispatch("QueryWorkflow", request.clone())
+                .await
+                .unwrap_err()
+                .to_string(),
             "WorkflowQuery is not set on request."
         );
         let request = serde_json::json!({
@@ -834,7 +863,11 @@ mod tests {
             "query": {"queryArgs": ""}
         });
         assert_eq!(
-            handler.dispatch("QueryWorkflow", request).await.unwrap_err().to_string(),
+            handler
+                .dispatch("QueryWorkflow", request)
+                .await
+                .unwrap_err()
+                .to_string(),
             "QueryType is not set on request."
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
@@ -920,7 +953,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(task_list_error.to_string(), "TaskList is not set on request.");
+        assert_eq!(
+            task_list_error.to_string(),
+            "TaskList is not set on request."
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
@@ -1006,7 +1042,10 @@ mod tests {
                 "GetWorkflowExecutionHistory",
                 serde_json::json!({
                     "domain": "shop",
-                    "execution": {"workflowId": "checkout", "runId": "request-run"},
+                    "execution": {
+                        "workflowId": "checkout",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
                     "nextPageToken": encoded
                 }),
             )

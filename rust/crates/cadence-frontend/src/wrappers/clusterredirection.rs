@@ -83,7 +83,10 @@ impl ForwardingPolicy {
     }
 
     pub fn is_all_domain(self) -> bool {
-        matches!(self, Self::AllDomainV1 | Self::AllDomainV2 | Self::AllDomainV3)
+        matches!(
+            self,
+            Self::AllDomainV1 | Self::AllDomainV2 | Self::AllDomainV3
+        )
     }
 
     pub fn allows_api(self, api: &str) -> bool {
@@ -323,7 +326,10 @@ fn active_active_target<M: ActiveClusterManager>(
     operation: &str,
     current_cluster: &str,
 ) -> String {
-    let is_start = matches!(operation, "StartWorkflowExecution" | "StartWorkflowExecutionAsync");
+    let is_start = matches!(
+        operation,
+        "StartWorkflowExecution" | "StartWorkflowExecutionAsync"
+    );
     let is_signal_start = matches!(
         operation,
         "SignalWithStartWorkflowExecution" | "SignalWithStartWorkflowExecutionAsync"
@@ -383,14 +389,22 @@ mod tests {
         fn active_cluster_for_workflow(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
             Ok("cluster-b".into())
         }
-        fn active_cluster_for_cluster_attribute(&self, _: &str, attr: &str) -> Result<String, String> {
+        fn active_cluster_for_cluster_attribute(
+            &self,
+            _: &str,
+            attr: &str,
+        ) -> Result<String, String> {
             if attr.is_empty() {
                 Ok("cluster-a".into())
             } else {
                 Ok("cluster-b".into())
             }
         }
-        fn current_workflow_selection(&self, _: &str, _: &str) -> Result<(bool, Option<String>), String> {
+        fn current_workflow_selection(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<(bool, Option<String>), String> {
             Ok((false, None))
         }
     }
@@ -416,13 +430,25 @@ mod tests {
     #[test]
     fn forwarding_falls_back_to_selected_allowlist() {
         assert!(!ForwardingPolicy::AllDomainV2.routes_to_active_cluster(
-            "DescribeWorkflowExecution", false, true, "cluster-b", "cluster-a"
+            "DescribeWorkflowExecution",
+            false,
+            true,
+            "cluster-b",
+            "cluster-a"
         ));
         assert!(!ForwardingPolicy::AllDomainV2.routes_to_active_cluster(
-            "DescribeWorkflowExecution", false, false, "cluster-b", "cluster-a"
+            "DescribeWorkflowExecution",
+            false,
+            false,
+            "cluster-b",
+            "cluster-a"
         ));
         assert!(ForwardingPolicy::AllDomainV2.routes_to_active_cluster(
-            "StartWorkflowExecution", false, false, "cluster-b", "cluster-a"
+            "StartWorkflowExecution",
+            false,
+            false,
+            "cluster-b",
+            "cluster-a"
         ));
     }
 
@@ -506,7 +532,10 @@ mod tests {
             },
         );
         assert!(result.is_ok());
-        assert_eq!(targets, vec![String::from("cluster-b"), String::from("cluster-c")]);
+        assert_eq!(
+            targets,
+            vec![String::from("cluster-b"), String::from("cluster-c")]
+        );
         assert_eq!(metrics.0.borrow().len(), 2);
     }
 

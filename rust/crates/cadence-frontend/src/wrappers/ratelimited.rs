@@ -26,26 +26,51 @@ pub struct OperationRule {
 pub fn operation_rule(operation: &str) -> Option<OperationRule> {
     use RequestClass::{Async, User, Visibility, Worker, WorkerPoll};
     let (class, reject_when_limited) = match operation {
-        "BackfillSchedule" | "CreateSchedule" | "CreateSemaphore" | "DeleteSchedule"
-        | "DescribeSchedule" | "DescribeTaskList" | "DescribeWorkflowExecution"
-        | "DiagnoseWorkflowExecution" | "FailoverDomain" | "GetTaskListsByDomain"
-        | "GetWorkflowExecutionHistory" | "ListSchedules" | "ListTaskListPartitions"
-        | "PauseSchedule" | "QueryWorkflow" | "RefreshWorkflowTasks"
-        | "RequestCancelWorkflowExecution" | "ResetWorkflowExecution"
-        | "RestartWorkflowExecution" | "SignalWithStartWorkflowExecution"
-        | "SignalWorkflowExecution" | "StartWorkflowExecution" | "TerminateWorkflowExecution"
-        | "UnpauseSchedule" | "UpdateSchedule" => (User, true),
-        "CountWorkflowExecutions" | "ListArchivedWorkflowExecutions"
-        | "ListClosedWorkflowExecutions" | "ListOpenWorkflowExecutions"
-        | "ListWorkflowExecutions" | "ScanWorkflowExecutions" => (Visibility, true),
+        "BackfillSchedule"
+        | "CreateSchedule"
+        | "CreateSemaphore"
+        | "DeleteSchedule"
+        | "DescribeSchedule"
+        | "DescribeTaskList"
+        | "DescribeWorkflowExecution"
+        | "DiagnoseWorkflowExecution"
+        | "FailoverDomain"
+        | "GetTaskListsByDomain"
+        | "GetWorkflowExecutionHistory"
+        | "ListSchedules"
+        | "ListTaskListPartitions"
+        | "PauseSchedule"
+        | "QueryWorkflow"
+        | "RefreshWorkflowTasks"
+        | "RequestCancelWorkflowExecution"
+        | "ResetWorkflowExecution"
+        | "RestartWorkflowExecution"
+        | "SignalWithStartWorkflowExecution"
+        | "SignalWorkflowExecution"
+        | "StartWorkflowExecution"
+        | "TerminateWorkflowExecution"
+        | "UnpauseSchedule"
+        | "UpdateSchedule" => (User, true),
+        "CountWorkflowExecutions"
+        | "ListArchivedWorkflowExecutions"
+        | "ListClosedWorkflowExecutions"
+        | "ListOpenWorkflowExecutions"
+        | "ListWorkflowExecutions"
+        | "ScanWorkflowExecutions" => (Visibility, true),
         "PollForActivityTask" | "PollForDecisionTask" => (WorkerPoll, true),
         "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync" => (Async, true),
-        "RecordActivityTaskHeartbeat" | "RecordActivityTaskHeartbeatByID"
-        | "ResetStickyTaskList" | "RespondActivityTaskCanceled"
-        | "RespondActivityTaskCanceledByID" | "RespondActivityTaskCompleted"
-        | "RespondActivityTaskCompletedByID" | "RespondActivityTaskFailed"
-        | "RespondActivityTaskFailedByID" | "RespondDecisionTaskCompleted"
-        | "RespondDecisionTaskFailed" | "RespondQueryTaskCompleted" => (Worker, false),
+        "RecordActivityTaskHeartbeat"
+        | "RecordActivityTaskHeartbeatByID"
+        | "ResetStickyTaskList"
+        | "RespondActivityTaskCanceled"
+        | "RespondActivityTaskCanceledByID"
+        | "RespondActivityTaskCompleted"
+        | "RespondActivityTaskCompletedByID"
+        | "RespondActivityTaskFailed"
+        | "RespondActivityTaskFailedByID"
+        | "RespondDecisionTaskCompleted"
+        | "RespondDecisionTaskFailed"
+        | "RespondQueryTaskCompleted" => (Worker, false),
         _ => return None,
     };
     Some(OperationRule {
@@ -92,9 +117,8 @@ pub fn quota_info(
             | "RespondDecisionTaskFailed"
             | "RespondQueryTaskCompleted"
     ) {
-        let token: EncodedTaskToken = serde_json::from_value(request.clone()).map_err(|error| {
-            CadenceError::Unknown(error.to_string())
-        })?;
+        let token: EncodedTaskToken = serde_json::from_value(request.clone())
+            .map_err(|error| CadenceError::Unknown(error.to_string()))?;
         let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&token.task_token)
             .map_err(|error| CadenceError::Unknown(error.to_string()))?;
         domains.domain_name(&token.domain_id)?
@@ -192,9 +216,9 @@ pub fn allow_domain(
     if class == RequestClass::WorkerPoll && !max_worker_poll_delay.is_zero() {
         return match policy.wait(info, max_worker_poll_delay) {
             Ok(()) => Ok(()),
-            Err(WaitFailure::CallerCancelled) => Err(CadenceError::Unknown(
-                "request context canceled".to_owned(),
-            )),
+            Err(WaitFailure::CallerCancelled) => {
+                Err(CadenceError::Unknown("request context canceled".to_owned()))
+            }
             Err(WaitFailure::Other(message)) => Err(CadenceError::Unknown(message)),
             Err(WaitFailure::Deadline) if bypass.should_bypass() => Ok(()),
             Err(WaitFailure::Deadline) if bypass.allow_policy(policy, info) => Ok(()),
@@ -409,12 +433,7 @@ mod tests {
             }
         });
         assert_eq!(
-            quota_info(
-                "StartWorkflowExecutionAsync",
-                &async_request,
-                &DomainLookup
-            )
-            .unwrap(),
+            quota_info("StartWorkflowExecutionAsync", &async_request, &DomainLookup).unwrap(),
             QuotaInfo {
                 domain: "async-domain".into(),
                 task_list: "base".into()
@@ -440,10 +459,24 @@ mod tests {
 
     #[test]
     fn operation_categories_and_ignored_worker_limits_match_generated_go_wrapper() {
-        assert_eq!(operation_rule("PollForActivityTask").unwrap().class, RequestClass::WorkerPoll);
-        assert!(operation_rule("StartWorkflowExecutionAsync").unwrap().reject_when_limited);
-        assert!(!operation_rule("RespondActivityTaskCompleted").unwrap().reject_when_limited);
-        assert_eq!(operation_rule("CountWorkflowExecutions").unwrap().class, RequestClass::Visibility);
+        assert_eq!(
+            operation_rule("PollForActivityTask").unwrap().class,
+            RequestClass::WorkerPoll
+        );
+        assert!(
+            operation_rule("StartWorkflowExecutionAsync")
+                .unwrap()
+                .reject_when_limited
+        );
+        assert!(
+            !operation_rule("RespondActivityTaskCompleted")
+                .unwrap()
+                .reject_when_limited
+        );
+        assert_eq!(
+            operation_rule("CountWorkflowExecutions").unwrap().class,
+            RequestClass::Visibility
+        );
         assert!(operation_rule("RegisterDomain").is_none());
     }
 

@@ -40,9 +40,7 @@ pub fn error_code(error: &cadence_api::errors::CadenceError) -> tonic::Code {
         CadenceError::EntityNotExists(_) | CadenceError::WorkflowAlreadyCompleted(_) => {
             tonic::Code::NotFound
         }
-        CadenceError::BadRequest(_) | CadenceError::QueryFailed(_) => {
-            tonic::Code::InvalidArgument
-        }
+        CadenceError::BadRequest(_) | CadenceError::QueryFailed(_) => tonic::Code::InvalidArgument,
         CadenceError::CancellationAlreadyRequested(_)
         | CadenceError::DomainAlreadyExists(_)
         | CadenceError::WorkflowAlreadyStarted(_) => tonic::Code::AlreadyExists,
@@ -52,9 +50,7 @@ pub fn error_code(error: &cadence_api::errors::CadenceError) -> tonic::Code {
         CadenceError::LimitExceeded(_) | CadenceError::ServiceBusy(_) => {
             tonic::Code::ResourceExhausted
         }
-        CadenceError::ShardOwnershipLost(_) | CadenceError::RetryTaskV2(_) => {
-            tonic::Code::Aborted
-        }
+        CadenceError::ShardOwnershipLost(_) | CadenceError::RetryTaskV2(_) => tonic::Code::Aborted,
         CadenceError::Unknown(_) => tonic::Code::Unknown,
     }
 }

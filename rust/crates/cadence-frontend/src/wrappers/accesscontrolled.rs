@@ -26,11 +26,7 @@ pub struct Attributes {
 
 /// Build the authorization input used by Go's generated Workflow API wrapper.
 /// Methods absent from that wrapper return `None` and bypass authorization.
-pub fn attributes_for_request(
-    operation: &str,
-    request: &Value,
-    actor: &str,
-) -> Option<Attributes> {
+pub fn attributes_for_request(operation: &str, request: &Value, actor: &str) -> Option<Attributes> {
     use Permission::{Admin, Process, Read, Write};
     let permission = match operation {
         "CountWorkflowExecutions"
@@ -244,23 +240,22 @@ mod tests {
         assert_eq!(start.request_body, Some(request.clone()));
 
         let private_request = serde_json::json!({"domain": "shop", "input": "secret"});
-        let filtered = attributes_for_request(
-            "StartWorkflowExecution",
-            &private_request,
-            "worker",
-        )
-        .unwrap();
-        assert_eq!(filtered.request_body, Some(serde_json::json!({"domain": "shop"})));
+        let filtered =
+            attributes_for_request("StartWorkflowExecution", &private_request, "worker").unwrap();
+        assert_eq!(
+            filtered.request_body,
+            Some(serde_json::json!({"domain": "shop"}))
+        );
         let async_request = serde_json::json!({
             "request": {"domain": "shop", "input": "secret", "signalInput": "secret"}
         });
         assert_eq!(
             {
                 let attributes = attributes_for_request(
-                "SignalWithStartWorkflowExecutionAsync",
-                &async_request,
-                "worker"
-            )
+                    "SignalWithStartWorkflowExecutionAsync",
+                    &async_request,
+                    "worker",
+                )
                 .unwrap();
                 assert_eq!(attributes.domain, "shop");
                 attributes.request_body
@@ -280,7 +275,9 @@ mod tests {
                 .permission,
             Some(Permission::Read)
         );
-        assert!(attributes_for_request("RespondActivityTaskCompleted", &request, "worker").is_none());
+        assert!(
+            attributes_for_request("RespondActivityTaskCompleted", &request, "worker").is_none()
+        );
         assert!(attributes_for_request("Health", &request, "worker").is_none());
     }
 }

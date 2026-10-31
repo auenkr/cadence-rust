@@ -217,6 +217,17 @@ these fixes; no green CI evidence covers the current changes.
   tested `e29a3c2ada2a66d2960d15a3fdddd0abca522073` and concluded `failure`.
   Clippy then reported three needless borrows in Thrift wrapper unit tests;
   those test references were simplified, with another exact-head run required.
+- CI formatting run
+  [41178031363](https://github.com/auenkr/cadence-rust/actions/runs/41178031363)
+  tested `618fda8a3bf5b4f5c840cc69e1b40068973a6a96` with
+  `format_frontend_files=true` and concluded `failure` in tests (formatting and
+  Clippy passed after the CI rustfmt step). Retrieved its
+  `frontend-format-patch` artifact and applied the runner-generated formatting
+  patch locally. Two tests failed: history run-ID mismatch used a malformed
+  request run UUID (Go validates it first), and the Thrift test assumed a
+  WorkflowService `Health` method that does not exist. Fixed the UUID fixture
+  and now test the valid `GetSearchAttributes` method's undeclared BadRequest
+  exception behavior. A normal exact-head CI run is required.
 - Next exact-head CI must be dispatched after pushing the validator API fix and
   metering integration. No green CI result covers the current source.
 - Handler bodies still do not execute Go's workflow-engine transformations:
