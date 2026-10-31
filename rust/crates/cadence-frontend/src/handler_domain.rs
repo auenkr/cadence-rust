@@ -5,8 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cadence_api::{
     enums::DomainStatus,
     errors::{
-        BadRequestError, DomainAlreadyExistsError, EntityNotExistsError, InternalServiceError,
-        ServiceBusyError,
+        BadRequestError, DomainAlreadyExistsError, EntityNotExistsError, ServiceBusyError,
     },
     service_types::{
         DeprecateDomainRequest, DescribeDomainRequest, DescribeDomainResponse, ListDomainsRequest,
@@ -22,10 +21,6 @@ use cadence_api::{
 pub struct Handler;
 
 impl Handler {
-    pub fn dispatch(&self, operation: &str) -> Result<(), InternalServiceError> {
-        Err(crate::handler_workflow::unimplemented_operation(operation))
-    }
-
     /// Create a domain in the shared persistence state. The Go handler checks
     /// for an existing name before validating the name, defaults replication
     /// to the active cluster, then validates attributes before persistence.

@@ -14,7 +14,7 @@ use cadence_api::{
         PersistenceInfo, RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigResponse,
     },
     enums::IndexedValueType,
-    errors::{BadRequestError, InternalServiceError},
+    errors::BadRequestError,
     types::SupportedClientVersions,
 };
 use cadence_service_core::admin::DynamicConfigOverlay;
@@ -189,10 +189,6 @@ pub struct Handler {
 }
 
 impl Handler {
-    pub fn dispatch(&self, operation: &str) -> Result<(), InternalServiceError> {
-        Err(crate::handler_workflow::unimplemented_operation(operation))
-    }
-
     pub fn add_search_attributes(
         &self,
         request: Option<&AddSearchAttributeRequest>,
