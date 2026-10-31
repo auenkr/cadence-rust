@@ -271,3 +271,42 @@ these fixes; no green CI evidence covers the current changes.
   and typed outbound History/Matching method calls. The latter two client
   wrappers only expose generated gRPC clients; they do not yet provide the
   operation adapters needed by these handler methods.
+
+## Wrapper dispatch integration checkpoint
+
+- Added caller metadata and access-control, rate-limit, and version-check hooks
+  to `Handler`. Access control runs outside metering; rate-limit preflight and
+  quota policy run before version checking; both run inside metering, matching
+  the Go constructor/decorator order for these layers.
+- Added `HandlerAuthorization` and `HandlerRateLimit` adapters so the existing
+  Go-parity attribute and quota policies can be installed directly on the
+  handler. Rate-limit adapter resolves token domain IDs through the injected
+  `DomainNameLookup`, preserves sticky task-list quota names, and applies
+  worker-poll waiting/bypass semantics.
+- Added an outer cluster-redirection hook to `Handler`, a target-cluster backend
+  invocation seam, an async forwarding adapter that reuses the existing
+  stateful policy, active-active selection and DomainNotActive fallback, and a
+  handler integration test. The runtime must supply a `RedirectRequestResolver`
+  backed by its domain cache/config/active-cluster manager; that resolver is
+  still not implemented in the Frontend production graph.
+- Added `grpc::to_status`, which converts the mapped Cadence code and original
+  message into one tonic status at the transport boundary.
+- CI run
+  [41179224019](https://github.com/auenkr/cadence-rust/actions/runs/41179224019)
+  is testing head `ad0cd7e6d97903ec192b3cb4a6041a9c6b54daf2`; it was `in_progress`
+  at this save. Runs [41179195098](https://github.com/auenkr/cadence-rust/actions/runs/41179195098),
+  [41179109690](https://github.com/auenkr/cadence-rust/actions/runs/41179109690),
+  [41179068665](https://github.com/auenkr/cadence-rust/actions/runs/41179068665),
+  [41178916064](https://github.com/auenkr/cadence-rust/actions/runs/41178916064),
+  and [41178803702](https://github.com/auenkr/cadence-rust/actions/runs/41178803702)
+  were cancelled when newer same-branch runs superseded them. The latest
+  completed success remains run 41178373998 at `0e76f49` and does not cover
+  these wrapper changes.
+- Still incomplete: all API methods continue through the generic backend
+  `invoke` seam, so Go's typed History/Matching/visibility/archival/async
+  transformations and responses are not ported. List/scan/count and task-list
+  methods currently validate requests but do not resolve domain IDs, validate
+  visibility queries, select filter-specific persistence calls, or implement
+  archival behavior. Thrift/gRPC helpers are not registered as Frontend
+  transports; `run()` still selects the shared Matching launcher. The Frontend
+  production runtime does not instantiate this handler or its middleware.
