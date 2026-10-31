@@ -380,11 +380,11 @@ impl RequestValidator {
             .dynamic
             .as_ref()
             .and_then(|dynamic| dynamic.lock().ok())
-            .and_then(|dynamic| {
-                Some(cadence_persistence::dynamic_config::map_property(
+            .map(|dynamic| {
+                cadence_persistence::dynamic_config::map_property(
                     dynamic.property_values("system.requiredDomainDataKeys"),
                     default_required_keys.clone(),
-                ))
+                )
             })
             .unwrap_or(default_required_keys);
         let required_keys_go_format = format!(
@@ -695,7 +695,6 @@ mod tests {
                 &ListTaskListPartitionsRequest {
                     domain: "d".into(),
                     task_list: None,
-                    ..Default::default()
                 },
             )),
             "TaskList is not set on request.",

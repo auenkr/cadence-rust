@@ -145,12 +145,16 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
 
 - At `be0432cc7dcffc39469bad1d7e09b6bebc34231d`, CI run
   https://github.com/auenkr/cadence-rust/actions/runs/41178553763 was still
-  `in_progress` at the last check. Its runner was executing a large shared
-  Matching + Frontend gate and had not yet reached the Frontend package tests.
+  `failure`: Clippy caught an `and_then(Some(...))` pattern in required-key
+  binding and needless struct updates in test fixtures. The required-key
+  binding now uses `map`; the two exhaustive request fixtures omit the
+  redundant update. Formatting and tests were not reached on that head.
 - This follow-up adds exact message checks for all Go open/closed start-time
   filter failures, the conflicting filter cases, and empty-domain validation.
   Run fresh exact-head formatting, Clippy and Frontend tests on Actions before
-  treating this update as validated.
+  treating this update as validated. The first run at `5c2983d36` was dispatched
+  as https://github.com/auenkr/cadence-rust/actions/runs/41178727979, but is
+  superseded by the Clippy correction in the next commit.
 - Persistence remains the largest open item. Frontend opens the configured
   default SQL/Cassandra store through Matching's native adapter and performs a
   read-only domain metadata bootstrap. It still has no write-capable durable
