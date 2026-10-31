@@ -292,14 +292,16 @@ pub fn describe_cluster_response(hostname: &str) -> cadence_api::admin::Describe
     }
     cadence_api::admin::DescribeClusterResponse {
         supported_client_versions: Some(cadence_api::types::SupportedClientVersions {
-            go_sdk: "v1.4.0".to_string(),
-            java_sdk: "v3.9.0".to_string(),
+            go_sdk: "<=1.7.0".to_string(),
+            java_sdk: "<=1.5.0".to_string(),
         }),
         membership_info: Some(cadence_api::admin::MembershipInfo {
             current_host: Some(cadence_api::admin::HostInfo {
                 identity: hostname.to_string(),
             }),
-            reachable_members: vec![hostname.to_string()],
+            // Go appends every returned member in role iteration order, so a
+            // single host serving all four roles appears four times here.
+            reachable_members: vec![hostname.to_string(); 4],
             rings,
         }),
         persistence_info: Some(persistence_info),
@@ -391,7 +393,8 @@ pub async fn refresh_workflow_tasks(
 
 /// Register custom search attributes, mirroring Go admin
 /// `AddSearchAttribute`: system keys and type conflicts are rejected, and
-/// accepted keys join the custom registry.
+/// accepted keys join both the custom registry and the live dynamic-config
+/// overlay used by visibility query validation.
 pub async fn add_search_attribute(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
@@ -418,25 +421,66 @@ pub async fn add_search_attribute(
             return bad_request(BadRequestError::new("SearchAttributes are not provided"));
         }
     };
-    let mut custom = state
-        .admin
-        .custom_search_attributes
-        .lock()
-        .expect("admin lock");
+    const VALID_ATTRIBUTES: &str = "frontend.validSearchAttributes";
+    let mut overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let mut valid_attributes = match overlay
+        .get(false, VALID_ATTRIBUTES, &[])
+        .and_then(|value| value.value)
+    {
+        Some(value) => match serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data) {
+            Ok(attributes) => attributes,
+            Err(error) => {
+                return error_response(
+                    "InternalServiceError",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get dynamic config, err: {error}"),
+                );
+            }
+        },
+        None => cadence_api::search_attributes::default_indexed_keys()
+            .into_iter()
+            .map(|(key, value)| (key, value.value()))
+            .collect(),
+    };
     for (key, value_type) in &attrs {
         if cadence_api::search_attributes::is_system_indexed_key(key) {
             return bad_request(BadRequestError::new(format!(
                 "Key [{key}] is reserved by system"
             )));
         }
-        if let Some(existing) = custom.get(key) {
-            if existing != value_type {
+        if valid_attributes
+            .get(key)
+            .is_some_and(|existing| *existing != value_type.value())
+        {
                 return bad_request(BadRequestError::new(format!(
                     "Key [{key}] is already whitelisted as a different type"
                 )));
-            }
         }
+        valid_attributes.insert(key.clone(), value_type.value());
     }
+    let encoded = match serde_json::to_vec(&valid_attributes) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to encode dynamic config, err: {error}"),
+            );
+        }
+    };
+    overlay.update(
+        false,
+        VALID_ATTRIBUTES,
+        vec![DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: encoded,
+            }),
+            filters: Vec::new(),
+        }],
+    );
+    drop(overlay);
+    let mut custom = state.admin.custom_search_attributes.lock().expect("admin lock");
     for (key, value_type) in attrs {
         custom.insert(key, value_type);
     }
