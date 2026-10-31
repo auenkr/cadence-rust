@@ -1388,3 +1388,8 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   visibility/history/execution managers and their configured SQL/Cassandra
   selection; do not claim Frontend persistence or lifecycle parity from this
   green package run.
+- A fresh exact-head run with `clean_target=true` checked the evidence-update
+  head `38422ad88de4dda0afbf82765e02f7ec669b9ab4`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41210718522 concluded
+  `success` (FrontEnd formatting, Clippy, and tests on the runner's fresh target).
+  This run is code-equivalent to the source head above; no local Cargo was run.
