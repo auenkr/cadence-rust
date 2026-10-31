@@ -550,6 +550,47 @@ impl ToThrift for GetWorkflowExecutionRawHistoryV2Response {
     }
 }
 
+impl FromThrift for cadence_api::admin::DeleteWorkflowRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DeleteWorkflowResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if self.history_deleted {
+            f.fields.push((10, crate::value::Value::Bool(true)));
+        }
+        if self.executions_deleted {
+            f.fields.push((20, crate::value::Value::Bool(true)));
+        }
+        if self.visibility_deleted {
+            f.fields.push((30, crate::value::Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::RefreshWorkflowTasksRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            domain_id: String::new(),
+            workflow_execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::RefreshWorkflowTasksResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
 impl FromThrift for RetryPolicy {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
