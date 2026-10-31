@@ -982,5 +982,7 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - Added a persistence test that drives the SQLite-backed Frontend domain
   manager through create, cache restart/describe from the SQL row, and delete.
   The test was pushed in `d4c547d17`; its exact-head
-  `cadence-persistence` CI run is pending at
-  https://github.com/auenkr/cadence-rust/actions/runs/41197648965.
+  `cadence-persistence` CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41197648965 validated
+  `d4c547d1789e4e85208d25166071eedf1f1a7182` and concluded `success`
+  (formatting, Clippy, and tests).
