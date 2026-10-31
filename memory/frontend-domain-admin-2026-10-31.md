@@ -692,3 +692,12 @@ migration forward.
   [41194562850](https://github.com/auenkr/cadence-rust/actions/runs/41194562850)
   was cancelled after this unrelated formatting fix changed the source; dispatch
   fresh CI at the next pushed head.
+- `origin/frontend-core2` advanced from `9bf48bc0c` to `7b5635c96`
+  (`fix(persistence): transact MySQL domain deletes`). Rebased the Frontend
+  branch onto the new tip and resolved overlapping SQL persistence interfaces
+  by retaining core2's `GoSqlDomainPersistence` API and implementations while
+  adding the Frontend-facing `DomainMetadataPersistence` adapter for both SQL
+  stores. Preserved core2's transaction semantics and PG Debug implementation.
+  The package CI run [41194722171](https://github.com/auenkr/cadence-rust/actions/runs/41194722171)
+  at `48e7220a675177dd864d5bc6bf49540dcafb12d2` was cancelled when core2
+  advanced. Push the rebased source and dispatch exact-head package CI.
