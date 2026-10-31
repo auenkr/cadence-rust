@@ -129,6 +129,50 @@ impl MatchingClient {
             .await
             .map(|_| ())
     }
+
+    pub async fn respond_query_task_completed(
+        &self,
+        request: cadence_proto::matching::RespondQueryTaskCompletedRequest,
+    ) -> Result<cadence_proto::matching::RespondQueryTaskCompletedResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_query_task_completed(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn describe_task_list(
+        &self,
+        request: cadence_proto::matching::DescribeTaskListRequest,
+    ) -> Result<cadence_proto::matching::DescribeTaskListResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_task_list(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn list_task_list_partitions(
+        &self,
+        request: cadence_proto::matching::ListTaskListPartitionsRequest,
+    ) -> Result<cadence_proto::matching::ListTaskListPartitionsResponse, tonic::Status> {
+        self.client
+            .clone()
+            .list_task_list_partitions(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn get_task_lists_by_domain(
+        &self,
+        request: cadence_proto::matching::GetTaskListsByDomainRequest,
+    ) -> Result<cadence_proto::matching::GetTaskListsByDomainResponse, tonic::Status> {
+        self.client
+            .clone()
+            .get_task_lists_by_domain(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
 }
 
 /// Construct Go's internal Matching activity-poll envelope from the typed

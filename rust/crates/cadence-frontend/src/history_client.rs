@@ -299,8 +299,8 @@ pub fn generated(channel: Channel, max_message_size: usize) -> HistoryApiClient<
 mod tests {
     use super::*;
 
-    #[test]
-    fn generated_history_calls_attach_go_caller_metadata_and_timeout() {
+    #[tokio::test]
+    async fn generated_history_calls_attach_go_caller_metadata_and_timeout() {
         let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:7233")
             .connect_lazy();
         let client = HistoryClient::from_channel(channel, 1024);

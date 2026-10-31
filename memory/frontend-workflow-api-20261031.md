@@ -758,14 +758,24 @@ Frontend parity until these are implemented and validated.
   [41189834515](https://github.com/auenkr/cadence-rust/actions/runs/41189834515)
   checked exact SHA `1a66c0e0645fd08f7bc3e59bd98f484596e76bea` and failed at
   Clippy before tests because tonic `Status` triggers `result_large_err` on
-  generated RPC client wrappers. The narrow lint allowance is the current
-  uncommitted fix; package CI must be rerun.
+  generated RPC client wrappers. Commit `4dd5a5177f5068c68199699fab589e85dbb57528`
+  added the module-scoped lint allowance; its run
+  [41190049756](https://github.com/auenkr/cadence-rust/actions/runs/41190049756)
+  was cancelled when the History client methods were pushed, so the fix was
+  not independently validated there.
 - Added typed History client calls for start, signal, signal-with-start,
   terminate, reset, describe, query, cancel, sticky reset, mutable-state reads,
   decision/activity completion/failure/cancel, and heartbeat. Added a client
-  metadata/timeout unit test. These edits are uncommitted and will supersede
-  the pending CI run [41190049756](https://github.com/auenkr/cadence-rust/actions/runs/41190049756)
-  for exact head `4dd5a5177f5068c68199699fab589e85dbb57528`.
+  metadata/timeout unit test. Commit `bcf07d73a2bf440c3ad607c1285f98826d73c72a`
+  is pushed. CI run [41190113832](https://github.com/auenkr/cadence-rust/actions/runs/41190113832)
+  tested that exact SHA: Clippy passed, but tests were 97/98 because the new
+  metadata test created a lazy tonic channel without a Tokio runtime. It is now
+  an async Tokio test.
+- Added typed Matching client calls for `RespondQueryTaskCompleted`,
+  `DescribeTaskList`, `ListTaskListPartitions`, and `GetTaskListsByDomain` to
+  cover the remaining generated Matching operations named in the Go Workflow
+  handlers. Those calls and the Tokio test correction are uncommitted and not
+  yet validated.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
   `Handler` or compose its wrappers; poll cancellation/health-wait and response
