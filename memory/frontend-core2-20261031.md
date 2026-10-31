@@ -1155,6 +1155,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   only as config groundwork. The existing default-store domain/metadata
   persistence remains SQL MySQL/PostgreSQL and Cassandra; this change does not
   add the missing Visibility, History, or Execution managers.
+- Added a factory-level regression case proving a separately configured
+  `visibilityStore` does not change which backend the default-store factory
+  opens. Exact-head Frontend CI is required for this test.
 - Lifecycle stop order is present in the shared runtime, but production still
   constructs no seven global quota collection owners and the AdminHandler is
   still a stub, so its Go DLQ/failover worker owners are absent. The validator

@@ -572,6 +572,31 @@ mod tests {
     }
 
     #[test]
+    fn configured_default_datastore_uses_default_role_with_separate_visibility_store() {
+        let mut config = persistence(Some(SqlConfig {
+            plugin_name: "sqlite".into(),
+            database_name: "primary.db".into(),
+            ..Default::default()
+        }));
+        config.visibility_store = "visibility".into();
+        config.datastores.insert(
+            "visibility".into(),
+            DatastoreConfig {
+                sql: Some(SqlConfig {
+                    plugin_name: "postgres".into(),
+                    database_name: "cadence_visibility".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+
+        let (name, datastore) = configured_default_datastore(&config).unwrap();
+        assert_eq!(name, "primary");
+        assert_eq!(datastore.sql.as_ref().unwrap().plugin_name, "sqlite");
+    }
+
+    #[test]
     fn configured_sqlite_exposes_native_and_legacy_views_of_one_store() {
         use cadence_common::go_string::GoString;
         use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
