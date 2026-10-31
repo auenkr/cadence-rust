@@ -1,4 +1,7 @@
-//! Scheduler worker workflow names and task-list contract.
+//! Scheduler worker workflow names, task-list contract and backfill logic from Go `scheduler`.
+
+pub mod backfill;
+
 pub const TASK_LIST: &str = "cadence-scheduler";
 pub const WORKFLOW_TYPE: &str = "cadence-scheduler";
 pub const SIGNAL_PAUSE: &str = "scheduler-pause";
