@@ -1,5 +1,29 @@
 # Frontend workflow API port — 2026-10-31
 
+## Continued work after merged frontend-core2 — 2026-10-31
+
+- Merged `origin/frontend-core2` into `t3/frontend-workflow-api` at
+  `c05a6d62c84ecbec922337a2ef7bdc1a53a8181f`. The merge brings lifecycle
+  limiter-stop support in `cadence-service-core` and the launcher's service
+  shutdown hook. It does not yet provide the requested History/Matching typed
+  operation adapters or Frontend handler registration. The updated core2
+  memory also confirms its work owns persistence bootstrap and lifecycle, but
+  does not close the write-capable domain/visibility/history managers.
+- Re-audited the handler dispatch: 40 public operations are catalogued and the
+  task-token builders, blob observer, visibility request mapping, and typed
+  low-level History/Matching gRPC methods exist as seams. The production
+  `cadence-frontend::run()` still calls the shared Matching launcher directly;
+  `cadence-service-core::yarpc` and registered gRPC handlers dispatch their own
+  persistence operations, not `handler_workflow::Handler`. Thus the wrapper
+  chain is not yet in the actual registered WorkflowService, and the handler
+  backend remains injected/generic rather than a typed History/Matching and
+  persistence implementation.
+- Work remains open for task-token and long-poll response shaping, History
+  page/archive behavior, archived visibility, and all production adapter and
+  registration paths. No CI evidence is claimed for the merge until a
+  package-specific run completes on its exact head. Cargo remains prohibited
+  on the development host.
+
 ## Current branch and skeleton state
 
 - Implementation checkout: `t3/frontend-workflow-api` at `94e79ff98`.
