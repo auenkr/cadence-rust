@@ -1515,3 +1515,22 @@ migration forward.
 - Known concern to verify in CI: the new `cadence-service-core` signature
   change has no service-core CI run yet. Dispatch
   `-f package=cadence-service-core` after the persistence run concludes.
+
+### CI state at handoff (durable audit slice)
+
+- Run [41225578354](https://github.com/auenkr/cadence-rust/actions/runs/41225578354)
+  (`beb88ff09`): Format and Clippy passed, Test FAILED with two stale tests
+  that could never compile before this branch: the sqlite restart test (it
+  expects a fresh cache to serve SQL rows without hydration; production
+  hydrates through the launcher's `list_domains` + `sync_matching_metadata`
+  loop) and the replication task test (it read field 30 where field 20 holds the
+  `DomainTaskAttributes`). Both are fixed in `23811edf8`.
+- Run [41225991648](https://github.com/auenkr/cadence-rust/actions/runs/41225991648)
+  (`23811edf8`, package `cadence-persistence`): in progress at the Go oracle
+  step when this note was written. Its conclusion is not yet known. A new
+  `cadence-service-core` run is still needed because the Frontend trait
+  signature changed; dispatch it only after this run concludes.
+- Open design gap: `PersistedFrontendDomainManager::describe` is cache-only, so
+  a domain that drops out of the runtime cache cannot be re-read from SQL until
+  restart. The launcher's startup hydration covers restart, but not runtime
+  cache loss. Decide whether to add a read-through on cache miss.
