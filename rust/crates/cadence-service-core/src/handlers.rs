@@ -2503,9 +2503,19 @@ async fn list_task_list_partitions(
         .into_response()
 }
 
-pub fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
+pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttributesResponse {
+    let mut keys = cadence_api::search_attributes::default_indexed_keys();
+    keys.extend(
+        state
+            .admin
+            .custom_search_attributes
+            .lock()
+            .expect("admin lock")
+            .iter()
+            .map(|(key, value_type)| (key.clone(), *value_type)),
+    );
     cadence_api::tasks::GetSearchAttributesResponse {
-        keys: Some(cadence_api::search_attributes::default_indexed_keys()),
+        keys: Some(keys),
     }
 }
 
@@ -2653,8 +2663,8 @@ mod frontend_drain_tests {
     }
 }
 
-async fn get_search_attributes() -> impl IntoResponse {
-    Json(search_attributes())
+async fn get_search_attributes(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(search_attributes(&state))
 }
 
 #[derive(Debug, Deserialize)]
