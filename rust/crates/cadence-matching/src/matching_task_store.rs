@@ -200,14 +200,26 @@ pub fn open_configured_default_store(
             if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
                 anyhow::bail!("Matching SQLite task persistence does not support multipleDatabasesConfig");
             }
-            let task_store =
-                SqliteTaskStoreConfig::from_default_store(persistence)?.open_store()?;
+            let sqlite = SqliteTaskStoreConfig::from_default_store(persistence)?;
+            let task_store = sqlite.open_store()?;
+            let metadata = Arc::new(
+                cadence_persistence::matching_domain_metadata::MatchingDomainMetadataStore::open_read_write_with_options(
+                    &sqlite.database_name,
+                    active_cluster_name,
+                    &sqlite.mode,
+                    sqlite.busy_timeout,
+                )?,
+            );
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> =
+                metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> =
+                metadata;
             Ok(ConfiguredMatchingStores {
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: task_store.clone(),
                 task_store,
-                domain_metadata_source: None,
-                domain_persistence: None,
+                domain_metadata_source: Some(metadata_source),
+                domain_persistence: Some(domain_persistence),
             })
         }
         "mysql" => {

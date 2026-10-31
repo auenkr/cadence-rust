@@ -110,8 +110,9 @@ pub enum MatchingDomainMetadataError {
 ///
 /// Go's SQL backend stores UUIDs as 16-byte BLOBs, uses shard 54321 for domain
 /// rows, and pages by `id > token ORDER BY id LIMIT page_size`.
+#[derive(Clone)]
 pub struct MatchingDomainMetadataStore {
-    connection: Mutex<Connection>,
+    connection: std::sync::Arc<Mutex<Connection>>,
     active_cluster_name: String,
     busy_timeout: Duration,
 }
@@ -605,6 +606,53 @@ impl MatchingDomainMetadataStore {
         ))
     }
 
+    /// Open the existing Go SQLite schema with the configured read/write mode.
+    /// This is used by Frontend's transactional domain+metadata manager; it
+    /// never creates schema objects or migrates the Cadence database.
+    pub fn open_read_write_with_options(
+        path: impl AsRef<Path>,
+        active_cluster_name: impl Into<String>,
+        mode: &str,
+        busy_timeout: Duration,
+    ) -> Result<Self, MatchingDomainMetadataError> {
+        let flags = match mode {
+            "rw" => OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+            "rwc" => OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+            "ro" => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    "Frontend domain manager requires a writable SQLite mode".into(),
+                ));
+            }
+            "memory" => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    "mode=memory is not supported by the Frontend domain manager".into(),
+                ));
+            }
+            _ => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    format!("unsupported URI mode {mode:?}"),
+                ));
+            }
+        };
+        let path = path.as_ref().to_string_lossy();
+        if path.contains('?') {
+            return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                "SQLite databaseName containing URI query attributes is not supported".into(),
+            ));
+        }
+        let connection = Connection::open_with_flags(format!("file:{path}?mode={mode}"), flags)?;
+        Ok(Self::from_connection_with_busy_timeout(
+            connection,
+            active_cluster_name,
+            busy_timeout,
+        ))
+    }
+
     /// Wrap an existing read-only connection. Primarily useful to callers that
     /// manage connection lifecycle outside this metadata reader.
     pub fn from_connection(connection: Connection, active_cluster_name: impl Into<String>) -> Self {
@@ -621,7 +669,7 @@ impl MatchingDomainMetadataStore {
         busy_timeout: Duration,
     ) -> Self {
         Self {
-            connection: Mutex::new(connection),
+            connection: std::sync::Arc::new(Mutex::new(connection)),
             active_cluster_name: active_cluster_name.into(),
             busy_timeout,
         }
@@ -790,6 +838,123 @@ impl MatchingDomainMetadataStore {
             row.data_encoding,
             &self.active_cluster_name,
         )
+    }
+}
+
+impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let expected_version = self.get_metadata_version()?;
+        let mut metadata = metadata.clone();
+        metadata.notification_version = expected_version;
+        let blob = encode_go_sql_domain_metadata(&metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice(), metadata.info.name, metadata.is_global_domain, blob, ENCODING_THRIFT_RW],
+        )?;
+        let current: i64 = transaction.query_row(
+            "SELECT notification_version FROM domain_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        if current != expected_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_version}, found {current}"
+            )));
+        }
+        let changed = transaction.execute(
+            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
+            params![expected_version + 1, expected_version],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(expected_version)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let blob = encode_go_sql_domain_metadata(metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE domains SET name = ?1, data = ?2, data_encoding = ?3 WHERE shard_id = ?4 AND id = ?5",
+            params![metadata.info.name, blob, ENCODING_THRIFT_RW, GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice()],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::NotFound(metadata.info.uuid.clone()));
+        }
+        let current: i64 = transaction.query_row(
+            "SELECT notification_version FROM domain_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        if current != expected_notification_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_notification_version}, found {current}"
+            )));
+        }
+        let changed = transaction.execute(
+            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
+            params![expected_notification_version + 1, expected_notification_version],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        let uuid = uuid::Uuid::parse_str(domain_id)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM domains WHERE shard_id = ?1 AND id = ?2",
+            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        self.get_metadata_version_with_timeout(Duration::from_secs(3))
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        MatchingDomainMetadataStore::get_domain(self, name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
     }
 }
 
@@ -1354,6 +1519,68 @@ mod tests {
         assert_eq!(decoded.failover_version, metadata.failover_version);
         assert_eq!(decoded.previous_failover_version, metadata.previous_failover_version);
         assert_eq!(decoded.last_updated_time_nanos, metadata.last_updated_time_nanos);
+    }
+
+    #[test]
+    fn sqlite_domain_transactions_create_update_delete_and_advance_metadata() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let store = MatchingDomainMetadataStore::from_connection(connection, "cluster-a");
+        let uuid = uuid::Uuid::from_u128(0x1234);
+        let metadata = MatchingDomainMetadata {
+            info: DomainInfo {
+                name: "persisted-domain".into(),
+                uuid: uuid.to_string(),
+                status: Some(DomainStatus::Registered),
+                ..Default::default()
+            },
+            configuration: DomainConfiguration::default(),
+            replication: DomainReplicationConfiguration::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: DomainStatus::Registered as i32,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 0,
+            notification_version: 0,
+            failover_notification_version: 0,
+            failover_version: 0,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 1,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+
+        assert_eq!(store.create_domain(&metadata).unwrap(), 7);
+        assert_eq!(store.get_metadata_version().unwrap(), 8);
+        let mut persisted = store.get_domain(None, Some(&uuid.to_string())).unwrap();
+        persisted.info.description = "updated".into();
+        persisted.notification_version = 8;
+        store.update_domain(&persisted, 8).unwrap();
+        assert_eq!(store.get_metadata_version().unwrap(), 9);
+        assert_eq!(
+            store.get_domain(Some("persisted-domain"), None).unwrap().info.description,
+            "updated"
+        );
+        store.delete_domain(&uuid.to_string()).unwrap();
+        assert!(matches!(
+            store.get_domain(None, Some(&uuid.to_string())),
+            Err(MatchingDomainMetadataError::NotFound(_))
+        ));
     }
 
     #[test]

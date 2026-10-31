@@ -1098,7 +1098,7 @@ impl GoSqlFrontendDomainManager {
             is_global_domain: record.is_global_domain,
             archival_bucket: record.archival_bucket.clone(),
             status_raw: record.info.status.map(|status| status as i32).unwrap_or_default(),
-            archival_status_raw: record.configuration.archival_status.map(|status| status as i16).unwrap_or_default(),
+            archival_status_raw: 0,
             history_archival_status_raw: record.configuration.history_archival_status.map(|status| status as i16).unwrap_or_default(),
             visibility_archival_status_raw: record.configuration.visibility_archival_status.map(|status| status as i16).unwrap_or_default(),
             config_version: record.config_version,
@@ -1123,7 +1123,6 @@ impl GoSqlFrontendDomainManager {
         metadata.is_global_domain = record.is_global_domain;
         metadata.archival_bucket.clone_from(&record.archival_bucket);
         metadata.status_raw = record.info.status.map(|status| status as i32).unwrap_or_default();
-        metadata.archival_status_raw = record.configuration.archival_status.map(|status| status as i16).unwrap_or_default();
         metadata.history_archival_status_raw = record.configuration.history_archival_status.map(|status| status as i16).unwrap_or_default();
         metadata.visibility_archival_status_raw = record.configuration.visibility_archival_status.map(|status| status as i16).unwrap_or_default();
         metadata.config_version = record.config_version;

@@ -946,3 +946,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   compilation because rustfmt requested one layout change in `launcher.rs`.
   Applied the runner's exact formatting hunk; this run provides no compile or
   test evidence.
+- The formatted manager run,
+  https://github.com/auenkr/cadence-rust/actions/runs/41196752970, checked
+  `965cd1213ed4b25ddecd904ea4f0ed4d3dfd8205` and passed formatting, then failed
+  at Clippy compilation because `DomainConfiguration` has no base
+  `archival_status` member. Preserved the existing raw archival status instead
+  of reading a nonexistent field. This run predates the SQLite manager wiring
+  now in the working tree and provides no test evidence.
