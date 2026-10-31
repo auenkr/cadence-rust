@@ -635,3 +635,7 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   exceeded Rust's default configured maximum (60s). The Go test fixture sets
   the dynamic maximum to 300s; aligned the Rust fixture. Exact-head CI is
   required after pushing this correction.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41188685573
+  checked `456a6110730af157ba6342c5bece94da6186f426` and failed Clippy on an
+  unused `mut` left in the visibility page-size test by the fixture correction.
+  Removed it; request another exact-head Frontend run after pushing.

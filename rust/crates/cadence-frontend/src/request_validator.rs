@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn list_page_size_mutation_and_visibility_limit_match_go() {
-        let mut validator = RequestValidator::default();
+        let validator = RequestValidator::default();
         let mut request = ListWorkflowExecutionsRequest {
             domain: "d".into(),
             ..Default::default()
