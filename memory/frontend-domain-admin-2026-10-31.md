@@ -1064,3 +1064,8 @@ migration forward.
 
 - The first push of commit `2e0a7bd26` was rejected because `origin/t3/frontend-domain-admin` had advanced with 48 commits of Admin YARPC, raw-history, schedule validation and workflow-maintenance work. Merged that ref into the current domain/queue line. For overlapping code files, retained the more recent domain/queue implementation from this branch; non-conflicting API, proto and workflow changes were merged automatically. This merge must pass fresh exact-head CI before it is treated as validated.
 - Resolved the Thrift test fixture compilation error reported by `41204385560` by filling `DomainTaskAttributes` optional fields explicitly. The fix is included in the merge and still awaits exact-head `cadence-thrift` CI.
+
+## Failover notification commit ordering — 2026-10-31
+
+- Exact-head Thrift CI [41204863220](https://github.com/auenkr/cadence-rust/actions/runs/41204863220) failed Clippy at merge head `16bcc6bf78293af777110da42127aab2a745f62c`: automatic merge retained duplicate Admin converter imports. Removed the redundant import block.
+- Persisted domain mutations previously notified Matching failover watchers inside the in-memory candidate update, before the durable metadata write. If SQL/Cassandra rejected the write, the cache was restored but watchers had already observed a false failover. Persisted manager paths now defer notifications until after the metadata commit; direct in-memory operations retain immediate notifications. Added a regression around the deferred notification boundary. `git diff --check` is clean; no local Cargo command was run. This source needs fresh exact-head Frontend CI.
