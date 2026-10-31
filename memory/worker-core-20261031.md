@@ -57,13 +57,17 @@ Implemented in this slice:
 ## Validation evidence
 
 - Local: `git diff --check` passed; no Cargo command was run.
+- Package CI at `f0a142870c9d9bec76f939840583d513ef848780` failed Clippy only
+  on `result_large_err` for the two tonic WorkerAPI poll methods. Added the
+  local generated-RPC-style allowance in `af2b555e9`.
 - Latest package CI at source head
-  `f0a142870c9d9bec76f939840583d513ef848780`:
-  https://github.com/auenkr/cadence-rust/actions/runs/41205897788
-  was `in_progress` at last inspection. It must be checked to completion; this
-  run includes crate Clippy, formatting and tests after the payload/config
-  additions. Runs `41205510385`, `41205587991`, `41205654608`, and
-  `41205770812` were superseded/cancelled as source commits advanced.
+  `af2b555e9131cbc2049dd111ecff799a7f97db8d`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41206189276
+  was `in_progress` at last inspection. Check its final Clippy, formatting and
+  test conclusion before relying on this checkpoint. Runs `41205510385`,
+  `41205587991`, `41205654608`, `41205770812`, and `41205897788` were
+  superseded/cancelled or failed as source commits advanced; `41205897788`
+  failed only on the corrected lint.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
