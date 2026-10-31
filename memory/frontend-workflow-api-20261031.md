@@ -375,3 +375,11 @@ these fixes; no green CI evidence covers the current changes.
   redirect closure had an unnecessary `mut`, and the handler redirect test
   expected a plain mutex instead of the shared `Arc<Mutex<_>>`. Both are fixed
   in the current worktree; the next package run must validate those fixes.
+- Package run
+  [41180338585](https://github.com/auenkr/cadence-rust/actions/runs/41180338585)
+  tested `fc44957b70bb1ad2b59b2ee89bacd2dd74c4d0d4` and passed Clippy after
+  those fixes, but failed the full Frontend rustfmt check. Go's `HealthStatus`
+  string audit also corrected the API response text to `OK`, `WarmingUp`, and
+  `ShuttingDown`; that source adjustment is in the current worktree. Use the
+  workflow's `format_frontend_files=true` mode to retrieve the canonical patch,
+  then rerun normal package CI on the formatted pushed head.

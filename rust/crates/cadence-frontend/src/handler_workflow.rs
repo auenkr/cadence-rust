@@ -70,9 +70,9 @@ pub enum HealthStatus {
 impl HealthStatus {
     const fn message(self) -> &'static str {
         match self {
-            Self::Ok => "ok",
-            Self::WarmingUp => "warming up",
-            Self::ShuttingDown => "shutting down",
+            Self::Ok => "OK",
+            Self::WarmingUp => "WarmingUp",
+            Self::ShuttingDown => "ShuttingDown",
         }
     }
 
@@ -1152,7 +1152,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(health["ok"], true);
-        assert_eq!(health["msg"], "ok");
+        assert_eq!(health["msg"], "OK");
 
         handler.update_health_status(HealthStatus::ShuttingDown);
         handler.start(std::time::Duration::ZERO);
@@ -1162,7 +1162,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(health["ok"], false);
-        assert_eq!(health["msg"], "shutting down");
+        assert_eq!(health["msg"], "ShuttingDown");
     }
 
     #[tokio::test]
