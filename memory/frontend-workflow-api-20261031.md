@@ -611,3 +611,22 @@ Frontend parity until these are implemented and validated.
   tested exact HEAD `f7e74a256cf1e2e349f3f8cda93668355c45909e` and concluded
   `success` (Clippy, format, tests). A later async ThriftRW implementation is
   not included in that run.
+
+## Async queue and Diagnose continuations
+
+- Added Go-compatible async start/signal-with-start ThriftRW request-envelope
+  encoding, queue metadata (`request_type` 0/1, `ThriftRW`, workflow partition
+  key, original headers), an injectable publisher interface, and tests that
+  decode the queued start payload. Production must implement producer lookup,
+  publishing, queue metrics and transport-header extraction through that
+  interface.
+- Initial async checkpoint `d836011f814514c7fa6f2a48d87d1360cef0e1b7` failed
+  CI run [41184753862](https://github.com/auenkr/cadence-rust/actions/runs/41184753862)
+  at Clippy with two borrow-lifetime errors while extracting domain/partition
+  strings. The strings have since been cloned before the request drops; this
+  repair and Diagnose work remain unvalidated.
+- Started porting `DiagnoseWorkflowExecution`: construct the same
+  `cadence-system` start request, JSON-marshaled diagnostic input field names,
+  24h/5m timeouts and AllowDuplicate policy, and treat
+  WorkflowExecutionAlreadyStarted as a successful response carrying its run
+  ID. A Go-mirroring request test is pending CI.

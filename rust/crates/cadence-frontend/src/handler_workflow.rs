@@ -697,6 +697,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 }
             }
         }
+        if operation == WorkflowOperation::DiagnoseWorkflowExecution {
+            return self
+                .diagnose_workflow_execution(request, target_cluster)
+                .await;
+        }
         if matches!(
             operation,
             WorkflowOperation::StartWorkflowExecutionAsync
@@ -831,6 +836,86 @@ impl<B: WorkflowBackend> Handler<B> {
             .await?;
         Ok(serde_json::json!({
             "runID": response.get("runID").cloned().unwrap_or(Value::Null)
+        }))
+    }
+
+    async fn diagnose_workflow_execution(
+        &self,
+        request: Value,
+        target_cluster: Option<String>,
+    ) -> Result<Value, CadenceError> {
+        let domain = request
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let execution = request
+            .get("workflowExecution")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let workflow_id = execution
+            .get("workflowId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let run_id = execution
+            .get("runId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let diagnostic_domain = "cadence-system";
+        let diagnostic_workflow_id = format!("{domain}-{run_id}");
+        let input = serde_json::to_vec(&serde_json::json!({
+            "Domain": domain,
+            "Identity": request
+                .get("identity")
+                .cloned()
+                .unwrap_or_else(|| Value::String(String::new())),
+            "WorkflowID": workflow_id,
+            "RunID": run_id,
+        }))
+        .map_err(|error| CadenceError::Unknown(error.to_string()))?;
+        let start_request = serde_json::json!({
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "domain": diagnostic_domain,
+            "workflowId": diagnostic_workflow_id,
+            "workflowType": {"name": "diagnostics-starter-workflow"},
+            "taskList": {"name": "diagnostics-wf-tasklist"},
+            "input": cadence_api::b64::encode_bytes(&input),
+            "executionStartToCloseTimeoutSeconds": 86400,
+            "taskStartToCloseTimeoutSeconds": 300,
+            "identity": request
+                .get("identity")
+                .cloned()
+                .unwrap_or_else(|| Value::String(String::new())),
+            "workflowIDReusePolicy": 1
+        });
+        let start_request = self.validate_request(
+            WorkflowOperation::StartWorkflowExecution,
+            start_request,
+        )?;
+        let start_request = self.prepare_backend_request(
+            WorkflowOperation::StartWorkflowExecution,
+            start_request,
+        )?;
+        let run_id = match self
+            .backend
+            .invoke_on_cluster(
+                WorkflowOperation::StartWorkflowExecution,
+                start_request,
+                target_cluster,
+            )
+            .await
+        {
+            Ok(response) => response.get("runID").cloned().unwrap_or(Value::Null),
+            Err(CadenceError::WorkflowAlreadyStarted(error)) => {
+                Value::String(error.run_id)
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(serde_json::json!({
+            "domain": diagnostic_domain,
+            "diagnosticWorkflowExecution": {
+                "workflowId": diagnostic_workflow_id,
+                "runId": run_id
+            }
         }))
     }
 
@@ -2555,6 +2640,49 @@ mod tests {
         assert_eq!(messages[0].partition_key, "order-19");
         assert_eq!(messages[0].headers["x-cadence-trace"], b"abc");
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn diagnose_starts_system_workflow_with_go_input_and_request_policy() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        let response = handler
+            .dispatch(
+                "DiagnoseWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-20",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "identity": "operator"
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response["domain"], "cadence-system");
+        assert_eq!(
+            response["diagnosticWorkflowExecution"]["workflowId"],
+            "shop-550e8400-e29b-41d4-a716-446655440000"
+        );
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::StartWorkflowExecution);
+        assert_eq!(calls[0].1["domainUUID"], "uuid:cadence-system");
+        let start: cadence_api::types::StartWorkflowExecutionRequest =
+            serde_json::from_value(calls[0].1["startRequest"].clone()).unwrap();
+        assert_eq!(start.workflow_id, "shop-5500e840-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            start.workflow_id_reuse_policy,
+            Some(cadence_api::enums::WorkflowIDReusePolicy::AllowDuplicate)
+        );
+        assert_eq!(start.input, serde_json::to_vec(&serde_json::json!({
+            "Domain": "shop",
+            "Identity": "operator",
+            "WorkflowID": "order-20",
+            "RunID": "550e8400-e29b-41d4-a716-446655440000"
+        })).unwrap());
     }
 
     #[tokio::test]

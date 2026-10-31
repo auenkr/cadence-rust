@@ -28,8 +28,8 @@ pub fn encode_async_workflow_request(
             let payload = thrift_payload(&request);
             let start = request.request.as_ref();
             (
-                start.map_or("", |value| value.domain.as_str()),
-                start.map_or("", |value| value.workflow_id.as_str()),
+                start.map_or_else(String::new, |value| value.domain.clone()),
+                start.map_or_else(String::new, |value| value.workflow_id.clone()),
                 0,
                 payload,
             )
@@ -40,8 +40,8 @@ pub fn encode_async_workflow_request(
             let payload = thrift_payload(&request);
             let start = request.request.as_ref();
             (
-                start.map_or("", |value| value.domain.as_str()),
-                start.map_or("", |value| value.workflow_id.as_str()),
+                start.map_or_else(String::new, |value| value.domain.clone()),
+                start.map_or_else(String::new, |value| value.workflow_id.clone()),
                 1,
                 payload,
             )
@@ -53,8 +53,8 @@ pub fn encode_async_workflow_request(
         .map(|(key, value)| (key.clone(), value.as_bytes().to_vec()))
         .collect();
     Ok(AsyncWorkflowMessage {
-        domain: domain.to_owned(),
-        partition_key: partition_key.to_owned(),
+        domain,
+        partition_key,
         request_type,
         headers,
         encoding: "ThriftRW",
