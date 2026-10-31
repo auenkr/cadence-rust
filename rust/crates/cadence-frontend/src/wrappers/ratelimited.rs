@@ -85,7 +85,7 @@ pub struct QuotaInfo {
     pub task_list: String,
 }
 
-pub trait DomainNameLookup {
+pub trait DomainNameLookup: Send + Sync {
     fn domain_name(&self, domain_id: &str) -> Result<String, CadenceError>;
 }
 
@@ -184,12 +184,12 @@ pub enum WaitFailure {
     Other(String),
 }
 
-pub trait Policy {
+pub trait Policy: Send + Sync {
     fn allow(&self, info: &QuotaInfo) -> bool;
     fn wait(&self, info: &QuotaInfo, timeout: Duration) -> Result<(), WaitFailure>;
 }
 
-pub trait CallerBypass {
+pub trait CallerBypass: Send + Sync {
     fn should_bypass(&self) -> bool;
     fn allow_policy(&self, policy: &dyn Policy, info: &QuotaInfo) -> bool;
 }
@@ -279,6 +279,61 @@ pub fn task_list_quota_name(name: &str, base_name: &str, kind: i32) -> String {
         name.to_owned()
     } else {
         base_name.to_owned()
+    }
+}
+
+/// Concrete adapter that attaches Go's four quota policies and caller bypass
+/// to the generic workflow Handler middleware hook.
+pub struct HandlerRateLimit {
+    domains: std::sync::Arc<dyn DomainNameLookup>,
+    user: std::sync::Arc<dyn Policy>,
+    worker: std::sync::Arc<dyn Policy>,
+    visibility: std::sync::Arc<dyn Policy>,
+    asynchronous: std::sync::Arc<dyn Policy>,
+    bypass: std::sync::Arc<dyn CallerBypass>,
+    max_worker_poll_delay: Duration,
+}
+
+impl HandlerRateLimit {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        domains: std::sync::Arc<dyn DomainNameLookup>,
+        user: std::sync::Arc<dyn Policy>,
+        worker: std::sync::Arc<dyn Policy>,
+        visibility: std::sync::Arc<dyn Policy>,
+        asynchronous: std::sync::Arc<dyn Policy>,
+        bypass: std::sync::Arc<dyn CallerBypass>,
+        max_worker_poll_delay: Duration,
+    ) -> Self {
+        Self {
+            domains,
+            user,
+            worker,
+            visibility,
+            asynchronous,
+            bypass,
+            max_worker_poll_delay,
+        }
+    }
+}
+
+impl crate::handler_workflow::RequestRateLimit for HandlerRateLimit {
+    fn allow(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+    ) -> Result<(), CadenceError> {
+        let info = quota_info(operation, request, self.domains.as_ref())?;
+        allow_operation(
+            operation,
+            &info,
+            self.max_worker_poll_delay,
+            self.user.as_ref(),
+            self.worker.as_ref(),
+            self.visibility.as_ref(),
+            self.asynchronous.as_ref(),
+            self.bypass.as_ref(),
+        )
     }
 }
 

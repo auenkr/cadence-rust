@@ -287,6 +287,15 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
+    /// Attach the generated Go quota implementation and its domain/token
+    /// dimension resolver as one middleware component.
+    pub fn with_rate_limit_policies(
+        self,
+        rate_limit: crate::wrappers::ratelimited::HandlerRateLimit,
+    ) -> Self {
+        self.with_rate_limit(Arc::new(rate_limit))
+    }
+
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
         self.dispatch_with_metadata(operation, request, &CallerMetadata::default())
             .await
