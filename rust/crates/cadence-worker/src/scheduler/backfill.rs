@@ -176,10 +176,8 @@ pub fn process_backfills(
     }
 
     for backfill in pending.iter_mut().filter(|bf| !bf.runs_total_computed) {
-        let (total, truncated) = count_total(
-            backfill.start_time - ONE_SECOND_NANOS,
-            backfill.end_time,
-        );
+        let (total, truncated) =
+            count_total(backfill.start_time - ONE_SECOND_NANOS, backfill.end_time);
         backfill.runs_total = if truncated {
             MAX_BACKFILL_RUNS_TOTAL_COUNT as i32
         } else {
@@ -195,10 +193,8 @@ pub fn process_backfills(
     let mut fired = 0;
     while !pending.is_empty() {
         let backfill = &mut pending[0];
-        let (times, truncated) = missed_fires(
-            backfill.start_time - ONE_SECOND_NANOS,
-            backfill.end_time,
-        );
+        let (times, truncated) =
+            missed_fires(backfill.start_time - ONE_SECOND_NANOS, backfill.end_time);
 
         for time in &times {
             if *budget <= 0 {
@@ -285,8 +281,9 @@ mod tests {
 
     #[test]
     fn handle_backfill_rejects_a_full_queue() {
-        let mut pending: Vec<BackfillRequest> =
-            (0..MAX_PENDING_BACKFILLS).map(|_| BackfillRequest::default()).collect();
+        let mut pending: Vec<BackfillRequest> = (0..MAX_PENDING_BACKFILLS)
+            .map(|_| BackfillRequest::default())
+            .collect();
         assert_eq!(
             handle_backfill(&mut pending, &signal(0, 10, "over-cap")),
             Err(BackfillRejection::QueueFull)
@@ -376,7 +373,13 @@ mod tests {
             |_, _| (vec![10, 20, 30], false),
             |time, overlap, id| fired.push((time, overlap, id.to_owned())),
         );
-        assert_eq!(outcome, DrainOutcome { more_work: false, fired: 3 });
+        assert_eq!(
+            outcome,
+            DrainOutcome {
+                more_work: false,
+                fired: 3
+            }
+        );
         assert!(pending.is_empty());
         assert_eq!(budget, 97);
         assert_eq!(fired[0], (10, OverlapPolicy::Concurrent, "bf".into()));
@@ -399,7 +402,13 @@ mod tests {
             |_, _| (vec![10, 20, 30], false),
             |_, _, _| {},
         );
-        assert_eq!(outcome, DrainOutcome { more_work: true, fired: 2 });
+        assert_eq!(
+            outcome,
+            DrainOutcome {
+                more_work: true,
+                fired: 2
+            }
+        );
         assert_eq!(pending[0].start_time, 30);
         assert_eq!(pending[0].runs_completed, 2);
         assert_eq!(budget, 0);
@@ -422,7 +431,13 @@ mod tests {
             |_, _| (vec![10, 20], true),
             |_, _, _| {},
         );
-        assert_eq!(outcome, DrainOutcome { more_work: true, fired: 2 });
+        assert_eq!(
+            outcome,
+            DrainOutcome {
+                more_work: true,
+                fired: 2
+            }
+        );
         assert_eq!(pending[0].start_time, 20 + ONE_SECOND_NANOS);
         assert_eq!(pending.len(), 1);
     }
