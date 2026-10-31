@@ -830,7 +830,7 @@ pub async fn describe_shard_distribution(State(state): State<StdArc<AppState>>) 
     })
 }
 
-fn check_shard_id(state: &AppState, shard_id: i32) -> Result<(), BadRequestError> {
+pub(crate) fn check_shard_id(state: &AppState, shard_id: i32) -> Result<(), BadRequestError> {
     let count = shard_count(state);
     if shard_id < 0 || shard_id >= count {
         return Err(BadRequestError::new(format!(
