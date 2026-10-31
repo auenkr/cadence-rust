@@ -1258,3 +1258,11 @@ migration forward.
   reads and rejects malformed persistence cursors consistently with JSON.
   This is pushed for exact-head package CI; it does not establish full
   raw-history branch/persistence parity.
+- Raw-history parity commit `5da2b0b9fc3e483aac3742735882305af0ed1420` passed
+  exact-head Frontend package CI
+  [41216594378](https://github.com/auenkr/cadence-rust/actions/runs/41216594378).
+  Formatting, Clippy, Frontend package tests, and runtime smoke passed. No local
+  Cargo command ran.
+- Admin queue inventory found YARPC `GetDomainReplicationMessages` missing even
+  though the durable JSON helper implements the queue read/ack contract. I am
+  wiring the Thrift route to that same helper next.
