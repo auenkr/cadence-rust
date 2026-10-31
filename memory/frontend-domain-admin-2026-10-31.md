@@ -856,3 +856,9 @@ migration forward.
   existing Go SQL calls and the Frontend mutation trait now use that method.
   This preserves rollback on stale writes. `git diff --check` passes; no local
   Cargo command was run. This fix needs its own exact-head package CI run.
+- The first SQLite-adapter package run [41198020996](https://github.com/auenkr/cadence-rust/actions/runs/41198020996)
+  was cancelled when a follow-up correctness fix was pushed. The exact-head
+  replacement [41198107736](https://github.com/auenkr/cadence-rust/actions/runs/41198107736)
+  completed **success** at
+  `17ece2f9f55711d94a430adb635eec1f4a036d1c` (Frontend package Clippy,
+  formatting, tests and smoke checks).
