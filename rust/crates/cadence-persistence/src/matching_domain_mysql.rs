@@ -5,8 +5,8 @@
 //! the Go default domain shard (54321). It never writes or migrates schema.
 
 use crate::matching_domain_metadata::{
-    decode_go_sql_domain_metadata, MatchingDomainMetadata, MatchingDomainMetadataError,
-    MatchingDomainPage,
+    decode_go_sql_domain_metadata, DomainReplicationQueueMessage, MatchingDomainMetadata,
+    MatchingDomainMetadataError, MatchingDomainPage,
 };
 use crate::matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig};
 use mysql_async::prelude::Queryable as AsyncQueryable;
