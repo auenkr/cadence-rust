@@ -44,7 +44,13 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   validated head `d8a0bafb9a20d4e7660e3a8bc69d2f9bad6210b2` and concluded
   `failure` before Clippy/tests because rustfmt required the new
   `string_domain` signature on one line. This was a formatting-only CI failure;
-  corrected in the next commit. Request a fresh package run after pushing.
+  corrected in commit `6ecd411348678e5dcd435a465e3699afeb094b9c`.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41175118404
+  validated head `6ecd411348678e5dcd435a465e3699afeb094b9c` and concluded
+  `failure` during Clippy compilation: `string_domain` borrowed a string from
+  a temporary selected JSON value. Changed the fallback path to return an
+  owned string. A new table-like nil-request test now also covers all 16
+  validator entry points; both changes need exact-head CI validation.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
