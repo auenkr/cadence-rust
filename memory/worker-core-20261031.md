@@ -5,8 +5,8 @@ Branch: `worker-core`, based on `origin/master` at
 
 ## Current checkpoint
 
-This is an initial crate bootstrap and contract inventory, not Worker parity.
-Cargo was not run locally. `git diff --check` passed before this checkpoint.
+This is an initial crate bootstrap and partial contract/logic port, not Worker
+parity. Cargo was not run locally. `git diff --check` passed before each push.
 
 Implemented in this slice:
 
@@ -20,8 +20,18 @@ Implemented in this slice:
   plaintext and TLS endpoint constructors.
 - Added explicit lifecycle and workflow-registration primitives.
 - Recorded initial Go workflow/task-list/activity/signal/query identifiers.
-  Parent-close-policy and batcher contracts include test assertions for Go's
-  literal names; more comprehensive Go-source differential fixtures remain.
+- Added parent-close-policy request JSON structs with Go's exported-field names
+  and field order, plus ordered operation planning for Abandon, Cancel and
+  Terminate (legacy domain fallback, child-only semantics, first run ID,
+  identity and terminate reason).
+- Added batcher parameter structs with Go JSON names, base64 heartbeat page
+  tokens, exact required-parameter checks, supported type checks, and defaults
+  for RPS, concurrency, page size, retries and termination children.
+- Added a Go-source test fixture for literal workflow and task-list contracts,
+  and a beginning dynamic-config key/default audit.
+- Rechecked worker dynamic-config defaults against Go and corrected enabled
+  defaults, parent-close workflow count, archiver settings, scanner QPS/batch
+  and max retention values.
 - Worker startup intentionally errors before polling. The Cadence SDK's
   deterministic history replay, workflow decision runtime, activity execution,
   heartbeat/retry behavior and service dependencies are not ported yet. This
@@ -47,6 +57,14 @@ Implemented in this slice:
 ## Validation evidence
 
 - Local: `git diff --check` passed; no Cargo command was run.
-- CI: pending first `rust-ci.yml` dispatch. Record run URL, exact head SHA and
-  conclusion here after `gh run view`.
+- Latest package CI at source head
+  `f0a142870c9d9bec76f939840583d513ef848780`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41205897788
+  was `in_progress` at last inspection. It must be checked to completion; this
+  run includes crate Clippy, formatting and tests after the payload/config
+  additions. Runs `41205510385`, `41205587991`, `41205654608`, and
+  `41205770812` were superseded/cancelled as source commits advanced.
+
+Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
+`627fe3ce7`, `a1c371111`, `f0a142870`.
 
