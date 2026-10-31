@@ -247,6 +247,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   checked `60a61a767dea5c6e067b1db49d798087224687fe` and concluded `success`.
   Frontend formatting, package Clippy and tests passed, along with the enabled
   Go oracle and compatibility checks. No Cargo command was run locally.
+- Current branch-head run https://github.com/auenkr/cadence-rust/actions/runs/41184847564
+  checked `983669b1229f318a884e5d252bbf4ce37ad18a7b` and concluded `success`.
+  It passed the Frontend formatting, Clippy and test steps and enabled Go
+  oracle checks. This is the latest full Rust validation; only this evidence
+  paragraph is added in the following documentation commit.
 - Validator audit: Go has 16 validation entry points and 15 table-driven test
   groups; Rust now has nil-request coverage for every entry point and expanded
   error, mutation, success, filter, permission, and failover matrices. Do not
