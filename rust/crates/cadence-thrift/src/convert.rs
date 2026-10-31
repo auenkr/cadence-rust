@@ -9,6 +9,7 @@ use cadence_api::admin::{
     DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
     GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
     GetDomainIsolationGroupsResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
+    GetDomainReplicationMessagesResponse, ReplicationMessages,
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
@@ -1132,6 +1133,44 @@ impl ToThrift for ReplicationTask {
         f.oi64(11, self.source_task_id);
         f.ostruct(20, self.domain_task_attributes.as_ref());
         f.finish()
+    }
+}
+
+impl ToThrift for ReplicationMessages {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.replication_tasks);
+        f.fields.push((20, Value::I64(self.last_retrieved_message_id)));
+        if self.has_more {
+            f.fields.push((30, Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for ReplicationMessages {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            replication_tasks: s.opt_list(10)?.unwrap_or_default(),
+            last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
+            has_more: s.opt_bool(30)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for GetDomainReplicationMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.messages.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for GetDomainReplicationMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            messages: s.opt_struct(10)?,
+        })
     }
 }
 
