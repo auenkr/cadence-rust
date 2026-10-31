@@ -258,7 +258,7 @@ impl<B: WorkflowBackend> Handler<B> {
     fn validate_request(
         &self,
         operation: WorkflowOperation,
-        value: Value,
+        mut value: Value,
     ) -> Result<Value, CadenceError> {
         if matches!(
             operation,

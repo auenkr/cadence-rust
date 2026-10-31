@@ -206,6 +206,12 @@ these fixes; no green CI evidence covers the current changes.
   poll methods, plus required workflow/activity ID validation to heartbeat and
   all three activity respond-by-ID methods. Regression tests mirror Go's
   required-field error order.
+- CI run
+  [41177269241](https://github.com/auenkr/cadence-rust/actions/runs/41177269241)
+  tested `1437d2e5c11a6758b54710cdb4b08bddbd879008` and concluded `failure`.
+  Clippy found `validate_request` needed a mutable JSON value for the existing
+  Go-compatible page-size default mutation. The parameter is now mutable; the
+  latest source still needs an exact-head package run.
 - Next exact-head CI must be dispatched after pushing the validator API fix and
   metering integration. No green CI result covers the current source.
 - Handler bodies still do not execute Go's workflow-engine transformations:
