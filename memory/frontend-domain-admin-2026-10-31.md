@@ -749,3 +749,17 @@ migration forward.
   domain.go` corrected create ordering: the legacy row is inserted before the
   metadata version is read. The zero-version CAS now binds a null version, as
   Go's `updateMetadataBatch` does, while the v2 domain row retains version zero.
+
+## Cassandra typed blob serialization follow-up — candidate
+
+- Corrected Cassandra domain writes to serialize typed bad-binary, isolation
+  group and async-workflow configuration structs as ThriftRW with the live
+  `history.serializationEncoding` closure. Active-cluster configuration now
+  serializes the typed `ActiveClusters` value using Go's `thriftrw_snappy`
+  encoding. This removes accidental copying of JSON-oriented cached blob bytes.
+- Passed the existing dynamic serialization-encoding closure into the configured
+  Cassandra domain writer. `git diff --check` passes; no Cargo/rustfmt was run
+  locally. Exact-head CI and a Go Cassandra blob oracle are still required.
+- At edit time branch head was `b8e692f6c9b126e5acfed3ad6d71901ad19f23c5`;
+  Frontend CI run [41195683733](https://github.com/auenkr/cadence-rust/actions/runs/41195683733)
+  was still running for the preceding head and does not validate this change.
