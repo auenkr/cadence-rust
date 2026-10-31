@@ -28,6 +28,8 @@ pub struct ConfiguredMatchingStores {
     /// the existing SQL domain row schema (currently MySQL and PostgreSQL).
     pub domain_persistence:
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence>>,
+    /// Frontend transactional mutation boundary, implemented by SQL and Cassandra stores.
+    pub domain_metadata_persistence: Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
     pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
 }
@@ -208,6 +210,7 @@ pub fn open_configured_default_store(
             task_store,
             domain_metadata_source: Some(Arc::new(domain_metadata)),
             domain_persistence: Some(domain_persistence),
+            domain_metadata_persistence: None,
         });
     }
     let sql = datastore.sql.as_ref().ok_or_else(|| {
@@ -238,6 +241,7 @@ pub fn open_configured_default_store(
                 task_store,
                 domain_metadata_source: Some(metadata_source),
                 domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: None,
             })
         }
         "mysql" => {
@@ -291,14 +295,17 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
-            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = Arc::new(metadata.clone());
-            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = Arc::new(metadata);
+            let metadata = Arc::new(metadata);
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
                 domain_metadata_source: Some(metadata_source),
                 domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         "postgres" => {
@@ -350,14 +357,17 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
-            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = Arc::new(metadata.clone());
-            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = Arc::new(metadata);
+            let metadata = Arc::new(metadata);
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
                 domain_metadata_source: Some(metadata_source),
                 domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         other => anyhow::bail!(

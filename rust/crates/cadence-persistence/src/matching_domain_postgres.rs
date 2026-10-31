@@ -26,6 +26,14 @@ pub struct PostgresDomainMetadataStore {
     active_cluster_name: String,
 }
 
+impl std::fmt::Debug for PostgresDomainMetadataStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PostgresDomainMetadataStore")
+            .field("active_cluster_name", &self.active_cluster_name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl PostgresDomainMetadataStore {
     pub fn connect(
         config: &crate::matching_postgres::PostgresTaskStoreConfig,
@@ -466,6 +474,35 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for PostgresDomainM
         page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         PostgresDomainMetadataStore::list_domains(self, page_size, page_token)
+    }
+}
+
+impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDomainMetadataStore {
+    fn metadata_version(&self) -> Result<i64, String> {
+        self.get_metadata_version().map_err(|error| error.to_string())
+    }
+
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        _expected_version: i64,
+    ) -> Result<(), String> {
+        PostgresDomainMetadataStore::create_domain(self, metadata)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        PostgresDomainMetadataStore::update_domain(self, metadata, expected_version)
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain(&self, id: &str) -> Result<(), String> {
+        PostgresDomainMetadataStore::delete_domain(self, id).map_err(|error| error.to_string())
     }
 }
 

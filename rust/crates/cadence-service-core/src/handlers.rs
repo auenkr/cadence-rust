@@ -111,6 +111,9 @@ pub struct AppState {
     /// in-memory cache above; production Frontend injects a manager backed by
     /// the configured Go defaultStore and sharing that cache.
     pub domain_manager: Arc<dyn cadence_persistence::FrontendDomainManager>,
+    /// Configured SQL writer shared with the metadata reader. The durable
+    /// manager uses this for domain mutations.
+    pub domain_metadata_persistence: Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
@@ -144,6 +147,7 @@ impl Default for AppState {
             background_shutdown: tokio::sync::watch::channel(false).0,
             domains: domains.clone(),
             domain_manager: Arc::new(domains),
+            domain_metadata_persistence: None,
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
             limits: Limits::cadence_default(),

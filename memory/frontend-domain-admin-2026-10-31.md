@@ -635,3 +635,14 @@ migration forward.
   targets `247c371ee59a033acf0db1b203786c30e9452438` and is still running at
   this save; it includes both SQL primitives. Inspect its Clippy/format/test
   result before relying on either implementation. No Cargo command ran locally.
+- Package CI [41193518257](https://github.com/auenkr/cadence-rust/actions/runs/41193518257)
+  completed `success` at source head
+  `247c371ee59a033acf0db1b203786c30e9452438`; Clippy, Formatting and Test
+  passed with the MySQL/PostgreSQL SQL write primitives. This validates only the
+  persistence methods, not Frontend use or service parity.
+- Added a common `DomainMetadataPersistence` trait implemented by the SQL
+  adapters and exposed the configured SQL writer in `ConfiguredMatchingStores`
+  and `AppState`; production launcher now carries that handle into Frontend.
+  This remains wiring only until `FrontendDomainManager` calls it. Cassandra
+  remains without a writer. These additions are in the current unvalidated
+  source diff; next exact-head CI is required.
