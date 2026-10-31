@@ -19,7 +19,7 @@ pub mod cassandra;
 pub mod version_history;
 pub mod visibility;
 
-pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
+pub use domains::{DomainRecord, FailoverError, FrontendDomainManager, InMemoryDomainStore};
 pub use executions::{
     AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
     MutableStateView, QueryError, RecordError, RecordedActivity, RecordedDecision, ResetError,

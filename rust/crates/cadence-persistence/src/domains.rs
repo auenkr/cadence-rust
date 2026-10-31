@@ -94,6 +94,62 @@ pub struct InMemoryDomainStore {
     failover_notifications: Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>,
 }
 
+/// Frontend's domain operations behind the persistence-manager boundary.
+/// Production adapters may keep an `InMemoryDomainStore` as the shared domain
+/// cache while committing every write through Go's configured domain store.
+pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
+    fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError>;
+
+    fn describe(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, EntityNotExistsError>;
+
+    fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError>;
+
+    fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError>;
+
+    fn update(
+        &self,
+        request: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError>;
+
+    fn failover(
+        &self,
+        request: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError>;
+
+    fn failover_history(
+        &self,
+        domain_id: &str,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError>;
+
+    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), EntityNotExistsError>;
+
+    fn delete(&self, name: &str) -> Result<(), EntityNotExistsError>;
+
+    fn list_page(
+        &self,
+        request: &cadence_api::service_types::ListDomainsRequest,
+    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError>;
+
+    fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64>;
+}
+
 /// Errors for domain failover: unknown domains are `EntityNotExists`,
 /// invalid requests are `BadRequest` with Go's exact messages.
 #[derive(Debug, thiserror::Error)]
@@ -898,6 +954,88 @@ impl InMemoryDomainStore {
             }
         }
         Ok(store)
+    }
+}
+
+impl FrontendDomainManager for InMemoryDomainStore {
+    fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError> {
+        InMemoryDomainStore::create_with_version(
+            self,
+            info,
+            configuration,
+            replication,
+            is_global_domain,
+            failover_version,
+        )
+    }
+
+    fn describe(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, EntityNotExistsError> {
+        InMemoryDomainStore::describe(self, request)
+    }
+
+    fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
+        InMemoryDomainStore::domain_id(self, name)
+    }
+
+    fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
+        InMemoryDomainStore::is_active_in(self, uuid, cluster)
+    }
+
+    fn update(
+        &self,
+        request: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
+        InMemoryDomainStore::update(self, request, metadata, policy)
+    }
+
+    fn failover(
+        &self,
+        request: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
+        InMemoryDomainStore::failover(self, request, current_cluster, metadata, policy)
+    }
+
+    fn failover_history(
+        &self,
+        domain_id: &str,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError> {
+        InMemoryDomainStore::failover_history(self, domain_id, page_size, page_token)
+    }
+
+    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), EntityNotExistsError> {
+        InMemoryDomainStore::deprecate(self, request)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), EntityNotExistsError> {
+        InMemoryDomainStore::delete(self, name)
+    }
+
+    fn list_page(
+        &self,
+        request: &cadence_api::service_types::ListDomainsRequest,
+    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError> {
+        InMemoryDomainStore::list_page(self, request)
+    }
+
+    fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
+        InMemoryDomainStore::subscribe_failover(self, uuid)
     }
 }
 

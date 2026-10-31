@@ -104,6 +104,10 @@ pub struct AppState {
     /// The launcher signals this only after request draining has completed.
     pub background_shutdown: tokio::sync::watch::Sender<bool>,
     pub domains: InMemoryDomainStore,
+    /// Frontend's persistence-facing domain API. Matching retains the shared
+    /// in-memory cache above; production Frontend injects a manager backed by
+    /// the configured Go defaultStore and sharing that cache.
+    pub domain_manager: Arc<dyn cadence_persistence::FrontendDomainManager>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
@@ -119,6 +123,7 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
+        let domains = InMemoryDomainStore::new();
         Self {
             matching_http_isolated: false,
             admin: crate::admin::AdminState::default(),
@@ -134,7 +139,8 @@ impl Default for AppState {
             frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
             frontend_limiters: Arc::new(std::sync::Mutex::new(Vec::new())),
             background_shutdown: tokio::sync::watch::channel(false).0,
-            domains: InMemoryDomainStore::new(),
+            domains: domains.clone(),
+            domain_manager: Arc::new(domains),
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
             limits: Limits::cadence_default(),
@@ -202,7 +208,7 @@ impl AppState {
         &self,
         domain: &str,
     ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
-        let metadata = self.domains.describe(&cadence_api::service_types::DescribeDomainRequest {
+        let metadata = self.domain_manager.describe(&cadence_api::service_types::DescribeDomainRequest {
             name: Some(domain.to_string()), uuid: None,
         })?;
         let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
@@ -230,7 +236,7 @@ impl AppState {
         &self,
         domain: &str,
     ) -> Result<InMemoryExecutionStore, EntityNotExistsError> {
-        let metadata = self.domains.describe(&DescribeDomainRequest {
+        let metadata = self.domain_manager.describe(&DescribeDomainRequest {
             name: Some(domain.to_string()), uuid: None,
         })?;
         let id = metadata.domain_info.unwrap_or_default().uuid;
@@ -483,14 +489,14 @@ async fn register_domain(
         }
     } else { cadence_persistence::version_history::EMPTY_VERSION };
     match state
-        .domains
+        .domain_manager
         .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
     {
         Ok(resp) => {
             state.executions.register_domain(
                 &req.name,
                 &state
-                    .domains
+                    .domain_manager
                     .domain_id(&req.name)
                     .expect("registered domain"),
             );
@@ -515,7 +521,7 @@ async fn describe_domain(
     if q.name.is_none() && q.uuid.is_none() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.describe(&DescribeDomainRequest {
+    match state.domain_manager.describe(&DescribeDomainRequest {
         name: q.name,
         uuid: q.uuid,
     }) {
@@ -528,7 +534,7 @@ async fn list_domains(
     State(state): State<Arc<AppState>>,
     Query(request): Query<cadence_api::service_types::ListDomainsRequest>,
 ) -> Response {
-    match state.domains.list_page(&request) {
+    match state.domain_manager.list_page(&request) {
         Ok(v) => Json(v).into_response(),
         Err(e) => bad_request(e),
     }
@@ -609,7 +615,7 @@ async fn failover_domain(
         return bad_request(e);
     }
     match state
-        .domains
+        .domain_manager
         .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
@@ -645,7 +651,7 @@ async fn list_failover_history(
         .map(|p| p.next_page_token.clone())
         .unwrap_or_default();
     match state
-        .domains
+        .domain_manager
         .failover_history(&domain_id, page_size, &page_token)
     {
         Ok((events, next_page_token)) => (
@@ -667,7 +673,7 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
@@ -682,7 +688,7 @@ async fn deprecate_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.deprecate(&req) {
+    match state.domain_manager.deprecate(&req) {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => entity_not_exists(e),
     }
@@ -696,7 +702,7 @@ pub async fn require_domain(state: &AppState, domain: &str) -> Option<Response> 
     if domain.is_empty() {
         return Some(bad_request(validation::err_domain_not_set()));
     }
-    state.domains.domain_id(domain).err().map(entity_not_exists)
+    state.domain_manager.domain_id(domain).err().map(entity_not_exists)
 }
 
 fn require_task_domain(state: &AppState, bytes: &[u8]) -> Option<Response> {
@@ -1844,7 +1850,7 @@ async fn delete_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.delete(&req.name) {
+    match state.domain_manager.delete(&req.name) {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);
             StatusCode::OK.into_response()
