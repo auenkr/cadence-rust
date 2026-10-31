@@ -380,3 +380,18 @@ migration forward.
   The Go oracles and workspace format step passed. Extended the existing
   CI-only Frontend formatting patch step to include those touched core files;
   dispatch it with `format_frontend_files=true` and apply its uploaded patch.
+- The formatting-patch run [41179058460](https://github.com/auenkr/cadence-rust/actions/runs/41179058460)
+  at exact source `7f16043ef72126891befb89b8691d97f8e1d9958` completed with
+  `failure` in Clippy. After CI formatting was applied from its
+  `frontend-format-patch` artifact, Clippy exposed missing Admin type imports in
+  the rebase-conflicted `cadence-thrift/src/convert.rs` (`ResetQueue*`,
+  `DescribeQueue*`, and raw-history V2 request/response). Added those imports;
+  this fixes the reported source errors, pending fresh exact-head CI.
+- Mirrored Go `DeprecateDomain`'s metadata update by incrementing the stored
+  domain config version and write timestamp as status becomes Deprecated, with
+  a version assertion in the persistence test. Domain replication transmission
+  and metadata-backed durable storage remain open.
+- Lifecycle review corrected the earlier stale gap note: the shared launcher
+  already has a dedicated `run_frontend` path with readiness/admission drain
+  and shutdown ordering. Frontend-specific retry policy, request metrics,
+  complete middleware and remote membership are still not integrated.
