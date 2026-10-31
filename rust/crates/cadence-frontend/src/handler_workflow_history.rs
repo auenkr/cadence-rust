@@ -1,6 +1,6 @@
 //! Go-compatible history continuation token JSON (`api/handler.go`).
 
-use cadence_api::errors::BadRequestError;
+use cadence_api::errors::{BadRequestError, InternalServiceError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -76,21 +76,23 @@ pub fn verify_history_is_complete(
     is_first_page: bool,
     is_last_page: bool,
     page_size: usize,
-) -> Result<(), String> {
+) -> Result<(), InternalServiceError> {
     if event_count == 0 {
         if is_last_page {
             return Ok(());
         }
-        return Err("invalid history: contains zero events".to_owned());
+        return Err(InternalServiceError::new(
+            "invalid history: contains zero events",
+        ));
     }
     let first = first_event_id.unwrap_or_default();
     let last = last_event_id.unwrap_or_default();
     let mut expected_first = expected_first_event_id;
     if !is_first_page {
         if first <= expected_first_event_id {
-            return Err(format!(
+            return Err(InternalServiceError::new(format!(
                 "invalid history: expected first eventID to be > {expected_first_event_id} but got {first}"
-            ));
+            )));
         }
         expected_first = first;
     }
@@ -107,9 +109,9 @@ pub fn verify_history_is_complete(
     {
         return Ok(());
     }
-    Err(format!(
+    Err(InternalServiceError::new(format!(
         "incomplete history: expected events [{expected_first}-{expected_last}] but got events [{first}-{last}] of length {event_count}:isFirstPage={is_first_page},isLastPage={is_last_page},pageSize={page_size}"
-    ))
+    )))
 }
 
 #[cfg(test)]

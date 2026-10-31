@@ -1052,3 +1052,7 @@ Frontend parity until these are implemented and validated.
   JSON `null` after the new Go-shaped empty decision response. The assertion is
   fixed in `2b2a5b88b`. I applied the CI-uploaded rustfmt patch from that run;
   both the patch and the history completeness helper now need exact-head CI.
+- Tightened the history page verifier to return Cadence's typed
+  `InternalServiceError`, preserving Go's error category as well as its exact
+  diagnostic text. This amendment is newer than the active CI run and requires
+  another exact-head package run.
