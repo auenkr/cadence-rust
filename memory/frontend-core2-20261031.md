@@ -1011,3 +1011,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   unused status locals. The optional data expression was already corrected in
   `4fa73bbee`; removed the unused locals. That earlier run is a failure and
   does not validate the current head.
+- Exact-head persistence CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41198775233 validated
+  `430e76c303f815a411e750613146e66c4857cf63` and concluded `success`:
+  formatting, Clippy, and tests passed. The Frontend runtime smoke was skipped.
+- Extended the selected Cassandra domain persistence adapter to consume the
+  live `system.enableCassandraAllConsistencyLevelDelete` property. Deletes
+  now issue `ALL` consistency when enabled and retry at `LOCAL_QUORUM` when
+  Cassandra reports unavailable, following Go `executeWithConsistencyAll`.
+  This is the next unvalidated change; dispatch exact-head CI after push.

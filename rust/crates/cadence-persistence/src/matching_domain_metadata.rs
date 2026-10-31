@@ -279,12 +279,25 @@ pub struct CassandraDomainMetadataStore {
 #[derive(Clone)]
 pub struct CassandraFrontendDomainPersistence {
     metadata: CassandraDomainMetadataStore,
+    all_consistency_delete: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl CassandraFrontendDomainPersistence {
     #[must_use]
     pub fn new(metadata: CassandraDomainMetadataStore) -> Self {
-        Self { metadata }
+        Self {
+            metadata,
+            all_consistency_delete: std::sync::Arc::new(|| false),
+        }
+    }
+
+    #[must_use]
+    pub fn with_all_consistency_delete(
+        mut self,
+        enabled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.all_consistency_delete = enabled;
+        self
     }
 
     fn cql_error(error: impl std::fmt::Display) -> MatchingDomainMetadataError {
@@ -383,6 +396,29 @@ impl CassandraFrontendDomainPersistence {
     fn executor(&self) -> crate::matching_cassandra_exec::ScyllaExecutor {
         crate::matching_cassandra_exec::ScyllaExecutor::new(self.metadata.driver.clone())
     }
+
+    fn delete_with_consistency_all(
+        &self,
+        statement: &crate::matching_cassandra_exec::CqlStatement,
+        values: impl Fn() -> crate::matching_cassandra_exec::BoundValues,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{CqlExecutor, CqlStatement};
+        use scylla::frame::types::Consistency;
+        let executor = self.executor();
+        if !(self.all_consistency_delete)() {
+            return executor.exec(statement, values()).map_err(Self::cql_error);
+        }
+        let all = CqlStatement::with_consistency(statement.text.clone(), Consistency::All);
+        match executor.exec(&all, values()) {
+            Ok(()) => Ok(()),
+            Err(error) if error.is_unavailable() => {
+                let fallback =
+                    CqlStatement::with_consistency(statement.text.clone(), Consistency::LocalQuorum);
+                executor.exec(&fallback, values()).map_err(Self::cql_error)
+            }
+            Err(error) => Err(Self::cql_error(error)),
+        }
+    }
 }
 
 impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
@@ -390,7 +426,7 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
         &self,
         metadata: &MatchingDomainMetadata,
     ) -> Result<i64, MatchingDomainMetadataError> {
-        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        use crate::matching_cassandra_exec::{bound, CqlStatement};
         use chrono::Utc;
         let id = uuid::Uuid::parse_str(&metadata.info.uuid)
             .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
@@ -470,7 +506,7 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
         metadata: &MatchingDomainMetadata,
         expected_notification_version: i64,
     ) -> Result<(), MatchingDomainMetadataError> {
-        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        use crate::matching_cassandra_exec::{bound, CqlStatement};
         let (info, config, replication) = Self::domain_udts(metadata);
         let executor = self.executor();
         let outcome = executor
@@ -527,25 +563,20 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
         let metadata = self.metadata.get_domain(None, Some(domain_id))?;
         let id = uuid::Uuid::parse_str(domain_id)
             .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
-        let executor = self.executor();
         // Match Cassandra's Go DomainStore.DeleteDomain ordering: remove the
         // name index first, then the UUID lookup row. If the second write
         // fails, Go leaves an unindexed UUID row; deleting the UUID first
         // would instead leave an index entry pointing at a missing domain.
-        executor
-            .exec(
-                &CqlStatement::new(
-                    "DELETE FROM domains_by_name_v2 WHERE domains_partition = ? AND name = ?",
-                ),
-                vec![bound(0_i32), bound(metadata.info.name)],
-            )
-            .map_err(Self::cql_error)?;
-        executor
-            .exec(
-                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
-                vec![bound(id)],
-            )
-            .map_err(Self::cql_error)
+        self.delete_with_consistency_all(
+            &CqlStatement::new(
+                "DELETE FROM domains_by_name_v2 WHERE domains_partition = ? AND name = ?",
+            ),
+            || vec![bound(0_i32), bound(metadata.info.name.clone())],
+        )?;
+        self.delete_with_consistency_all(
+            &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+            || vec![bound(id)],
+        )
     }
 
     fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
