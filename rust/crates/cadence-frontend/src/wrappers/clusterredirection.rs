@@ -756,6 +756,83 @@ mod tests {
         assert_eq!(metrics.0.lock().unwrap().len(), 2);
     }
 
+    #[tokio::test]
+    async fn workflow_redirector_routes_handler_calls_through_selected_cluster() {
+        #[derive(Default)]
+        struct Backend(Mutex<Vec<Option<String>>>);
+        impl crate::handler_workflow::WorkflowBackend for Backend {
+            fn invoke<'a>(
+                &'a self,
+                _: crate::handler_workflow::WorkflowOperation,
+                _: serde_json::Value,
+            ) -> crate::handler_workflow::WorkflowFuture<'a> {
+                Box::pin(async { Ok(serde_json::Value::Null) })
+            }
+
+            fn invoke_on_cluster<'a>(
+                &'a self,
+                _: crate::handler_workflow::WorkflowOperation,
+                _: serde_json::Value,
+                target: Option<String>,
+            ) -> crate::handler_workflow::WorkflowFuture<'a> {
+                Box::pin(async move {
+                    self.0.lock().unwrap().push(target);
+                    Ok(serde_json::Value::Null)
+                })
+            }
+        }
+
+        struct Resolver;
+        impl RedirectRequestResolver for Resolver {
+            fn resolve(
+                &self,
+                _: &str,
+                _: &serde_json::Value,
+            ) -> Result<Option<RedirectRequest>, CadenceError> {
+                Ok(Some(RedirectRequest {
+                    domain: DomainState {
+                        id: "domain-id".into(),
+                        name: "global-domain".into(),
+                        global: true,
+                        active_cluster: "cluster-b".into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }))
+            }
+        }
+
+        let calls = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let backend = Backend(calls.clone());
+        let redirector = WorkflowRedirector {
+            policy: ForwardingPolicy::SelectedV3,
+            current_cluster: "cluster-a".into(),
+            configured_target: String::new(),
+            config: Config(true),
+            manager: Manager,
+            metrics: std::sync::Arc::new(RecordingMetrics::default()),
+            requests: Resolver,
+        };
+        let handler = crate::handler_workflow::Handler::new(backend)
+            .with_cluster_redirection(std::sync::Arc::new(redirector));
+
+        handler
+            .dispatch(
+                "TerminateWorkflowExecution",
+                serde_json::json!({
+                    "domain": "global-domain",
+                    "workflowExecution": {"workflowId": "wf", "runId": "run"}
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [Some("cluster-b".to_owned())]
+        );
+    }
+
     #[test]
     fn deprecated_domain_rejects_unlisted_operation_before_call() {
         let metrics = RecordingMetrics::default();
