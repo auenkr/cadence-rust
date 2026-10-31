@@ -249,6 +249,7 @@ pub struct Handler<B> {
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
+    workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
@@ -294,6 +295,12 @@ pub trait HistoryPageSizePolicy: Send + Sync {
     fn maximum_page_size(&self, domain: &str) -> i32;
 }
 
+/// Dynamic per-domain `DisallowQuery` check performed by Go before it checks
+/// the Query payload itself.
+pub trait WorkflowQueryPolicy: Send + Sync {
+    fn query_disallowed(&self, domain: &str) -> bool;
+}
+
 /// Live `frontend.validSearchAttributes` property used by Go's local
 /// GetSearchAttributes handler and visibility validators.
 pub trait SearchAttributeProvider: Send + Sync {
@@ -327,6 +334,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            workflow_query_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -350,6 +358,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            workflow_query_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -378,6 +387,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             visibility_filter_policy: None,
+            workflow_query_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -453,6 +463,14 @@ impl<B: WorkflowBackend> Handler<B> {
         policy: Arc<dyn VisibilityFilterPolicy>,
     ) -> Self {
         self.visibility_filter_policy = Some(policy);
+        self
+    }
+
+    pub fn with_workflow_query_policy(
+        mut self,
+        policy: Arc<dyn WorkflowQueryPolicy>,
+    ) -> Self {
+        self.workflow_query_policy = Some(policy);
         self
     }
 
@@ -888,6 +906,19 @@ impl<B: WorkflowBackend> Handler<B> {
                 validate_execution_field(&value, field)?;
             }
             if operation == WorkflowOperation::QueryWorkflow {
+                if self
+                    .workflow_query_policy
+                    .as_ref()
+                    .is_some_and(|policy| {
+                        policy.query_disallowed(
+                            value.get("domain").and_then(Value::as_str).unwrap_or_default(),
+                        )
+                    })
+                {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "Domain is not allowed to query, please contact cadence team to re-enable queries.",
+                    )));
+                }
                 let query = value.get("query").filter(|query| !query.is_null());
                 let Some(query) = query else {
                     return Err(CadenceError::BadRequest(BadRequestError::new(
@@ -1505,6 +1536,14 @@ mod tests {
         }
     }
 
+    struct DisabledWorkflowQueries(&'static str);
+
+    impl WorkflowQueryPolicy for DisabledWorkflowQueries {
+        fn query_disallowed(&self, domain: &str) -> bool {
+            domain == self.0
+        }
+    }
+
     struct StaticSearchAttributes;
 
     impl SearchAttributeProvider for StaticSearchAttributes {
@@ -1874,6 +1913,28 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "QueryType is not set on request."
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_domain_policy_runs_after_execution_and_before_query_payload() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_workflow_query_policy(Arc::new(DisabledWorkflowQueries("shop")));
+        let error = handler
+            .dispatch(
+                "QueryWorkflow",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf"}
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Domain is not allowed to query, please contact cadence team to re-enable queries."
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }

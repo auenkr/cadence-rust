@@ -535,3 +535,13 @@ these fixes; no green CI evidence covers the current changes.
   Clippy, format check and all Frontend unit tests passed. The runner patch only
   made rustfmt changes; it was applied locally and is being pushed as a separate
   formatting checkpoint, followed by normal exact-head package CI.
+- Normal package CI run
+  [41183294319](https://github.com/auenkr/cadence-rust/actions/runs/41183294319)
+  targets exact head `430259a93046d7f2d1dbb915597200fb35daf534`; it was
+  `in_progress` at this save. Its Go raw-byte oracle step was still running, so
+  no conclusion is available yet.
+- Continued the Go `QueryWorkflow` body audit. Added an injectable dynamic
+  `WorkflowQueryPolicy` and Go's exact `DisallowQuery` error. It runs after
+  domain/execution validation and before checking the Query payload, preserving
+  Go validation precedence; the regression test checks this ordering. This
+  source is currently uncommitted and needs format/package CI.
