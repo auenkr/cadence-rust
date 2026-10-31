@@ -830,7 +830,9 @@ mod tests {
                 ))
                 .unwrap_err(),
             validator
-                .validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest::default()))
+                .validate_reset_sticky_task_list_request(Some(
+                    &ResetStickyTaskListRequest::default(),
+                ))
                 .unwrap_err(),
             validator
                 .validate_count_workflow_executions_request(Some(

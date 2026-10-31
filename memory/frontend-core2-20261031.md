@@ -284,6 +284,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   rustfmt hunk. Also added the remaining closed-workflow TypeFilter/StatusFilter
   conflict pair and explicit missing-domain cases for all domain-scoped
   validator methods; these are awaiting exact-head CI.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41180682856
+  validated `fcacf2b5c660fdceed5f66f6f564f40f3c39b026` and failed formatting
+  before Clippy/tests. Applied the exact runner diff to one line in the new
+  domain-presence matrix. The matrix now also covers wrong tokens for register
+  and non-failover update. A new exact-head run is required.
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41179758023 at
   `3bc2dcca870ea3875d0915f6769d9b09ae9dcbe4` passed Frontend Clippy but failed
   the crate formatting step. The runner emitted 22 rustfmt hunks in
