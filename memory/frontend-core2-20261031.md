@@ -1450,3 +1450,30 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   holds `InMemoryExecutionStore` directly. Any production port must add those
   Go-compatible persistence types and route workflow mutations through the
   selected managers, rather than bolting on a serialization mirror.
+
+## Frontend core2 continuation audit — 2026-10-31
+
+- Revalidated the current pushed head `b8291db12beb5d24b6775d26ee2022d9f00b62be`
+  with Frontend package CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41216145813
+  concluded `success` (formatting, Clippy, Frontend tests, and configured Go
+  oracle checks). This rechecks the full validator test matrix: 88 named Go
+  table rows and nil/success coverage for all 16 Rust validator entry points.
+- Production persistence remains incomplete. The only configured Frontend
+  manager is the domain/metadata adapter. `AppState.executions` remains
+  `InMemoryExecutionStore`; there are no production SQL/Cassandra execution,
+  History, or Visibility managers. Go's mutable-state snapshots/mutations,
+  shard/range transactional conditions, serialization, and backend-specific
+  visibility schema/write behavior still need implementation and call-site
+  wiring. Existing Matching SQL/Cassandra stores provide connection/backend
+  groundwork but do not implement these manager contracts.
+- Lifecycle parity remains incomplete. Ordered health transition, failure
+  detection delay, API/Admin stop hooks, limiter hook, request drain, and
+  resource shutdown are wired. Production still constructs none of Go's seven
+  global quota collections, and the Rust Admin handler has no domain DLQ or
+  failover watcher worker owners; those stop hooks therefore have no real
+  owners.
+- No source code changed in this checkpoint. No Cargo command ran locally.
+  Continue with Go-compatible execution/history/visibility managers and
+  configured Cassandra/SQL selection, then instantiate the real lifecycle
+  owners; the green run above is not evidence that these gaps are closed.
