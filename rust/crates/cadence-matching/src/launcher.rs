@@ -1989,7 +1989,7 @@ async fn run_with_lifecycle(
                 signal_result.is_some(),
                 serving_result.is_some()
             ));
-            if frontend_lifecycle && run_frontend {
+            if frontend_lifecycle && run_frontend && state.begin_frontend_shutdown() {
                 // Go Frontend changes RPC health before waiting for Ringpop/YARPC
                 // failure detection, then rejects new calls and leaves the
                 // final (at most one second) window for in-flight requests.
