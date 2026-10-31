@@ -937,6 +937,11 @@ pub async fn get_workflow_execution_raw_history(
         return bad_request(e);
     }
     let execution = req.execution.clone().unwrap_or_default();
+    // Go's uuid.Parse accepts compact, braced and URN spellings, then the
+    // persistence layer addresses the run by the canonical UUID bytes.
+    let mut persistence_execution = execution.clone();
+    persistence_execution.run_id =
+        raw_history::canonical_run_id(&persistence_execution.run_id);
     if let Some(e) = require_domain(&state, &req.domain).await {
         return e;
     }
@@ -949,7 +954,7 @@ pub async fn get_workflow_execution_raw_history(
     let mut persistence_token = Vec::new();
     let mut continuation = None;
     let histories: cadence_api::types::VersionHistories = if req.next_page_token.is_empty() {
-        match executions.mutable_state_view(&req.domain, &execution) {
+            match executions.mutable_state_view(&req.domain, &persistence_execution) {
             Ok(view) => match view.version_histories {
                 Some(vh) => vh,
                 None => return bad_request(BadRequestError::new("Invalid version histories.")),
@@ -997,7 +1002,7 @@ pub async fn get_workflow_execution_raw_history(
 
     match executions.raw_history(
         &req.domain,
-        &execution,
+        &persistence_execution,
         req.start_event_id,
         req.end_event_id,
         req.maximum_page_size as usize,
