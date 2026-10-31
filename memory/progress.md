@@ -2022,3 +2022,6 @@ workflow-api and master refs remain ancestors. Applied the CI-uploaded
 Frontend formatting patch against source SHA `26f9cc54249f8a289f99714099be25b0afe35026`;
 fresh exact-head package validation is required. See
 `memory/frontend-domain-admin-2026-10-31.md`.
+Run [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
+failed at Clippy on a redundant `&str.clone()` in the merged Matching adapter;
+removed it and recorded the repair in the Frontend integration log.

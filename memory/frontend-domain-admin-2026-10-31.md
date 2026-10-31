@@ -1375,3 +1375,10 @@ migration forward.
 - The Cassandra domain-read source and the integration/format changes are
   being committed together. No Cargo command ran locally. Domain failover
   auditing and other listed parity blockers remain open.
+- Exact-head package run
+  [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
+  failed Clippy at `76c8613eb3837a673775d0b90d430f8132cd6dcf`, before package
+  tests: the merged Matching Cassandra adapter called `.clone()` on an `&str`
+  when creating `CassandraDomainMetadataStore`. Removed the redundant call to
+  preserve the core2 API usage. Fresh package CI is required; no Cargo command
+  ran locally.
