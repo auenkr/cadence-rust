@@ -649,3 +649,8 @@ Frontend parity until these are implemented and validated.
   Diagnose field-order fix (Go serializes `Domain`, `Identity`, `WorkflowID`,
   `RunID` in struct order) and duplicate-start regression test need another CI
   run.
+- Package CI run [41185964550](https://github.com/auenkr/cadence-rust/actions/runs/41185964550)
+  validated exact HEAD `91a9a1a8268f6f42cc775454ffcc6f2e98710183` and concluded
+  `success` (Clippy, formatting, all 80 Frontend unit tests). It covers async
+  queue encoding/publisher dispatch, Diagnose field order and duplicate-start
+  handling, Restart's corrected JSON field, and isolation group checks.
