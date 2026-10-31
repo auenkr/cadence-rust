@@ -112,6 +112,16 @@
   targets this head with formatting enabled and is in progress. These new cases
   remain unverified until that run completes.
 
+- Run [41174552823](https://github.com/auenkr/cadence-rust/actions/runs/41174552823)
+  completed `success` at `e09ab5cebf01a4a29b0b386d816f4f239e4bb1a6`. It passed
+  Frontend package Clippy, Formatting, and Test after CI applied rustfmt in the
+  runner; `frontend-format-patch` was applied and committed as
+  `809ecc73b`. A clean-target package validation was dispatched at that exact
+  source head as run [41174859526](https://github.com/auenkr/cadence-rust/actions/runs/41174859526)
+  and is in progress. The formatter-enabled run's tests cover the new unit
+  cases, while run 41174859526 is the clean-target gate for the committed,
+  formatted source.
+
 The handlers remain a partial port. Domain methods are not wired to real
 persistence/runtime clients; update cooldown/failover transmission and domain
 replication queue work are missing. Admin authorization and dynamic-config
