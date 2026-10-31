@@ -310,3 +310,23 @@ these fixes; no green CI evidence covers the current changes.
   archival behavior. Thrift/gRPC helpers are not registered as Frontend
   transports; `run()` still selects the shared Matching launcher. The Frontend
   production runtime does not instantiate this handler or its middleware.
+
+## Handler parity additions — history pagination and visibility query
+
+- Ported GetWorkflowExecutionHistory page-size behavior: non-positive sizes
+  use the configured `frontend.historyMaxPageSize` value, and requests above Go's
+  fixed `GetHistoryMaxPageSize` (1000) are clamped. The handler builder exposes
+  the configured value; domain-filtered dynamic lookup and Go's warning log
+  still need runtime config/metrics wiring.
+- Added an injected `VisibilityQueryValidator` hook and dispatch integration for
+  CountWorkflowExecutions, ScanWorkflowExecutions, and ListWorkflowExecutions.
+  The validated query is put back into the outbound request without dropping
+  other fields. This separates the query dialect/search-attribute dependency
+  from the shared request validator.
+- Package CI run
+  [41179465854](https://github.com/auenkr/cadence-rust/actions/runs/41179465854)
+  is testing source head `5bf5a6df0b331bae11334e0059e55e9ad753e4ab`; it remains
+  `in_progress` at the time of this note. This run includes the history
+  page-size and visibility-query code. No newer Rust source changes are pushed
+  after that head; subsequent work should wait for this run or dispatch a fresh
+  package workflow.
