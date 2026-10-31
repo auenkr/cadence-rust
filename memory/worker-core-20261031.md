@@ -248,7 +248,9 @@ Scanner workflow contract constants now also mirror the Go short/long
 activity schedule-to-start, start-to-close and heartbeat timeouts, retry
 initial/max/expiration values, non-retriable error names, and the fixer dynamic
 config version gate. Those constants and the wire payload fixtures remain
-pending package CI.
+pending package CI. The fixer corrupt-key page accumulator now preserves Go's
+first-page request, continuation through empty pages, entry order, min/max
+aggregation only for non-empty pages, and terminal pagination token.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

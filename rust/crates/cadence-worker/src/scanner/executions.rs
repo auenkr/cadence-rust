@@ -119,6 +119,80 @@ pub struct FixerCorruptedKeysActivityParams {
     pub starting_shard_id: Option<i32>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ShardQueryPaginationToken {
+    pub next_shard_id: Option<i32>,
+    pub is_done: bool,
+}
+
+/// One corrupted-key entry. `keys` remains a JSON value here because the
+/// store's blob key schema is owned by the storage implementation.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct CorruptedKeysEntry {
+    pub shard_id: i32,
+    pub corrupted_keys: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct FixerCorruptedKeysActivityResult {
+    pub corrupted_keys: Vec<CorruptedKeysEntry>,
+    pub min_shard: Option<i32>,
+    pub max_shard: Option<i32>,
+    pub shard_query_pagination_token: ShardQueryPaginationToken,
+}
+
+/// Accumulate Go `GetCorruptedKeys` activity pages. It requests at least one
+/// page, follows `NextShardID` even across empty pages, and incorporates min /
+/// max shard bounds only from pages containing entries.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CorruptedKeysAccumulator {
+    entries: Vec<CorruptedKeysEntry>,
+    min_shard: Option<i32>,
+    max_shard: Option<i32>,
+    next_shard_id: Option<i32>,
+    fetched_page: bool,
+}
+
+impl CorruptedKeysAccumulator {
+    pub fn should_fetch(&self) -> bool {
+        !self.fetched_page || self.next_shard_id.is_some()
+    }
+
+    pub fn starting_shard_id(&self) -> Option<i32> {
+        self.next_shard_id
+    }
+
+    pub fn add_page(&mut self, page: FixerCorruptedKeysActivityResult) {
+        self.fetched_page = true;
+        self.next_shard_id = page.shard_query_pagination_token.next_shard_id;
+        if page.corrupted_keys.is_empty() {
+            return;
+        }
+        self.entries.extend(page.corrupted_keys);
+        if let Some(min) = page.min_shard {
+            self.min_shard = Some(self.min_shard.map_or(min, |current| current.min(min)));
+        }
+        if let Some(max) = page.max_shard {
+            self.max_shard = Some(self.max_shard.map_or(max, |current| current.max(max)));
+        }
+    }
+
+    pub fn finish(self) -> FixerCorruptedKeysActivityResult {
+        FixerCorruptedKeysActivityResult {
+            corrupted_keys: self.entries,
+            min_shard: self.min_shard,
+            max_shard: self.max_shard,
+            shard_query_pagination_token: ShardQueryPaginationToken {
+                next_shard_id: None,
+                is_done: true,
+            },
+        }
+    }
+}
+
 pub fn resolve_scanner_config(
     dynamic: GenericScannerConfig,
     hook_custom: Option<CustomScannerConfig>,
@@ -370,5 +444,60 @@ mod tests {
         assert_eq!(super::SHARD_ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI, 1_700);
         assert_eq!(super::FIXER_CONFIG_CHANGE_VERSION_ID, "dynamic fixer config");
         assert_eq!(super::FIXER_CONFIG_CHANGE_MIN_VERSION, 1);
+    }
+
+    #[test]
+    fn corrupted_key_pages_follow_empty_pages_and_accumulate_bounds_in_go_order() {
+        use super::{
+            CorruptedKeysAccumulator, CorruptedKeysEntry, FixerCorruptedKeysActivityResult,
+            ShardQueryPaginationToken,
+        };
+        let mut accumulator = CorruptedKeysAccumulator::default();
+        assert!(accumulator.should_fetch());
+        assert_eq!(accumulator.starting_shard_id(), None);
+        accumulator.add_page(FixerCorruptedKeysActivityResult {
+            corrupted_keys: Vec::new(),
+            min_shard: Some(1),
+            max_shard: Some(4),
+            shard_query_pagination_token: ShardQueryPaginationToken {
+                next_shard_id: Some(5),
+                is_done: false,
+            },
+        });
+        assert!(accumulator.should_fetch());
+        assert_eq!(accumulator.starting_shard_id(), Some(5));
+        accumulator.add_page(FixerCorruptedKeysActivityResult {
+            corrupted_keys: vec![CorruptedKeysEntry {
+                shard_id: 7,
+                corrupted_keys: serde_json::json!({"Corrupt": "blob-key"}),
+            }],
+            min_shard: Some(6),
+            max_shard: Some(8),
+            shard_query_pagination_token: ShardQueryPaginationToken {
+                next_shard_id: Some(9),
+                is_done: false,
+            },
+        });
+        accumulator.add_page(FixerCorruptedKeysActivityResult {
+            corrupted_keys: vec![CorruptedKeysEntry {
+                shard_id: 12,
+                corrupted_keys: serde_json::json!({"Corrupt": "next-key"}),
+            }],
+            min_shard: Some(10),
+            max_shard: Some(13),
+            shard_query_pagination_token: ShardQueryPaginationToken {
+                next_shard_id: None,
+                is_done: true,
+            },
+        });
+        assert!(!accumulator.should_fetch());
+        let result = accumulator.finish();
+        assert_eq!(result.corrupted_keys.len(), 2);
+        assert_eq!(result.corrupted_keys[0].shard_id, 7);
+        assert_eq!(result.corrupted_keys[1].shard_id, 12);
+        assert_eq!(result.min_shard, Some(6));
+        assert_eq!(result.max_shard, Some(13));
+        assert_eq!(result.shard_query_pagination_token.next_shard_id, None);
+        assert!(result.shard_query_pagination_token.is_done);
     }
 }
