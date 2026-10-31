@@ -489,3 +489,11 @@ migration forward.
   cross-cluster History client calls; raw history remains single branch; and
   schedule persistence does not invoke scheduler workflows. This checkpoint
   does not claim service parity.
+- The `frontend-core2` branch advanced again to `b4fda09b4` during review. I
+  rebased this implementation branch onto that current head and force-pushed
+  `b2078a0ef`. The earlier run [41180174300](https://github.com/auenkr/cadence-rust/actions/runs/41180174300)
+  targets pre-rebase `91a751252`; it is stale for current code.
+- Added the HTTP `DeprecateDomain` primary-cluster check and aligned JSON
+  `RegisterDomain` with Go's global-secondary error precedence and UUIDv7
+  generation. Those follow-up edits are not part of `b2078a0ef` and require
+  their own exact-head CI run.
