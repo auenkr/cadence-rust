@@ -206,6 +206,7 @@ pub fn unimplemented_operation(operation: &str) -> cadence_api::errors::Internal
 pub struct Handler<B> {
     backend: B,
     validator: crate::request_validator::RequestValidator,
+    history_max_page_size: i32,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
     access_control: Option<Arc<dyn RequestAuthorization>>,
     redirector: Option<Arc<dyn RequestRedirector>>,
@@ -251,6 +252,7 @@ impl<B: WorkflowBackend> Handler<B> {
         Self {
             backend,
             validator: crate::request_validator::RequestValidator::default(),
+            history_max_page_size: 1000,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -266,6 +268,7 @@ impl<B: WorkflowBackend> Handler<B> {
         Self {
             backend,
             validator,
+            history_max_page_size: 1000,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -286,6 +289,7 @@ impl<B: WorkflowBackend> Handler<B> {
         Self {
             backend,
             validator,
+            history_max_page_size: 1000,
             metrics,
             access_control: None,
             redirector: None,
@@ -335,6 +339,13 @@ impl<B: WorkflowBackend> Handler<B> {
         rate_limit: crate::wrappers::ratelimited::HandlerRateLimit,
     ) -> Self {
         self.with_rate_limit(Arc::new(rate_limit))
+    }
+
+    /// Set the domain-filtered Go `frontend.historyMaxPageSize` value used
+    /// when GetWorkflowExecutionHistory omits a positive page size.
+    pub fn with_history_max_page_size(mut self, maximum: i32) -> Self {
+        self.history_max_page_size = maximum;
+        self
     }
 
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
@@ -474,7 +485,7 @@ impl<B: WorkflowBackend> Handler<B> {
             if value.is_null() {
                 return Err(cadence_api::validation::err_request_not_set().into());
             }
-            let request: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
+            let mut request: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
                 serde_json::from_value(value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
@@ -499,6 +510,15 @@ impl<B: WorkflowBackend> Handler<B> {
                     &token,
                 )?;
             }
+            if request.maximum_page_size <= 0 {
+                request.maximum_page_size = self.history_max_page_size;
+            }
+            request.maximum_page_size = request.maximum_page_size.min(1000);
+            set_i32_field(
+                &mut value,
+                "maximumPageSize",
+                request.maximum_page_size,
+            );
             return Ok(value);
         }
         if matches!(
@@ -1406,5 +1426,35 @@ mod tests {
             "RunID in the request does not match the NextPageToken."
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_page_size_uses_domain_default_and_go_hard_cap() {
+        let handler = Handler::new(FakeBackend::default()).with_history_max_page_size(1200);
+        let request = serde_json::json!({
+            "domain": "shop",
+            "execution": {"workflowId": "wf"},
+            "maximumPageSize": 0,
+            "futureSdkField": true
+        });
+        let response = handler
+            .dispatch("GetWorkflowExecutionHistory", request)
+            .await
+            .unwrap();
+        assert_eq!(response["maximumPageSize"], 1000);
+        assert_eq!(response["futureSdkField"], true);
+
+        let response = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf"},
+                    "maximumPageSize": 1500
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response["maximumPageSize"], 1000);
     }
 }
