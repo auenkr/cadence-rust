@@ -1451,22 +1451,10 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
-            if run_frontend {
-                if let Some(persistence) = configured_matching_stores
-                    .as_ref()
-                    .and_then(|stores| stores.domain_persistence.clone())
-                {
-                    state.domain_manager =
-                        std::sync::Arc::new(cadence_persistence::GoSqlFrontendDomainManager::new(
-                            state.domains.clone(),
-                            persistence,
-                        ));
-                }
-            }
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());
-            if run_frontend && !run_matching {
+            if run_frontend {
                 if let Some(source) = configured_matching_stores
                     .as_ref()
                     .and_then(|stores| stores.domain_metadata_source.as_ref())

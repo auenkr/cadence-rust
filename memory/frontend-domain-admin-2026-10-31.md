@@ -799,3 +799,27 @@ migration forward.
   targets pre-second-rebase source `84f03b8e679f02516a72513abda2ceced8a64b2a`
   and is not evidence for the rebased head. Push and dispatch a fresh exact-head
   run before relying on the source.
+
+## Rebase onto current `frontend-core2` and startup repair — 2026-10-31
+
+- `origin/frontend-core2` advanced to `a84001cf7` (including transactional
+  SQLite domain mutations and domain-manager Clippy cleanup). Rebasing this
+  branch replayed 101 commits. Resolved the SQL persistence integration
+  conflicts by retaining the configured SQL/Cassandra mutation adapter and the
+  core2 `PersistedFrontendDomainManager` API.
+- Exact-head run [41197133481](https://github.com/auenkr/cadence-rust/actions/runs/41197133481)
+  failed Clippy because launcher setup still referenced the removed
+  `GoSqlFrontendDomainManager` symbol. Removed that obsolete assignment; the
+  configured `PersistedFrontendDomainManager` assignment remains the one
+  Frontend production path.
+- Fixed combined Frontend+Matching mode startup to load durable domain metadata
+  into the Frontend's shared domain cache whenever Frontend is enabled. It was
+  previously skipped when Matching ran in the same process, leaving the
+  persisted manager's cache empty at startup. This also refreshes execution
+  domain aliases from the loaded metadata.
+- `git diff --check` passes. No local Cargo/rustfmt/tests were run. Push this
+  rebased branch and dispatch package CI at its exact resulting head.
+- Remaining blockers are unchanged: persistence-backed replication queue and
+  durable failover history, the rest of Admin DLQ/raw-history RPCs, scheduler
+  workflow RPC wiring, real membership, and exact-head Go/Rust mixed-cluster
+  failure/restart/recovery validation.
