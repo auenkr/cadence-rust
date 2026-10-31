@@ -10,4 +10,14 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+cadence-api = { path = "../cadence-api" }
+cadence-matching = { path = "../cadence-matching" }
 cadence-service-core = { path = "../cadence-service-core" }
+cadence-proto = { path = "../cadence-proto" }
+cadence-thrift = { path = "../cadence-thrift" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tonic = { version = "0.12", features = ["tls"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
