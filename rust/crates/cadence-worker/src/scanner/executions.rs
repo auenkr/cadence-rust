@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 
 pub type CustomScannerConfig = BTreeMap<String, String>;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct GenericScannerConfig {
     pub enabled: bool,
     pub concurrency: i32,
@@ -18,7 +19,8 @@ pub struct GenericScannerConfig {
     pub activity_batch_size: i32,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct GenericScannerConfigOverrides {
     pub enabled: Option<bool>,
     pub concurrency: Option<i32>,
@@ -27,22 +29,62 @@ pub struct GenericScannerConfigOverrides {
     pub activity_batch_size: Option<i32>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct ScannerWorkflowConfigOverrides {
+    #[serde(rename = "GenericScannerConfig")]
     pub generic: GenericScannerConfigOverrides,
     /// `Some(empty)` is distinct from `None` and replaces the hook config.
+    #[serde(rename = "CustomScannerConfig")]
     pub custom: Option<CustomScannerConfig>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct ResolvedScannerWorkflowConfig {
+    #[serde(rename = "GenericScannerConfig")]
     pub generic: GenericScannerConfig,
-    pub custom: CustomScannerConfig,
+    #[serde(rename = "CustomScannerConfig")]
+    pub custom: Option<CustomScannerConfig>,
+}
+
+/// Go `ScannerWorkflowParams` payload sent when starting a scan workflow.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ScannerWorkflowParams {
+    pub shards: super::shards::Shards,
+    pub scanner_workflow_config_overwrites: ScannerWorkflowConfigOverrides,
+}
+
+/// Go `ScannerConfigActivityParams` payload.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ScannerConfigActivityParams {
+    pub overwrites: ScannerWorkflowConfigOverrides,
+}
+
+/// Go `ScanShardActivityParams` payload. A nil Go map encodes as JSON null.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct ScanShardActivityParams {
+    pub shards: Vec<i32>,
+    pub page_size: i32,
+    pub blobstore_flush_threshold: i32,
+    pub scanner_config: Option<CustomScannerConfig>,
+}
+
+/// Go `FixerWorkflowParams` payload for fixing a completed scanner execution.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
+pub struct FixerWorkflowParams {
+    pub scanner_workflow_workflow_id: String,
+    pub scanner_workflow_run_id: String,
+    pub fixer_workflow_config_overwrites: FixerWorkflowConfigOverrides,
 }
 
 pub fn resolve_scanner_config(
     dynamic: GenericScannerConfig,
-    hook_custom: CustomScannerConfig,
+    hook_custom: Option<CustomScannerConfig>,
     overrides: ScannerWorkflowConfigOverrides,
 ) -> ResolvedScannerWorkflowConfig {
     let mut generic = dynamic;
@@ -64,18 +106,20 @@ pub fn resolve_scanner_config(
 
     ResolvedScannerWorkflowConfig {
         generic,
-        custom: overrides.custom.unwrap_or(hook_custom),
+        custom: overrides.custom.or(hook_custom),
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct FixerWorkflowConfigOverrides {
     pub concurrency: Option<i32>,
     pub blobstore_flush_threshold: Option<i32>,
     pub activity_batch_size: Option<i32>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct ResolvedFixerWorkflowConfig {
     pub concurrency: i32,
     pub blobstore_flush_threshold: i32,
@@ -116,7 +160,7 @@ mod tests {
 
         let resolved = resolve_scanner_config(
             dynamic,
-            hook_config,
+            Some(hook_config),
             ScannerWorkflowConfigOverrides {
                 generic: GenericScannerConfigOverrides {
                     enabled: Some(true),
@@ -132,7 +176,7 @@ mod tests {
         assert_eq!(resolved.generic.page_size, 100);
         assert_eq!(resolved.generic.blobstore_flush_threshold, 1_000);
         assert_eq!(resolved.generic.activity_batch_size, 1);
-        assert_eq!(resolved.custom, custom_override);
+        assert_eq!(resolved.custom, Some(custom_override));
     }
 
     #[test]
@@ -141,10 +185,10 @@ mod tests {
         hook.insert("invariant".to_owned(), "true".to_owned());
         let preserve = resolve_scanner_config(
             GenericScannerConfig::default(),
-            hook.clone(),
+            Some(hook.clone()),
             ScannerWorkflowConfigOverrides::default(),
         );
-        assert_eq!(preserve.custom, hook);
+        assert_eq!(preserve.custom, Some(hook));
 
         let replace = resolve_scanner_config(
             GenericScannerConfig::default(),
@@ -154,7 +198,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(replace.custom.is_empty());
+        assert_eq!(replace.custom, Some(CustomScannerConfig::new()));
     }
 
     #[test]
@@ -174,6 +218,59 @@ mod tests {
             })
             .concurrency,
             1_000
+        );
+    }
+
+    #[test]
+    fn scanner_workflow_params_use_go_field_names_and_null_pointer_fields() {
+        let params = super::ScannerWorkflowParams {
+            shards: super::super::shards::Shards {
+                list: Some(vec![3, 7]),
+                range: None,
+            },
+            scanner_workflow_config_overwrites: super::ScannerWorkflowConfigOverrides {
+                generic: GenericScannerConfigOverrides {
+                    concurrency: Some(4),
+                    ..Default::default()
+                },
+                custom: None,
+            },
+        };
+        let value = serde_json::to_value(params).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "Shards": {"List": [3, 7], "Range": null},
+                "ScannerWorkflowConfigOverwrites": {
+                    "GenericScannerConfig": {
+                        "Enabled": null,
+                        "Concurrency": 4,
+                        "PageSize": null,
+                        "BlobstoreFlushThreshold": null,
+                        "ActivityBatchSize": null
+                    },
+                    "CustomScannerConfig": null
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn scan_activity_preserves_null_custom_config_map() {
+        let params = super::ScanShardActivityParams {
+            shards: vec![4, 5],
+            page_size: 100,
+            blobstore_flush_threshold: 1_000,
+            scanner_config: None,
+        };
+        assert_eq!(
+            serde_json::to_value(params).unwrap(),
+            serde_json::json!({
+                "Shards": [4, 5],
+                "PageSize": 100,
+                "BlobstoreFlushThreshold": 1000,
+                "ScannerConfig": null
+            })
         );
     }
 }

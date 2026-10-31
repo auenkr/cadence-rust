@@ -1,6 +1,7 @@
 //! Scanner shard selection contract from Go `scanner/shardscanner/types.go`.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct ShardRange {
     /// Inclusive lower bound.
     pub min: i32,
@@ -8,7 +9,8 @@ pub struct ShardRange {
     pub max: i32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default, rename_all = "PascalCase")]
 pub struct Shards {
     /// `None` is Go nil; `Some(vec![])` is an explicitly empty list.
     pub list: Option<Vec<i32>>,
