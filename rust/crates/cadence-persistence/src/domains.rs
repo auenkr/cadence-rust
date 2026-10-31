@@ -1291,6 +1291,7 @@ impl FrontendDomainManager for GoSqlFrontendDomainManager {
         let _guard = self.write_lock.lock().expect("domain persistence write lock");
         let current = self.load(Some(name), None).map_err(|_| EntityNotExistsError::new(format!("Domain {name} does not exist.")))?;
         self.persistence.delete_domain(&current.info.uuid).map_err(|error| EntityNotExistsError::new(error.to_string()))?;
+        self.cache.sync_matching_metadata(std::slice::from_ref(&current));
         self.cache.delete(name)
     }
 
