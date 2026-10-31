@@ -692,6 +692,12 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   calls through the selected Go `defaultStore` and `visibilityStore`, then
   connect real Frontend lifecycle owners and rerun exact-head CI. Do not mark
   this task complete until both workstreams are implemented and validated.
+- The documentation checkpoint at `8dc83ffed0db23faacb3a15329fedfc3b25399d4`
+  passed a fresh Frontend package workflow:
+  https://github.com/auenkr/cadence-rust/actions/runs/41190182638
+  (head `8dc83ffed0db23faacb3a15329fedfc3b25399d4`, conclusion `success`).
+  This run covers the baseline source and docs only; it does not close either
+  outstanding implementation gap.
 
 ## Persistence manager contract inventory — continuation
 
