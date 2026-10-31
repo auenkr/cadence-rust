@@ -121,6 +121,12 @@ impl CassandraDomainMetadataPersistence {
             bound(metadata.info.name.clone()),
         ])
     }
+
+    fn metadata_cas_values(expected: i64) -> BoundValues {
+        let current = (expected > 0).then_some(expected);
+        let next = if expected > 0 { expected + 1 } else { 1 };
+        vec![bound(next), bound(DOMAIN_PARTITION), bound(DOMAIN_METADATA_NAME), bound(current)]
+    }
 }
 
 impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
@@ -135,14 +141,16 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             .map(|(version,)| version).unwrap_or(0))
     }
 
-    fn create_domain(&self, metadata: &MatchingDomainMetadata, expected_version: i64) -> Result<(), String> {
+    fn create_domain(&self, metadata: &MatchingDomainMetadata, _expected_version: i64) -> Result<(), String> {
         let domain = Self::bound_domain(metadata)?;
         let id = domain.id;
         if !self.lwt(CREATE_DOMAIN, vec![bound(id), bound(domain.name.clone()), bound(Utc::now())])? {
             return Err(format!("domain {} already exists", metadata.info.name));
         }
+        // Go inserts the legacy UUID row before reading the current singleton
+        // version and opening its conditional batch.
+        let expected_version = self.metadata_version()?;
         let (domain, config, replication) = Self::mutation_values(metadata)?;
-        let next_version = if expected_version > 0 { expected_version + 1 } else { 1 };
         let created = DateTime::<Utc>::from_timestamp_nanos(metadata.last_updated_time_nanos);
         let create_values = vec![
             bound(DOMAIN_PARTITION), bound(metadata.info.name.clone()), bound(domain), bound(config),
@@ -151,8 +159,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             bound(metadata.previous_failover_version), bound(metadata.failover_end_time_nanos.unwrap_or(0)),
             bound(metadata.last_updated_time_nanos), bound(expected_version), bound(created),
         ];
-        let metadata_values = vec![bound(next_version), bound(DOMAIN_PARTITION), bound(DOMAIN_METADATA_NAME), bound(expected_version)];
-        if self.batch_lwt(&[CREATE_DOMAIN_V2, UPDATE_METADATA], vec![create_values, metadata_values])? {
+        if self.batch_lwt(&[CREATE_DOMAIN_V2, UPDATE_METADATA], vec![create_values, Self::metadata_cas_values(expected_version)])? {
             Ok(())
         } else {
             let _ = self.delete_domain(&id.to_string());
@@ -162,9 +169,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
 
     fn update_domain(&self, metadata: &MatchingDomainMetadata, expected_version: i64) -> Result<(), String> {
         let update = Self::update_values(metadata, expected_version)?;
-        let next_version = if expected_version > 0 { expected_version + 1 } else { 1 };
-        let metadata_values = vec![bound(next_version), bound(DOMAIN_PARTITION), bound(DOMAIN_METADATA_NAME), bound(expected_version)];
-        if self.batch_lwt(&[UPDATE_DOMAIN_V2, UPDATE_METADATA], vec![update, metadata_values])? {
+        if self.batch_lwt(&[UPDATE_DOMAIN_V2, UPDATE_METADATA], vec![update, Self::metadata_cas_values(expected_version)])? {
             Ok(())
         } else {
             Err("domain metadata notification version changed during update".to_string())
