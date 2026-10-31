@@ -833,6 +833,47 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
     }
 }
 
+impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMetadataStore {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::create_domain(self, metadata)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::update_domain(self, metadata, expected_notification_version)
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::delete_domain(self, domain_id)
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::get_metadata_version(self)
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::get_domain(self, name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        MySqlDomainMetadataStore::list_domains(self, page_size, page_token)
+    }
+}
+
 fn query_error(error: crate::matching_mysql::TimedQueryError) -> MatchingDomainMetadataError {
     match error {
         crate::matching_mysql::TimedQueryError::Timeout => {

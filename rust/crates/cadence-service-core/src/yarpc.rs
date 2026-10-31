@@ -103,7 +103,11 @@ impl AppError {
 
     fn busy(message: String) -> Self {
         let error = cadence_api::errors::ServiceBusyError::new(message.clone());
-        Self { exc_name: "ServiceBusyError", value: error.to_thrift(), message }
+        Self {
+            exc_name: "ServiceBusyError",
+            value: error.to_thrift(),
+            message,
+        }
     }
 
     fn entity_not_exists(message: String) -> Self {
@@ -298,13 +302,20 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     let replication = crate::handlers::domain_replication(state, &req)
         .map_err(|e| AppError::bad_request(e.message))?;
     let failover_version = if req.is_global_domain {
-        state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false)
+        state
+            .cluster_metadata
+            .next_failover_version(&replication.active_cluster_name, 0, false)
             .map_err(AppError::bad_request)?
-    } else { cadence_persistence::version_history::EMPTY_VERSION };
-    match state
-        .domains
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    } else {
+        cadence_persistence::version_history::EMPTY_VERSION
+    };
+    match state.domains.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(_) => {
             state.executions.register_domain(
                 &req.name,
@@ -460,11 +471,19 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domains.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FailoverError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
         Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => Err(AppError::bad_request(message)),
+        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+            Err(AppError::bad_request(message))
+        }
     }
 }
 
@@ -1214,13 +1233,15 @@ async fn handle_record_heartbeat(state: &AppState, body: &Struct) -> HandlerResu
 }
 
 async fn handle_start_async(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::types::{StartWorkflowExecutionAsyncRequest, StartWorkflowExecutionAsyncResponse};
+    use cadence_api::types::{
+        StartWorkflowExecutionAsyncRequest, StartWorkflowExecutionAsyncResponse,
+    };
     use cadence_api::validation::{self, Limits};
     let req: StartWorkflowExecutionAsyncRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let inner = req.request.ok_or_else(|| {
-        AppError::bad_request("Start request is not set.".to_string())
-    })?;
+    let inner = req
+        .request
+        .ok_or_else(|| AppError::bad_request("Start request is not set.".to_string()))?;
     let executions = require_domain_thrift(state, &inner.domain)?;
     validation::validate_start_workflow_execution_request(Some(&inner), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
@@ -1230,8 +1251,7 @@ async fn handle_start_async(state: &AppState, body: &Struct) -> HandlerResult {
 
 async fn handle_signal_with_start_async(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::service_types::{
-        SignalWithStartWorkflowExecutionAsyncRequest,
-        SignalWithStartWorkflowExecutionAsyncResponse,
+        SignalWithStartWorkflowExecutionAsyncRequest, SignalWithStartWorkflowExecutionAsyncResponse,
     };
     use cadence_api::validation::{self, Limits};
     let req: SignalWithStartWorkflowExecutionAsyncRequest =
@@ -1243,7 +1263,9 @@ async fn handle_signal_with_start_async(state: &AppState, body: &Struct) -> Hand
     validation::validate_signal_with_start_request(Some(&inner), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
     executions.enqueue_async_signal_with_start(inner);
-    Ok(wrap_success(&SignalWithStartWorkflowExecutionAsyncResponse {}))
+    Ok(wrap_success(
+        &SignalWithStartWorkflowExecutionAsyncResponse {},
+    ))
 }
 
 async fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
@@ -1268,7 +1290,12 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domains.failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name)) {
+    match state.domains.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FailoverError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
@@ -1326,9 +1353,7 @@ fn schedule_gate(state: &AppState, domain: &str) -> Result<(), AppError> {
 
 fn schedule_error(e: cadence_persistence::ScheduleError) -> AppError {
     match e {
-        cadence_persistence::ScheduleError::NotFound(e) => {
-            AppError::entity_not_exists(e.message)
-        }
+        cadence_persistence::ScheduleError::NotFound(e) => AppError::entity_not_exists(e.message),
         cadence_persistence::ScheduleError::Invalid(message)
         | cadence_persistence::ScheduleError::Exists(message) => AppError::bad_request(message),
     }
@@ -1345,9 +1370,10 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
             "ScheduleID is not set on request.".to_string(),
         ));
     }
-    let spec = req.spec.as_ref().ok_or_else(|| {
-        AppError::bad_request("Spec is not set on request.".to_string())
-    })?;
+    let spec = req
+        .spec
+        .as_ref()
+        .ok_or_else(|| AppError::bad_request("Spec is not set on request.".to_string()))?;
     if spec.cron_expression.is_empty() {
         return Err(AppError::bad_request(
             "CronExpression is not set on request.".to_string(),
@@ -1407,7 +1433,11 @@ async fn handle_list_schedules(state: &AppState, body: &Struct) -> HandlerResult
     let req: ListSchedulesRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     let executions = require_domain_thrift(state, &req.domain)?;
-    let page_size = if req.page_size <= 0 { 10 } else { req.page_size as usize };
+    let page_size = if req.page_size <= 0 {
+        10
+    } else {
+        req.page_size as usize
+    };
     let (schedules, next_page_token) =
         executions.list_schedules(&req.domain, page_size, &req.next_page_token);
     Ok(wrap_success(&ListSchedulesResponse {
@@ -1577,12 +1607,15 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     let (semaphores, domain_id) = state
         .semaphore_store_for_domain(&req.domain)
         .map_err(|e| AppError::entity_not_exists(e.message))?;
-    match semaphores.create_semaphore(
-        &domain_id,
-        &req.semaphore_name,
-        req.capacity,
-        req.bucket_capacity,
-    ).await {
+    match semaphores
+        .create_semaphore(
+            &domain_id,
+            &req.semaphore_name,
+            req.capacity,
+            req.bucket_capacity,
+        )
+        .await
+    {
         Ok(meta) => Ok(wrap_success(&CreateSemaphoreResponse {
             semaphore: Some(Semaphore {
                 semaphore_name: req.semaphore_name.clone(),
@@ -1605,9 +1638,15 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         }
         Err(cadence_persistence::SemaphoreError::Internal(message)) => {
             let error = cadence_api::errors::InternalServiceError::new(message.clone());
-            Err(AppError { exc_name: "InternalServiceError", value: error.to_thrift(), message })
+            Err(AppError {
+                exc_name: "InternalServiceError",
+                value: error.to_thrift(),
+                message,
+            })
         }
-        Err(cadence_persistence::SemaphoreError::Throttled(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => {
+            Err(AppError::busy(message))
+        }
     }
 }
 
@@ -1673,9 +1712,10 @@ async fn handle_diagnose(state: &AppState, body: &Struct) -> HandlerResult {
         Err(cadence_persistence::StartError::AlreadyStarted(e)) => {
             Ok(wrap_success(&DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, e.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    e.run_id,
+                )),
             }))
         }
         Err(cadence_persistence::StartError::InvalidArgument(message)) => {
@@ -1743,9 +1783,7 @@ async fn handle_respond_query_completed(state: &AppState, body: &Struct) -> Hand
         Err(cadence_persistence::QueryError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::QueryError::Invalid(e)) => {
-            Err(AppError::bad_request(e.message))
-        }
+        Err(cadence_persistence::QueryError::Invalid(e)) => Err(AppError::bad_request(e.message)),
         Err(cadence_persistence::QueryError::Rejected(_)) => Err(AppError::bad_request(
             "Query task was rejected.".to_string(),
         )),
@@ -1764,21 +1802,16 @@ async fn handle_describe_task_list(state: &AppState, body: &Struct) -> HandlerRe
     }
     match crate::handlers::describe_task_list_response(state, &executions, &req) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(crate::handlers::DescribeTaskListError::TaskListNotSet) => {
-            Err(AppError::bad_request(
-                "TaskList is not set on request.".to_string(),
-            ))
-        }
-        Err(crate::handlers::DescribeTaskListError::DomainGone) => {
-            Err(AppError::entity_not_exists("Domain does not exist.".to_string()))
-        }
+        Err(crate::handlers::DescribeTaskListError::TaskListNotSet) => Err(AppError::bad_request(
+            "TaskList is not set on request.".to_string(),
+        )),
+        Err(crate::handlers::DescribeTaskListError::DomainGone) => Err(
+            AppError::entity_not_exists("Domain does not exist.".to_string()),
+        ),
     }
 }
 
-async fn handle_get_task_lists_by_domain(
-    state: &AppState,
-    body: &Struct,
-) -> HandlerResult {
+async fn handle_get_task_lists_by_domain(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::tasks::{GetTaskListsByDomainRequest, GetTaskListsByDomainResponse};
     let req: GetTaskListsByDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -1840,10 +1873,7 @@ async fn handle_get_task_lists_by_domain(
     }))
 }
 
-async fn handle_list_task_list_partitions(
-    state: &AppState,
-    body: &Struct,
-) -> HandlerResult {
+async fn handle_list_task_list_partitions(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::tasks::{ListTaskListPartitionsRequest, ListTaskListPartitionsResponse};
     let req: ListTaskListPartitionsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -1971,7 +2001,17 @@ pub async fn dispatch(
             fields: vec![(
                 0,
                 Value::Struct(Struct {
-                    fields: vec![(1, Value::Bool(true)), (2, Value::Bytes(b"OK".to_vec()))],
+                    fields: vec![
+                        (
+                            1,
+                            Value::Bool(
+                                state
+                                    .frontend_ready
+                                    .load(std::sync::atomic::Ordering::Acquire),
+                            ),
+                        ),
+                        (2, Value::Bytes(b"OK".to_vec())),
+                    ],
                 }),
             )],
         }),
@@ -2026,7 +2066,9 @@ pub async fn dispatch(
         "FailoverDomain" => handle_failover_domain(state, body).await,
         "ListFailoverHistory" => handle_list_failover_history(state, body).await,
         "StartWorkflowExecutionAsync" => handle_start_async(state, body).await,
-        "SignalWithStartWorkflowExecutionAsync" => handle_signal_with_start_async(state, body).await,
+        "SignalWithStartWorkflowExecutionAsync" => {
+            handle_signal_with_start_async(state, body).await
+        }
         "RequestCancelWorkflowExecution" => handle_request_cancel(state, body).await,
         "ResetStickyTaskList" => handle_reset_sticky(state, body).await,
         "PollForDecisionTask" => handle_poll_decision(state, body, deadline).await,

@@ -1924,3 +1924,17 @@ return empty single-host behavior, schedules use execution-store state rather
 than scheduler workflows, and domain metadata is in-memory without replication
 publication. See `memory/frontend-domain-admin-2026-10-31.md` for detailed
 status. No Cargo ran locally; Frontend parity remains incomplete.
+
+## 2026-10-31: Frontend workflow API continuation
+
+On `t3/frontend-workflow-api`, corrected Go event-blob limit scope and memo map
+size accounting, and added open-visibility request mapping coverage. Package CI
+run https://github.com/auenkr/cadence-rust/actions/runs/41187401382 passed at
+source SHA `d78e835134d307733706b480f21b82821cdb896d` (Clippy, formatting, 83
+Frontend unit tests). Current branch head after the evidence update is
+`1a0926f0c770b2b052baac7b5f867b88b6c938c6`. No local Cargo command was run.
+Workflow method behavior and wrappers remain incomplete: the handler is not
+wired into production WorkflowService transport, history/archive/poll/respond
+transformations and the concrete History/Matching/visibility backend remain
+open. See `frontend-workflow-api-20261031.md`.
+- Frontend core2 continuation merged at `54c2e54c45141b5499ee4d896dad9a639631ff27`: shared frontend lifecycle drain/warmup, validator matrix and dynamic required-domain-data mapping, Matching gRPC admission/runtime, and read-only persistence metadata updates. Fresh package/runtime validation is required on the merge.

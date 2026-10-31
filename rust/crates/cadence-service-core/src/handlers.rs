@@ -42,9 +42,7 @@ use std::pin::Pin;
 /// seven collections before opening the request drain window.
 pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
-    fn on_stop(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
+    fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
 }
 
 /// Recently seen pollers: (task-list, identity, kind) -> poll record.
@@ -2703,15 +2701,9 @@ pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttri
         .get(false, "frontend.validSearchAttributes", &[])
         .and_then(|entry| entry.value)
     {
-<<<<<<< HEAD
         if let Ok(configured) =
             serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data)
         {
-=======
-        if let Ok(configured) = serde_json::from_slice::<std::collections::HashMap<String, i32>>(
-            &value.data,
-        ) {
->>>>>>> 7069b321d (fix(frontend): remove unreachable admin YARPC dispatch)
             keys.extend(configured.into_iter().filter_map(|(key, raw_type)| {
                 cadence_api::enums::IndexedValueType::from_i32(raw_type)
                     .map(|value_type| (key, value_type))
@@ -2746,9 +2738,7 @@ mod frontend_drain_tests {
             "test"
         }
 
-        fn on_stop(
-            &self,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+        fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(()) })
         }

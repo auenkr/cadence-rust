@@ -208,7 +208,7 @@ pub(crate) struct FailoverAuditEntry {
     after_version: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Inner {
     by_name: HashMap<String, DomainRecord>,
     by_id: HashMap<String, String>, // uuid -> name

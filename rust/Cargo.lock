@@ -470,6 +470,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-reflection",
+ "tracing",
  "tower 0.5.3",
  "tracing",
  "tracing-subscriber",

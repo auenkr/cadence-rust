@@ -1,4 +1,6 @@
 //! Generated outbound gRPC client for the original Go History service.
+#![allow(clippy::result_large_err)]
+
 use cadence_proto::history::history_api_client::HistoryApiClient;
 use cadence_service_core::{
     config::TlsConfig,
@@ -85,6 +87,224 @@ impl HistoryClient {
         request.set_timeout(timeout);
         request
     }
+
+    /// Typed History boundary methods used by the public WorkflowHandler.
+    /// Request mapping stays at the handler boundary; these methods preserve
+    /// generated protobuf types and Go's caller/deadline metadata.
+    pub async fn start_workflow_execution(
+        &self,
+        request: cadence_proto::history::StartWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::StartWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .start_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn signal_workflow_execution(
+        &self,
+        request: cadence_proto::history::SignalWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::SignalWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .signal_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn signal_with_start_workflow_execution(
+        &self,
+        request: cadence_proto::history::SignalWithStartWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::SignalWithStartWorkflowExecutionResponse, tonic::Status>
+    {
+        self.client
+            .clone()
+            .signal_with_start_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn terminate_workflow_execution(
+        &self,
+        request: cadence_proto::history::TerminateWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::TerminateWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .terminate_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn reset_workflow_execution(
+        &self,
+        request: cadence_proto::history::ResetWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::ResetWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .reset_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn describe_workflow_execution(
+        &self,
+        request: cadence_proto::history::DescribeWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::DescribeWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn query_workflow(
+        &self,
+        request: cadence_proto::history::QueryWorkflowRequest,
+    ) -> Result<cadence_proto::history::QueryWorkflowResponse, tonic::Status> {
+        self.client
+            .clone()
+            .query_workflow(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn request_cancel_workflow_execution(
+        &self,
+        request: cadence_proto::history::RequestCancelWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::history::RequestCancelWorkflowExecutionResponse, tonic::Status> {
+        self.client
+            .clone()
+            .request_cancel_workflow_execution(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn reset_sticky_task_list(
+        &self,
+        request: cadence_proto::history::ResetStickyTaskListRequest,
+    ) -> Result<cadence_proto::history::ResetStickyTaskListResponse, tonic::Status> {
+        self.client
+            .clone()
+            .reset_sticky_task_list(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn get_mutable_state(
+        &self,
+        request: cadence_proto::history::GetMutableStateRequest,
+    ) -> Result<cadence_proto::history::GetMutableStateResponse, tonic::Status> {
+        self.client
+            .clone()
+            .get_mutable_state(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn poll_mutable_state(
+        &self,
+        request: cadence_proto::history::PollMutableStateRequest,
+    ) -> Result<cadence_proto::history::PollMutableStateResponse, tonic::Status> {
+        self.client
+            .clone()
+            .poll_mutable_state(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    /// Requeue the workflow tasks after Frontend's explicit refresh operation.
+    /// Go sends this through the History client with the caller's normal RPC
+    /// timeout and cadence-history identity metadata.
+    pub async fn refresh_workflow_tasks(
+        &self,
+        request: cadence_proto::history::RefreshWorkflowTasksRequest,
+    ) -> Result<cadence_proto::history::RefreshWorkflowTasksResponse, tonic::Status> {
+        self.client
+            .clone()
+            .refresh_workflow_tasks(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    /// Expose the History diagnostic operation used by workflow diagnostics
+    /// and administrative callers through the typed History boundary.
+    pub async fn describe_mutable_state(
+        &self,
+        request: cadence_proto::history::DescribeMutableStateRequest,
+    ) -> Result<cadence_proto::history::DescribeMutableStateResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_mutable_state(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn respond_decision_task_completed(
+        &self,
+        request: cadence_proto::history::RespondDecisionTaskCompletedRequest,
+    ) -> Result<cadence_proto::history::RespondDecisionTaskCompletedResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_decision_task_completed(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn respond_decision_task_failed(
+        &self,
+        request: cadence_proto::history::RespondDecisionTaskFailedRequest,
+    ) -> Result<cadence_proto::history::RespondDecisionTaskFailedResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_decision_task_failed(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn respond_activity_task_completed(
+        &self,
+        request: cadence_proto::history::RespondActivityTaskCompletedRequest,
+    ) -> Result<cadence_proto::history::RespondActivityTaskCompletedResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_activity_task_completed(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn respond_activity_task_failed(
+        &self,
+        request: cadence_proto::history::RespondActivityTaskFailedRequest,
+    ) -> Result<cadence_proto::history::RespondActivityTaskFailedResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_activity_task_failed(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn respond_activity_task_canceled(
+        &self,
+        request: cadence_proto::history::RespondActivityTaskCanceledRequest,
+    ) -> Result<cadence_proto::history::RespondActivityTaskCanceledResponse, tonic::Status> {
+        self.client
+            .clone()
+            .respond_activity_task_canceled(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn record_activity_task_heartbeat(
+        &self,
+        request: cadence_proto::history::RecordActivityTaskHeartbeatRequest,
+    ) -> Result<cadence_proto::history::RecordActivityTaskHeartbeatResponse, tonic::Status> {
+        self.client
+            .clone()
+            .record_activity_task_heartbeat(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
 }
 
 /// Build a lazy gRPC channel using the configured Go `services.history.rpc`
@@ -101,4 +321,27 @@ pub fn generated(channel: Channel, max_message_size: usize) -> HistoryApiClient<
     HistoryApiClient::new(channel)
         .max_decoding_message_size(max_message_size)
         .max_encoding_message_size(max_message_size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn generated_history_calls_attach_go_caller_metadata_and_timeout() {
+        let channel =
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:7233").connect_lazy();
+        let client = HistoryClient::from_channel(channel, 1024);
+        let request = client.request(());
+        assert_eq!(
+            request.metadata().get("rpc-service").unwrap(),
+            "cadence-history"
+        );
+        assert_eq!(
+            request.metadata().get("rpc-caller").unwrap(),
+            "cadence-frontend"
+        );
+        assert_eq!(request.metadata().get("rpc-encoding").unwrap(), "proto");
+        assert_eq!(client.rpc_timeout, DEFAULT_HISTORY_RPC_TIMEOUT);
+    }
 }

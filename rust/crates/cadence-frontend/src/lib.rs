@@ -10,6 +10,8 @@ pub mod handler_admin;
 pub mod handler_domain;
 pub mod handler_schedule;
 pub mod handler_workflow;
+pub mod handler_workflow_async;
+pub mod handler_workflow_history;
 pub mod history_client;
 pub mod lifecycle;
 pub mod matching_client;
