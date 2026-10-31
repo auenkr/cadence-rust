@@ -330,3 +330,36 @@ these fixes; no green CI evidence covers the current changes.
   page-size and visibility-query code. No newer Rust source changes are pushed
   after that head; subsequent work should wait for this run or dispatch a fresh
   package workflow.
+
+## User-directed rebase continuation — 2026-10-31
+
+- Fetched `origin/frontend-core` at `4fe22eea2` and rebased
+  `t3/frontend-workflow-api` onto it. Rebase completed without conflicts and
+  preserved the existing wrapper/handler commits. Rewritten branch pushed with
+  `--force-with-lease`; latest workflow-api head before the shutdown follow-up
+  was `2abc9cc3f6295c6a503a353bc910bcb3bcb7797e`.
+- Added `Handler::stop` and atomic shutdown gating in the workflow dispatcher,
+  mirroring `WorkflowHandler.Stop` and the `validate.ErrShuttingDown` message.
+  Health remains callable during drain. A unit test covers rejection and the
+  Health exception. Source-only `git diff --check` passed; Cargo was not run on
+  this host.
+- Follow-up commit `4d433e93aee93112d3f6c26a7609fe73729489fd` was pushed.
+  CI run
+  [41179864590](https://github.com/auenkr/cadence-rust/actions/runs/41179864590)
+  targets this exact head; latest observed state: pending. Older run
+  [41179724089](https://github.com/auenkr/cadence-rust/actions/runs/41179724089)
+  targets `2abc9cc3f6295c6a503a353bc910bcb3bcb7797e` and was still in progress
+  when superseded; it is not evidence for the latest source.
+- Remaining parity gaps are unchanged and material: workflow calls still use
+  the generic `WorkflowBackend::invoke` seam rather than Go-equivalent typed
+  History/Matching/visibility/archival/async calls; list/task-list bodies only
+  validate and forward public requests; runtime does not register this handler
+  or install its wrappers. Needed interfaces include domain lookup/config,
+  typed History and Matching method adapters, visibility persistence/archive
+  operations, async ThriftRW producer and request context metadata. The
+  parallel `frontend-core2` branch currently has a later tip than the already
+  incorporated validator/client changes; do not merge blindly, coordinate if
+  API interfaces change.
+- This is progress evidence, not a parity completion claim. Continue porting
+  service-specific request/response behavior and its Go-mirroring tests, then
+  rerun exact-head package CI and record the run URL, head SHA and conclusion.

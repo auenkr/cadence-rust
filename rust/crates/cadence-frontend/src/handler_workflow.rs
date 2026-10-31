@@ -12,7 +12,7 @@ use cadence_api::{service_types, tasks};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -57,6 +57,32 @@ pub enum WorkflowOperation {
     ResetStickyTaskList,
     RefreshWorkflowTasks,
     GetClusterInfo,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum HealthStatus {
+    Ok = 1,
+    WarmingUp = 2,
+    ShuttingDown = 3,
+}
+
+impl HealthStatus {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::WarmingUp => "warming up",
+            Self::ShuttingDown => "shutting down",
+        }
+    }
+
+    fn from_byte(value: u8) -> Self {
+        match value {
+            1 => Self::Ok,
+            3 => Self::ShuttingDown,
+            _ => Self::WarmingUp,
+        }
+    }
 }
 
 impl WorkflowOperation {
@@ -215,6 +241,7 @@ pub struct Handler<B> {
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
     shutting_down: Arc<AtomicBool>,
+    health_status: Arc<AtomicU8>,
 }
 
 /// Caller metadata carried by the transport into the same wrapper layers that
@@ -269,6 +296,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
+            health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
     }
 
@@ -287,6 +315,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
+            health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
     }
 
@@ -310,6 +339,7 @@ impl<B: WorkflowBackend> Handler<B> {
             rate_limit: None,
             visibility_query_validator: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
+            health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
     }
 
@@ -376,6 +406,25 @@ impl<B: WorkflowBackend> Handler<B> {
     /// peers can observe service state during the drain window.
     pub fn stop(&self) {
         self.shutting_down.store(true, Ordering::Release);
+    }
+
+    /// Start the API health warmup timer. Like Go, the timer only promotes a
+    /// handler that is still in its initial warming state.
+    pub fn start(&self, warmup_duration: std::time::Duration) {
+        let health_status = Arc::clone(&self.health_status);
+        tokio::spawn(async move {
+            tokio::time::sleep(warmup_duration).await;
+            let _ = health_status.compare_exchange(
+                HealthStatus::WarmingUp as u8,
+                HealthStatus::Ok as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        });
+    }
+
+    pub fn update_health_status(&self, status: HealthStatus) {
+        self.health_status.store(status as u8, Ordering::Release);
     }
 
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
@@ -465,6 +514,13 @@ impl<B: WorkflowBackend> Handler<B> {
             return Err(CadenceError::Internal(
                 cadence_api::errors::InternalServiceError::new("Shutting down"),
             ));
+        }
+        if operation == WorkflowOperation::Health {
+            let status = HealthStatus::from_byte(self.health_status.load(Ordering::Acquire));
+            return Ok(serde_json::json!({
+                "ok": status == HealthStatus::Ok,
+                "msg": status.message()
+            }));
         }
         let request = self.validate_request(operation, request)?;
         self.backend
@@ -1080,11 +1136,33 @@ mod tests {
         assert!(handler
             .dispatch("Health", serde_json::Value::Null)
             .await
-            .is_ok());
-        assert_eq!(
-            handler.backend.0.lock().unwrap().as_slice(),
-            &[WorkflowOperation::Health]
-        );
+            .unwrap()["ok"]
+            .as_bool()
+            == Some(false));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn health_warmup_promotes_only_if_status_stays_warming() {
+        let handler = Handler::new(FakeBackend::default());
+        handler.start(std::time::Duration::from_millis(1));
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let health = handler
+            .dispatch("Health", Value::Null)
+            .await
+            .unwrap();
+        assert_eq!(health["ok"], true);
+        assert_eq!(health["msg"], "ok");
+
+        handler.update_health_status(HealthStatus::ShuttingDown);
+        handler.start(std::time::Duration::ZERO);
+        tokio::task::yield_now().await;
+        let health = handler
+            .dispatch("Health", Value::Null)
+            .await
+            .unwrap();
+        assert_eq!(health["ok"], false);
+        assert_eq!(health["msg"], "shutting down");
     }
 
     #[tokio::test]
