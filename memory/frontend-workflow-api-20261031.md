@@ -754,7 +754,12 @@ Frontend parity until these are implemented and validated.
   Matching client request methods described below.
 - Added typed Matching client calls for both long-poll RPCs and explicit
   `CancelOutstandingPoll`, with builders for Go's internal request envelopes
-  and a constructor unit test. These edits are uncommitted and unvalidated.
+  and a constructor unit test. CI run
+  [41189834515](https://github.com/auenkr/cadence-rust/actions/runs/41189834515)
+  checked exact SHA `1a66c0e0645fd08f7bc3e59bd98f484596e76bea` and failed at
+  Clippy before tests because tonic `Status` triggers `result_large_err` on
+  generated RPC client wrappers. The narrow lint allowance is the current
+  uncommitted fix; package CI must be rerun.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
   `Handler` or compose its wrappers; poll cancellation/health-wait and response

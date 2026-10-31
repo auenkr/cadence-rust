@@ -1,4 +1,6 @@
 //! Generated outbound gRPC client for the original Go Matching service.
+#![allow(clippy::result_large_err)]
+
 use cadence_proto::matching::matching_api_client::MatchingApiClient;
 use cadence_service_core::{
     config::TlsConfig,
