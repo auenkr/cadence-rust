@@ -278,12 +278,12 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
 
 ## Continuation — Frontend lifecycle and validator audit
 
-- Moved shutdown of Frontend-owned background loops to the Go-equivalent
-  `WorkflowHandler.Stop` / `AdminHandler.Stop` point: after health failure
-  detection and admission stop, before the quota-stop hook and final request
-  drain. The loops are now signalled and joined before the final drain window;
-  listener/resource teardown remains after that window. This applies to the
-  Frontend lifecycle path in the shared launcher.
+- The first lifecycle adjustment moved resource worker joins ahead of the
+  request-drain window. A source comparison with Go's `WorkflowHandler.Stop`
+  and `AdminHandler.Stop` showed that Rust timer/snapshot workers belong to
+  resource shutdown, after the drain. That adjustment was reverted; only
+  request admission stops before the drain, and resource-owned workers are
+  signalled/joined after it. This exact corrected head needs fresh CI.
 - Audited Go's 15 table-driven `request_validator_test.go` groups (88 named
   case rows) against Rust tests. All Go rows map to semantic cases in the Rust
   suite; the test case names are grouped by behavior rather than copied
@@ -316,9 +316,13 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
 - The lifecycle path still has no actual global quota collection instances to
   stop, so its Go limiter-stop slot is empty. The stop-order correction above
   does not close the missing production persistence or quota-owner gaps.
-- Exact-head CI for this continuation is pending; dispatch after pushing and
-  record the run URL, head SHA, and conclusion here. Cargo remains prohibited
-  locally.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41185490422 was
+  dispatched for the intermediate, now superseded lifecycle ordering at
+  `f03448dc44c26a0c116e661b658b4db0dabe80ec`; it was still in progress when
+  corrected. Do not use its result as validation of the corrected code.
+- Exact-head CI for the corrected lifecycle path is pending; dispatch after
+  pushing and record its run URL, head SHA, and conclusion here. Cargo remains
+  prohibited locally.
 
 ## Exact-head follow-up — 2026-10-31
 

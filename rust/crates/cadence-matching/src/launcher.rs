@@ -1960,6 +1960,7 @@ async fn run_with_lifecycle(
                 };
                 let health_state = state.clone();
                 let handler_state = state.clone();
+                let resource_state = state.clone();
                 cadence_service_core::frontend_lifecycle::shutdown(
                     shutdown_drain,
                     move || async move {
@@ -1971,20 +1972,17 @@ async fn run_with_lifecycle(
                         handler_state
                             .frontend_accepting
                             .store(false, std::sync::atomic::Ordering::Release);
-                        // Go calls WorkflowHandler.Stop and AdminHandler.Stop
-                        // before stopping quota collections and opening the
-                        // final request-drain window. These are the Rust
-                        // Frontend service-owned handler loops; signal and
-                        // join them at the same lifecycle point.
-                        stop_background_workers(&handler_state, snapshot_task, timer_task).await;
                     },
                     // Global quota collections are not constructed by the
                     // current Rust Frontend runtime. Keep the Go hook slot
                     // explicit until their owners are wired here.
                     || async {},
-                    // Listener/resource tasks are forcefully torn down after
-                    // the request-drain window below, as Go Resource.Stop is.
-                    || async {},
+                    move || async move {
+                        // Go closes the Frontend stop channel and stops its
+                        // resource-owned timer/admin workers after the final
+                        // request-drain window.
+                        stop_background_workers(&resource_state, snapshot_task, timer_task).await;
+                    },
                 )
                 .await;
             } else {
