@@ -35,6 +35,11 @@
   replication field and any failover timeout, including zero/negative values.
 - Completed the previously unterminated domain unit-test module and added
   cases for those request-shape rules. This commit still needs CI verification.
+- Schedule `CreateSchedule` now returns Go's distinct missing-action error
+  before checking the action's `StartWorkflow` fields. Added an
+  `UpdateSchedule` validator for Go's first-error order, empty-update check,
+  cron/time-range checks, complete replacement action, policy validation, and
+  scheduler-reserved search-attribute keys.
 
 ## CI evidence
 
