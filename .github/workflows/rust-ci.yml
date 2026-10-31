@@ -434,6 +434,7 @@ jobs:
             crates/cadence-worker/src/indexer/fields.rs
             crates/cadence-worker/src/scheduler.rs
             crates/cadence-worker/src/scheduler/backfill.rs
+            crates/cadence-worker/src/scheduler/policy.rs
           )
           rustfmt --edition 2021 --config skip_children=true "${files[@]}"
           git -C "$GITHUB_WORKSPACE" diff --binary -- "${files[@]/#/rust/}" > "$RUNNER_TEMP/worker-format.patch"
