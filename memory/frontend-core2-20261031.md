@@ -593,3 +593,28 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   mutation operations and Frontend wiring remain outstanding.
 - Exact-head `cadence-persistence` CI is required for this encoder/test before
   proceeding. No Cargo or rustfmt command was run locally.
+
+## Follow-up after domain encoder validation
+
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41187612484
+  validated `e9664c5b6f5ca3f64a7c7f462ac63419b61caa39` and concluded
+  `success`. `cadence-persistence` formatting, Clippy and tests passed, including
+  the SQL domain metadata encoder round-trip. This validates only the encoder
+  groundwork; it does not implement a production domain manager.
+- Added the missing Go-shaped successful Frontend failover validation rows:
+  active-passive, active-active, graceful timeout within range, and the maximum
+  timeout boundary, plus both active-active and active-passive lockdown rows.
+  These complement the existing nil/domain/missing-cluster/zero/negative/over-
+  maximum cases. Exact-head Frontend CI is pending.
+- The production persistence request is still open. The encoder does not supply
+  write-capable SQL/Cassandra domain or metadata managers, nor configured
+  visibility, history or execution managers. Frontend operation state still
+  routes to in-memory stores. The current matching store selector only opens
+  Matching task and metadata-source adapters.
+- Lifecycle shutdown currently implements Go's health → failure-detection wait
+  → reject new requests → rate-limiter hook → request-drain wait → resource
+  stop order in the shared launcher. The request-admission gate covers the
+  shared HTTP/gRPC/TChannel surface, but there are no Go-equivalent global
+  quota-collection owners to stop; admin and workflow handler stop calls are
+  represented by the shared admission gate rather than independently owned
+  handler lifecycle objects.

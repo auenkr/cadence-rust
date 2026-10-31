@@ -1761,4 +1761,74 @@ mod tests {
             "FailoverTimeoutInSeconds 600 exceeds the maximum allowed 300"
         );
     }
+
+    #[test]
+    fn go_failover_domain_table_success_and_lockdown_rows() {
+        let validator = RequestValidator::default();
+        let active_active = cadence_api::types::ActiveClusters {
+            active_clusters_by_cluster_attribute: Some(std::collections::HashMap::from([(
+                "region".to_string(),
+                cadence_api::types::ClusterAttributeScope {
+                    cluster_attributes: Some(std::collections::HashMap::from([(
+                        "region0".to_string(),
+                        cadence_api::types::ActiveClusterInfo {
+                            active_cluster_name: "cluster0".into(),
+                            failover_version: 1,
+                        },
+                    )])),
+                },
+            )])),
+        };
+        for request in [
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                ..Default::default()
+            },
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                active_clusters: Some(active_active.clone()),
+                ..Default::default()
+            },
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                failover_timeout_in_seconds: Some(120),
+                ..Default::default()
+            },
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                failover_timeout_in_seconds: Some(60),
+                ..Default::default()
+            },
+        ] {
+            assert!(validator
+                .validate_failover_domain_request(Some(&request))
+                .is_ok());
+        }
+
+        let mut lockdown = validator;
+        lockdown.config.lockdown = true;
+        for request in [
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                ..Default::default()
+            },
+            FailoverDomainRequest {
+                domain_name: "domain".into(),
+                active_clusters: Some(active_active),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                lockdown
+                    .validate_failover_domain_request(Some(&request))
+                    .unwrap_err()
+                    .message,
+                "Domain is not accepting fail overs at this time due to lockdown."
+            );
+        }
+    }
 }
