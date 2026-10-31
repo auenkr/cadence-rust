@@ -52,6 +52,24 @@ pub fn canonical_run_id(value: &str) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+/// Validate the in-memory execution store's opaque continuation cursor before
+/// it reaches the read path. A bad cursor must not silently restart at offset
+/// zero, which would return duplicate history pages.
+pub fn validate_persistence_token(token: &[u8]) -> Result<()> {
+    if token.is_empty() {
+        return Ok(());
+    }
+    let valid = std::str::from_utf8(token)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some();
+    if valid {
+        Ok(())
+    } else {
+        Err(BadRequestError::new("Invalid pagination token."))
+    }
+}
+
 pub fn select_history<'a>(
     request: &mut Request,
     histories: &'a VersionHistories,
@@ -181,5 +199,17 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(validate_request(&invalid).unwrap_err().message, "Invalid RunID.");
+    }
+
+    #[test]
+    fn raw_history_rejects_invalid_persistence_cursors_instead_of_restarting() {
+        assert!(validate_persistence_token(b"").is_ok());
+        assert!(validate_persistence_token(b"12").is_ok());
+        for token in [b"offset".as_slice(), b"-1", &[0xff]] {
+            assert_eq!(
+                validate_persistence_token(token).unwrap_err().message,
+                "Invalid pagination token."
+            );
+        }
     }
 }

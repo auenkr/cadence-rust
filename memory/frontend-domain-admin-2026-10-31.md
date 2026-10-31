@@ -992,3 +992,27 @@ migration forward.
 - Added a shared queue persistence contract and bound the MySQL, PostgreSQL, and Cassandra Go-schema adapters to it. `PersistedFrontendDomainManager` now publishes encoded create/update/delete tasks after successful persistence mutations, only for global domains; failover/update and deprecation publish Update tasks. This mirrors Go's post-mutation transmission call and its error propagation. This producer connection is not yet CI-verified or wired to Admin reads. No local Cargo command ran; the latest pushed CI [41201734019](https://github.com/auenkr/cadence-rust/actions/runs/41201734019) targets `995c71ec50b14d0dff671c7027106bfd923d676d` and was still in progress before these edits.
 - Source audit of `go/idls/thrift/replicator.thrift` found the new task envelope converter used incorrect wrapper field IDs (it placed sourceTaskId/domainTaskAttributes at 20/30). Corrected them to the Go IDL IDs 11/20 and added ThriftRW decoding for domain replication tasks and an exact field-ID round trip assertion. This correction is necessary for SQL/Cassandra queue interoperability. `git diff --check` passes; CI has not yet validated it.
 - Added the Go-shaped `ReplicationMessages`/`GetDomainReplicationMessagesResponse` API model and Thrift converters, then replaced the disabled queue response with durable cursor read, ThriftRW decode, ack-based default cursor selection, and warning-only ack update across JSON and YARPC handler paths. Queue reads currently return `hasMore=false` and use a fixed batch of 100, matching the Go constant; only domain task payloads are modeled. Full DLQ support and exact Go decoder/error coverage remain open. This increment has not been CI-validated; no local Cargo commands were run.
+
+## Rebase to current core2 and raw-history cursor repair — 2026-10-31
+
+- Fetched and rebased the 124 Frontend commits onto current `origin/frontend-core2`
+  at `4821a2347a27018dcf28a311e0d4ce1560392099`. The rebase completed without
+  conflicts. Force-pushed branch head `6842527a0cdf012a8e8e97bbc9028a1ef9bc6159`.
+- Replaced stale pre-rebase run [41202143737](https://github.com/auenkr/cadence-rust/actions/runs/41202143737)
+  with [41202217880](https://github.com/auenkr/cadence-rust/actions/runs/41202217880)
+  for exact head `6842527a0cdf012a8e8e97bbc9028a1ef9bc6159`; it was in progress
+  at the last check.
+- Continued the raw-history pagination audit against Go's `ReadRawHistoryBranch`
+  contract. Rust's in-memory execution store treated any malformed internal
+  cursor as offset zero, silently replaying the first page. Added validation
+  before the read and cases for valid, malformed, negative and non-UTF-8 cursor
+  bytes. This preserves valid cursors while reporting `Invalid pagination
+  token.` rather than duplicating history. Source change is pending exact-head
+  CI; no local Cargo command or test was run.
+- Open blockers: durable domain DLQ operations and Admin RPC wiring; raw-history
+  parity for all branch/token encodings and Go History-backed reads; schedule
+  handlers still mutate Rust schedule persistence rather than scheduler
+  workflows; `DescribeCluster` still reports a static single-host membership
+  view; full Admin RPC authorization, dynamic-config backing, metrics/retries,
+  and mixed Go/Rust failure, restart and recovery validation. No Frontend parity
+  claim is made.
