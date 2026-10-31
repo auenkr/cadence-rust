@@ -1267,7 +1267,6 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
     let req: CreateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     schedule_gate(state, &req.domain)?;
-    let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1284,12 +1283,18 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
     validate_schedule_cron_thrift(&spec.cron_expression)?;
     validation::validate_schedule_spec(Some(spec))
         .map_err(|e| AppError::bad_request(e.message))?;
+    if req.action.is_none() {
+        return Err(AppError::bad_request(
+            "Action is not set on request.".to_string(),
+        ));
+    }
     validation::validate_schedule_action_complete(req.action.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_policies(req.policies.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .create_schedule(&req.domain, &req)
         .map(|id| wrap_success(&CreateScheduleResponse { schedule_id: id }))
@@ -1312,7 +1317,6 @@ async fn handle_describe_schedule(state: &AppState, body: &Struct) -> HandlerRes
     use cadence_api::schedule::DescribeScheduleRequest;
     let req: DescribeScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1329,7 +1333,6 @@ async fn handle_list_schedules(state: &AppState, body: &Struct) -> HandlerResult
     use cadence_api::schedule::{ListSchedulesRequest, ListSchedulesResponse};
     let req: ListSchedulesRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     let page_size = if req.page_size <= 0 { 10 } else { req.page_size as usize };
     let (schedules, next_page_token) =
@@ -1344,7 +1347,6 @@ async fn handle_delete_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::schedule::{DeleteScheduleRequest, DeleteScheduleResponse};
     let req: DeleteScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1361,7 +1363,6 @@ async fn handle_pause_schedule(state: &AppState, body: &Struct) -> HandlerResult
     use cadence_api::schedule::{PauseScheduleRequest, PauseScheduleResponse};
     let req: PauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1383,7 +1384,6 @@ async fn handle_unpause_schedule(state: &AppState, body: &Struct) -> HandlerResu
     use cadence_api::schedule::{UnpauseScheduleRequest, UnpauseScheduleResponse};
     let req: UnpauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1400,7 +1400,6 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct) -> HandlerRes
     use cadence_api::schedule::{BackfillScheduleRequest, BackfillScheduleResponse};
     let req: BackfillScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1448,8 +1447,6 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::validation;
     let req: UpdateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
-    let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1465,6 +1462,8 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
                 .to_string(),
         ));
     }
+    validation::validate_schedule_policies(req.policies.as_ref())
+        .map_err(|e| AppError::bad_request(e.message))?;
     if let Some(spec) = req.spec.as_ref() {
         if !spec.cron_expression.is_empty() {
             validate_schedule_cron_thrift(&spec.cron_expression)?;
@@ -1476,10 +1475,9 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
         validation::validate_schedule_action_complete(req.action.as_ref())
             .map_err(|e| AppError::bad_request(e.message))?;
     }
-    validation::validate_schedule_policies(req.policies.as_ref())
-        .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .update_schedule(&req)
         .map(|()| wrap_success(&UpdateScheduleResponse {}))
