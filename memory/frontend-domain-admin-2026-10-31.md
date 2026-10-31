@@ -794,3 +794,8 @@ migration forward.
   persistence yet. Admin DLQ/history, live membership, scheduler workflow
   wiring, RPC lifecycle/metrics, and mixed Go/Rust failure/restart/recovery
   validation remain open.
+- `origin/frontend-core2` advanced again to `965cd1213` while CI was running.
+  Rebased the branch onto that tip. The prior CI run [41196886047](https://github.com/auenkr/cadence-rust/actions/runs/41196886047)
+  targets pre-second-rebase source `84f03b8e679f02516a72513abda2ceced8a64b2a`
+  and is not evidence for the rebased head. Push and dispatch a fresh exact-head
+  run before relying on the source.
