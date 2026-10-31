@@ -1991,6 +1991,18 @@ mod tests {
                 .unwrap(),
             8
         );
+        let stale_uuid = uuid::Uuid::from_u128(0x5678);
+        let mut stale = metadata.clone();
+        stale.info.name = "stale-domain".into();
+        stale.info.uuid = stale_uuid.to_string();
+        assert!(crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
+            &store, &stale, 7,
+        )
+        .is_err());
+        assert!(matches!(
+            store.get_domain(None, Some(&stale_uuid.to_string())),
+            Err(MatchingDomainMetadataError::NotFound(_))
+        ));
         let mut persisted = store.get_domain(None, Some(&uuid.to_string())).unwrap();
         persisted.info.description = "updated".into();
         persisted.notification_version = 8;
