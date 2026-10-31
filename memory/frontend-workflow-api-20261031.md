@@ -93,6 +93,11 @@ cache/config/metrics/archive/task-token services. Confirm the concrete owner
 interfaces before adding overlapping client or persistence code.
 
 The wrapper tests and new handler tests have not been run locally (Cargo is
-forbidden on the dev host). `git diff --check` is source-only. A fresh
-`rust-ci.yml` dispatch is required after this implementation checkpoint; no
-green CI evidence currently covers these uncommitted changes.
+forbidden on the dev host). `git diff --check` is source-only. CI run
+[41174711275](https://github.com/auenkr/cadence-rust/actions/runs/41174711275)
+tested SHA `48b30c7d16c76d325b3e318ab5eb1771f205999d` and failed in Clippy
+because the three skeleton domain/admin/schedule handlers still import the
+compatibility `unimplemented_operation` helper and a test backend used
+`RefCell` despite the `Sync` contract. Both compile errors were fixed in the
+current working tree. A fresh `rust-ci.yml` dispatch is required after pushing
+these fixes; no green CI evidence covers the current changes.

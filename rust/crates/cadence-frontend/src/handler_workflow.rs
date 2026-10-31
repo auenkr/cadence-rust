@@ -156,6 +156,15 @@ pub trait WorkflowBackend: Send + Sync {
     ) -> Result<Value, CadenceError>;
 }
 
+/// Temporary compatibility constructor retained for the independent domain,
+/// schedule and admin skeletons. Workflow API operations use `WorkflowBackend`
+/// and do not call this stub path.
+pub fn unimplemented_operation(operation: &str) -> cadence_api::errors::InternalServiceError {
+    cadence_api::errors::InternalServiceError::new(format!(
+        "Frontend operation {operation} is not implemented"
+    ))
+}
+
 pub struct Handler<B> {
     backend: B,
 }
@@ -178,17 +187,17 @@ impl<B: WorkflowBackend> Handler<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     #[derive(Default)]
-    struct FakeBackend(RefCell<Vec<WorkflowOperation>>);
+    struct FakeBackend(Mutex<Vec<WorkflowOperation>>);
     impl WorkflowBackend for FakeBackend {
         fn invoke(
             &self,
             operation: WorkflowOperation,
             request: Value,
         ) -> Result<Value, CadenceError> {
-            self.0.borrow_mut().push(operation);
+            self.0.lock().unwrap().push(operation);
             Ok(request)
         }
     }
@@ -213,7 +222,10 @@ mod tests {
             handler.dispatch("StartWorkflowExecution", request.clone()).unwrap(),
             request
         );
-        assert_eq!(handler.backend.0.borrow().as_slice(), &[WorkflowOperation::StartWorkflowExecution]);
+        assert_eq!(
+            handler.backend.0.lock().unwrap().as_slice(),
+            &[WorkflowOperation::StartWorkflowExecution]
+        );
         assert!(handler.dispatch("NotAnApi", Value::Null).is_err());
     }
 }

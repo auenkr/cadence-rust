@@ -13,6 +13,45 @@ pub enum RequestClass {
     Async,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OperationRule {
+    pub class: RequestClass,
+    /// Several worker completion methods call `allowDomain` but deliberately
+    /// ignore the result, matching Go's generated wrapper.
+    pub reject_when_limited: bool,
+}
+
+pub fn operation_rule(operation: &str) -> Option<OperationRule> {
+    use RequestClass::{Async, User, Visibility, Worker, WorkerPoll};
+    let (class, reject_when_limited) = match operation {
+        "BackfillSchedule" | "CreateSchedule" | "CreateSemaphore" | "DeleteSchedule"
+        | "DescribeSchedule" | "DescribeTaskList" | "DescribeWorkflowExecution"
+        | "DiagnoseWorkflowExecution" | "FailoverDomain" | "GetTaskListsByDomain"
+        | "GetWorkflowExecutionHistory" | "ListSchedules" | "ListTaskListPartitions"
+        | "PauseSchedule" | "QueryWorkflow" | "RefreshWorkflowTasks"
+        | "RequestCancelWorkflowExecution" | "ResetWorkflowExecution"
+        | "RestartWorkflowExecution" | "SignalWithStartWorkflowExecution"
+        | "SignalWorkflowExecution" | "StartWorkflowExecution" | "TerminateWorkflowExecution"
+        | "UnpauseSchedule" | "UpdateSchedule" => (User, true),
+        "CountWorkflowExecutions" | "ListArchivedWorkflowExecutions"
+        | "ListClosedWorkflowExecutions" | "ListOpenWorkflowExecutions"
+        | "ListWorkflowExecutions" | "ScanWorkflowExecutions" => (Visibility, true),
+        "PollForActivityTask" | "PollForDecisionTask" => (WorkerPoll, true),
+        "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync" => (Async, true),
+        "RecordActivityTaskHeartbeat" | "RecordActivityTaskHeartbeatByID"
+        | "ResetStickyTaskList" | "RespondActivityTaskCanceled"
+        | "RespondActivityTaskCanceledByID" | "RespondActivityTaskCompleted"
+        | "RespondActivityTaskCompletedByID" | "RespondActivityTaskFailed"
+        | "RespondActivityTaskFailedByID" | "RespondDecisionTaskCompleted"
+        | "RespondDecisionTaskFailed" | "RespondQueryTaskCompleted" => (Worker, false),
+        _ => return None,
+    };
+    Some(OperationRule {
+        class,
+        reject_when_limited,
+    })
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct QuotaInfo {
     pub domain: String,
@@ -181,5 +220,14 @@ mod tests {
     fn sticky_poll_is_charged_to_base_task_list() {
         assert_eq!(task_list_quota_name("sticky-name", "base", 1), "base");
         assert_eq!(task_list_quota_name("normal", "", 0), "normal");
+    }
+
+    #[test]
+    fn operation_categories_and_ignored_worker_limits_match_generated_go_wrapper() {
+        assert_eq!(operation_rule("PollForActivityTask").unwrap().class, RequestClass::WorkerPoll);
+        assert!(operation_rule("StartWorkflowExecutionAsync").unwrap().reject_when_limited);
+        assert!(!operation_rule("RespondActivityTaskCompleted").unwrap().reject_when_limited);
+        assert_eq!(operation_rule("CountWorkflowExecutions").unwrap().class, RequestClass::Visibility);
+        assert!(operation_rule("RegisterDomain").is_none());
     }
 }

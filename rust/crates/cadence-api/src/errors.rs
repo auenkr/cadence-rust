@@ -260,6 +260,14 @@ pub enum CadenceError {
     #[error(transparent)]
     WorkflowAlreadyStarted(#[from] WorkflowExecutionAlreadyStartedError),
     #[error(transparent)]
+    WorkflowAlreadyCompleted(#[from] WorkflowExecutionAlreadyCompletedError),
+    #[error(transparent)]
+    DomainAlreadyExists(#[from] DomainAlreadyExistsError),
+    #[error(transparent)]
+    CancellationAlreadyRequested(#[from] CancellationAlreadyRequestedError),
+    #[error(transparent)]
+    QueryFailed(#[from] QueryFailedError),
+    #[error(transparent)]
     ServiceBusy(#[from] ServiceBusyError),
     #[error(transparent)]
     LimitExceeded(#[from] LimitExceededError),
