@@ -7,11 +7,10 @@ use cadence_api::{
         CountWorkflowExecutionsRequest, DeleteDomainRequest, DeprecateDomainRequest,
         DescribeDomainRequest, ListArchivedWorkflowExecutionsRequest,
         ListClosedWorkflowExecutionsRequest, ListOpenWorkflowExecutionsRequest,
-        ListWorkflowExecutionsRequest, UpdateDomainRequest,
+        ListWorkflowExecutionsRequest, ResetStickyTaskListRequest, UpdateDomainRequest,
     },
     tasks::{
         DescribeTaskListRequest, GetTaskListsByDomainRequest, ListTaskListPartitionsRequest,
-        ResetStickyTaskListRequest,
     },
     types::{FailoverDomainRequest, RefreshWorkflowTasksRequest, RegisterDomainRequest},
 };

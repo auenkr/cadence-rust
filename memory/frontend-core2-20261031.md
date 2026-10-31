@@ -51,6 +51,13 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   a temporary selected JSON value. Changed the fallback path to return an
   owned string. A new table-like nil-request test now also covers all 16
   validator entry points; both changes need exact-head CI validation.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41175347808
+  validated head `e4f0ec4db8a36284d331312cf33eb11cd7d6574e` and concluded
+  `failure` during Clippy: the gRPC TLS builder returned
+  `Option<Option<ClientTls>>` when TLS config was optional, and the sticky-task
+  request was imported from the wrong API module. Flattened the optional TLS
+  result and moved the request import to `service_types`; dispatch package CI
+  again after this commit.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
