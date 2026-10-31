@@ -1982,3 +1982,7 @@ Added the wildcard invalid-value mapping; exact-head package CI is pending.
 The Thrift/YARPC `ResetQueue` and `DescribeQueue` routes now delegate to the
 configured History client, matching the JSON paths and Go Admin behavior. Exact
 package CI is pending for this source change.
+
+Merged the latest `origin/frontend-core2` update at `271fdab4e` into the
+integration branch, preserving its shutdown idempotency change. The current
+integration head requires fresh package CI.

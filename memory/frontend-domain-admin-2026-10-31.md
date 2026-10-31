@@ -1236,3 +1236,8 @@ migration forward.
   History gRPC calls, including Go caller metadata, cluster-name validation,
   and History error propagation. This change is pushed for exact-head package
   CI; no local Cargo command ran.
+- Fetched a newer `origin/frontend-core2` tip (`271fdab4e`) and merged it after
+  finding it had advanced beyond the previous integration head. The merge
+  retained core2's newer shutdown idempotency lifecycle and current persistence
+  checkpoint. `origin/t3/frontend-workflow-api` and `origin/master` remain
+  ancestors. The queue change and merge need exact-head CI together.
