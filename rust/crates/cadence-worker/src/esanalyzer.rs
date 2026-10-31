@@ -1,4 +1,7 @@
-//! ES analyzer system workflow names from Go `esanalyzer`.
+//! ES analyzer system workflow names and query templates from Go `esanalyzer`.
+
+pub mod queries;
+
 pub const TASK_LIST: &str = "cadence-sys-es-analyzer-tasklist";
 pub const WORKFLOW_TYPE: &str = "cadence-sys-es-analyzer-workflow";
 pub const EMIT_WORKFLOW_VERSION_METRICS_ACTIVITY: &str =
