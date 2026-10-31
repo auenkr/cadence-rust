@@ -30,7 +30,9 @@ pub fn validate_domain_name(name: &str) -> Result<(), BadRequestError> {
     if !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         Ok(())
     } else {
-        Err(bad("Domain name can only include alphanumeric and dash characters."))
+        Err(bad(
+            "Domain name can only include alphanumeric and dash characters.",
+        ))
     }
 }
 
@@ -81,7 +83,11 @@ pub fn validate_replication_config(
         validate_cluster(&cluster.cluster_name, enabled_clusters)?;
     }
     validate_cluster(&config.active_cluster_name, enabled_clusters)?;
-    let names: BTreeSet<_> = config.clusters.iter().map(|c| c.cluster_name.as_str()).collect();
+    let names: BTreeSet<_> = config
+        .clusters
+        .iter()
+        .map(|c| c.cluster_name.as_str())
+        .collect();
     if !names.contains(config.active_cluster_name.as_str()) {
         return Err(bad("Active cluster is not contained in all clusters."));
     }
@@ -105,15 +111,26 @@ fn validate_active_clusters(
         return Ok(());
     };
     for scope in scopes.values() {
-        for attr in scope.cluster_attributes.as_ref().into_iter().flat_map(|m| m.values()) {
+        for attr in scope
+            .cluster_attributes
+            .as_ref()
+            .into_iter()
+            .flat_map(|m| m.values())
+        {
             validate_cluster(&attr.active_cluster_name, enabled).map_err(|_| {
-                bad(format!("Invalid active cluster name: {}", attr.active_cluster_name))
+                bad(format!(
+                    "Invalid active cluster name: {}",
+                    attr.active_cluster_name
+                ))
             })?;
             if !domain_clusters.contains(attr.active_cluster_name.as_str()) {
                 return Err(bad("Active cluster is not contained in all clusters."));
             }
             if attr.failover_version < 0 {
-                return Err(bad(format!("invalid failover version: {}", attr.failover_version)));
+                return Err(bad(format!(
+                    "invalid failover version: {}",
+                    attr.failover_version
+                )));
             }
         }
     }
@@ -126,7 +143,9 @@ pub fn validate_clusters_not_removed(
 ) -> Result<(), BadRequestError> {
     let new: BTreeSet<_> = new.iter().map(String::as_str).collect();
     if old.iter().any(|name| !new.contains(name.as_str())) {
-        Err(bad("Cannot remove existing replicated clusters from a domain."))
+        Err(bad(
+            "Cannot remove existing replicated clusters from a domain.",
+        ))
     } else {
         Ok(())
     }
@@ -137,14 +156,20 @@ pub fn validate_clusters_not_removed(
 /// non-empty active-active attribute scope also selects the failover path.
 #[must_use]
 pub fn is_failover_request(request: &UpdateDomainRequest) -> bool {
-    request.replication_configuration.as_ref().is_some_and(|replication| {
-        replication.active_cluster_name.is_some()
-            || replication
-                .active_clusters
-                .as_ref()
-                .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
-                .is_some_and(|scopes| !scopes.is_empty())
-    }) || request.failover_timeout_in_seconds.is_some_and(|timeout| timeout > 0)
+    request
+        .replication_configuration
+        .as_ref()
+        .is_some_and(|replication| {
+            replication.active_cluster_name.is_some()
+                || replication
+                    .active_clusters
+                    .as_ref()
+                    .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+                    .is_some_and(|scopes| !scopes.is_empty())
+        })
+        || request
+            .failover_timeout_in_seconds
+            .is_some_and(|timeout| timeout > 0)
 }
 
 /// Reject mixed configuration and failover requests before the failover path
@@ -163,14 +188,15 @@ pub fn validate_update_request(request: &UpdateDomainRequest) -> Result<(), BadR
 /// of failover. Go checks presence of these fields, including a zero or
 /// negative timeout, independent of `IsAFailoverRequest`.
 pub fn validate_local_domain_update(request: &UpdateDomainRequest) -> Result<(), BadRequestError> {
-    let has_replication_update = request
-        .replication_configuration
-        .as_ref()
-        .is_some_and(|replication| {
-            replication.active_cluster_name.is_some()
-                || replication.active_clusters.is_some()
-                || replication.clusters.is_some()
-        });
+    let has_replication_update =
+        request
+            .replication_configuration
+            .as_ref()
+            .is_some_and(|replication| {
+                replication.active_cluster_name.is_some()
+                    || replication.active_clusters.is_some()
+                    || replication.clusters.is_some()
+            });
     if has_replication_update || request.failover_timeout_in_seconds.is_some() {
         return Err(bad(
             "Local domains cannot perform failovers or change replication configuration",
@@ -218,7 +244,10 @@ impl std::error::Error for ArchivalTransitionError {}
 impl ArchivalState {
     #[must_use]
     pub fn never_enabled() -> Self {
-        Self { status: ArchivalStatus::Disabled, uri: String::new() }
+        Self {
+            status: ArchivalStatus::Disabled,
+            uri: String::new(),
+        }
     }
 
     /// Apply Go's state table, then invoke the matching archiver's URI validator.
@@ -243,22 +272,50 @@ impl ArchivalState {
         let has_uri = !self.uri.is_empty();
         let event_uri = !event.uri.is_empty();
         let (next, changed) = match (self.status, has_uri, event.status, event_uri) {
-            (ArchivalStatus::Enabled, true, Some(ArchivalStatus::Disabled), _) =>
-                (Self { status: ArchivalStatus::Disabled, uri: self.uri.clone() }, true),
-            (ArchivalStatus::Disabled, true, Some(ArchivalStatus::Enabled), _) =>
-                (Self { status: ArchivalStatus::Enabled, uri: self.uri.clone() }, true),
-            (ArchivalStatus::Disabled, false, Some(ArchivalStatus::Enabled), _) => (Self {
-                status: ArchivalStatus::Enabled,
-                uri: if event_uri { event.uri.clone() } else { event.default_uri.clone() },
-            }, true),
-            (ArchivalStatus::Disabled, false, Some(ArchivalStatus::Disabled), true) =>
-                (Self { status: ArchivalStatus::Disabled, uri: event.uri.clone() }, true),
+            (ArchivalStatus::Enabled, true, Some(ArchivalStatus::Disabled), _) => (
+                Self {
+                    status: ArchivalStatus::Disabled,
+                    uri: self.uri.clone(),
+                },
+                true,
+            ),
+            (ArchivalStatus::Disabled, true, Some(ArchivalStatus::Enabled), _) => (
+                Self {
+                    status: ArchivalStatus::Enabled,
+                    uri: self.uri.clone(),
+                },
+                true,
+            ),
+            (ArchivalStatus::Disabled, false, Some(ArchivalStatus::Enabled), _) => (
+                Self {
+                    status: ArchivalStatus::Enabled,
+                    uri: if event_uri {
+                        event.uri.clone()
+                    } else {
+                        event.default_uri.clone()
+                    },
+                },
+                true,
+            ),
+            (ArchivalStatus::Disabled, false, Some(ArchivalStatus::Disabled), true) => (
+                Self {
+                    status: ArchivalStatus::Disabled,
+                    uri: event.uri.clone(),
+                },
+                true,
+            ),
             (ArchivalStatus::Disabled, false, Some(ArchivalStatus::Disabled), false)
             | (ArchivalStatus::Disabled, false, None, false) => (self.clone(), false),
-            (ArchivalStatus::Disabled, false, None, true) =>
-                (Self { status: ArchivalStatus::Disabled, uri: event.uri.clone() }, true),
-            (ArchivalStatus::Enabled, true, _, _) | (ArchivalStatus::Disabled, true, _, _) =>
-                (self.clone(), false),
+            (ArchivalStatus::Disabled, false, None, true) => (
+                Self {
+                    status: ArchivalStatus::Disabled,
+                    uri: event.uri.clone(),
+                },
+                true,
+            ),
+            (ArchivalStatus::Enabled, true, _, _) | (ArchivalStatus::Disabled, true, _, _) => {
+                (self.clone(), false)
+            }
             _ => return Err(ArchivalTransitionError::CannotHandleStateChange),
         };
         if next.status == ArchivalStatus::Enabled && next.uri.is_empty() {
@@ -276,37 +333,61 @@ mod tests {
     use super::*;
 
     fn event(status: Option<ArchivalStatus>, uri: &str) -> ArchivalEvent {
-        ArchivalEvent { default_uri: "file:///default".into(), uri: uri.into(), status }
+        ArchivalEvent {
+            default_uri: "file:///default".into(),
+            uri: uri.into(),
+            status,
+        }
     }
 
     #[test]
     fn validates_domain_name_and_retention() {
         assert!(validate_domain_name("workflow-prod").is_ok());
-        assert_eq!(validate_domain_name("bad_name").unwrap_err().message,
-            "Domain name can only include alphanumeric and dash characters.");
-        assert_eq!(validate_domain_config(&DomainConfiguration::default(), 1).unwrap_err().message,
-            "A valid retention period is not set on request.");
+        assert_eq!(
+            validate_domain_name("bad_name").unwrap_err().message,
+            "Domain name can only include alphanumeric and dash characters."
+        );
+        assert_eq!(
+            validate_domain_config(&DomainConfiguration::default(), 1)
+                .unwrap_err()
+                .message,
+            "A valid retention period is not set on request."
+        );
     }
 
     #[test]
     fn archival_enable_disable_preserves_immutable_uri() {
         let validate = |_: &str| Ok(());
         let (enabled, changed) = ArchivalState::never_enabled()
-            .next_state(&event(Some(ArchivalStatus::Enabled), ""), validate).unwrap();
+            .next_state(&event(Some(ArchivalStatus::Enabled), ""), validate)
+            .unwrap();
         assert!(changed);
         assert_eq!(enabled.uri, "file:///default");
         let (disabled, changed) = enabled
-            .next_state(&event(Some(ArchivalStatus::Disabled), ""), validate).unwrap();
+            .next_state(&event(Some(ArchivalStatus::Disabled), ""), validate)
+            .unwrap();
         assert!(changed);
         assert_eq!(disabled.uri, "file:///default");
-        assert!(matches!(disabled.next_state(&event(Some(ArchivalStatus::Enabled), "file:///other"), validate),
-            Err(ArchivalTransitionError::ImmutableUri)));
+        assert!(matches!(
+            disabled.next_state(
+                &event(Some(ArchivalStatus::Enabled), "file:///other"),
+                validate
+            ),
+            Err(ArchivalTransitionError::ImmutableUri)
+        ));
     }
 
     #[test]
     fn validates_unchanged_archival_uri() {
-        let state = ArchivalState { status: ArchivalStatus::Disabled, uri: "file:///old".into() };
-        let error = state.next_state(&event(None, ""), |_| Err(BadRequestError::new("invalid URI"))).unwrap_err();
+        let state = ArchivalState {
+            status: ArchivalStatus::Disabled,
+            uri: "file:///old".into(),
+        };
+        let error = state
+            .next_state(&event(None, ""), |_| {
+                Err(BadRequestError::new("invalid URI"))
+            })
+            .unwrap_err();
         assert_eq!(error.to_string(), "invalid URI");
     }
 
@@ -344,8 +425,12 @@ mod tests {
         let config = DomainReplicationConfiguration {
             active_cluster_name: "cluster-a".into(),
             clusters: vec![
-                cadence_api::types::ClusterReplicationConfiguration { cluster_name: "cluster-a".into() },
-                cadence_api::types::ClusterReplicationConfiguration { cluster_name: "cluster-b".into() },
+                cadence_api::types::ClusterReplicationConfiguration {
+                    cluster_name: "cluster-a".into(),
+                },
+                cadence_api::types::ClusterReplicationConfiguration {
+                    cluster_name: "cluster-b".into(),
+                },
             ],
             active_clusters: Some(ActiveClusters {
                 active_clusters_by_region: None,
