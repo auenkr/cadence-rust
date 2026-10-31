@@ -277,4 +277,25 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn fixer_workflow_params_keep_go_id_acronyms_and_nil_overrides() {
+        let params = super::FixerWorkflowParams {
+            scanner_workflow_workflow_id: "scan-id".to_owned(),
+            scanner_workflow_run_id: "run-id".to_owned(),
+            fixer_workflow_config_overwrites: FixerWorkflowConfigOverrides::default(),
+        };
+        assert_eq!(
+            serde_json::to_value(params).unwrap(),
+            serde_json::json!({
+                "ScannerWorkflowWorkflowID": "scan-id",
+                "ScannerWorkflowRunID": "run-id",
+                "FixerWorkflowConfigOverwrites": {
+                    "Concurrency": null,
+                    "BlobstoreFlushThreshold": null,
+                    "ActivityBatchSize": null
+                }
+            })
+        );
+    }
 }
