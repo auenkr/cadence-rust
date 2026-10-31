@@ -9,6 +9,14 @@
   `go/config/development.yaml`, returned healthy status and search attributes.
   This is a skeleton only; full handler, validator, transport extraction and
   mixed-service parity gaps are listed in `memory/frontend-core-20261031.md`.
+- **2026-10-31 — Frontend Domain/Admin/Schedule implementation started.**
+  Branch `frontend-domain-admin` adds domain validation and archival
+  transitions, Admin dynamic-config/search attribute operations, and schedule
+  create validation/ID helpers under the Frontend crate. CI run 41172959808 was
+  dispatched before the core rebase and later handler additions, so it is stale
+  and has no recorded conclusion. See
+  `memory/frontend-domain-admin-2026-10-31.md` for scope, evidence and open
+  parity gaps. Frontend remains incomplete.
 
 - **2026-10-25 — Matching evidence checkpoint.** Active-offer mixed gate
   40157002080 succeeded on `b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`; Rust
