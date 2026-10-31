@@ -1,4 +1,15 @@
-//! Archival workflow wire names from Go `archiver`.
+//! Archival workflow wire names and limits from Go `archiver`.
+
+use std::time::Duration;
+
+pub mod request;
+pub mod util;
+pub mod workflow;
+
+/// Go `workflowStartToCloseTimeout` for the archival workflow (30 days).
+pub const WORKFLOW_START_TO_CLOSE_TIMEOUT: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// Go `workflowTaskStartToCloseTimeout` for the archival workflow.
+pub const WORKFLOW_TASK_START_TO_CLOSE_TIMEOUT: Duration = Duration::from_secs(60);
 pub const TASK_LIST: &str = "cadence-archival-tl";
 pub const WORKFLOW_TYPE: &str = "archivalWorkflow";
 pub const SIGNAL_NAME: &str = "cadence-archival-signal";
