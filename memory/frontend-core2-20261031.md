@@ -239,8 +239,13 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   source head `2f1de3f321983cc393738d69d520c708124757d1` and concluded
   `success`: Clippy, formatting, Frontend tests, and the enabled Go oracle
   steps passed. The subsequent commit `8537a4ae6615455c40ae335b3af00a718c484a56`
-  changes only this memory audit; run exact-head CI before treating that head
-  as the current validated checkpoint. No Cargo command was run locally.
+  changes only this memory audit. The follow-up added Cassandra selection
+  assertions for domain, metadata, history, and execution roles. Exact-source
+  Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41208565512 validated
+  `59b2986cb76f2a4b4defc132098ce0fce7390204` and concluded `success`:
+  Clippy, formatting, Frontend tests, and enabled Go oracle steps passed.
+  No Cargo command was run locally.
 
 ## Source pointers
 
