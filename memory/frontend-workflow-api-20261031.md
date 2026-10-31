@@ -130,6 +130,16 @@ these fixes; no green CI evidence covers the current changes.
   preflight, authorization attributes and metered tags now unwrap that request
   for Go's promoted domain/workflow/task-list fields while preserving the
   original envelope for dispatch.
+- Merged `origin/frontend-core2` at `981e17c690d108d42a2ce2a2eb0f3cba394d9de8`
+  (its package CI run
+  [41176185814](https://github.com/auenkr/cadence-rust/actions/runs/41176185814)
+  concluded `success`) to use its owned request-validator methods and generated
+  History/Matching client interfaces. List/scan/count, open/closed/archived
+  visibility, task-list, sticky-reset and refresh handlers now invoke the
+  corresponding validator entry points. Page-size defaults are copied back
+  into the original JSON request without dropping unknown SDK fields.
+- Added handler tests for list page-size mutation and unknown-field retention,
+  open-list validation, task-list validation, and rate-limit wrapper preflight.
 - CI run
   [41175955180](https://github.com/auenkr/cadence-rust/actions/runs/41175955180)
   at `a26cf95b4e110bb4a2ec5902771d4e2a7552e0b4` was cancelled when a newer

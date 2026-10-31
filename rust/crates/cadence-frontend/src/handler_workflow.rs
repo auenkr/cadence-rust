@@ -8,6 +8,7 @@
 #![allow(clippy::result_large_err)]
 
 use cadence_api::errors::{BadRequestError, CadenceError};
+use cadence_api::{service_types, tasks};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
@@ -352,7 +353,70 @@ impl<B: WorkflowBackend> Handler<B> {
                 )));
             }
         }
+        match operation {
+            WorkflowOperation::CountWorkflowExecutions => {
+                let request: service_types::CountWorkflowExecutionsRequest =
+                    parse_request(value.clone())?;
+                self.validator.validate_count_workflow_executions_request(Some(&request))?;
+            }
+            WorkflowOperation::ScanWorkflowExecutions | WorkflowOperation::ListWorkflowExecutions => {
+                let mut request: service_types::ListWorkflowExecutionsRequest =
+                    parse_request(value.clone())?;
+                self.validator.validate_list_workflow_executions_request(Some(&mut request))?;
+                set_i32_field(&mut value, "pageSize", request.page_size);
+            }
+            WorkflowOperation::ListOpenWorkflowExecutions => {
+                let mut request: service_types::ListOpenWorkflowExecutionsRequest =
+                    parse_request(value.clone())?;
+                self.validator.validate_list_open_workflow_executions_request(Some(&mut request))?;
+                set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
+            }
+            WorkflowOperation::ListClosedWorkflowExecutions => {
+                let mut request: service_types::ListClosedWorkflowExecutionsRequest =
+                    parse_request(value.clone())?;
+                self.validator.validate_list_closed_workflow_executions_request(Some(&mut request))?;
+                set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
+            }
+            WorkflowOperation::ListArchivedWorkflowExecutions => {
+                let mut request: service_types::ListArchivedWorkflowExecutionsRequest =
+                    parse_request(value.clone())?;
+                self.validator.validate_list_archived_workflow_executions_request(Some(&mut request))?;
+                set_i32_field(&mut value, "pageSize", request.page_size);
+            }
+            WorkflowOperation::DescribeTaskList => {
+                let request: tasks::DescribeTaskListRequest = parse_request(value.clone())?;
+                self.validator.validate_describe_task_list_request(Some(&request))?;
+            }
+            WorkflowOperation::ListTaskListPartitions => {
+                let request: tasks::ListTaskListPartitionsRequest = parse_request(value.clone())?;
+                self.validator.validate_list_task_list_partitions_request(Some(&request))?;
+            }
+            WorkflowOperation::GetTaskListsByDomain => {
+                let request: tasks::GetTaskListsByDomainRequest = parse_request(value.clone())?;
+                self.validator.validate_get_task_lists_by_domain_request(Some(&request))?;
+            }
+            WorkflowOperation::ResetStickyTaskList => {
+                let request: service_types::ResetStickyTaskListRequest = parse_request(value.clone())?;
+                self.validator.validate_reset_sticky_task_list_request(Some(&request))?;
+            }
+            WorkflowOperation::RefreshWorkflowTasks => {
+                let request: cadence_api::types::RefreshWorkflowTasksRequest = parse_request(value.clone())?;
+                self.validator.validate_refresh_workflow_tasks_request(Some(&request))?;
+            }
+            _ => {}
+        }
         Ok(value)
+    }
+}
+
+fn parse_request<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, CadenceError> {
+    serde_json::from_value(value)
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
+}
+
+fn set_i32_field(value: &mut Value, field: &str, number: i32) {
+    if let Some(object) = value.as_object_mut() {
+        object.insert(field.to_owned(), Value::from(number));
     }
 }
 
@@ -613,6 +677,49 @@ mod tests {
                 .to_string(),
             "Task token not set on request."
         );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn visibility_validator_defaults_page_size_without_dropping_unknown_fields() {
+        let handler = Handler::new(FakeBackend::default());
+        let response = handler
+            .dispatch(
+                "ListWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "shop",
+                    "pageSize": 0,
+                    "nextPageToken": "",
+                    "query": "WorkflowType='order'",
+                    "futureSdkField": "preserved"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response["pageSize"], 1000);
+        assert_eq!(response["futureSdkField"], "preserved");
+    }
+
+    #[tokio::test]
+    async fn visibility_and_task_list_validation_fail_before_backend() {
+        let handler = Handler::new(FakeBackend::default());
+        let filter_error = handler
+            .dispatch(
+                "ListOpenWorkflowExecutions",
+                serde_json::json!({"domain": "shop"}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(filter_error.to_string(), "StartTimeFilter is required");
+
+        let task_list_error = handler
+            .dispatch(
+                "DescribeTaskList",
+                serde_json::json!({"domain": "shop", "taskListType": 0}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(task_list_error.to_string(), "TaskList is not set on request.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }
