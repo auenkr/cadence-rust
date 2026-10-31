@@ -1913,3 +1913,14 @@ included in this helper-level slice.
 Package CI run 41173547050 caught the schedule module's undeclared direct
 `cadence-common` dependency. The crate manifest and workspace lockfile now
 declare it; run 41173868530 is validating the corrected head on Actions.
+
+## Frontend domain/admin continuation — 2026-10-31
+
+Rebased `frontend-domain-admin` onto `frontend-core2` (`be0432cc7`, containing
+`frontend-core` at `4fe22ee2a`). Rebase preserved core2 clients/validator and
+continued domain/admin source. Exact-head CI has not yet been dispatched. Audit
+found the handler `dispatch` methods remain stubs, Admin DLQ/replication queues
+return empty single-host behavior, schedules use execution-store state rather
+than scheduler workflows, and domain metadata is in-memory without replication
+publication. See `memory/frontend-domain-admin-2026-10-31.md` for detailed
+status. No Cargo ran locally; Frontend parity remains incomplete.

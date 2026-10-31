@@ -329,3 +329,30 @@ migration forward.
 - CI run [41178581328](https://github.com/auenkr/cadence-rust/actions/runs/41178581328)
   targets the current code and runs package clippy/tests with formatter enabled;
   pending at dispatch. No local Cargo command was run.
+
+## Rebase onto core2 and resumed parity audit — 2026-10-31
+
+- Rebased the domain/admin branch onto `origin/frontend-core2` at
+  `be0432cc7dcffc39469bad1d7e09b6bebc34231d`, which itself includes
+  `origin/frontend-core` at `4fe22ee2a19345553a7ddda0fea244f186ed286`.
+  Conflict resolution retained core2's History/Matching clients and request
+  validator, and preserved the domain/admin changes and Frontend drain test.
+  The branch has not yet been force-pushed after this rebase.
+- Existing in-progress package workflow [41178581328](https://github.com/auenkr/cadence-rust/actions/runs/41178581328)
+  targets pre-rebase code `c3acb7697158921807b49476640a7eab6b7afcce`;
+  run [41178553763](https://github.com/auenkr/cadence-rust/actions/runs/41178553763)
+  tests the core2 base `be0432cc7dcffc39469bad1d7e09b6bebc34231d`. Both were
+  still in progress at the audit snapshot. Neither validates the rebased head.
+- Coverage audit against Go inventories shows that helpers and shared YARPC
+  routes exist, but `cadence-frontend` handler modules still expose stub
+  `dispatch` methods. Shared `cadence-service-core` routes have partial
+  implementations, with DLQ/replication queue behavior still modeled as empty
+  single-host responses and schedules stored in the in-memory execution store
+  instead of invoking scheduler workflows. Domain metadata remains in-memory
+  and updates do not publish domain replication tasks. The full Admin method
+  inventory in `go/service/frontend/admin/handler.go` has not been ported.
+  No Frontend parity claim is warranted.
+- No Cargo command was run locally. Next: force-push the rebased branch, dispatch
+  exact-head `cadence-frontend` CI, then implement missing runtime-backed
+  methods and queue/scheduler integrations incrementally. Record each exact
+  head and CI result here; mixed Go/Rust validation is still outstanding.
