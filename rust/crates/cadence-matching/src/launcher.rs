@@ -962,8 +962,7 @@ async fn run_with_lifecycle(
                     let snapshot_domains = state.domains.clone();
                     let mut shutdown = state.background_shutdown.subscribe();
                     Some(tokio::spawn(async move {
-                        let mut interval =
-                            tokio::time::interval(std::time::Duration::from_secs(5));
+                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
                         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                         loop {
                             tokio::select! {

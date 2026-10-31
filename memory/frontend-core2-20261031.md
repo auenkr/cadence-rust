@@ -358,3 +358,34 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   It passed the workflow's Go oracles, Formatting, Clippy, Test, and Frontend
   runtime smoke steps. The audit-only commit that follows does not change Rust
   source.
+
+## Shutdown worker ownership continuation — 2026-10-31
+
+- Added the Go `stopC` equivalent after the Frontend request drain. The shared
+  launcher signals its background timer/snapshot workers and joins them before
+  listener teardown. The snapshot owner flushes development snapshots once on
+  this boundary; the timer worker exits promptly. A unit test verifies the
+  shutdown broadcast, and the existing admission test verifies readiness fails
+  before requests are rejected.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41183097444 checked
+  exact head `6d06117efff74ea22a61b5e4ca9e1237b9806344`; Go oracles passed, but
+  the run failed its changed-Matching rustfmt gate on the snapshot interval
+  line. Applied the exact one-line formatting correction locally. This run did
+  not reach Clippy or tests; dispatch fresh CI on the corrected head.
+- The 91-case request-validator matrix remains closed by fresh uncached run
+  https://github.com/auenkr/cadence-rust/actions/runs/41181338783 (head
+  `97ee38218fbf77970269d3937eb8e82199787285`, success). No validator source
+  changed afterward.
+- Production persistence remains open. Current configured startup retains the
+  Matching SQL/Cassandra task-store connection and reads Go domain metadata,
+  while `AppState` still uses `InMemoryDomainStore` and
+  `InMemoryExecutionStore`. There are no write-capable Go-compatible domain,
+  metadata, visibility, history, or execution manager adapters selected by
+  `defaultStore`/visibility-store configuration. Do not count development JSON
+  snapshots or Matching task persistence as these Frontend managers.
+- The Go service drain order still lacks separately owned Frontend workflow and
+  admin handler stop hooks and the seven global quota collection owners from
+  `service.go`. The skeleton does not currently construct those objects; full
+  parity requires adding their actual owners and lifecycle registration, not
+  empty hooks. Background worker shutdown is now covered, but this does not
+  close all lifecycle ownership.
