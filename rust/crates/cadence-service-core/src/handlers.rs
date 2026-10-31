@@ -2505,6 +2505,23 @@ async fn list_task_list_partitions(
 
 pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttributesResponse {
     let mut keys = cadence_api::search_attributes::default_indexed_keys();
+    if let Some(value) = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .get(false, "frontend.validSearchAttributes", &[])
+        .and_then(|entry| entry.value)
+    {
+        if let Ok(configured) = serde_json::from_slice::<std::collections::HashMap<String, i32>>(
+            &value.data,
+        ) {
+            keys.extend(configured.into_iter().filter_map(|(key, raw_type)| {
+                cadence_api::enums::IndexedValueType::from_i32(raw_type)
+                    .map(|value_type| (key, value_type))
+            }));
+        }
+    }
     keys.extend(
         state
             .admin
