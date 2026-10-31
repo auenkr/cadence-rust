@@ -575,3 +575,26 @@ migration forward.
 - `origin/frontend-core2` currently points to docs-only `def795959`; this branch shares its implementation base at `35e84865e`. The History client and persistence changes are in this branch's existing ancestry. No destructive rebase was done.
 - Stop condition is not met. Active blockers: Domain CRUD still uses `InMemoryDomainStore`; SQL/Cassandra domain writes, global-domain replication transmission/queue consumption and audit lifecycle are missing. Admin `DescribeCluster` synthesizes membership, search-attribute mutation does not update a real visibility index, dynamic-config updates only mutate the process overlay, and DLQ/replication/cross-cluster endpoints still lack their History/domain queue clients. Schedule CRUD still goes to the local schedule store instead of starting/signaling/querying the `cadence-scheduler` workflow. Raw history only serves the current single-branch persistence representation. RPC retry/metrics/access-control lifecycle parity and mixed Go/Rust SDK failure/restart/recovery evidence are also open.
 - Next implementation priority: build the durable Domain persistence/client path and its replication queue contract against Go `go/common/domain/handler.go` and persistence interfaces; then port remaining Admin History/domain DLQ RPCs, wire scheduler workflow start/signal/query paths, and rerun exact-head package CI after each pushed implementation chunk. Do not claim parity from this green package run.
+
+## Latest core2 refresh and durable snapshot rebinding — 2026-10-31
+
+- Fetched the moving `origin/frontend-core2` branch and rebased this branch onto
+  its latest implementation tip `f644498bf0b383ce508e06e262329ac94a9b0e5e`.
+  The new `FrontendDomainManager` boundary is now the handler-facing API;
+  conflict resolution retained that boundary along with the existing global
+  domain primary-cluster guards. The branch is based on the fetched core2 tip.
+- Added a snapshot-load fix in `cadence-matching/src/launcher.rs`: when
+  `--data-dir` replaces `AppState.domains` with the loaded snapshot, Frontend's
+  `domain_manager` now points at the same loaded store. Previously it retained
+  the pre-load empty clone, so RPC reads/writes and the periodic snapshot loop
+  could act on different domain stores. This repairs the existing embedded file
+  durability path; it does not satisfy configured SQL/Cassandra persistence.
+- Rebase checkpoint `1c673ed3af4f149dfa2514b26f60919293db3878` was pushed and
+  package CI [41192950727](https://github.com/auenkr/cadence-rust/actions/runs/41192950727)
+  started there. It was still running when the snapshot rebinding change was
+  made and will be superseded by the next exact-head run.
+- `git diff --check` passed for the snapshot rebinding change. No local Cargo,
+  formatter, or tests were run. Next: push this fix, dispatch package CI, then
+  implement a manager that commits against the configured Go SQL/Cassandra
+  domain tables. Global-domain replication queue transmission and consumption
+  remain open.

@@ -960,7 +960,16 @@ async fn run_with_lifecycle(
                 }
                 if domains_path.exists() {
                     match cadence_persistence::InMemoryDomainStore::load_from_file(domains_path) {
-                        Ok(loaded) => state.domains = loaded,
+                        Ok(loaded) => {
+                            state.domains = loaded.clone();
+                            // AppState's persistence-facing manager normally
+                            // shares the same in-memory store. Rebind it when
+                            // replacing that store from the durable snapshot,
+                            // or Frontend RPCs would keep reading the empty
+                            // pre-load instance while the snapshot loop writes
+                            // the loaded state back to disk.
+                            state.domain_manager = std::sync::Arc::new(loaded);
+                        }
                         Err(e) => eprintln!("warning: ignoring {domains_path:?}: {e}"),
                     }
                 }
