@@ -1,8 +1,11 @@
 //! Conversions mirror go/common/types/mapper/proto. Thrift enums start at
 //! zero; protobuf enums reserve zero for INVALID. Time in the current Rust
 //! engine is milliseconds; protobuf Timestamp is seconds plus nanoseconds.
+pub mod decisions;
+pub mod history;
+
 use cadence_api::{enums as e, schedule as tk_schedule, service_types as st, tasks as tk, types as t};
-use cadence_proto::api as p;
+use crate::api as p;
 use tonic::Status;
 
 pub fn timestamp(ms: i64) -> prost_types::Timestamp {
@@ -246,7 +249,7 @@ pub fn history(v: st::History) -> Result<p::History, Status> {
         events: v
             .events
             .into_iter()
-            .map(crate::grpc_history::event)
+            .map(history::event)
             .collect::<Result<_, _>>()?,
     })
 }
@@ -770,17 +773,17 @@ pub fn schedule_entry_out(v: tk_schedule::ScheduleListEntry) -> p::ScheduleListE
 }
 
 
-pub fn version_history_out(value: t::VersionHistory) -> cadence_proto::admin::VersionHistory {
-    cadence_proto::admin::VersionHistory {
+pub fn version_history_out(value: t::VersionHistory) -> crate::admin::VersionHistory {
+    crate::admin::VersionHistory {
         branch_token: value.branch_token,
-        items: value.items.into_iter().map(|item| cadence_proto::admin::VersionHistoryItem {
+        items: value.items.into_iter().map(|item| crate::admin::VersionHistoryItem {
             event_id: item.event_id, version: item.version,
         }).collect(),
     }
 }
 
-pub fn version_histories_out(value: t::VersionHistories) -> cadence_proto::shared::VersionHistories {
-    cadence_proto::shared::VersionHistories {
+pub fn version_histories_out(value: t::VersionHistories) -> crate::shared::VersionHistories {
+    crate::shared::VersionHistories {
         current_version_history_index: value.current_version_history_index,
         histories: value.histories.into_iter().map(version_history_out).collect(),
     }

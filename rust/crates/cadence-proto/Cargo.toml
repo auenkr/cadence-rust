@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 prost = "0.13"
 prost-types = "0.13"

@@ -512,6 +512,7 @@ dependencies = [
 name = "cadence-proto"
 version = "0.1.0"
 dependencies = [
+ "cadence-api",
  "cadence-common",
  "heck",
  "prost",

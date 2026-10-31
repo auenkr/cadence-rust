@@ -1,4 +1,7 @@
 //! Cadence public and internal protobuf APIs, generated from upstream IDLs.
+// Shared proto<->API converters used by Matching and Frontend.
+#[allow(clippy::result_large_err)]
+pub mod convert;
 pub mod native;
 pub mod native_service;
 pub mod task_list_partition;
