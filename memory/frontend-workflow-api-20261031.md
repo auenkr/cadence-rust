@@ -727,3 +727,31 @@ Frontend parity until these are implemented and validated.
   runtime does not compose them into the actual registered Thrift/gRPC
   WorkflowService. Mixed Go/Rust SDK, failure, restart and recovery validation
   has not run. The green package CI is compile/unit evidence only.
+
+## Follow-up — blob warning observation and poll envelopes
+
+- Rechecked `origin/frontend-core2` at `32de07ee3`; its only commit since the
+  merge is a memory/documentation update. The merged History/Matching client
+  shells remain the current shared interface. No interface or persistence
+  source change was available to merge at this checkpoint.
+- Merged-head CI run
+  [41189188057](https://github.com/auenkr/cadence-rust/actions/runs/41189188057)
+  concluded `success` for exact source SHA
+  `cb6d9b07b284f3e2a042394f368788661b310e1b`.
+- Added `WorkflowBlobSizeMeasurement` observer dimensions and warning/error
+  outcomes around the Go-equivalent payload size checks. Commit
+  `322010a62920f31e48881061f4042baa07962a47` is pushed; package CI
+  [41189493958](https://github.com/auenkr/cadence-rust/actions/runs/41189493958)
+  was still `in_progress` at the time of this save. It must not be described as
+  a pass until a terminal conclusion is recorded.
+- Poll activity/decision now prepares the Go Matching envelope with resolved
+  `domainUUID`, unique UUID `pollerID`, nested public `pollRequest`, and the
+  caller isolation group. A regression test covers those fields and fresh IDs.
+  This change is uncommitted at this save and has no CI result yet.
+- Remaining critical gaps are unchanged: generated History/Matching client
+  shells are not operation adapters; the production launcher does not register
+  `Handler` or compose its wrappers; poll cancellation/health-wait and response
+  shaping, history/archive paging, archived visibility, and typed persistence
+  calls remain absent. No Frontend + Go History + Rust Matching SDK gate has
+  been added or run. Current package CI validates only the handler's unit-test
+  backend and is not mixed-service proof.

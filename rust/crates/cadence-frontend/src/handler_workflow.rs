@@ -825,9 +825,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 return Ok(serde_json::json!({}));
             }
         }
-        let request = self.prepare_backend_request(operation, request)?;
+        let request = self.prepare_backend_request(operation, request, caller)?;
         if operation == WorkflowOperation::RestartWorkflowExecution {
-            return self.restart_workflow_execution(request, target_cluster).await;
+            return self
+                .restart_workflow_execution(request, target_cluster, caller)
+                .await;
         }
         self.backend
             .invoke_on_cluster(operation, request, target_cluster)
@@ -838,6 +840,7 @@ impl<B: WorkflowBackend> Handler<B> {
         &self,
         request: Value,
         target_cluster: Option<String>,
+        _caller: &CallerMetadata,
     ) -> Result<Value, CadenceError> {
         let domain = request
             .get("domain")
@@ -1007,6 +1010,7 @@ impl<B: WorkflowBackend> Handler<B> {
         let start_request = self.prepare_backend_request(
             WorkflowOperation::StartWorkflowExecution,
             start_request,
+            caller,
         )?;
         let run_id = match self
             .backend
@@ -1036,6 +1040,7 @@ impl<B: WorkflowBackend> Handler<B> {
         &self,
         operation: WorkflowOperation,
         request: Value,
+        caller: &CallerMetadata,
     ) -> Result<Value, CadenceError> {
         if matches!(
             operation,
@@ -1060,6 +1065,21 @@ impl<B: WorkflowBackend> Handler<B> {
             .unwrap_or_default()
             .to_owned();
         let domain_id = || domains.domain_id(&domain);
+        if matches!(
+            operation,
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
+        ) {
+            // Go creates a fresh poller identity for every frontend long-poll
+            // and sends Matching the public request inside its internal
+            // envelope. Matching uses this ID to cancel a zombie poll when
+            // the caller disconnects.
+            return Ok(serde_json::json!({
+                "domainUUID": domain_id()?,
+                "pollerID": uuid::Uuid::new_v4().to_string(),
+                "pollRequest": request,
+                "isolationGroup": caller.isolation_group,
+            }));
+        }
         if matches!(
             operation,
             WorkflowOperation::RecordActivityTaskHeartbeatByID
@@ -3177,6 +3197,45 @@ mod tests {
             assert_eq!(error.to_string(), "TaskList is not set on request.");
         }
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_calls_build_go_matching_envelope_and_fresh_poller_id() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        let caller = CallerMetadata {
+            isolation_group: "blue-workers".into(),
+            ..Default::default()
+        };
+        for operation in ["PollForActivityTask", "PollForDecisionTask"] {
+            let poll_request = serde_json::json!({
+                "domain": "shop",
+                "taskList": {"name": "orders"},
+                "identity": "worker-1"
+            });
+            handler
+                .dispatch_with_metadata(operation, poll_request.clone(), &caller)
+                .await
+                .unwrap();
+        }
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        for (operation, request) in calls.iter() {
+            assert_eq!(
+                request["domainUUID"],
+                serde_json::json!("uuid:shop")
+            );
+            assert_eq!(request["isolationGroup"], "blue-workers");
+            assert_eq!(request["pollRequest"]["taskList"]["name"], "orders");
+            let poller_id = request["pollerID"].as_str().unwrap();
+            assert!(uuid::Uuid::parse_str(poller_id).is_ok());
+            assert_eq!(
+                *operation,
+                WorkflowOperation::from_name(operation.name()).unwrap()
+            );
+        }
+        assert_ne!(calls[0].1["pollerID"], calls[1].1["pollerID"]);
     }
 
     #[tokio::test]
