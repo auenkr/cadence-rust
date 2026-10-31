@@ -180,6 +180,26 @@ async fn shutdown_signal() -> anyhow::Result<()> {
     }
 }
 
+async fn persist_frontend_snapshot(
+    domains: cadence_persistence::InMemoryDomainStore,
+    executions: cadence_persistence::InMemoryExecutionStore,
+    domains_path: std::path::PathBuf,
+    executions_path: std::path::PathBuf,
+) {
+    if let Err(error) = tokio::task::spawn_blocking(move || {
+        if let Err(error) = domains.save_to_file(domains_path) {
+            eprintln!("warning: snapshot domains failed: {error}");
+        }
+        if let Err(error) = executions.save_to_file(executions_path) {
+            eprintln!("warning: snapshot executions failed: {error}");
+        }
+    })
+    .await
+    {
+        eprintln!("warning: snapshot task failed: {error}");
+    }
+}
+
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
@@ -939,38 +959,53 @@ async fn run_with_lifecycle(
             if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
                 let snapshot_store = state.executions.clone();
                 let snapshot_domains = state.domains.clone();
+                let mut shutdown = state.background_shutdown.subscribe();
                 tokio::spawn(async move {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     loop {
-                        interval.tick().await;
-                        let store = snapshot_store.clone();
-                        let domains = snapshot_domains.clone();
-                        let domains_path = domains_path.clone();
-                        let executions_path = executions_path.clone();
-                        // Await one write so snapshots cannot overlap or race
-                        // their atomic temporary-file rename.
-                        if let Err(error) = tokio::task::spawn_blocking(move || {
-                            if let Err(error) = domains.save_to_file(domains_path) {
-                                eprintln!("warning: snapshot domains failed: {error}");
+                        tokio::select! {
+                            _ = interval.tick() => {
+                                // Await one write so snapshots cannot overlap
+                                // or race their atomic temporary-file rename.
+                                persist_frontend_snapshot(
+                                    snapshot_domains.clone(),
+                                    snapshot_store.clone(),
+                                    domains_path.clone(),
+                                    executions_path.clone(),
+                                ).await;
                             }
-                            if let Err(error) = store.save_to_file(executions_path) {
-                                eprintln!("warning: snapshot executions failed: {error}");
+                            changed = shutdown.changed() => {
+                                if changed.is_err() || *shutdown.borrow() {
+                                    // Go Resource.Stop runs after the drain;
+                                    // flush development snapshots at that boundary.
+                                    persist_frontend_snapshot(
+                                        snapshot_domains,
+                                        snapshot_store,
+                                        domains_path,
+                                        executions_path,
+                                    ).await;
+                                    break;
+                                }
                             }
-                        })
-                        .await
-                        {
-                            eprintln!("warning: snapshot task failed: {error}");
                         }
                     }
                 });
             }
             let timer_store = state.executions.clone();
+            let mut shutdown = state.background_shutdown.subscribe();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
-                    interval.tick().await;
+                    tokio::select! {
+                        _ = interval.tick() => {}
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() {
+                                break;
+                            }
+                        }
+                    }
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as i64)
@@ -1916,6 +1951,10 @@ async fn run_with_lifecycle(
                     .store(false, std::sync::atomic::Ordering::Release);
                 tokio::time::sleep(request_drain).await;
             }
+            // Go Frontend closes stopC after the final request-drain window;
+            // this stops service-owned timer/snapshot loops before resources
+            // and listeners are torn down below.
+            state.stop_background_workers();
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())

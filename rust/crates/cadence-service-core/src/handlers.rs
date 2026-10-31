@@ -79,6 +79,9 @@ pub struct AppState {
     /// fail health checks, wait for discovery, and only then reject new RPCs.
     pub frontend_ready: Arc<std::sync::atomic::AtomicBool>,
     pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
+    /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
+    /// The launcher signals this only after request draining has completed.
+    pub background_shutdown: tokio::sync::watch::Sender<bool>,
     pub domains: InMemoryDomainStore,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
@@ -106,6 +109,7 @@ impl Default for AppState {
             grpc_max_message_size: 4 * 1024 * 1024,
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            background_shutdown: tokio::sync::watch::channel(false).0,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
@@ -119,6 +123,11 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Stop service-owned background loops, matching Go Frontend's `close(s.stopC)`.
+    pub fn stop_background_workers(&self) {
+        self.background_shutdown.send_replace(true);
+    }
+
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
@@ -2430,6 +2439,18 @@ mod frontend_drain_tests {
     use axum::body::Body;
     use http::{Request, StatusCode};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn stop_background_workers_broadcasts_the_go_stop_signal() {
+        let state = AppState::default();
+        let mut shutdown = state.background_shutdown.subscribe();
+        assert!(!*shutdown.borrow());
+
+        state.stop_background_workers();
+        shutdown.changed().await.unwrap();
+
+        assert!(*shutdown.borrow());
+    }
 
     #[tokio::test]
     async fn frontend_health_fails_before_admission_closes() {
