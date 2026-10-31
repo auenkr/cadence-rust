@@ -773,3 +773,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   the `Debug` bound required by `AppState`; corrected the diagnostic path to
   standard error and added the trait bound/test fixture derive. This run did
   not reach formatting or tests; dispatch CI again after pushing the fix.
+- Corrected exact-head package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41191723085 checked
+  `d38ae11b243a8780897d444c681f40fba7e7c590` and concluded `success`. Frontend
+  formatting, Clippy and package tests passed with the registered-owner stop
+  hook. This validates the stop seam and test only; the runtime still has no
+  actual registered Go quota collections, and all five production persistence
+  managers remain outstanding.
