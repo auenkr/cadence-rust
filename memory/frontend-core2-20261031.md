@@ -1026,3 +1026,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   `dd0f27fc4141b20b5d6c3539121c3ac20daed346` and concluded `failure` at
   Clippy (unused import); formatting passed and tests were skipped. The import
   is fixed in the current working change; exact-head CI is pending.
+- Exact-head `cadence-persistence` CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41199446903 checked
+  `3d55037a7741b5ccde05603e027cd2f6509fe8f4` and concluded `success`:
+  formatting, Clippy, and tests passed. This package selection does not compile
+  the Matching launcher that constructs the Cassandra adapter; run the
+  Frontend package gate too.
