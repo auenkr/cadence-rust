@@ -1393,3 +1393,37 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   https://github.com/auenkr/cadence-rust/actions/runs/41210718522 concluded
   `success` (FrontEnd formatting, Clippy, and tests on the runner's fresh target).
   This run is code-equivalent to the source head above; no local Cargo was run.
+
+## Continuation after shutdown idempotence — 2026-10-31
+
+- Exact-head Frontend CI for `954a63d89826b946107773caf9dd2065b4bef5d6`
+  completed successfully:
+  https://github.com/auenkr/cadence-rust/actions/runs/41214901436
+  (conclusion `success`). Formatting, Clippy, Frontend tests, and the
+  configured Go oracle checks passed. The change adds an atomic, shared
+  one-shot shutdown transition matching Go `Service.Stop`; no Cargo command
+  ran locally.
+- The validator source audit still counts all 88 named rows across the 15 Go
+  test tables. Rust covers all 16 public validator entry points and the grouped
+  cases listed in the matrix detail above. The exact-head successful run
+  validates these tests at `954a63d`.
+- Re-audited production persistence wiring: the configured default Cassandra
+  or SQL store constructs the Go-schema domain/metadata persistence adapter and
+  `GoSqlFrontendDomainManager`. The new `PersistenceStoreRole` enum records the
+  Go role selection but does not create missing managers. Frontend's
+  `AppState.executions` remains `InMemoryExecutionStore`; no configured durable
+  execution manager, History manager, or Visibility manager is opened. The
+  existing `visibility.rs` evaluates in-memory query results and is not a
+  database-backed visibility manager. All three manager ports and their
+  datastore wiring remain open.
+- Lifecycle sequencing remains hooked into the launcher and now has an
+  idempotent transition guard. Production does not construct Go's seven
+  global quota collection owners, and the Rust Admin handler does not own the
+  Go domain DLQ/failover watcher loops. Their stop hooks therefore have no
+  production owners; full `service.go` parity remains open.
+- The pushed evidence-only checkpoint `f17ac7e005aad53be016a79ba094b67b1b6b9120`
+  also passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41215343243
+  (conclusion `success`). This validates formatting, Clippy, and Frontend tests
+  against the memory update; it does not close any of the persistence or
+  lifecycle gaps above.

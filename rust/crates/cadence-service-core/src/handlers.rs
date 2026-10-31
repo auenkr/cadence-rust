@@ -96,6 +96,9 @@ pub struct AppState {
     /// Prevents the Go-compatible warmup timer from marking a stopping
     /// Frontend healthy while shutdown is waiting for discovery/drain.
     pub frontend_shutting_down: Arc<std::sync::atomic::AtomicBool>,
+    /// Go `Service.Stop` uses an atomic status transition so only one caller
+    /// runs the ordered drain and resource teardown sequence.
+    pub frontend_shutdown_started: Arc<std::sync::atomic::AtomicBool>,
     pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
     /// Stop signal for AdminHandler-owned background workers (for example,
     /// the Go domain DLQ and failover watchers). This is separate from the
@@ -143,6 +146,7 @@ impl Default for AppState {
             grpc_max_message_size: 4 * 1024 * 1024,
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            frontend_shutdown_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
             frontend_limiters: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -162,6 +166,18 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Begin Go Frontend's idempotent `Service.Stop` transition.
+    pub fn begin_frontend_shutdown(&self) -> bool {
+        self.frontend_shutdown_started
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
     /// Stop accepting API requests, matching Go's WorkflowHandler.Stop.
     pub fn stop_frontend_handler(&self) {
         self.frontend_accepting
@@ -2832,6 +2848,13 @@ mod frontend_drain_tests {
         state.stop_frontend_admin_handler();
         admin_shutdown.changed().await.unwrap();
         assert!(*admin_shutdown.borrow());
+    }
+
+    #[test]
+    fn frontend_shutdown_transition_runs_once_like_go_service_stop() {
+        let state = AppState::default();
+        assert!(state.begin_frontend_shutdown());
+        assert!(!state.begin_frontend_shutdown());
     }
 
     #[tokio::test]
