@@ -43,6 +43,15 @@ fn is_google_uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok()
 }
 
+/// Normalize every spelling accepted by Go's `google/uuid.Parse` before a
+/// persistence lookup. The request and its pagination token keep the original
+/// string; only the execution-store key is canonicalized.
+pub fn canonical_run_id(value: &str) -> String {
+    uuid::Uuid::parse_str(value)
+        .map(|id| id.to_string())
+        .unwrap_or_else(|_| value.to_string())
+}
+
 pub fn select_history<'a>(
     request: &mut Request,
     histories: &'a VersionHistories,
@@ -164,6 +173,7 @@ mod tests {
                 ..Default::default()
             };
             assert!(validate_request(&request).is_ok(), "{run_id}");
+            assert_eq!(canonical_run_id(run_id), "123e4567-e89b-12d3-a456-426614174000");
         }
         let invalid = Request {
             execution: Some(WorkflowExecution::new("workflow", "not-a-uuid")),

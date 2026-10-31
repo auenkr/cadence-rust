@@ -486,6 +486,13 @@ migration forward.
   Admin RPCs and real DLQ/queue behavior, full membership resolution, durable
   domain persistence/replication, schedule workflow integration and mixed
   Go/Rust restart/recovery evidence. This is not Frontend completion.
+- Raw-history continuation: both JSON and Thrift handlers now normalize
+  accepted non-canonical UUID spellings only for the persistence lookup and
+  preserve the caller's original run ID for pagination tokens. Added a
+  `canonical_run_id` helper and extended its Go-spelling unit matrix. This
+  changes `cadence-persistence` and `cadence-service-core`, so the package CI
+  needs to be rerun after the next push. `git diff --check` passed; Cargo was
+  not run locally.
 
 - Rebased the implementation branch onto the then-current
   `origin/frontend-core2` at `3bc2dcca8`; conflict resolution kept the newer
