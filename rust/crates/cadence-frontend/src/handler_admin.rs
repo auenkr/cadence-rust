@@ -187,10 +187,21 @@ pub fn describe_cluster_response(
 #[derive(Debug, Clone, Default)]
 pub struct Handler {
     dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
-    custom_search_attributes: Arc<Mutex<BTreeMap<String, IndexedValueType>>>,
+    custom_search_attributes: Arc<Mutex<std::collections::HashMap<String, IndexedValueType>>>,
 }
 
 impl Handler {
+    /// Bind this handler to the same dynamic-config and search-attribute
+    /// state used by Frontend's JSON and Thrift transports. Admin mutations
+    /// are immediately visible to runtime property readers and other handlers.
+    #[must_use]
+    pub fn from_app_state(state: &cadence_service_core::handlers::AppState) -> Self {
+        Self {
+            dynamic_config: state.admin.dynamic_config.clone(),
+            custom_search_attributes: state.admin.custom_search_attributes.clone(),
+        }
+    }
+
     pub fn add_search_attributes(
         &self,
         request: Option<&AddSearchAttributeRequest>,
@@ -284,7 +295,9 @@ impl Handler {
         self.custom_search_attributes
             .lock()
             .expect("admin lock")
-            .clone()
+            .iter()
+            .map(|(name, value)| (name.clone(), *value))
+            .collect()
     }
 }
 
@@ -359,6 +372,45 @@ mod tests {
         assert_eq!(
             handler.search_attributes()["CustomOne"],
             IndexedValueType::String
+        );
+    }
+
+    #[test]
+    fn app_state_constructor_shares_dynamic_config_and_search_attributes() {
+        let state = cadence_service_core::handlers::AppState::default();
+        let handler = Handler::from_app_state(&state);
+        handler
+            .update_dynamic_config(
+                "worker.enableScheduler",
+                vec![DynamicConfigValue {
+                    value: Some(cadence_api::types::DataBlob {
+                        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                        data: b"true".to_vec(),
+                    }),
+                    filters: vec![],
+                }],
+                false,
+            )
+            .unwrap();
+        assert!(state.scheduler_enabled_for_domain("payments"));
+
+        handler
+            .add_search_attributes(Some(&AddSearchAttributeRequest {
+                search_attribute: Some(std::collections::HashMap::from([(
+                    "CustomShared".to_string(),
+                    IndexedValueType::Keyword,
+                )])),
+                security_token: String::new(),
+            }))
+            .unwrap();
+        assert_eq!(
+            state
+                .admin
+                .custom_search_attributes
+                .lock()
+                .unwrap()
+                .get("CustomShared"),
+            Some(&IndexedValueType::Keyword)
         );
     }
 
