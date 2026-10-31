@@ -5,6 +5,22 @@ Branch: `worker-core`, based on `origin/master` at
 
 ## Current checkpoint
 
+Continuation at `7845b4939752c16f9b4642b4a598a725a39fbac2` found the earlier
+package run terminal: run
+https://github.com/auenkr/cadence-rust/actions/runs/41206189276 failed its
+test step. Clippy completed; 12 of 13 unit tests passed. The failing scanner
+contract test expected `cadence-sys-tl-scanner-tasklist`, while the Go source
+`go/service/worker/scanner/workflow.go` defines
+`cadence-sys-tl-scanner-tasklist-0`.
+
+The continuation fixes that stale expectation and expands Rust scanner contract
+coverage to Go's task-list/history scanner workflow IDs and activity types,
+periodic start policies, timeouts, retry constants and workflow ID reuse
+behavior. Source inspection confirms Go uses 12-hour cron schedules for
+task-list/history scanning and five-minute schedules for execution/timer
+scanner/fixer workflows. This remains declarative parity coverage only; no
+scanner activities or deterministic workflow runtime have been implemented.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 
@@ -68,6 +84,8 @@ Implemented in this slice:
   `41205587991`, `41205654608`, `41205770812`, and `41205897788` were
   superseded/cancelled or failed as source commits advanced; `41205897788`
   failed only on the corrected lint.
+- Continuation CI after the scanner contract correction is pending; record its
+  exact head, URL and conclusion here before relying on it.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
