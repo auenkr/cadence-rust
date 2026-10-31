@@ -157,6 +157,24 @@ pub trait GoSqlDomainPersistence: Send + Sync {
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError>;
 }
 
+/// Frontend's Go-compatible domain mutation boundary. The manager reads the
+/// current metadata version before staging cache changes and supplies it to
+/// update so SQL backends can preserve the original compare-and-set fence.
+pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
+    fn metadata_version(&self) -> Result<i64, String>;
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String>;
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String>;
+    fn delete_domain(&self, id: &str) -> Result<(), String>;
+}
+
 /// Convert Cassandra's nested domain/config/replication UDTs through the same
 /// Go DomainInfo field interpretation used by SQL domain metadata.
 #[allow(clippy::too_many_arguments)]

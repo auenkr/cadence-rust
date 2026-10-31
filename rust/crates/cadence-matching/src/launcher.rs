@@ -1462,6 +1462,9 @@ async fn run_with_lifecycle(
                         ));
                 }
             }
+            state.domain_metadata_persistence = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.domain_metadata_persistence.clone());
             if run_frontend && !run_matching {
                 if let Some(source) = configured_matching_stores
                     .as_ref()

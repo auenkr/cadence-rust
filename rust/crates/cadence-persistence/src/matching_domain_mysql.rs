@@ -515,6 +515,35 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMeta
     }
 }
 
+impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainMetadataStore {
+    fn metadata_version(&self) -> Result<i64, String> {
+        self.get_metadata_version().map_err(|error| error.to_string())
+    }
+
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        _expected_version: i64,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::create_domain(self, metadata)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::update_domain(self, metadata, expected_version)
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain(&self, id: &str) -> Result<(), String> {
+        MySqlDomainMetadataStore::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+}
+
 fn query_error(error: crate::matching_mysql::TimedQueryError) -> MatchingDomainMetadataError {
     match error {
         crate::matching_mysql::TimedQueryError::Timeout => {
