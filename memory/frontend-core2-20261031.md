@@ -1535,4 +1535,7 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   covered by validator logic before. The other 13 Go test tables remain covered
   by the existing grouped matrix and the audit of 88 named rows.
 - `git diff --check` passed. Formatting, Clippy, and Frontend unit tests are
-  pending exact-head GitHub Actions CI; no local Cargo command was run.
+  green at source head `e124daed576ece6854d9a66153206a10778a5a8f`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41219259467
+  (conclusion `success`; formatting, Clippy, tests, and Frontend smoke/oracle
+  gates). No Cargo command was run locally.
