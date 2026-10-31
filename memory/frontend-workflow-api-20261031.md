@@ -1046,3 +1046,9 @@ Frontend parity until these are implemented and validated.
   page lower-bound checks, and the exact malformed/incomplete history errors.
   Go-shaped fixtures cover valid terminal/continuation pages and both invalid
   cases. It is not yet connected to a production persistence page reader.
+- Run [41198125673](https://github.com/auenkr/cadence-rust/actions/runs/41198125673)
+  checked exact SHA `b5678f1e3ccb51e04d1551649808106b3d81f866`; Clippy passed,
+  but tests failed 113/114 because the old fail-open poll fixture still expected
+  JSON `null` after the new Go-shaped empty decision response. The assertion is
+  fixed in `2b2a5b88b`. I applied the CI-uploaded rustfmt patch from that run;
+  both the patch and the history completeness helper now need exact-head CI.

@@ -238,12 +238,12 @@ impl WorkflowDomainLookup for PersistenceWorkflowDomainLookup {
     }
 
     fn domain_name(&self, domain_id: &str) -> Result<Option<String>, CadenceError> {
-        let described = self
-            .manager
-            .describe(&cadence_api::service_types::DescribeDomainRequest {
-                uuid: Some(domain_id.to_owned()),
-                ..Default::default()
-            })?;
+        let described =
+            self.manager
+                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                    uuid: Some(domain_id.to_owned()),
+                    ..Default::default()
+                })?;
         Ok(described.domain_info.map(|info| info.name))
     }
 }
@@ -1090,8 +1090,8 @@ impl<B: WorkflowBackend> Handler<B> {
                 .restart_workflow_execution(request, target_cluster, caller)
                 .await;
         }
-        let (backend_operation, request, heartbeat_overflow) = self
-            .prepare_activity_blob_request(operation, &public_request, request)?;
+        let (backend_operation, request, heartbeat_overflow) =
+            self.prepare_activity_blob_request(operation, &public_request, request)?;
         let poll_guard = if matches!(
             operation,
             WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
@@ -1119,12 +1119,8 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         let response = result?;
         match operation {
-            WorkflowOperation::PollForActivityTask => {
-                Ok(shape_activity_poll_response(response))
-            }
-            WorkflowOperation::PollForDecisionTask => {
-                Ok(shape_decision_poll_response(response))
-            }
+            WorkflowOperation::PollForActivityTask => Ok(shape_activity_poll_response(response)),
+            WorkflowOperation::PollForDecisionTask => Ok(shape_decision_poll_response(response)),
             _ => Ok(response),
         }
     }
@@ -1178,8 +1174,14 @@ impl<B: WorkflowBackend> Handler<B> {
         }
 
         let truncated = cadence_api::b64::encode_bytes(&bytes[..bytes.len().min(error_limit)]);
-        let identity = public_request.get("identity").cloned().unwrap_or(Value::Null);
-        let token_value = token_request.get("taskToken").cloned().unwrap_or(Value::Null);
+        let identity = public_request
+            .get("identity")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let token_value = token_request
+            .get("taskToken")
+            .cloned()
+            .unwrap_or(Value::Null);
         if matches!(
             operation,
             WorkflowOperation::RespondActivityTaskCompleted
@@ -1191,9 +1193,7 @@ impl<B: WorkflowBackend> Handler<B> {
         ) {
             let reason = match operation {
                 WorkflowOperation::RecordActivityTaskHeartbeat
-                | WorkflowOperation::RecordActivityTaskHeartbeatByID => {
-                    "HEARTBEAT_EXCEEDS_LIMIT"
-                }
+                | WorkflowOperation::RecordActivityTaskHeartbeatByID => "HEARTBEAT_EXCEEDS_LIMIT",
                 WorkflowOperation::RespondActivityTaskCompleted
                 | WorkflowOperation::RespondActivityTaskCompletedByID => {
                     "COMPLETE_RESULT_EXCEEDS_LIMIT"
@@ -3901,7 +3901,10 @@ mod tests {
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
-        assert_eq!(calls[0].1["failedRequest"]["reason"], "COMPLETE_RESULT_EXCEEDS_LIMIT");
+        assert_eq!(
+            calls[0].1["failedRequest"]["reason"],
+            "COMPLETE_RESULT_EXCEEDS_LIMIT"
+        );
         assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
         assert_eq!(calls[0].1["failedRequest"]["identity"], "worker");
     }
@@ -3936,7 +3939,10 @@ mod tests {
         assert_eq!(response, serde_json::json!({"cancelRequested": true}));
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
-        assert_eq!(calls[0].1["failedRequest"]["reason"], "HEARTBEAT_EXCEEDS_LIMIT");
+        assert_eq!(
+            calls[0].1["failedRequest"]["reason"],
+            "HEARTBEAT_EXCEEDS_LIMIT"
+        );
         assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
     }
 
@@ -3970,7 +3976,10 @@ mod tests {
 
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
-        assert_eq!(calls[0].1["failedRequest"]["reason"], "FAILURE_DETAILS_EXCEEDS_LIMIT");
+        assert_eq!(
+            calls[0].1["failedRequest"]["reason"],
+            "FAILURE_DETAILS_EXCEEDS_LIMIT"
+        );
         assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
     }
 
@@ -3996,7 +4005,10 @@ mod tests {
 
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
-        assert_eq!(calls[0].1["failedRequest"]["reason"], "CANCEL_DETAILS_EXCEEDS_LIMIT");
+        assert_eq!(
+            calls[0].1["failedRequest"]["reason"],
+            "CANCEL_DETAILS_EXCEEDS_LIMIT"
+        );
         assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
         let synthesized_token = decode_workflow_task_token(&serde_json::json!({
             "taskToken": calls[0].1["failedRequest"]["taskToken"]
