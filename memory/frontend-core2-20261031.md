@@ -573,3 +573,7 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   persistence integration remains separate task storage/read-only metadata.
 - The request-validator matrix remains closed by fresh-target CI run
   `41181338783` (success, head `97ee38218fbf77970269d3937eb8e82199787285`).
+- Warmup exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41186799552
+  checked `c4aa845cf24fe5dcaf81e3d8028485e46ad176ed` and failed Clippy on an
+  unnecessary `return` in the shutdown-select branch. Simplified the branch;
+  this run did not reach tests. Dispatching a fresh exact-head run.

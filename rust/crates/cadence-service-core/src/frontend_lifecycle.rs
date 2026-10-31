@@ -23,11 +23,7 @@ pub async fn warmup(
                 ready.store(true, std::sync::atomic::Ordering::Release);
             }
         }
-        changed = shutdown.changed() => {
-            if changed.is_err() || *shutdown.borrow() {
-                return;
-            }
-        }
+        _ = shutdown.changed() => {}
     }
 }
 
