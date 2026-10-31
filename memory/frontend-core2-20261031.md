@@ -971,9 +971,16 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - Exact-head Frontend CI run
   https://github.com/auenkr/cadence-rust/actions/runs/41197272110 was
   dispatched for `a84001cf702f65cb2769d2a4998a0d74c0ca5141`; its final
-  conclusion must be recorded after completion.
+  conclusion was `success`: Frontend formatting, Clippy, and tests all passed.
+  The optional development-config runtime smoke was skipped. No Cargo command
+  ran locally.
 - Still open: Cassandra domain/metadata writes and selection; production SQL
   and Cassandra Visibility, History, and Execution managers; registration and
   tests for the Go seven global quota collection owners. The Go validator
   matrix remains covered by the earlier fresh-target 91-case evidence; no
   validator code changed here.
+- Added a persistence test that drives the SQLite-backed Frontend domain
+  manager through create, cache restart/describe from the SQL row, and delete.
+  The test was pushed in `d4c547d17`; its exact-head
+  `cadence-persistence` CI run is pending at
+  https://github.com/auenkr/cadence-rust/actions/runs/41197648965.
