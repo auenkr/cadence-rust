@@ -673,3 +673,57 @@ Frontend parity until these are implemented and validated.
   `success` (Clippy, format, tests). It includes the per-domain query argument
   limit and exact BadRequest test. It does not validate a production visibility
   or History backend.
+
+## Workflow continuation — 2026-10-31 (blob limits and visibility mapping)
+
+- Reconfirmed `origin/frontend-core` is an ancestor of this branch: `git
+  rev-list --left-right --count origin/frontend-core...HEAD` returned `0 69`
+  before these incremental commits. No core commit was dropped.
+- Added Go event-blob limit accounting for the Go call sites implemented here:
+  Query args, Signal input, synchronous Start input plus memo map, and each of
+  the two synchronous SignalWithStart payloads. Memo size uses Go's exact map
+  overhead constant (48 bytes). Removed speculative checks for async queue
+  methods and Terminate after source comparison showed those Go methods do not
+  call `CheckEventBlobSizeLimit`.
+- Added Go-mirroring tests for Signal rejection before dispatch, memo overhead,
+  and filtered open-visibility mapping to the persistence request fields.
+- The initial expected memo total was wrong (test output: actual 55, expected
+  57); corrected the fixture. Exact-head CI run
+  [41187401382](https://github.com/auenkr/cadence-rust/actions/runs/41187401382)
+  tested `d78e835134d307733706b480f21b82821cdb896d` and concluded `success`
+  (Clippy, formatting, and all 83 Frontend unit tests). Prior run
+  [41187035561](https://github.com/auenkr/cadence-rust/actions/runs/41187035561)
+  tested `87bb3d148278e51d7003eeed7b3eec4ead01d857` and failed only that
+  incorrect expectation (82 passed, 1 failed). No Cargo was run locally.
+
+### Still open; this branch is not complete Frontend parity
+
+- `Handler` still delegates to generic `WorkflowBackend::invoke`; the shared
+  launcher does not instantiate this handler as the production Workflow API.
+  The existing History and Matching modules are generated gRPC client shells,
+  not method adapters.
+- `GetWorkflowExecutionHistory` still lacks Go's PollMutableState/page loop,
+  persistence/raw-history retrieval, long-poll behavior, transient decisions,
+  close-event filtering, archive selection/read, and exact continuation-token
+  reconstruction. `ListArchivedWorkflowExecutions` still lacks archival config,
+  URI/provider lookup and execution-time normalization. Visibility response
+  conversion remains backend-dependent.
+- Poll/respond methods still need Go's task-token/poll-ID reconstruction,
+  matching long-poll cancellation and isolation-group wait behavior, response
+  shaping, and oversized worker payload failure-to-activity conversion.
+  Workflow blob checking currently implements error thresholds but not Go's
+  warning thresholds, event size timer/histogram, violation tags, or operation
+  metrics.
+- Runtime integration must provide typed History calls (including mutable
+  state, history pages, start/signal/cancel/terminate/reset/query/respond/
+  heartbeat/sticky reset), Matching poll/respond/task-list calls, visibility
+  list/scan/count calls, archived history/visibility readers, domain cache and
+  config, search-attribute validation, task-token serializer, caller transport
+  metadata, poll isolation waits, and event-blob metrics. `frontend-core2`
+  owns History/Matching clients and persistence wiring; these adapters should
+  be added against that worker's final interfaces, without duplicating those
+  owned files.
+- Wrapper policy modules and decorator hooks have unit tests, but the shared
+  runtime does not compose them into the actual registered Thrift/gRPC
+  WorkflowService. Mixed Go/Rust SDK, failure, restart and recovery validation
+  has not run. The green package CI is compile/unit evidence only.
