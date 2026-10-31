@@ -871,8 +871,7 @@ pub(crate) fn check_shard_id(state: &AppState, shard_id: i32) -> Result<(), BadR
     Ok(())
 }
 
-/// Close a shard. Single host keeps all shards loaded, so a valid ID is a
-/// no-op success like Go's unload-then-lazy-reload.
+/// Close a shard through the History service, matching Go Admin's delegation.
 pub async fn close_shard(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::CloseShardRequest>,
@@ -880,11 +879,31 @@ pub async fn close_shard(
     if let Err(e) = check_shard_id(&state, req.shard_id) {
         return bad_request(e);
     }
-    ok_json(cadence_api::admin::CloseShardResponse {})
+    let Some(channel) = state.history_admin_channel.clone() else {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History client is not configured.".to_string(),
+        );
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    match client
+        .close_shard(history_admin_request(cadence_proto::history::CloseShardRequest {
+            shard_id: req.shard_id,
+        }))
+        .await
+    {
+        Ok(_) => ok_json(cadence_api::admin::CloseShardResponse {}),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.message().to_string(),
+        ),
+    }
 }
 
-/// Remove one persistence task. Single host has no addressable persistence
-/// task IDs, so a valid request is a no-op success.
+/// Remove one persistence task through the History service, matching Go
+/// Admin's delegation.
 pub async fn remove_task(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RemoveTaskRequest>,
@@ -895,7 +914,35 @@ pub async fn remove_task(
     if req.task_type.is_none() {
         return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
-    ok_json(cadence_api::admin::RemoveTaskResponse {})
+    let Some(channel) = state.history_admin_channel.clone() else {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History client is not configured.".to_string(),
+        );
+    };
+    let visibility_time = req.visibility_timestamp.map(|nanos| {
+        prost_types::Timestamp {
+            seconds: nanos.div_euclid(1_000_000_000),
+            nanos: nanos.rem_euclid(1_000_000_000) as i32,
+        }
+    });
+    let request = cadence_proto::history::RemoveTaskRequest {
+        shard_id: req.shard_id,
+        task_type: req.task_type.unwrap_or_default(),
+        task_id: req.task_id,
+        visibility_time,
+        cluster_name: req.cluster_name,
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    match client.remove_task(history_admin_request(request)).await {
+        Ok(_) => ok_json(cadence_api::admin::RemoveTaskResponse {}),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.message().to_string(),
+        ),
+    }
 }
 
 /// Reset a persistence queue through the configured History service, matching
