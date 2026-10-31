@@ -20,6 +20,7 @@ use cadence_api::admin::{
     UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
     ReapplyEventsRequest, ReapplyEventsResponse,
     MaintainCorruptWorkflowRequest, MaintainCorruptWorkflowResponse,
+    CloseShardRequest, CloseShardResponse, RemoveTaskRequest, RemoveTaskResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -39,6 +40,38 @@ fn millis_to_nanos(value: Option<i64>) -> Option<i64> {
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
+
+impl FromThrift for CloseShardRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for CloseShardResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for RemoveTaskRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            task_type: s.opt_i32(20)?,
+            task_id: s.opt_i64(30)?.unwrap_or_default(),
+            visibility_timestamp: s.opt_i64(40)?,
+            cluster_name: s.req_string(50, "")?,
+        })
+    }
+}
+
+impl ToThrift for RemoveTaskResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
 
 macro_rules! wrap_enum {
     ($($t:ty),*) => {
