@@ -887,6 +887,32 @@ fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     }
 }
 
+fn handle_maintain_corrupt_workflow(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::MaintainCorruptWorkflowRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let execution = req
+        .execution
+        .as_ref()
+        .filter(|execution| !execution.workflow_id.is_empty())
+        .ok_or_else(|| AppError::bad_request("Execution is missing"))?;
+    let executions = require_domain_thrift(state, &req.domain)?;
+    match executions.maintain_corrupt_workflow(&req.domain, execution) {
+        Ok((history_deleted, executions_deleted, visibility_deleted)) => {
+            Ok(wrap_success(&cadence_api::admin::MaintainCorruptWorkflowResponse {
+                history_deleted,
+                executions_deleted,
+                visibility_deleted,
+            }))
+        }
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
+}
+
 fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::admin::{
         GetWorkflowExecutionRawHistoryV2Request as Request,
@@ -2188,6 +2214,7 @@ pub async fn dispatch(
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
+        "MaintainCorruptWorkflow" => handle_maintain_corrupt_workflow(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),

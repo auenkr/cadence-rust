@@ -19,6 +19,7 @@ use cadence_api::admin::{
     GetDomainAsyncWorkflowConfiguratonRequest, GetDomainAsyncWorkflowConfiguratonResponse,
     UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
     ReapplyEventsRequest, ReapplyEventsResponse,
+    MaintainCorruptWorkflowRequest, MaintainCorruptWorkflowResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -1006,6 +1007,25 @@ impl FromThrift for ReapplyEventsRequest {
 
 impl ToThrift for ReapplyEventsResponse {
     fn to_thrift(&self) -> Struct { Fields::new().finish() }
+}
+
+impl FromThrift for MaintainCorruptWorkflowRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for MaintainCorruptWorkflowResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.bool(10, self.history_deleted);
+        f.bool(20, self.executions_deleted);
+        f.bool(30, self.visibility_deleted);
+        f.finish()
+    }
 }
 
 impl FromThrift for DomainReplicationConfiguration {
@@ -5674,6 +5694,10 @@ mod tests {
             domain: "payments".into(),
             workflow_execution: Some(WorkflowExecution::new("wf", "run")),
             events: Some(DataBlob::new(EncodingType::ThriftRW, vec![0x59])),
+        });
+        round_trip(&MaintainCorruptWorkflowRequest {
+            domain: "payments".into(),
+            execution: Some(WorkflowExecution::new("wf", "run")),
         });
     }
 
