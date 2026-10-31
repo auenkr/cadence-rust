@@ -775,7 +775,7 @@ fn handle_get_domain_isolation_groups(state: &AppState, body: &Struct) -> Handle
     let req: cadence_api::admin::GetDomainIsolationGroupsRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request."));
+        return Err(AppError::bad_request("Domain is not set on request.".into()));
     }
     let groups = state
         .domains
@@ -792,7 +792,7 @@ fn handle_update_domain_isolation_groups(state: &AppState, body: &Struct) -> Han
     let req: cadence_api::admin::UpdateDomainIsolationGroupsRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request."));
+        return Err(AppError::bad_request("Domain is not set on request.".into()));
     }
     state
         .domains
@@ -807,7 +807,7 @@ fn handle_get_domain_async_workflow_configuration(state: &AppState, body: &Struc
     let req: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request."));
+        return Err(AppError::bad_request("Domain is not set on request.".into()));
     }
     let configuration = state
         .domains
@@ -825,7 +825,7 @@ fn handle_update_domain_async_workflow_configuration(
     let req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request."));
+        return Err(AppError::bad_request("Domain is not set on request.".into()));
     }
     state
         .domains
@@ -840,19 +840,19 @@ fn handle_reapply_events(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ReapplyEventsRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain not set on request."));
+        return Err(AppError::bad_request("Domain not set on request.".into()));
     }
     let execution = req
         .workflow_execution
         .as_ref()
-        .ok_or_else(|| AppError::bad_request("Execution is not set on request."))?;
+        .ok_or_else(|| AppError::bad_request("Execution is not set on request.".into()))?;
     if execution.workflow_id.is_empty() {
-        return Err(AppError::bad_request("WorkflowID is not set on request."));
+        return Err(AppError::bad_request("WorkflowID is not set on request.".into()));
     }
     let blob = req
         .events
         .as_ref()
-        .ok_or_else(|| AppError::bad_request("WorkflowID is not set on request."))?;
+        .ok_or_else(|| AppError::bad_request("WorkflowID is not set on request.".into()))?;
     let events = cadence_thrift::history_blob::decode(blob)
         .map_err(|error| AppError::bad_request(error.to_string()))?;
     let signals = events
@@ -907,7 +907,7 @@ fn handle_maintain_corrupt_workflow(state: &AppState, body: &Struct) -> HandlerR
         .execution
         .as_ref()
         .filter(|execution| !execution.workflow_id.is_empty())
-        .ok_or_else(|| AppError::bad_request("Execution is missing"))?;
+        .ok_or_else(|| AppError::bad_request("Execution is missing".into()))?;
     let executions = require_domain_thrift(state, &req.domain)?;
     match executions.maintain_corrupt_workflow(&req.domain, execution) {
         Ok((history_deleted, executions_deleted, visibility_deleted)) => {

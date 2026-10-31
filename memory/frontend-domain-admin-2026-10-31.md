@@ -509,3 +509,9 @@ migration forward.
   Thrift converter calls used the removed method. Replaced them with `obool`.
   The subsequent candidate [41180550214](https://github.com/auenkr/cadence-rust/actions/runs/41180550214)
   at `dc34713bf` predates this fix and is superseded. Fresh CI is required.
+- Exact-head CI [41180597552](https://github.com/auenkr/cadence-rust/actions/runs/41180597552)
+  at `d5a77d7237736724a07240baae4ba591da37d4a2` passed Go oracle and formatting
+  steps, then failed during Clippy with nine `&str`/`String` mismatches in the
+  rebased Admin YARPC handlers. Added explicit string conversion at those
+  call sites; source-only diff checks pass. Dispatch a fresh package run after
+  pushing this repair.
