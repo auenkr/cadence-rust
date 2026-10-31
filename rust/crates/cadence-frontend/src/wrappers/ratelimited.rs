@@ -318,11 +318,7 @@ impl HandlerRateLimit {
 }
 
 impl crate::handler_workflow::RequestRateLimit for HandlerRateLimit {
-    fn allow(
-        &self,
-        operation: &str,
-        request: &serde_json::Value,
-    ) -> Result<(), CadenceError> {
+    fn allow(&self, operation: &str, request: &serde_json::Value) -> Result<(), CadenceError> {
         let info = quota_info(operation, request, self.domains.as_ref())?;
         allow_operation(
             operation,

@@ -206,8 +206,7 @@ pub trait WorkflowBackend: Send + Sync {
 
 pub type WorkflowFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
-pub type WorkflowNext<'a> =
-    Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
+pub type WorkflowNext<'a> = Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
 
 /// Outer cluster-redirection decorator. It can invoke `next` on the selected
 /// cluster and retry once on the active cluster after DomainNotActive, while
@@ -256,8 +255,7 @@ pub struct CallerMetadata {
 }
 
 pub trait RequestAuthorization: Send + Sync {
-    fn authorize(&self, operation: &str, request: &Value, actor: &str)
-        -> Result<(), CadenceError>;
+    fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError>;
 }
 
 pub trait RequestRateLimit: Send + Sync {
@@ -455,7 +453,8 @@ impl<B: WorkflowBackend> Handler<B> {
                 .invoke(operation, &redirect_request, Box::new(next))
                 .await;
         }
-        self.dispatch_metered(operation, request, caller, None).await
+        self.dispatch_metered(operation, request, caller, None)
+            .await
     }
 
     fn dispatch_metered<'a>(
@@ -466,25 +465,25 @@ impl<B: WorkflowBackend> Handler<B> {
         target_cluster: Option<String>,
     ) -> WorkflowFuture<'a> {
         Box::pin(async move {
-        let start = std::time::Instant::now();
-        self.metrics.increment_requests(operation.name());
-        let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
-        let result = self
-            .dispatch_operation(operation, request, caller, target_cluster)
-            .await;
-        let elapsed = start.elapsed();
-        self.metrics
-            .record_operation(operation.name(), elapsed, &tags);
-        self.metrics
-            .record_latency_histogram(operation.name(), elapsed);
-        match result {
-            Ok(response) => Ok(response),
-            Err(error) => {
-                let (error, counter) = crate::wrappers::metered::normalize_error(error);
-                self.metrics.increment(counter);
-                Err(error)
+            let start = std::time::Instant::now();
+            self.metrics.increment_requests(operation.name());
+            let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
+            let result = self
+                .dispatch_operation(operation, request, caller, target_cluster)
+                .await;
+            let elapsed = start.elapsed();
+            self.metrics
+                .record_operation(operation.name(), elapsed, &tags);
+            self.metrics
+                .record_latency_histogram(operation.name(), elapsed);
+            match result {
+                Ok(response) => Ok(response),
+                Err(error) => {
+                    let (error, counter) = crate::wrappers::metered::normalize_error(error);
+                    self.metrics.increment(counter);
+                    Err(error)
+                }
             }
-        }
         })
     }
 
@@ -508,9 +507,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 version_check.checker.as_ref(),
             )?;
         }
-        if operation != WorkflowOperation::Health
-            && self.shutting_down.load(Ordering::Acquire)
-        {
+        if operation != WorkflowOperation::Health && self.shutting_down.load(Ordering::Acquire) {
             return Err(CadenceError::Internal(
                 cadence_api::errors::InternalServiceError::new("Shutting down"),
             ));
@@ -607,11 +604,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 request.maximum_page_size = self.history_max_page_size;
             }
             request.maximum_page_size = request.maximum_page_size.min(1000);
-            set_i32_field(
-                &mut value,
-                "maximumPageSize",
-                request.maximum_page_size,
-            );
+            set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
             return Ok(value);
         }
         if matches!(
@@ -965,11 +958,7 @@ mod tests {
     struct RedirectBackend(Mutex<Vec<Option<String>>>);
 
     impl WorkflowBackend for RedirectBackend {
-        fn invoke<'a>(
-            &'a self,
-            _: WorkflowOperation,
-            _: Value,
-        ) -> WorkflowFuture<'a> {
+        fn invoke<'a>(&'a self, _: WorkflowOperation, _: Value) -> WorkflowFuture<'a> {
             Box::pin(async { Ok(Value::Null) })
         }
 
@@ -1026,16 +1015,8 @@ mod tests {
     struct RecordingAuthorization(Mutex<Vec<String>>);
 
     impl RequestAuthorization for RecordingAuthorization {
-        fn authorize(
-            &self,
-            operation: &str,
-            _: &Value,
-            actor: &str,
-        ) -> Result<(), CadenceError> {
-            self.0
-                .lock()
-                .unwrap()
-                .push(format!("{operation}:{actor}"));
+        fn authorize(&self, operation: &str, _: &Value, actor: &str) -> Result<(), CadenceError> {
+            self.0.lock().unwrap().push(format!("{operation}:{actor}"));
             Ok(())
         }
     }
@@ -1062,10 +1043,10 @@ mod tests {
             client_impl: &str,
             feature_version: &str,
         ) -> Result<(), cadence_api::errors::ClientVersionNotSupportedError> {
-            self.0.lock().unwrap().push((
-                client_impl.to_owned(),
-                feature_version.to_owned(),
-            ));
+            self.0
+                .lock()
+                .unwrap()
+                .push((client_impl.to_owned(), feature_version.to_owned()));
             Ok(())
         }
     }
@@ -1128,17 +1109,25 @@ mod tests {
         handler.stop();
 
         let error = handler
-            .dispatch("StartWorkflowExecution", serde_json::json!({"domain":"shop"}))
+            .dispatch(
+                "StartWorkflowExecution",
+                serde_json::json!({"domain":"shop"}),
+            )
             .await
             .unwrap_err();
-        assert_eq!(error.to_string(), "Shutting down");
+        assert_eq!(
+            error.to_string(),
+            "cadence internal error, msg: Shutting down"
+        );
 
-        assert!(handler
-            .dispatch("Health", serde_json::Value::Null)
-            .await
-            .unwrap()["ok"]
-            .as_bool()
-            == Some(false));
+        assert!(
+            handler
+                .dispatch("Health", serde_json::Value::Null)
+                .await
+                .unwrap()["ok"]
+                .as_bool()
+                == Some(false)
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
@@ -1147,20 +1136,14 @@ mod tests {
         let handler = Handler::new(FakeBackend::default());
         handler.start(std::time::Duration::from_millis(1));
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        let health = handler
-            .dispatch("Health", Value::Null)
-            .await
-            .unwrap();
+        let health = handler.dispatch("Health", Value::Null).await.unwrap();
         assert_eq!(health["ok"], true);
         assert_eq!(health["msg"], "OK");
 
         handler.update_health_status(HealthStatus::ShuttingDown);
         handler.start(std::time::Duration::ZERO);
         tokio::task::yield_now().await;
-        let health = handler
-            .dispatch("Health", Value::Null)
-            .await
-            .unwrap();
+        let health = handler.dispatch("Health", Value::Null).await.unwrap();
         assert_eq!(health["ok"], false);
         assert_eq!(health["msg"], "ShuttingDown");
     }
@@ -1212,7 +1195,10 @@ mod tests {
             crate::request_validator::RequestValidator::default(),
             metrics.clone(),
         );
-        let error = handler.dispatch("Health", Value::Null).await.unwrap_err();
+        let error = handler
+            .dispatch("GetSearchAttributes", Value::Null)
+            .await
+            .unwrap_err();
 
         assert!(matches!(error, CadenceError::Internal(_)));
         assert_eq!(
@@ -1257,10 +1243,7 @@ mod tests {
             *authorization.0.lock().unwrap(),
             ["DescribeWorkflowExecution:sdk-worker"]
         );
-        assert_eq!(
-            *rate_limit.0.lock().unwrap(),
-            ["DescribeWorkflowExecution"]
-        );
+        assert_eq!(*rate_limit.0.lock().unwrap(), ["DescribeWorkflowExecution"]);
         assert!(version.0.lock().unwrap().is_empty());
         assert!(handler.backend.0.lock().unwrap().is_empty());
         assert_eq!(
@@ -1273,12 +1256,7 @@ mod tests {
     async fn access_control_denial_is_outside_metering() {
         struct Deny;
         impl RequestAuthorization for Deny {
-            fn authorize(
-                &self,
-                _: &str,
-                _: &Value,
-                _: &str,
-            ) -> Result<(), CadenceError> {
+            fn authorize(&self, _: &str, _: &Value, _: &str) -> Result<(), CadenceError> {
                 Err(CadenceError::AccessDenied(
                     cadence_api::errors::AccessDeniedError::new("Request unauthorized."),
                 ))
@@ -1293,7 +1271,10 @@ mod tests {
         )
         .with_access_control(Arc::new(Deny));
         let error = handler
-            .dispatch("StartWorkflowExecution", serde_json::json!({"domain": "shop"}))
+            .dispatch(
+                "StartWorkflowExecution",
+                serde_json::json!({"domain": "shop"}),
+            )
             .await
             .unwrap_err();
 
@@ -1313,13 +1294,16 @@ mod tests {
         )
         .with_cluster_redirection(Arc::new(ForwardToCluster("cluster-b")));
 
-        handler.dispatch("Health", Value::Null).await.unwrap();
+        handler
+            .dispatch("GetSearchAttributes", Value::Null)
+            .await
+            .unwrap();
 
         assert_eq!(
             *handler.backend.0.lock().unwrap(),
             [Some("cluster-b".to_owned())]
         );
-        assert_eq!(*metrics.requests.lock().unwrap(), ["Health"]);
+        assert_eq!(*metrics.requests.lock().unwrap(), ["GetSearchAttributes"]);
     }
 
     #[tokio::test]

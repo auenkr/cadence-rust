@@ -204,12 +204,7 @@ where
     A::Error: Send + Sync,
     M: AuthorizationMetrics + Send + Sync,
 {
-    fn authorize(
-        &self,
-        operation: &str,
-        request: &Value,
-        actor: &str,
-    ) -> Result<(), CadenceError> {
+    fn authorize(&self, operation: &str, request: &Value, actor: &str) -> Result<(), CadenceError> {
         authorize_request(operation, request, actor, &self.authorizer, &self.metrics)
     }
 }

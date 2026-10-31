@@ -820,16 +820,16 @@ mod tests {
                 "TerminateWorkflowExecution",
                 serde_json::json!({
                     "domain": "global-domain",
-                    "workflowExecution": {"workflowId": "wf", "runId": "run"}
+                    "workflowExecution": {
+                        "workflowId": "wf",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    }
                 }),
             )
             .await
             .unwrap();
 
-        assert_eq!(
-            *calls.lock().unwrap(),
-            [Some("cluster-b".to_owned())]
-        );
+        assert_eq!(*calls.lock().unwrap(), [Some("cluster-b".to_owned())]);
     }
 
     #[test]

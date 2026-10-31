@@ -383,3 +383,11 @@ these fixes; no green CI evidence covers the current changes.
   `ShuttingDown`; that source adjustment is in the current worktree. Use the
   workflow's `format_frontend_files=true` mode to retrieve the canonical patch,
   then rerun normal package CI on the formatted pushed head.
+- Formatting run
+  [41180617761](https://github.com/auenkr/cadence-rust/actions/runs/41180617761)
+  tested `41dabb27448981fe4be686d819d2f3ec8bec08c8`. The runner-generated
+  `frontend-format-patch` artifact was applied. Its Clippy and formatting steps
+  passed; 54/58 unit tests passed. The four failures were three stale tests
+  assuming Health called the backend or returned the unmetered shutdown error,
+  plus an invalid run UUID in the redirect test fixture. Those expectations
+  are corrected in the current worktree; normal package CI is still required.
