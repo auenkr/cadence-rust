@@ -132,4 +132,41 @@ mod tests {
             }
         );
     }
+
+    #[tokio::test]
+    async fn shutdown_runs_go_hooks_in_order_and_is_idempotent() {
+        let lifecycle = Lifecycle::default();
+        assert!(lifecycle.start());
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let push = |event: &'static str| {
+            let events = events.clone();
+            move || {
+                let events = events.clone();
+                async move { events.lock().unwrap().push(event); }
+            }
+        };
+        assert!(lifecycle
+            .shutdown(
+                Duration::ZERO,
+                push("health"),
+                push("handlers"),
+                push("limiters"),
+                push("resource"),
+            )
+            .await);
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["health", "handlers", "limiters", "resource"]
+        );
+        assert_eq!(lifecycle.state(), State::Stopped);
+        assert!(!lifecycle
+            .shutdown(
+                Duration::ZERO,
+                || async {},
+                || async {},
+                || async {},
+                || async {},
+            )
+            .await);
+    }
 }

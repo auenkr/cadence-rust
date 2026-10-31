@@ -1348,6 +1348,7 @@ async fn run_with_lifecycle(
                     .and_then(|stores| stores.domain_metadata_source.as_ref())
                 {
                     let mut token: Option<Vec<u8>> = None;
+                    let mut domains = Vec::new();
                     loop {
                         match source.list_domains(
                             crate::matching_domain_cache::DOMAIN_CACHE_REFRESH_PAGE_SIZE,
@@ -1355,11 +1356,7 @@ async fn run_with_lifecycle(
                             crate::matching_domain_cache::DOMAIN_CACHE_PERSISTENCE_TIMEOUT,
                         ) {
                             Ok(page) => {
-                                for domain in page.domains {
-                                    state
-                                        .domains
-                                        .insert_matching_metadata_if_missing(&domain);
-                                }
+                                domains.extend(page.domains);
                                 token = page.next_page_token;
                                 if token.is_none() {
                                     break;
@@ -1371,6 +1368,7 @@ async fn run_with_lifecycle(
                             }
                         }
                     }
+                    state.domains.sync_matching_metadata(&domains);
                     state.executions.sync_domains(
                         &state.domains.list().domains.into_iter()
                             .filter_map(|desc| desc.domain_info.map(|info| (info.name, info.uuid)))

@@ -739,4 +739,128 @@ mod tests {
             "DomainActiveClusterName or ActiveClusters must be provided",
         );
     }
+
+    #[test]
+    fn go_request_validator_limit_filter_and_lockdown_matrix() {
+        let mut validator = RequestValidator::default();
+        validator.config.max_domain_name_length = 3;
+        validator.config.max_task_list_name_length = 2;
+        validator.config.max_retention_days = 5;
+        validator.config.max_failover_timeout_seconds = 4;
+
+        assert_eq!(
+            validator
+                .validate_describe_task_list_request(Some(&DescribeTaskListRequest {
+                    domain: "d".into(),
+                    task_list: Some(TaskList { name: "long".into(), ..Default::default() }),
+                    task_list_type: Some(cadence_api::TaskListType::Decision),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "TaskList length exceeds limit."
+        );
+        let time_filter = StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) };
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "d".into(),
+            start_time_filter: Some(time_filter.clone()),
+            execution_filter: Some(WorkflowExecutionFilter::default()),
+            type_filter: Some(WorkflowTypeFilter::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut open))
+                .unwrap_err()
+                .message,
+            "Only one of ExecutionFilter or TypeFilter is allowed"
+        );
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "d".into(),
+            start_time_filter: Some(time_filter),
+            execution_filter: Some(WorkflowExecutionFilter::default()),
+            type_filter: Some(WorkflowTypeFilter::default()),
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err()
+                .message,
+            "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed"
+        );
+        let mut archived = ListArchivedWorkflowExecutionsRequest {
+            domain: "d".into(),
+            page_size: 2,
+            ..Default::default()
+        };
+        validator.config.visibility_archival_query_max_page_size = 1;
+        assert_eq!(
+            validator
+                .validate_list_archived_workflow_executions_request(Some(&mut archived))
+                .unwrap_err()
+                .message,
+            "Pagesize is larger than allowed 1"
+        );
+
+        assert_eq!(
+            validator
+                .validate_register_domain_request(Some(&RegisterDomainRequest {
+                    name: "four".into(),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "Domain length exceeds limit."
+        );
+        assert_eq!(
+            validator
+                .validate_register_domain_request(Some(&RegisterDomainRequest {
+                    name: "ok".into(),
+                    workflow_execution_retention_period_in_days: 6,
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "RetentionDays is invalid."
+        );
+        assert_eq!(
+            validator
+                .validate_update_domain_request(Some(&UpdateDomainRequest {
+                    name: "d".into(),
+                    configuration: Some(cadence_api::types::DomainConfiguration {
+                        workflow_execution_retention_period_in_days: Some(6),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "RetentionDays is invalid."
+        );
+        assert_eq!(
+            validator
+                .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                    domain_name: "d".into(),
+                    domain_active_cluster_name: Some("cluster".into()),
+                    failover_timeout_in_seconds: Some(5),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "FailoverTimeoutInSeconds 5 exceeds the maximum allowed 4"
+        );
+        validator.config.lockdown = true;
+        assert_eq!(
+            validator
+                .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                    domain_name: "d".into(),
+                    domain_active_cluster_name: Some("cluster".into()),
+                    ..Default::default()
+                }))
+                .unwrap_err()
+                .message,
+            "Domain is not accepting fail overs at this time due to lockdown."
+        );
+    }
 }
