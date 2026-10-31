@@ -239,6 +239,8 @@ pub fn open_configured_default_store(
             let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> =
                 metadata.clone();
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> =
+                metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> =
                 metadata;
             Ok(ConfiguredMatchingStores {
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
@@ -246,7 +248,7 @@ pub fn open_configured_default_store(
                 task_store,
                 domain_metadata_source: Some(metadata_source),
                 domain_persistence: Some(domain_persistence),
-                domain_metadata_persistence: None,
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         "mysql" => {

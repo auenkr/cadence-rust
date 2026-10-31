@@ -823,3 +823,22 @@ migration forward.
   durable failover history, the rest of Admin DLQ/raw-history RPCs, scheduler
   workflow RPC wiring, real membership, and exact-head Go/Rust mixed-cluster
   failure/restart/recovery validation.
+
+## Startup cache fix exact-head validation and SQLite domain-writer adapter — 2026-10-31
+
+- Rebased onto `origin/frontend-core2` tip `a84001cf7`, fixed the stale
+  `GoSqlFrontendDomainManager` startup reference, and loaded durable domain
+  metadata in combined Frontend+Matching mode. Exact-head package CI
+  [41197558733](https://github.com/auenkr/cadence-rust/actions/runs/41197558733)
+  completed **success** at `c814e54cb1a2eb176901d00adc279a9f146597bd`.
+- Core2 then advanced through SQLite domain-transaction restart validation to
+  `3019e49c2`. Rebased again onto that current tip; the rebase replayed 102
+  Frontend commits without conflicts.
+- SQLite's configured Go-schema domain store already supported create/update/
+  delete transactions through `GoSqlDomainPersistence`, but Frontend startup
+  did not expose it through the current `DomainMetadataPersistence` manager
+  contract. Added the adapter and configured SQLite to provide it, retaining
+  expected metadata-version checks and the existing transaction semantics.
+  Expanded the SQLite transaction test to exercise the new adapter boundary.
+- `git diff --check` passes. No local Cargo commands were run. Commit and push
+  this adapter slice next, then run package CI at that pushed exact head.
