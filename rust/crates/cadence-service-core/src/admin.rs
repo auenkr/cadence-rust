@@ -1208,6 +1208,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn describe_cluster_matches_go_versions_and_single_host_rings() {
+        let response = describe_cluster_response("frontend-1");
+        let versions = response.supported_client_versions.unwrap();
+        assert_eq!(versions.go_sdk, "<=1.7.0");
+        assert_eq!(versions.java_sdk, "<=1.5.0");
+        let membership = response.membership_info.unwrap();
+        assert_eq!(membership.current_host.unwrap().identity, "frontend-1");
+        assert_eq!(membership.rings.len(), 4);
+        assert_eq!(
+            membership
+                .reachable_members
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["frontend-1"; 4]
+        );
+    }
+
+    #[test]
     fn overlay_get_update_restore_list() {
         let mut overlay = DynamicConfigOverlay::default();
         assert!(overlay.get(false, "k", &[]).is_none());
