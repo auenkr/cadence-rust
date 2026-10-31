@@ -470,6 +470,89 @@ impl MySqlDomainMetadataStore {
             })
             .map_err(query_error)
     }
+
+    /// Store a consumer's monotonically increasing acknowledgement level in
+    /// Go's JSON `queue_metadata` row. Delayed acknowledgements are ignored.
+    pub fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let mut transaction = connection
+                        .start_transaction(mysql_async::TxOpts::default())
+                        .await?;
+                    let current: Option<Vec<u8>> = transaction
+                        .exec_first(
+                            "SELECT data FROM queue_metadata WHERE queue_type=? FOR UPDATE",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                        )
+                        .await?;
+                    let has_current = current.is_some();
+                    let mut levels: std::collections::HashMap<String, i64> = current
+                        .map(|data| serde_json::from_slice(&data))
+                        .transpose()
+                        .map_err(|error| {
+                            mysql_async::Error::Other(Box::new(std::io::Error::other(error)))
+                        })?
+                        .unwrap_or_default();
+                    if levels.get(&cluster_name).is_some_and(|old| *old >= message_id) {
+                        transaction.commit().await?;
+                        return Ok(());
+                    }
+                    levels.insert(cluster_name, message_id);
+                    let data = serde_json::to_vec(&levels).map_err(|error| {
+                        mysql_async::Error::Other(Box::new(std::io::Error::other(error)))
+                    })?;
+                    if has_current {
+                        transaction
+                            .exec_drop(
+                                "UPDATE queue_metadata SET data=? WHERE queue_type=?",
+                                (data, GO_DOMAIN_REPLICATION_QUEUE_TYPE),
+                            )
+                            .await?;
+                    } else {
+                        transaction
+                            .exec_drop(
+                                "INSERT INTO queue_metadata (queue_type, data) VALUES (?, ?)",
+                                (GO_DOMAIN_REPLICATION_QUEUE_TYPE, data),
+                            )
+                            .await?;
+                    }
+                    transaction.commit().await
+                })
+            })
+            .map_err(query_error)
+    }
+
+    pub fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let data: Option<Vec<u8>> = connection
+                        .exec_first(
+                            "SELECT data FROM queue_metadata WHERE queue_type=?",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                        )
+                        .await?;
+                    data.map(|data| serde_json::from_slice(&data))
+                        .transpose()
+                        .map(|levels| levels.unwrap_or_default())
+                        .map_err(|error| {
+                            mysql_async::Error::Other(Box::new(std::io::Error::other(error)))
+                        })
+                })
+            })
+            .map_err(query_error)
+    }
 }
 
 /// Go allocates a queue ID above both the last persisted row and every known
