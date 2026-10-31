@@ -253,6 +253,7 @@ jobs:
             crates/cadence-frontend/src/handler_domain.rs
             crates/cadence-frontend/src/handler_schedule.rs
             crates/cadence-frontend/src/handler_workflow.rs
+            crates/cadence-frontend/src/handler_workflow_history.rs
             crates/cadence-frontend/src/history_client.rs
             crates/cadence-frontend/src/lifecycle.rs
             crates/cadence-frontend/src/matching_client.rs
@@ -260,6 +261,7 @@ jobs:
             crates/cadence-frontend/src/wrappers/mod.rs
             crates/cadence-frontend/src/wrappers/accesscontrolled.rs
             crates/cadence-frontend/src/wrappers/clusterredirection.rs
+            crates/cadence-frontend/src/wrappers/grpc.rs
             crates/cadence-frontend/src/wrappers/metered.rs
             crates/cadence-frontend/src/wrappers/ratelimited.rs
             crates/cadence-frontend/src/wrappers/thrift.rs

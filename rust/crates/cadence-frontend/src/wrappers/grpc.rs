@@ -30,6 +30,35 @@ pub fn error_message(error: &cadence_api::errors::CadenceError) -> String {
     error.to_string()
 }
 
+/// Status code selected by Go's `common/types/mapper/proto.FromError` for the
+/// Cadence errors represented by this API crate.
+pub fn error_code(error: &cadence_api::errors::CadenceError) -> tonic::Code {
+    use cadence_api::errors::CadenceError;
+    match error {
+        CadenceError::AccessDenied(_) => tonic::Code::PermissionDenied,
+        CadenceError::Internal(_) => tonic::Code::Internal,
+        CadenceError::EntityNotExists(_) | CadenceError::WorkflowAlreadyCompleted(_) => {
+            tonic::Code::NotFound
+        }
+        CadenceError::BadRequest(_) | CadenceError::QueryFailed(_) => {
+            tonic::Code::InvalidArgument
+        }
+        CadenceError::CancellationAlreadyRequested(_)
+        | CadenceError::DomainAlreadyExists(_)
+        | CadenceError::WorkflowAlreadyStarted(_) => tonic::Code::AlreadyExists,
+        CadenceError::DomainNotActive(_) | CadenceError::ClientVersionNotSupported(_) => {
+            tonic::Code::FailedPrecondition
+        }
+        CadenceError::LimitExceeded(_) | CadenceError::ServiceBusy(_) => {
+            tonic::Code::ResourceExhausted
+        }
+        CadenceError::ShardOwnershipLost(_) | CadenceError::RetryTaskV2(_) => {
+            tonic::Code::Aborted
+        }
+        CadenceError::Unknown(_) => tonic::Code::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,5 +68,18 @@ mod tests {
         assert_eq!(API_GROUPS.len(), 7);
         assert!(API_GROUPS.contains(&ApiGroup::Workflow));
         assert!(API_GROUPS.contains(&ApiGroup::Semaphore));
+    }
+
+    #[test]
+    fn grpc_error_status_preserves_go_error_categories() {
+        use cadence_api::errors::{BadRequestError, CadenceError, ServiceBusyError};
+        assert_eq!(
+            error_code(&CadenceError::BadRequest(BadRequestError::new("bad"))),
+            tonic::Code::InvalidArgument
+        );
+        assert_eq!(
+            error_code(&CadenceError::ServiceBusy(ServiceBusyError::new("busy"))),
+            tonic::Code::ResourceExhausted
+        );
     }
 }

@@ -215,7 +215,10 @@ mod tests {
             &bypass,
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), "request context canceled");
+        assert!(matches!(
+            err,
+            CadenceError::Unknown(message) if message == "request context canceled"
+        ));
     }
 
     #[test]
@@ -231,5 +234,59 @@ mod tests {
         assert!(!operation_rule("RespondActivityTaskCompleted").unwrap().reject_when_limited);
         assert_eq!(operation_rule("CountWorkflowExecutions").unwrap().class, RequestClass::Visibility);
         assert!(operation_rule("RegisterDomain").is_none());
+    }
+
+    #[test]
+    fn workflow_api_ratelimit_table_covers_each_go_generated_method() {
+        use RequestClass::{Async, User, Visibility, Worker, WorkerPoll};
+        let expected = [
+            ("DiagnoseWorkflowExecution", Some((User, true))),
+            ("PollForActivityTask", Some((WorkerPoll, true))),
+            ("PollForDecisionTask", Some((WorkerPoll, true))),
+            ("RecordActivityTaskHeartbeat", Some((Worker, false))),
+            ("RecordActivityTaskHeartbeatByID", Some((Worker, false))),
+            ("RespondActivityTaskCompleted", Some((Worker, false))),
+            ("RespondActivityTaskCompletedByID", Some((Worker, false))),
+            ("RespondActivityTaskFailed", Some((Worker, false))),
+            ("RespondActivityTaskFailedByID", Some((Worker, false))),
+            ("RespondActivityTaskCanceled", Some((Worker, false))),
+            ("RespondActivityTaskCanceledByID", Some((Worker, false))),
+            ("RespondDecisionTaskCompleted", Some((Worker, false))),
+            ("RespondDecisionTaskFailed", Some((Worker, false))),
+            ("RespondQueryTaskCompleted", Some((Worker, false))),
+            ("StartWorkflowExecution", Some((User, true))),
+            ("StartWorkflowExecutionAsync", Some((Async, true))),
+            ("GetWorkflowExecutionHistory", Some((User, true))),
+            ("SignalWorkflowExecution", Some((User, true))),
+            ("SignalWithStartWorkflowExecution", Some((User, true))),
+            ("SignalWithStartWorkflowExecutionAsync", Some((Async, true))),
+            ("TerminateWorkflowExecution", Some((User, true))),
+            ("ResetWorkflowExecution", Some((User, true))),
+            ("RequestCancelWorkflowExecution", Some((User, true))),
+            ("RestartWorkflowExecution", Some((User, true))),
+            ("GetSearchAttributes", None),
+            ("QueryWorkflow", Some((User, true))),
+            ("DescribeWorkflowExecution", Some((User, true))),
+            ("CountWorkflowExecutions", Some((Visibility, true))),
+            ("ScanWorkflowExecutions", Some((Visibility, true))),
+            ("ListOpenWorkflowExecutions", Some((Visibility, true))),
+            ("ListClosedWorkflowExecutions", Some((Visibility, true))),
+            ("ListArchivedWorkflowExecutions", Some((Visibility, true))),
+            ("ListWorkflowExecutions", Some((Visibility, true))),
+            ("DescribeTaskList", Some((User, true))),
+            ("ListTaskListPartitions", Some((User, true))),
+            ("GetTaskListsByDomain", Some((User, true))),
+            ("ResetStickyTaskList", Some((Worker, false))),
+            ("RefreshWorkflowTasks", Some((User, true))),
+            ("GetClusterInfo", None),
+            ("Health", None),
+        ];
+        for (name, expected) in expected {
+            assert_eq!(
+                operation_rule(name).map(|rule| (rule.class, rule.reject_when_limited)),
+                expected,
+                "Go wrapper rate-limit classification differs for {name}"
+            );
+        }
     }
 }

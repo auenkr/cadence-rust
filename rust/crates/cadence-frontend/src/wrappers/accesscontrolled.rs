@@ -17,18 +17,20 @@ pub enum Permission {
 pub struct Attributes {
     pub operation: String,
     pub permission: Option<Permission>,
+    pub actor: String,
     pub domain: String,
-    pub workflow_id: String,
-    pub run_id: String,
-    pub task_list: String,
-    pub identity: String,
+    pub task_list: Option<Value>,
     pub workflow_type: Option<Value>,
     pub request_body: Option<Value>,
 }
 
 /// Build the authorization input used by Go's generated Workflow API wrapper.
 /// Methods absent from that wrapper return `None` and bypass authorization.
-pub fn attributes_for_request(operation: &str, request: &Value) -> Option<Attributes> {
+pub fn attributes_for_request(
+    operation: &str,
+    request: &Value,
+    actor: &str,
+) -> Option<Attributes> {
     use Permission::{Admin, Process, Read, Write};
     let permission = match operation {
         "CountWorkflowExecutions"
@@ -71,23 +73,31 @@ pub fn attributes_for_request(operation: &str, request: &Value) -> Option<Attrib
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    let task_list = request
-        .get("taskList")
-        .and_then(|value| value.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let mut request_body = request.clone();
+    if matches!(
+        operation,
+        "SignalWorkflowExecution"
+            | "SignalWithStartWorkflowExecution"
+            | "SignalWithStartWorkflowExecutionAsync"
+            | "StartWorkflowExecution"
+            | "StartWorkflowExecutionAsync"
+    ) {
+        if let Some(body) = request_body.as_object_mut() {
+            // Go's request structs mark these byte fields json:"-" to keep
+            // workflow/query payloads out of authorization audit logs.
+            body.remove("input");
+            body.remove("signalInput");
+        }
+    }
     Some(Attributes {
         operation: operation.to_owned(),
         permission: Some(permission),
+        actor: actor.to_owned(),
         domain,
-        workflow_id: String::new(),
-        run_id: String::new(),
-        task_list,
-        identity: String::new(),
+        task_list: request.get("taskList").cloned(),
         workflow_type: request.get("workflowType").cloned(),
         // Go's NewFilteredRequestBody JSON-serializes the full API request.
-        request_body: Some(request.clone()),
+        request_body: Some(request_body),
     })
 }
 
@@ -141,6 +151,7 @@ where
 pub fn authorize_request<A, M>(
     operation: &str,
     request: &Value,
+    actor: &str,
     authorizer: &A,
     metrics: &M,
 ) -> Result<(), CadenceError>
@@ -148,7 +159,7 @@ where
     A: Authorizer,
     M: AuthorizationMetrics,
 {
-    match attributes_for_request(operation, request) {
+    match attributes_for_request(operation, request, actor) {
         Some(attributes) => authorize(authorizer, metrics, &attributes),
         None => Ok(()),
     }
@@ -204,26 +215,36 @@ mod tests {
             "workflowType": {"name": "checkout"},
             "taskList": {"name": "orders"}
         });
-        let start = attributes_for_request("StartWorkflowExecution", &request).unwrap();
+        let start = attributes_for_request("StartWorkflowExecution", &request, "worker").unwrap();
         assert_eq!(start.permission, Some(Permission::Write));
+        assert_eq!(start.actor, "worker");
         assert_eq!(start.domain, "shop");
-        assert_eq!(start.task_list, "orders");
+        assert_eq!(start.task_list, request.get("taskList").cloned());
         assert_eq!(start.workflow_type, request.get("workflowType").cloned());
         assert_eq!(start.request_body, Some(request.clone()));
 
+        let private_request = serde_json::json!({"domain": "shop", "input": "secret"});
+        let filtered = attributes_for_request(
+            "StartWorkflowExecution",
+            &private_request,
+            "worker",
+        )
+        .unwrap();
+        assert_eq!(filtered.request_body, Some(serde_json::json!({"domain": "shop"})));
+
         assert_eq!(
-            attributes_for_request("PollForActivityTask", &request)
+            attributes_for_request("PollForActivityTask", &request, "worker")
                 .unwrap()
                 .permission,
             Some(Permission::Process)
         );
         assert_eq!(
-            attributes_for_request("CountWorkflowExecutions", &request)
+            attributes_for_request("CountWorkflowExecutions", &request, "worker")
                 .unwrap()
                 .permission,
             Some(Permission::Read)
         );
-        assert!(attributes_for_request("RespondActivityTaskCompleted", &request).is_none());
-        assert!(attributes_for_request("Health", &request).is_none());
+        assert!(attributes_for_request("RespondActivityTaskCompleted", &request, "worker").is_none());
+        assert!(attributes_for_request("Health", &request, "worker").is_none());
     }
 }
