@@ -22,6 +22,9 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   one-second request-drain split and hook order (health, handlers, limiters,
   resource), plus timing tests. The current launcher has not wired it into the
   running Frontend process.
+- Added per-request gRPC metadata and the Go 30-second default timeout helper
+  to both outbound generated clients. Extended dynamic-config string reads to
+  support Go's domain-filtered visibility-store selector.
 - Added focused validator tests for page mutation/visibility limits, validation
   order, and execution identity checks.
 
@@ -32,8 +35,9 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   head `e268cf3c5ed7e1160e5df74a2e663b6f6dd144fd`. It was `in_progress` at the
   last read; that run predates the follow-up dynamic-config changes below.
 - A new package CI run is required after the current commit is pushed. Record
-  its final conclusion here. Run `41174623555` is dispatched for
-  `39e0220a3bf5d60f7608270357f42b6d09cc750e` and was pending when inspected.
+  its final conclusion here. Run `41174623555` at
+  `39e0220a3bf5d60f7608270357f42b6d09cc750e` was in progress before the latest
+  client and lifecycle edits; request a fresh final run after pushing them.
   No Cargo command was run locally.
 
 ## Remaining gaps (this branch is not Frontend complete)
