@@ -132,6 +132,10 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   explicit empty-map override. The validator now uses Go map membership and
   formats the missing-key error with Go's map representation. Exact-head CI
   must validate this code and the expanded success matrix.
+- Added successful Rust fixtures for every validator method, plus a core
+  request-admission test that checks health turns unhealthy before the HTTP
+  router rejects new calls. This strengthens the drain contract but does not
+  supply the absent global quota-collection lifecycle owners.
 
 ## Remaining gaps (this branch is not Frontend complete)
 

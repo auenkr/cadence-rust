@@ -2423,6 +2423,66 @@ pub fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
         keys: Some(cadence_api::search_attributes::default_indexed_keys()),
     }
 }
+
+#[cfg(test)]
+mod frontend_drain_tests {
+    use super::*;
+    use axum::body::Body;
+    use http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn frontend_health_fails_before_admission_closes() {
+        let state = AppState::default();
+        let ready = state.frontend_ready.clone();
+        let accepting = state.frontend_accepting.clone();
+        let app = router(state);
+
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        ready.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Requests continue while peers discover the unhealthy state; the
+        // admission gate closes only after that interval.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        accepting.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}
+
 async fn get_search_attributes() -> impl IntoResponse {
     Json(search_attributes())
 }
