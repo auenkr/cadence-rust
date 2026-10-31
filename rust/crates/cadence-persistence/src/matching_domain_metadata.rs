@@ -410,10 +410,6 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
 
         let notification_version = self.metadata.metadata_version()?;
         let (info, config, replication) = Self::domain_udts(metadata);
-        let (history_status, visibility_status) = (
-            i32::from(metadata.history_archival_status_raw),
-            i32::from(metadata.visibility_archival_status_raw),
-        );
         let name = metadata.info.name.clone();
         let insert = CqlStatement::new(
             "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS",
