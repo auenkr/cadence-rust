@@ -381,3 +381,31 @@ run. The Worker service still refuses to poll (`WorkerService::start`).
 6. Still unported in the requested order: failovermanager, scheduler,
    esanalyzer, indexer, diagnostics. Then pollers, deterministic replay, the
    registration dispatch, the lifecycle and drain, and the mixed Go/Rust gates.
+
+## Checkpoint — failover manager planners (2026-10-31, continuation)
+
+Head `78b589040`. Package CI with `format_worker_files=true`: run
+https://github.com/auenkr/cadence-rust/actions/runs/41223313367 — success at
+`a08fd0db1`, 101 worker crate tests passed. The CI format patch was applied in
+`78b589040` (formatting only). Earlier in the continuation, `failovermanager/shared.rs`
+passed CI at `e85534c9a` (run 41222417343, 90 tests).
+
+Ported (Go-mirroring pure logic, Go-derived tests):
+- `failovermanager/shared.rs`: activity payload JSON (Go field names, null
+  slices decode as empty), touched clusters, active-cluster grouping,
+  eligibility, `processInBatches` (wait between batches only), failure and
+  name helpers, failover timeout parser.
+- `failovermanager/domain.rs`: `DomainView` (the `DescribeDomainResponse` subset)
+  with managed-by-Cadence, preferred cluster, attribute lookup, timeout.
+- `failovermanager/failover_v2.rs`: `FailoverV2Params` defaults and validation,
+  `DomainSnapshot`, `failoverPreferencesForDomain`.
+- `failovermanager/rebalance_v2.rs`: `shouldAllowRebalance`,
+  `rebalancePreferencesForDomain`, attribute update selection, malformed
+  preference tolerance, `getDomainsByCluster`.
+
+Still unported in failovermanager: `workflow.go` (legacy failover workflow and
+`FailoverActivity`), `failover_workflow_v2.go` workflow body and
+`GetDomainsForFailoverV2Activity`, `rebalance_workflow.go` and
+`rebalance_workflow_v2.go` workflow bodies and activities, `starter.go`
+(`FailoverManager` lifecycle), and the `ClusterAttribute` activity bodies that
+call frontend APIs.
