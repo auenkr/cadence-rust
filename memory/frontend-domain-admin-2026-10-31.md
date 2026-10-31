@@ -709,3 +709,23 @@ migration forward.
   delete methods. Core2 also changed the in-memory domain create error type;
   adapted the convenience method to propagate it into `FrontendDomainError`.
   No local Cargo command was run. Push this repair and redispatch package CI.
+
+## Continuation checkpoint — 2026-10-31 (post core2 rebase)
+
+- Rebased the Frontend work branch onto the latest `origin/frontend-core2`
+  tip `a4098142b1b7925e6eb4fc6dee0ba4a2f973e929`. The rebase applied all 92
+  Frontend commits without conflicts and now includes the shared Go SQL domain
+  transaction contract. The resulting working branch is currently 93 commits
+  ahead and 92 behind the old remote ref; push it with `--force-with-lease`.
+- Exact old-head CI run
+  [41195083454](https://github.com/auenkr/cadence-rust/actions/runs/41195083454)
+  completed success at `fb55f284af1a2ee1f611dab69ab238e03bb53001` (Clippy,
+  formatting, tests and Frontend runtime smoke). This does not validate the
+  rebased head; dispatch fresh package CI after pushing.
+- Persistence gap inspection: MySQL and PostgreSQL implement both SQL domain
+  mutation traits. Cassandra metadata has only the reader/cache path and does
+  not implement `DomainMetadataPersistence`, so configured Cassandra Frontend
+  domain mutations remain a concrete blocker. Next implementation slice should
+  add Cassandra Go-schema create/update/delete with Go's LWT/version semantics,
+  then select that writer in configured Frontend startup. No cargo was run
+  locally.
