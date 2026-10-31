@@ -906,3 +906,9 @@ migration forward.
   Changed the first use to `driver.clone()`; dispatch fresh CI at the resulting
   commit, because run [41199231977](https://github.com/auenkr/cadence-rust/actions/runs/41199231977)
   was already running against the pre-fix head `6e64bc87014f012d9dcdd06032600913b8739c4a`.
+- Corrected source commit `014526620ae4d5983e62148e0df23c707d5ded4f` passed
+  exact-head Frontend package CI:
+  [41199384065](https://github.com/auenkr/cadence-rust/actions/runs/41199384065)
+  completed `success` (Clippy, Formatting, Test and Frontend runtime smoke).
+  This validates the configured domain persistence integration and current
+  CRUD routing source, but does not close the parity blockers listed above.
