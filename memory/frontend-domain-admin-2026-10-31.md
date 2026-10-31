@@ -1059,3 +1059,8 @@ migration forward.
   and failed Clippy on a now-redundant `..Default::default()` in the domain
   replication task fixture. Removed that struct update; rerun the focused
   package on the new head.
+
+## Concurrent Frontend API work integration — 2026-10-31
+
+- The first push of commit `2e0a7bd26` was rejected because `origin/t3/frontend-domain-admin` had advanced with 48 commits of Admin YARPC, raw-history, schedule validation and workflow-maintenance work. Merged that ref into the current domain/queue line. For overlapping code files, retained the more recent domain/queue implementation from this branch; non-conflicting API, proto and workflow changes were merged automatically. This merge must pass fresh exact-head CI before it is treated as validated.
+- Resolved the Thrift test fixture compilation error reported by `41204385560` by filling `DomainTaskAttributes` optional fields explicitly. The fix is included in the merge and still awaits exact-head `cadence-thrift` CI.

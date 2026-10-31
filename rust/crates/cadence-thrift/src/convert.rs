@@ -24,6 +24,14 @@ use cadence_api::admin::{
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
+use cadence_api::admin::{
+    AddSearchAttributeRequest, AddSearchAttributeResponse, DescribeClusterResponse,
+    DynamicConfigEntry, DynamicConfigFilter, DynamicConfigValue, GetDynamicConfigRequest,
+    GetDynamicConfigResponse, HostInfo, ListDynamicConfigRequest, ListDynamicConfigResponse,
+    MembershipInfo, PersistenceFeature, PersistenceInfo, RestoreDynamicConfigRequest,
+    RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigRequest,
+    UpdateDynamicConfigResponse,
+};
 use cadence_api::schedule::*;
 use cadence_api::service_types::*;
 use cadence_api::tasks::*;
