@@ -1978,3 +1978,7 @@ Added the wildcard invalid-value mapping; exact-head package CI is pending.
 - Frontend parity remains incomplete. See
   `memory/frontend-domain-admin-2026-10-31.md` for the remaining Domain,
   Admin, Schedule and mixed-cluster blockers.
+
+The Thrift/YARPC `ResetQueue` and `DescribeQueue` routes now delegate to the
+configured History client, matching the JSON paths and Go Admin behavior. Exact
+package CI is pending for this source change.

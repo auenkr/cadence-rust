@@ -707,39 +707,68 @@ fn handle_describe_cluster() -> HandlerResult {
     )))
 }
 
-fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     crate::admin::check_shard_id(state, req.shard_id)
         .map_err(|error| AppError::bad_request(error.message))?;
-    if req.task_type.is_none() {
+    let task_type = req
+        .task_type
+        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+    if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
-            "TaskType is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured."))?;
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    client
+        .reset_queue(crate::admin::history_admin_request(
+            cadence_proto::history::ResetQueueRequest {
+                shard_id: req.shard_id,
+                cluster_name: req.cluster_name,
+                task_type,
+            },
+        ))
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?;
     Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
 }
 
-fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DescribeQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     crate::admin::check_shard_id(state, req.shard_id)
         .map_err(|error| AppError::bad_request(error.message))?;
-    if req.task_type.is_none() {
+    let task_type = req
+        .task_type
+        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+    if req.cluster_name.is_empty() {
         return Err(AppError::bad_request(
-            "TaskType is not set on request.".to_string(),
+            "Cluster name is not set.".to_string(),
         ));
     }
-    let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
-    let processing_queue_states = vec![
-        format!("{{\"queue\":\"decision\",\"pending\":{decisions}}}"),
-        format!("{{\"queue\":\"activity\",\"pending\":{activities}}}"),
-        format!("{{\"queue\":\"timer\",\"pending\":{timers}}}"),
-        format!("{{\"queue\":\"backoff\",\"pending\":{backoffs}}}"),
-        format!("{{\"queue\":\"schedule\",\"registered\":{schedules}}}"),
-    ];
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured."))?;
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    let response = client
+        .describe_queue(crate::admin::history_admin_request(
+            cadence_proto::history::DescribeQueueRequest {
+                shard_id: req.shard_id,
+                cluster_name: req.cluster_name,
+                task_type,
+            },
+        ))
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?
+        .into_inner();
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
-        processing_queue_states,
+        processing_queue_states: response.processing_queue_states,
     }))
 }
 
@@ -2078,8 +2107,8 @@ pub async fn dispatch(
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
-        "ResetQueue" => handle_reset_queue(state, body),
-        "DescribeQueue" => handle_describe_queue(state, body),
+        "ResetQueue" => handle_reset_queue(state, body).await,
+        "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),

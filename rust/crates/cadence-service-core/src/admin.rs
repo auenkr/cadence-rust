@@ -1330,7 +1330,7 @@ pub async fn describe_queue(
     }
 }
 
-fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
+pub(crate) fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
     let mut request = tonic::Request::new(payload);
     request.metadata_mut().insert(
         "rpc-service",

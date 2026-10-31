@@ -1230,3 +1230,9 @@ migration forward.
   scheduler workflow integration; live membership; and mixed Go/Rust
   failure/restart/recovery acceptance. This CI pass does not establish service
   parity.
+- Continued the Admin queue audit: JSON `ResetQueue` and `DescribeQueue` used
+  the configured History client, but the YARPC methods still returned a local
+  no-op/synthetic queue response. Replaced both Thrift paths with the same
+  History gRPC calls, including Go caller metadata, cluster-name validation,
+  and History error propagation. This change is pushed for exact-head package
+  CI; no local Cargo command ran.
