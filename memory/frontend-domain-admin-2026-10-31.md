@@ -553,3 +553,9 @@ migration forward.
   rebased Admin YARPC handlers. Added explicit string conversion at those
   call sites; source-only diff checks pass. Dispatch a fresh package run after
   pushing this repair.
+
+## Continued Admin validation and core2 refresh — 2026-10-31
+
+- Reconfirmed current source still has placeholder behavior in `cadence-service-core/src/admin.rs`: DLQ endpoints return empty results, queue removal/reset is a no-op, membership is synthesized from one host, and several cross-cluster methods do not call clients. Schedule HTTP/YARPC operations persist schedule records but do not yet signal the scheduler workflow. Domain state remains the shared in-memory metadata store.
+- The working tree contained an uncommitted Admin validation fix carried from the prior session: `GetReplicationMessages` now matches Go's `Cluster name is not set.` message; `GetDLQReplicationMessages` rejects an empty task-info list; and read/purge/merge DLQ routes reject `DLQType.Invalid` with Go's unsupported-type error. It passes `git diff --check`; exact-head CI has not yet run.
+- `origin/frontend-core2` advanced after this branch's previous rebase. Rebase onto its current fetched head before the next CI dispatch. No Cargo command was run locally.
