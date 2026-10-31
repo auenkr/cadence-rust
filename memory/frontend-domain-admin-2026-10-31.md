@@ -69,6 +69,10 @@
   used by cron validation in `handler_schedule.rs`. Go oracle and formatting
   steps passed; Rust formatting and tests were skipped. Added the missing direct
   path dependency to `cadence-frontend/Cargo.toml`; fresh CI is required.
+- Run [41173868530](https://github.com/auenkr/cadence-rust/actions/runs/41173868530)
+  was dispatched for head `f6c0d65004cab12e9f9e1a3699f3290cad651d90` after
+  adding the dependency and lockfile entry. Conclusion pending; inspect with
+  `gh run view 41173868530`.
 
 ## Known gaps — do not claim service parity
 
