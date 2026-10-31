@@ -409,3 +409,15 @@ Still unported in failovermanager: `workflow.go` (legacy failover workflow and
 `rebalance_workflow_v2.go` workflow bodies and activities, `starter.go`
 (`FailoverManager` lifecycle), and the `ClusterAttribute` activity bodies that
 call frontend APIs.
+
+## Checkpoint — ES analyzer query templates (2026-10-31, continuation)
+
+Commit `3464a16b4`, package CI https://github.com/auenkr/cadence-rust/actions/runs/41223667431
+— success, 104 worker crate tests passed. The CI format patch was empty for the
+new files. `esanalyzer/queries.rs` holds the five Go ES/Pinot templates, copied
+from the Go source with a script (not retyped), with `{DOMAIN_ID}`, `{TABLE}`
+and `{WORKFLOW_TYPE}` placeholders, plus the `readMode` values. Go's
+domain workflow-type Pinot query has `ORDER BY count` without `DESC`. This is
+kept as written. Not yet ported: the analyzer workflow, the version and
+type-count aggregation, store clients, metric emission and `analyzer.go`
+lifecycle.
