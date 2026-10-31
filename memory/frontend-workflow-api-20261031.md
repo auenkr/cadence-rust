@@ -1304,3 +1304,58 @@ Frontend parity until these are implemented and validated.
   backend starting from the simplest RPCs; (4) History events proto→api
   conversion; (5) register the composed Handler on gRPC and Thrift; (6) the mixed
   Go History + Rust Matching/Frontend gate with binary SHA256.
+
+## Converter sharing, reverse task-list converters, typed Matching backend — 2026-10-31
+
+Branch `t3/frontend-workflow-api` (worker run on `t3/frontend-workflow-api-2`).
+Commits, in order:
+
+- `b5a6b021d` refactor(proto): move Matching proto<->API converters into
+  `cadence-proto::convert` (`mod.rs` = former `grpc_convert.rs`, plus
+  `history.rs` = event API->proto and `decisions.rs` = decision proto->API).
+  Matching re-exports them as `grpc_convert`/`grpc_history`/`grpc_decisions`,
+  so call sites are unchanged. `cadence-proto` now depends on `cadence-api`
+  (no cycle: cadence-api depends only on cadence-common). Generator templates in
+  `rust/tools/generate-grpc-{history,decisions}.py` point at the new paths.
+- `9f8e63eb7` feat(proto): reverse task-list converters: `poll_for_decision_task_request_in/_out`,
+  `poll_for_activity_task_request_in/_out`, `describe_task_list_request_in/_out`,
+  `describe_task_list_in`, `list_task_list_partitions_{request,}_{in,out}`,
+  `get_task_lists_by_domain_{request,}_in`, plus private helpers. Round-trip tests
+  in `convert::reverse_tests`.
+- `c280e4c6a` feat(frontend): `matching_task_list_backend::MatchingTaskListBackend<R>`
+  implements `WorkflowBackend` for `ListTaskListPartitions` and
+  `GetTaskListsByDomain` over the typed Matching client (via
+  `MatchingClientResolver`). Other operations return `Internal`. Three unit
+  tests (malformed request, resolver failure, unserved operation).
+- `066e8d885` fix(proto): prost maps `google.protobuf.DoubleValue` to
+  `Option<f64>`; `prost_types::DoubleValue` does not exist. Caught by CI.
+
+CI evidence (rust-ci.yml, clippy then tests, standard runner):
+
+| Run | Package | Head | Conclusion |
+|---|---|---|---|
+| [41220709660](https://github.com/auenkr/cadence-rust/actions/runs/41220709660) | cadence-matching | b5a6b021d (step 1) | success |
+| [41221582350](https://github.com/auenkr/cadence-rust/actions/runs/41221582350) | cadence-proto | 066e8d885 | success |
+| [41221841031](https://github.com/auenkr/cadence-rust/actions/runs/41221841031) | cadence-frontend | 066e8d885 | success |
+| [41222168706](https://github.com/auenkr/cadence-rust/actions/runs/41222168706) | cadence-matching | 066e8d885 (final) | success |
+
+The first proto run [41221279687](https://github.com/auenkr/cadence-rust/actions/runs/41221279687)
+failed at `c280e4c6a` on the DoubleValue error above; it is superseded.
+No Cargo or rustfmt ran locally. No Rust binary SHA256 exists for these runs
+(unit and package gates only; no mixed-cluster gate).
+
+### What is NOT done (remaining gaps, in priority order)
+
+1. Proto->API poll **responses** (`PollForDecisionTaskResponse`,
+   `PollForActivityTaskResponse`) and History event reverse conversion. Needs a
+   reverse event converter for all `HistoryEvent` attribute types; the existing
+   `convert::history` only maps API->proto. Blocks any typed poll path.
+2. Typed `WorkflowBackend` coverage for the remaining operations (poll,
+   DescribeTaskList needs the matching `domain_id` from the domain lookup,
+   History-backed operations via `HistoryClient`). Only two operations are served.
+3. Registration: `MatchingTaskListBackend` is not wired. The public
+   WorkflowService still calls the local engine in `cadence-matching::grpc`;
+   `cadence-frontend::run()` still calls the shared Matching launcher. Needs the
+   transport injection point from gap 4 in the earlier list.
+4. Mixed Go History + Rust Matching/Frontend SDK gate, failure/restart/recovery,
+   and recorded binary SHA256. Not started.
