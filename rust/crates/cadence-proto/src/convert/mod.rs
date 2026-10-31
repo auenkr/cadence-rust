@@ -590,16 +590,15 @@ pub fn poll_for_activity_task_request_out(
         task_list_metadata: v.task_list_metadata.map(task_list_metadata_out),
     }
 }
+// prost maps the `google.protobuf.DoubleValue` wrapper to `Option<f64>`.
 fn task_list_metadata_in(v: p::TaskListMetadata) -> t::TaskListMetadata {
     t::TaskListMetadata {
-        max_tasks_per_second: v.max_tasks_per_second.map(|d| d.value),
+        max_tasks_per_second: v.max_tasks_per_second,
     }
 }
 fn task_list_metadata_out(v: t::TaskListMetadata) -> p::TaskListMetadata {
     p::TaskListMetadata {
-        max_tasks_per_second: v
-            .max_tasks_per_second
-            .map(|value| prost_types::DoubleValue { value }),
+        max_tasks_per_second: v.max_tasks_per_second,
     }
 }
 pub fn describe_task_list_request_in(
