@@ -1041,3 +1041,9 @@ migration forward.
   `cadence-service-core`, then failed Clippy because the domain queue read's
   three-arm `Result` match should use `?`. Replaced it with the equivalent
   propagation. The next exact-head run is required; no Rust tests ran.
+- Exact-head Frontend package run [41203546921](https://github.com/auenkr/cadence-rust/actions/runs/41203546921)
+  completed **success** at `0919ea858351fd6870165459d1892e4d6462e4af` after the
+  fixes above. Frontend Clippy, formatting, tests and runtime smoke passed. The
+  package selection compiles the changed service-core/thrift dependencies, but
+  does not run their own unit-test suites; dispatch focused `cadence-thrift` and
+  `cadence-persistence` package runs for the new conversion and cursor tests.
