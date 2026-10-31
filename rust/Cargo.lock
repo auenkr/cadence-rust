@@ -406,6 +406,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cadence-api",
+ "cadence-common",
  "cadence-matching",
  "cadence-persistence",
  "cadence-proto",
