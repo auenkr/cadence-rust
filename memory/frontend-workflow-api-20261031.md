@@ -923,3 +923,16 @@ Frontend parity until these are implemented and validated.
   succeeded at `3af6e5659a72c570de6986eeabfda8851faa02d3`; the runner applied
   its formatting patch before Clippy, format and package tests. The patch was
   retrieved for committing. Exact committed-head validation is pending.
+- Exact-head package run
+  [41195195658](https://github.com/auenkr/cadence-rust/actions/runs/41195195658)
+  checked `a3bc2dfb09769c5bafb90aef216601739c37cc9e` and concluded `success`
+  for formatting, Clippy and Frontend tests, including the archived-history
+  reader seam test. The test run precedes the core2 SQL transaction commits
+  cherry-picked next.
+- Re-fetched `origin/frontend-core2` at `a4098142b`. Cherry-picked its scoped
+  SQL domain persistence groundwork (`807d23e52`, `9bf48bc0c`, `f93c0eb4b`,
+  `7b5635c96`, `f3d148ba1`) as `7a052b528`, `d874bf480`, `8014429e3`,
+  `affae4dec`, `fc03f8b5e`. These changes provide transaction primitives and a
+  shared Go SQL domain persistence contract; the production Frontend factory
+  still does not select or wrap them as `FrontendDomainManager`. An exact-head
+  Frontend CI dispatch after these cherry-picks is pending.
