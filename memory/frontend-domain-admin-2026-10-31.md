@@ -53,6 +53,13 @@
   is at head `f3b3611f7da78ab156b6fd14ef7e7026339683c1` and was in progress at
   the last check; it also predates the current domain update guards. It is not
   evidence for the updated source. A fresh run will be dispatched after push.
+- Run [41173330575](https://github.com/auenkr/cadence-rust/actions/runs/41173330575)
+  targeted `39eaefbd3b9073576df7d650e08ec3190a65ec92`; it was cancelled after
+  schedule validation changed the source.
+- Fresh package run [41173422606](https://github.com/auenkr/cadence-rust/actions/runs/41173422606)
+  targets head `9a920ed2c8ae7b060b83d5b98e022cda0e0e9dfd`. Its conclusion is
+  pending; inspect with `gh run view 41173422606` before treating any code as
+  CI-verified.
 
 ## Known gaps — do not claim service parity
 
@@ -71,6 +78,5 @@
 - Schedule helpers are not yet connected to Frontend RPC handlers. The Go
   scheduler workflow interaction, retry/continued-as-new behavior, lifecycle,
   authorization, metrics/logging, and SDK mixed-service tests remain open.
-- The new source after head `ae651ac85b852f9386b6b84021bfd6b187978bca` has
-  not yet had a fresh CI result. Mixed Go/Rust failure, restart and recovery
-  validation has not been run.
+- The current source has not yet had a completed fresh CI result. Mixed
+  Go/Rust failure, restart and recovery validation has not been run.
