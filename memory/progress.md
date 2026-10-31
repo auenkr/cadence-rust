@@ -1,5 +1,15 @@
 # Progress log
 
+- **2026-10-31 — Frontend Rust bootstrap skeleton.** Added the
+  `cadence-frontend` executable, Frontend handler/config/validator/lifecycle
+  boundaries and wrapper module layout. The executable reuses the shared
+  Matching launcher while the generic transport/runtime is extracted. A fresh
+  CI target at head `996486568b4931a16013d09ba38f1adccf07a459` passed package
+  Clippy, formatting and tests, and a runtime smoke started using Go's
+  `go/config/development.yaml`, returned healthy status and search attributes.
+  This is a skeleton only; full handler, validator, transport extraction and
+  mixed-service parity gaps are listed in `memory/frontend-core-20261031.md`.
+
 - **2026-10-25 — Matching evidence checkpoint.** Active-offer mixed gate
   40157002080 succeeded on `b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`; Rust
   Matching binary SHA256

@@ -53,6 +53,18 @@ Branch: `frontend-core`.
 
 ## Validation evidence
 
-- Source checks before CI: `git diff --check` passed.
+- Source checks before CI: `git diff --check` passed. A Python source audit
+  compared Go's Frontend `dynamicproperties` references to the registry and
+  found 79/79 keys present.
 - Cargo was not run on the development host, per project instructions.
-- CI workflow URL, head SHA and conclusion: pending dispatch.
+- Fresh-target CI run:
+  https://github.com/auenkr/cadence-rust/actions/runs/41173902121
+  validated head `996486568b4931a16013d09ba38f1adccf07a459` with conclusion
+  `success`. Package Clippy, formatting and tests passed; the runtime smoke
+  built and started Frontend with `go/config/development.yaml`, then returned
+  `{"ok":true}` from `/health` and the full indexed-key map from
+  `/api/v1/search-attributes`. Uploaded artifact: `frontend-runtime-smoke`.
+- Earlier run 41172875238 at `3b920551eff7d6ee2586502139ad9492a42e01c8`
+  had Clippy success but formatting failure; its Rust test step was skipped.
+  CI rustfmt patch was applied, committed as `8f171fe28`, and the later fresh
+  run above validates the formatted source.
