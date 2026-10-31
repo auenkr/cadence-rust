@@ -396,6 +396,22 @@ pub async fn add_search_attribute(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
 ) -> Response {
+    let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let protection_enabled = cadence_persistence::dynamic_config::boolean(
+        overlay.property_values("history.enableAdminProtection"),
+        None,
+        false,
+    );
+    if protection_enabled {
+        let required_token = cadence_persistence::dynamic_config::string(
+            overlay.property_values("history.adminOperationToken"),
+            "",
+        );
+        if req.security_token.is_empty() || req.security_token != required_token {
+            return bad_request(BadRequestError::new("No permission to do this operation."));
+        }
+    }
+    drop(overlay);
     let attrs = match req.search_attribute {
         Some(attrs) if !attrs.is_empty() => attrs,
         _ => {

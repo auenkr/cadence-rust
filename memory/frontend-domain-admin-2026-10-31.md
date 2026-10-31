@@ -189,3 +189,9 @@ migration forward.
   rather than `service_types`, and both generated gRPC clients wrapped the TLS
   result in `Option<Option<ClientTls>>`. Fixed the import and flattened the
   TLS construction. Dispatch a new CI run for the updated source.
+- Added Go's `CheckPermission` token gate to the live Admin AddSearchAttribute
+  endpoint: it now reads `history.enableAdminProtection` and
+  `history.adminOperationToken` from the same dynamic-config overlay and returns
+  Go's exact bad-request message when the token is missing or wrong. External
+  authorization middleware (the Go authorizer decision and operation mapping)
+  remains unwired in the Rust YARPC/HTTP runtime.
