@@ -195,3 +195,7 @@ migration forward.
   Go's exact bad-request message when the token is missing or wrong. External
   authorization middleware (the Go authorizer decision and operation mapping)
   remains unwired in the Rust YARPC/HTTP runtime.
+- The raw-history package validator had its own strict UUID parsing and still
+  rejected forms accepted by Go `google/uuid.Parse`; updated it to accept
+  canonical, compact, braced and `urn:uuid:` spellings and added Go-shape cases.
+  This still does not add multi-branch persistence or History-client paging.

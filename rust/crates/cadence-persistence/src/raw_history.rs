@@ -14,7 +14,7 @@ pub fn validate_request(request: &Request) -> Result<()> {
     if execution.is_none_or(|e| e.workflow_id.is_empty()) {
         return Err(BadRequestError::new("Invalid WorkflowID."));
     }
-    if execution.is_none_or(|e| uuid::Uuid::parse_str(&e.run_id).is_err()) {
+    if execution.is_none_or(|e| !is_google_uuid(&e.run_id)) {
         return Err(BadRequestError::new("Invalid RunID."));
     }
     if request.maximum_page_size <= 0 {
@@ -31,6 +31,16 @@ pub fn validate_request(request: &Request) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Go's `google/uuid.Parse` accepts canonical, compact, braced and URN forms.
+fn is_google_uuid(value: &str) -> bool {
+    let value = value.strip_prefix("urn:uuid:").unwrap_or(value);
+    let value = value
+        .strip_prefix('{')
+        .and_then(|v| v.strip_suffix('}'))
+        .unwrap_or(value);
+    uuid::Uuid::parse_str(value).is_ok()
 }
 
 pub fn select_history<'a>(
@@ -132,5 +142,34 @@ impl RawHistoryToken {
             return Err(BadRequestError::new("Invalid pagination token."));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadence_api::types::WorkflowExecution;
+
+    #[test]
+    fn raw_history_run_id_accepts_google_uuid_spellings() {
+        for run_id in [
+            "123e4567-e89b-12d3-a456-426614174000",
+            "123e4567e89b12d3a456426614174000",
+            "{123e4567-e89b-12d3-a456-426614174000}",
+            "urn:uuid:123e4567-e89b-12d3-a456-426614174000",
+        ] {
+            let request = Request {
+                execution: Some(WorkflowExecution::new("workflow", run_id)),
+                maximum_page_size: 1,
+                ..Default::default()
+            };
+            assert!(validate_request(&request).is_ok(), "{run_id}");
+        }
+        let invalid = Request {
+            execution: Some(WorkflowExecution::new("workflow", "not-a-uuid")),
+            maximum_page_size: 1,
+            ..Default::default()
+        };
+        assert_eq!(validate_request(&invalid).unwrap_err().message, "Invalid RunID.");
     }
 }
