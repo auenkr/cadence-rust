@@ -1475,3 +1475,43 @@ migration forward.
   https://github.com/auenkr/cadence-rust/actions/runs/41220848025 was queued
   (in_progress) at handoff. Conclusion not yet observed. Check it before any
   further work and record the final conclusion here.
+
+## Durable failover audit — SQLite, MySQL, Postgres — 2026-10-31 (continuation)
+
+- Commits: `3784163ac` (SQLite rows), `beb88ff09` (durable history reads with
+  FailoverInfo expiry), `5e326d3e9` (MySQL and Postgres adapters). Earlier
+  `fcdea3b7d` repaired stale persistence test compile errors and
+  `76b824b05` recorded the first codec run.
+- Persistence-package CI: `41225578354` (commit `beb88ff09`) passed Format and
+  Clippy; its Test step was still running at the time of writing. Check its
+  conclusion before trusting the audit path. Run `41225302144` on `3784163ac`
+  failed Clippy on a `let_and_return` that was then reverted; run
+  `41224924517` on `fcdea3b7d` failed Clippy on an items-after-test-module
+  lint in `matching_domain_mysql.rs`, fixed by moving the test module last.
+- Implemented: `DomainMetadataPersistence::{supports_domain_audit_log,
+  create_domain_audit_log, get_domain_audit_logs}` with a default-off capability
+  flag. SQLite, MySQL and Postgres return true and use the Go `domain_audit_log`
+  table. Cassandra still uses the default `false`.
+- Writer: `PersistedFrontendDomainManager::{failover, update}` append one
+  failover-type row after the domain row persists. `update` does so when the
+  failover version changes. Failure after persist returns an error, matching
+  Go's order. The audit uses the domain's `failover_end_time` to mark graceful
+  failovers.
+- Reader: `failover_history` reads durable rows and maps them through
+  `domain_audit::failover_event`, a port of Go `ToFailoverEvents` with the same
+  cluster-change and attribute rules and the same nil filter. The cursor is
+  opaque `"<nanos>:<event_id>"`. The Frontend trait now returns
+  `FrontendDomainError`; JSON and YARPC callers map `NotFound` to entity-not-exists
+  and other failures to internal errors.
+- Blob: `DomainAuditState` carries the Go `DescribeDomainResponse` thrift plus
+  `FailoverInfo` (field 60, `failoverExpireTimestamp` field 30), which decides
+  graceful versus force. Go reads the same bytes.
+- Not yet done: Cassandra audit rows (`domain_audit_log.cql` v0.44; needs
+  clustering order and scylla `uuid`/`timestamp` bindings); the
+  `DescribeDomainResponse` in the public Rust API still has no `FailoverInfo`
+  field, so DescribeDomain does not show it; `identity` and `identity_type` are
+  empty (Go takes them from the request context); create/update/deprecate/delete
+  audit rows are not written.
+- Known concern to verify in CI: the new `cadence-service-core` signature
+  change has no service-core CI run yet. Dispatch
+  `-f package=cadence-service-core` after the persistence run concludes.
