@@ -537,7 +537,8 @@ pub fn describe_task_list_out(v: tk::DescribeTaskListResponse) -> p::DescribeTas
                     )
                 })
                 .collect(),
-            ..Default::default()
+            new_tasks_per_second: x.new_tasks_per_second,
+            empty: x.empty,
         }),
         task_list: None,
         partition_config: None,

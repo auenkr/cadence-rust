@@ -74,12 +74,13 @@ pub fn native_queue_registry(
         let overlay = overlay.clone();
         let cache = cache.clone();
         Arc::new(move |domain_id, task_list, task_type| {
+            // Resolve the name before locking: the domain cache source reads this overlay.
+            let name = cached_domain_name(&cache, domain_id);
             let config = overlay.lock().expect("admin lock");
-            task_list_boolean(
+            task_list_boolean_named(
                 &config,
                 "matching.enableStandbyTaskCompletion",
-                &cache,
-                domain_id,
+                name.as_deref(),
                 task_list,
                 task_type,
                 true,
@@ -445,6 +446,7 @@ fn reader_properties_provider(
     })
 }
 
+#[cfg(test)]
 fn task_list_boolean(
     overlay: &DynamicConfigOverlay,
     key: &str,
@@ -454,9 +456,27 @@ fn task_list_boolean(
     task_type: i32,
     default: bool,
 ) -> bool {
+    task_list_boolean_named(
+        overlay,
+        key,
+        cached_domain_name(cache, domain).as_deref(),
+        task,
+        task_type,
+        default,
+    )
+}
+
+fn task_list_boolean_named(
+    overlay: &DynamicConfigOverlay,
+    key: &str,
+    domain_name: Option<&str>,
+    task: &GoString,
+    task_type: i32,
+    default: bool,
+) -> bool {
     cadence_persistence::dynamic_config::task_list_boolean_bytes(
         overlay.property_values(key),
-        cached_domain_name(cache, domain).as_deref(),
+        domain_name,
         task.as_bytes(),
         task_type,
         default,
@@ -470,10 +490,12 @@ fn integer_provider(
     default: i64,
 ) -> crate::matching_registry_native::NativeProvider<i64> {
     Arc::new(move |domain, task, task_type| {
+        // Resolve the name before locking: the domain cache source reads this overlay (std mutexes are not reentrant).
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_integer_bytes(
             config.property_values(key),
-            cached_domain_name(&cache, domain).as_deref(),
+            name.as_deref(),
             task.as_bytes(),
             task_type,
             default,
@@ -488,10 +510,12 @@ fn duration_provider(
     default: i64,
 ) -> crate::matching_registry_native::NativeProvider<i64> {
     Arc::new(move |domain, task, task_type| {
+        // Resolve the name before locking: the domain cache source reads this overlay (std mutexes are not reentrant).
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
         cadence_persistence::dynamic_config::task_list_duration_bytes(
             config.property_values(key),
-            cached_domain_name(&cache, domain).as_deref(),
+            name.as_deref(),
             task.as_bytes(),
             task_type,
             default,
@@ -506,8 +530,9 @@ fn boolean_provider(
     default: bool,
 ) -> crate::matching_registry_native::NativeProvider<bool> {
     Arc::new(move |domain, task, task_type| {
+        let name = cached_domain_name(&cache, domain);
         let config = overlay.lock().expect("admin lock");
-        task_list_boolean(&config, key, &cache, domain, task, task_type, default)
+        task_list_boolean_named(&config, key, name.as_deref(), task, task_type, default)
     })
 }
 
