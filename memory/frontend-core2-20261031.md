@@ -767,3 +767,34 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   follow-up.
 - Dispatch a fresh exact-head package workflow after pushing the limiter-owner
   change; record its final result below.
+- Initial exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41191487485
+  checked `02fb3c1c2b34eef79df8c4a3e3157ec6df7913e8` and concluded `failure`
+  in Clippy compilation. It identified the missing `tracing` dependency and
+  the `Debug` bound required by `AppState`; corrected the diagnostic path to
+  standard error and added the trait bound/test fixture derive. This run did
+  not reach formatting or tests; dispatch CI again after pushing the fix.
+- Corrected exact-head package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41191723085 checked
+  `d38ae11b243a8780897d444c681f40fba7e7c590` and concluded `success`. Frontend
+  formatting, Clippy and package tests passed with the registered-owner stop
+  hook. This validates the stop seam and test only; the runtime still has no
+  actual registered Go quota collections, and all five production persistence
+  managers remain outstanding.
+
+## Frontend domain-manager seam — continuation
+
+- Added `FrontendDomainManager` to cadence-persistence and routed Frontend
+  domain API methods through the injectable manager field on `AppState`.
+  `InMemoryDomainStore` implements the contract and remains the default; its
+  cloned handle is still shared with Matching's domain cache. This is an
+  adapter seam, not a production manager or persistence backend.
+- Added a test that the default manager writes through the shared Matching
+  cache. Exact-head package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41192829670 checked
+  `f644498bf0b383ce508e06e262329ac94a9b0e5e` and concluded `success` for the
+  manager interface change. The subsequent cache-sharing test is not covered
+  by that run and needs exact-head CI.
+- The config factory still exposes only Matching task persistence and a
+  read-only domain metadata source. SQL/Cassandra CRUD transactions and
+  Frontend domain manager selection are still unimplemented. Visibility,
+  History, and Execution manager implementations are also still absent.
