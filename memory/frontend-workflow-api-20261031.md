@@ -1074,3 +1074,33 @@ Frontend parity until these are implemented and validated.
   backend `null` to `{}`. Restored its expected `null`, kept the separate
   fail-open poll expectation as `{}`, and applied the CI rustfmt patch for
   `handler_workflow_history.rs`. A fresh-target exact-head run is pending.
+
+## Crash recovery continuation — 2026-10-31 (current)
+
+- Resumed at `1b3ef3fabd2cc2f6fc1a2b69e7ee3995723d6d65`; working tree was
+  clean. Package run [41199308250](https://github.com/auenkr/cadence-rust/actions/runs/41199308250)
+  targets that exact SHA and remains `in_progress` as of this update. It has
+  completed the Go behavior oracles and is still executing the CI job; no
+  conclusion is recorded yet.
+- Fetched `origin/frontend-core2` at `3d55037a7` and inspected its work since
+  the existing merge base. Cherry-picked Cassandra Frontend domain-write and
+  consistency commits `d2e55b219`, `4fa73bbee`, `0ecbfebe5`, `d522ffd51`,
+  `430e76c30`, `eb462d6b1`, and `dd0f27fc4`. The import supplies a Cassandra
+  `FrontendDomainManager` persistence implementation and matching domain
+  metadata conversion. The style commit conflicted because it also carried
+  the already-developed SQL domain manager implementation; kept that complete
+  implementation while taking the runner's formatting changes. Excluded
+  unrelated core2 memory edits. Resulting head: `e8bde781a7811cb3b8e4f5ba2b698b2fffd79a08`,
+  pushed to `origin/t3/frontend-workflow-api`. `git diff --check` passed.
+- The newly cherry-picked persistence source is not covered by run 41199308250.
+  Dispatch a fresh `rust-ci.yml` Frontend package run and record its exact
+  head, URL and conclusion after it completes. No Cargo command was run
+  locally.
+- Remaining gaps remain blocking parity: no typed production `WorkflowBackend`
+  adapting the JSON handler envelopes to History/Matching RPCs, no live
+  Visibility list/scan/count persistence adapter, no archived history or
+  visibility provider, and `run()` does not register this WorkflowService or
+  compose its wrappers. Matching poll envelopes/cancellation, token decode,
+  response shaping, archive/read seams, blob size policy and history page
+  completeness helpers exist but are not connected to the real registered RPC
+  runtime. No mixed Go History + Rust Matching + Rust Frontend SDK gate exists.
