@@ -78,6 +78,9 @@ pub struct AppState {
     /// Frontend readiness and admission state are split so shutdown can first
     /// fail health checks, wait for discovery, and only then reject new RPCs.
     pub frontend_ready: Arc<std::sync::atomic::AtomicBool>,
+    /// Prevents the Go-compatible warmup timer from marking a stopping
+    /// Frontend healthy while shutdown is waiting for discovery/drain.
+    pub frontend_shutting_down: Arc<std::sync::atomic::AtomicBool>,
     pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
     /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
     /// The launcher signals this only after request draining has completed.
@@ -108,6 +111,7 @@ impl Default for AppState {
             cluster_metadata: cadence_common::cluster::Metadata::default(),
             grpc_max_message_size: 4 * 1024 * 1024,
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             background_shutdown: tokio::sync::watch::channel(false).0,
             domains: InMemoryDomainStore::new(),

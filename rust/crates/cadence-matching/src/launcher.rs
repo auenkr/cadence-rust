@@ -1050,6 +1050,31 @@ async fn run_with_lifecycle(
             let history_state = state.clone();
             let tchannel_state = state.clone();
             let run_frontend = wanted.contains(&service::ServiceName::Frontend);
+            if run_frontend {
+                state
+                    .frontend_ready
+                    .store(false, std::sync::atomic::Ordering::Release);
+                let warmup_duration = {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    std::time::Duration::from_nanos(
+                        cadence_persistence::dynamic_config::duration(
+                            overlay.property_values("frontend.warmupDuration"),
+                            None,
+                            std::time::Duration::from_secs(30).as_nanos() as i64,
+                        )
+                        .max(0) as u64,
+                    )
+                };
+                let ready = state.frontend_ready.clone();
+                let shutting_down = state.frontend_shutting_down.clone();
+                let shutdown = state.background_shutdown.subscribe();
+                tokio::spawn(cadence_service_core::frontend_lifecycle::warmup(
+                    warmup_duration,
+                    ready,
+                    shutting_down,
+                    shutdown,
+                ));
+            }
             let app = if run_frontend {
                 handlers::router(state.clone())
             } else {
@@ -1966,6 +1991,9 @@ async fn run_with_lifecycle(
                 cadence_service_core::frontend_lifecycle::shutdown(
                     shutdown_drain,
                     move || async move {
+                        health_state
+                            .frontend_shutting_down
+                            .store(true, std::sync::atomic::Ordering::Release);
                         health_state
                             .frontend_ready
                             .store(false, std::sync::atomic::Ordering::Release);

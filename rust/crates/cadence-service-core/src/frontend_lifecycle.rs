@@ -8,6 +8,29 @@ pub struct DrainPlan {
     pub request_drain: Duration,
 }
 
+/// Apply Go `WorkflowHandler.Start`'s warmup health transition. Shutdown
+/// notification cancels the timer; the atomic guard also closes the race
+/// where shutdown begins at the same instant the timer expires.
+pub async fn warmup(
+    duration: Duration,
+    ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    shutting_down: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    tokio::select! {
+        () = tokio::time::sleep(duration) => {
+            if !shutting_down.load(std::sync::atomic::Ordering::Acquire) {
+                ready.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        changed = shutdown.changed() => {
+            if changed.is_err() || *shutdown.borrow() {
+                return;
+            }
+        }
+    }
+}
+
 impl DrainPlan {
     #[must_use]
     pub fn from_go_shutdown_drain_duration(duration: Duration) -> Self {
@@ -99,5 +122,24 @@ mod tests {
             *events.lock().unwrap(),
             ["health", "handlers", "limiters", "resource"]
         );
+    }
+
+    #[tokio::test]
+    async fn warmup_marks_healthy_after_duration() {
+        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (_signal, shutdown) = tokio::sync::watch::channel(false);
+        warmup(Duration::ZERO, ready.clone(), stopping, shutdown).await;
+        assert!(ready.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn shutdown_prevents_warmup_from_marking_healthy() {
+        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (signal, shutdown) = tokio::sync::watch::channel(false);
+        signal.send_replace(true);
+        warmup(Duration::from_secs(30), ready.clone(), stopping, shutdown).await;
+        assert!(!ready.load(std::sync::atomic::Ordering::Acquire));
     }
 }

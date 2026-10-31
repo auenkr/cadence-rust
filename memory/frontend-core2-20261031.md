@@ -556,3 +556,20 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   the runner expects the chained `.push(format!(...))` layout. Reverted to the
   exact runner output. No Clippy/tests were reached; a fresh exact-head run is
   required.
+
+## Frontend warmup lifecycle port — continuation
+
+- Added Go `WorkflowHandler.Start` warmup semantics to the Rust Frontend
+  runtime: Frontend begins unhealthy, and a timer reads the live
+  `frontend.warmupDuration` value (Go default 30 seconds) before publishing
+  readiness. The timer is cancelled by the service stop signal and guards
+  against marking the service healthy once shutdown has started.
+- Added lifecycle unit cases for successful warmup and shutdown suppression.
+  Exact-head CI is required; no Cargo or rustfmt command was run locally.
+- The limiter stop hook is still empty because the current Rust Frontend has
+  not constructed global quota collections or the Go admin DLQ/failover
+  watcher owners. Production Go-compatible domain, metadata, visibility,
+  History and execution managers are still absent; the configured Matching
+  persistence integration remains separate task storage/read-only metadata.
+- The request-validator matrix remains closed by fresh-target CI run
+  `41181338783` (success, head `97ee38218fbf77970269d3937eb8e82199787285`).
