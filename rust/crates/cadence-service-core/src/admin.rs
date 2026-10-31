@@ -686,7 +686,7 @@ pub async fn get_replication_messages(
     Json(req): Json<cadence_api::admin::GetReplicationMessagesRequest>,
 ) -> Response {
     if req.cluster_name.is_empty() {
-        return bad_request(BadRequestError::new("ClusterName is not set on request."));
+        return bad_request(BadRequestError::new("Cluster name is not set."));
     }
     ok_json(serde_json::json!({ "shardMessages": {} }))
 }
@@ -696,7 +696,11 @@ pub async fn get_dlq_replication_messages(
     State(_state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetDLQReplicationMessagesRequest>,
 ) -> Response {
-    let _ = req;
+    if req.task_infos.is_empty() {
+        return bad_request(BadRequestError::new(
+            "Replication task info is not set.",
+        ));
+    }
     ok_json(serde_json::json!({ "replicationTasks": [] }))
 }
 
@@ -734,6 +738,9 @@ pub async fn read_dlq_messages(
     if req.dlq_type.is_none() {
         return bad_request(BadRequestError::new("Queue type is not set."));
     }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
+        return bad_request(BadRequestError::new("The DLQ type is not supported."));
+    }
     ok_json(serde_json::json!({ "replicationTasks": [], "nextPageToken": "" }))
 }
 
@@ -745,6 +752,9 @@ pub async fn purge_dlq_messages(
     if req.dlq_type.is_none() {
         return bad_request(BadRequestError::new("Queue type is not set."));
     }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
+        return bad_request(BadRequestError::new("The DLQ type is not supported."));
+    }
     ok_json(cadence_api::admin::PurgeDLQMessagesResponse {})
 }
 
@@ -755,6 +765,9 @@ pub async fn merge_dlq_messages(
 ) -> Response {
     if req.dlq_type.is_none() {
         return bad_request(BadRequestError::new("Queue type is not set."));
+    }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
+        return bad_request(BadRequestError::new("The DLQ type is not supported."));
     }
     ok_json(cadence_api::admin::MergeDLQMessagesResponse {
         next_page_token: vec![],
