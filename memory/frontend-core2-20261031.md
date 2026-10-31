@@ -234,8 +234,13 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   in Rust tests rather than retaining Go's `t.Run` names; the tested request
   conditions and outcomes correspond to all named source rows. The CI run on
   the pushed head below must pass before considering this matrix closed.
-- CI run to validate the role-selection change will be recorded here after
-  completion. No Cargo command was run locally.
+- Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41208155748 validated
+  source head `2f1de3f321983cc393738d69d520c708124757d1` and concluded
+  `success`: Clippy, formatting, Frontend tests, and the enabled Go oracle
+  steps passed. The subsequent commit `8537a4ae6615455c40ae335b3af00a718c484a56`
+  changes only this memory audit; run exact-head CI before treating that head
+  as the current validated checkpoint. No Cargo command was run locally.
 
 ## Source pointers
 
