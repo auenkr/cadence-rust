@@ -319,3 +319,13 @@ migration forward.
 - Commit `ebf2b19a3` is pushed. Package run
   [41178498001](https://github.com/auenkr/cadence-rust/actions/runs/41178498001)
   targets this source and includes CI formatting. Pending at dispatch.
+
+## Workflow maintenance Admin RPCs
+
+- Added Thrift converters and YARPC dispatch for `DeleteWorkflow` and
+  `RefreshWorkflowTasks` at `c3acb7697`. Delete uses persistence and returns
+  Go-compatible not-found/already-completed errors. Refresh resolves the domain,
+  validates the execution, and requeues tasks through persistence.
+- CI run [41178581328](https://github.com/auenkr/cadence-rust/actions/runs/41178581328)
+  targets the current code and runs package clippy/tests with formatter enabled;
+  pending at dispatch. No local Cargo command was run.
