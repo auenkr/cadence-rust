@@ -1,5 +1,9 @@
 //! Outbound Cadence WorkerAPI client used by internal workflow workers.
 
+// tonic RPC calls intentionally return `Status` directly, matching generated
+// service signatures and the other Cadence service crates.
+#![allow(clippy::result_large_err)]
+
 use cadence_proto::api::worker_api_client::WorkerApiClient;
 use cadence_proto::api::{
     PollForActivityTaskRequest, PollForActivityTaskResponse, PollForDecisionTaskRequest,
