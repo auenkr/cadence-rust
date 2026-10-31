@@ -58,6 +58,12 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   request was imported from the wrong API module. Flattened the optional TLS
   result and moved the request import to `service_types`; dispatch package CI
   again after this commit.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41175558484
+  validated head `7338118a6056143f15b16877237a4f75fb664f02` and concluded
+  `failure` at the format check. The existing frontend files on this branch
+  have broad rustfmt differences, including the client changes and validator
+  module. Use CI's `format_frontend_files` input to generate the formatting
+  patch artifact, apply that artifact locally, then dispatch package CI again.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
