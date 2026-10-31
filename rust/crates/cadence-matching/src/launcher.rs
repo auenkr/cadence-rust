@@ -1279,7 +1279,9 @@ async fn run_with_lifecycle(
             // persistence factory. The shared Matching adapters provide the
             // native SQL/Cassandra pools and read-compatible domain metadata
             // source; keep the handles alive for the process lifetime.
-            let configured_matching_stores = if (run_matching || run_frontend) && !embedded_development {
+            let configured_matching_stores = if (run_matching || run_frontend)
+                && !embedded_development
+            {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
                 let dynamic_config = state.admin.dynamic_config.clone();
@@ -1363,14 +1365,21 @@ async fn run_with_lifecycle(
                                 }
                             }
                             Err(error) => {
-                                eprintln!("warning: loading configured Go domain metadata: {}", error.message);
+                                eprintln!(
+                                    "warning: loading configured Go domain metadata: {}",
+                                    error.message
+                                );
                                 break;
                             }
                         }
                     }
                     state.domains.sync_matching_metadata(&domains);
                     state.executions.sync_domains(
-                        &state.domains.list().domains.into_iter()
+                        &state
+                            .domains
+                            .list()
+                            .domains
+                            .into_iter()
                             .filter_map(|desc| desc.domain_info.map(|info| (info.name, info.uuid)))
                             .collect::<Vec<_>>(),
                     );

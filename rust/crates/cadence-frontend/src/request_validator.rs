@@ -1100,4 +1100,112 @@ mod tests {
             .unwrap();
         assert_eq!(page.page_size, 7);
     }
+
+    #[test]
+    fn go_request_validator_success_cases_cover_all_entry_points() {
+        let validator = RequestValidator::default();
+        let execution = WorkflowExecution {
+            workflow_id: "wf".into(),
+            run_id: "".into(),
+        };
+        validator
+            .validate_refresh_workflow_tasks_request(Some(&RefreshWorkflowTasksRequest {
+                domain: "domain".into(),
+                execution: Some(execution.clone()),
+            }))
+            .unwrap();
+        validator
+            .validate_describe_task_list_request(Some(&DescribeTaskListRequest {
+                domain: "domain".into(),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                task_list_type: Some(cadence_api::TaskListType::Activity),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_list_task_list_partitions_request(Some(&ListTaskListPartitionsRequest {
+                domain: "domain".into(),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_get_task_lists_by_domain_request(Some(&GetTaskListsByDomainRequest {
+                domain: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
+                domain: "domain".into(),
+                execution: Some(execution),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_count_workflow_executions_request(Some(&CountWorkflowExecutionsRequest {
+                domain: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        let mut list = ListWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            ..Default::default()
+        };
+        validator.validate_list_workflow_executions_request(Some(&mut list)).unwrap();
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) }),
+            ..Default::default()
+        };
+        validator.validate_list_open_workflow_executions_request(Some(&mut open)).unwrap();
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) }),
+            ..Default::default()
+        };
+        validator.validate_list_closed_workflow_executions_request(Some(&mut closed)).unwrap();
+        let mut archived = ListArchivedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            ..Default::default()
+        };
+        validator.validate_list_archived_workflow_executions_request(Some(&mut archived)).unwrap();
+        validator
+            .validate_register_domain_request(Some(&RegisterDomainRequest {
+                name: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_describe_domain_request(Some(&DescribeDomainRequest {
+                name: Some("domain".into()),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_update_domain_request(Some(&UpdateDomainRequest {
+                name: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_delete_domain_request(Some(&DeleteDomainRequest {
+                name: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_deprecate_domain_request(Some(&DeprecateDomainRequest {
+                name: "domain".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                ..Default::default()
+            }))
+            .unwrap();
+    }
 }

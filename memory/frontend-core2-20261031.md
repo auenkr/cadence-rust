@@ -116,6 +116,11 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   compare and close this lifecycle gap before calling it complete.
 - Cargo was not run locally. The next package run must be dispatched after
   pushing the current fixes; record its exact head and terminal conclusion.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41177893560 at
+  `cfb74b0ff5e6a0701dcf7f648207dd5ec3097e4b` concluded `failure` in the
+  changed Matching runtime formatting gate, before Clippy. CI identified three
+  rustfmt-only hunks in `launcher.rs` and `grpc_matching.rs`; applied them from
+  the runner's emitted diff. The run did not validate compilation or tests.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
