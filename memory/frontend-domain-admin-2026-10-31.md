@@ -137,7 +137,11 @@
   notify Matching on newer failover versions. Added unit cases for idempotent
   create/delete and stale versus newer update versions. This slice is not yet
   CI-validated; live replication consumption, audit events, and YARPC DLQ
-  dispatch are still open.
+  dispatch are still open. Package run
+  [41209114513](https://github.com/auenkr/cadence-rust/actions/runs/41209114513)
+  failed Clippy at `1d0ec30f1173f2cdef491c81bd887d76092bb5c9` on one unused
+  import and three redundant identity conversions in the new persistence
+  manager method; those warnings are fixed for the next run.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.

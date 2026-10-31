@@ -372,8 +372,6 @@ fn merge_active_clusters(
     current: Option<cadence_api::types::ActiveClusters>,
     incoming: Option<cadence_api::types::ActiveClusters>,
 ) -> cadence_api::types::ActiveClusters {
-    use cadence_api::types::ActiveClusters;
-
     fn merge_values(
         target: &mut std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
         incoming: std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
@@ -1693,18 +1691,18 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
                     .map_err(FrontendDomainError::Persistence)?;
                 self.cache
                     .apply_replication_task(task)
-                    .map_err(FrontendDomainError::from)?;
+                    ?;
             } else {
                 self.cache
                     .apply_replication_task(task)
-                    .map_err(FrontendDomainError::from)?;
+                    ?;
             }
             return Ok(());
         }
 
         self.cache
             .apply_replication_task(task)
-            .map_err(FrontendDomainError::from)?;
+            ?;
         let updated = self
             .cache
             .record_by_id(&task.id)
