@@ -23,7 +23,12 @@ impl Lifecycle {
 
     pub fn begin_shutdown(&self) -> bool {
         self.0
-            .compare_exchange(1, State::ShuttingDown as u8, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(
+                1,
+                State::ShuttingDown as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_ok()
     }
 
