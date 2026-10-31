@@ -696,24 +696,30 @@ impl<B: WorkflowBackend> Handler<B> {
             }
         }
         let request = self.validate_request(operation, request)?;
-        if operation == WorkflowOperation::QueryWorkflow {
+        if matches!(
+            operation,
+            WorkflowOperation::QueryWorkflow
+                | WorkflowOperation::SignalWorkflowExecution
+                | WorkflowOperation::StartWorkflowExecution
+                | WorkflowOperation::SignalWithStartWorkflowExecution
+        ) {
             if let (Some(policy), Some(domain)) = (
                 &self.blob_size_policy,
-                request.get("domain").and_then(Value::as_str),
+                request
+                    .get("domain")
+                    .or_else(|| request.get("request").and_then(|nested| nested.get("domain")))
+                    .and_then(Value::as_str),
             ) {
                 if let Some(domains) = &self.domain_lookup {
                     // Go resolves the domain before checking the input size.
                     domains.domain_id(domain)?;
                 }
-                let query: tasks::QueryWorkflowRequest =
-                    serde_json::from_value(request.clone()).map_err(|error| {
-                        CadenceError::BadRequest(BadRequestError::new(error.to_string()))
-                    })?;
-                let size = query.query.as_ref().map_or(0, |query| query.query_args.len());
-                if size > policy.error_limit(domain) {
-                    return Err(CadenceError::BadRequest(BadRequestError::new(
-                        "Blob data size exceeds limit.",
-                    )));
+                for size in workflow_payload_sizes(operation, &request)? {
+                    if size > policy.error_limit(domain) {
+                        return Err(CadenceError::BadRequest(BadRequestError::new(
+                            "Blob data size exceeds limit.",
+                        )));
+                    }
                 }
             }
         }
@@ -1636,6 +1642,49 @@ fn validate_ratelimit_wrapper_request(
         _ => {}
     }
     Ok(())
+}
+
+fn workflow_payload_sizes(
+    operation: WorkflowOperation,
+    request: &Value,
+) -> Result<Vec<usize>, CadenceError> {
+    let invalid = |error: serde_json::Error| {
+        CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+    };
+    let sizes = match operation {
+        WorkflowOperation::QueryWorkflow => {
+            let request: tasks::QueryWorkflowRequest =
+                serde_json::from_value(request.clone()).map_err(invalid)?;
+            vec![request.query.as_ref().map_or(0, |query| query.query_args.len())]
+        }
+        WorkflowOperation::SignalWorkflowExecution => {
+            let request: cadence_api::types::SignalWorkflowExecutionRequest =
+                serde_json::from_value(request.clone()).map_err(invalid)?;
+            vec![request.input.len()]
+        }
+        WorkflowOperation::StartWorkflowExecution => {
+            let request: cadence_api::types::StartWorkflowExecutionRequest =
+                serde_json::from_value(request.clone()).map_err(invalid)?;
+            vec![request.input.len() + memo_payload_size(request.memo.as_ref())]
+        }
+        WorkflowOperation::SignalWithStartWorkflowExecution => {
+            let request: cadence_api::service_types::SignalWithStartWorkflowExecutionRequest =
+                serde_json::from_value(request.clone()).map_err(invalid)?;
+            vec![
+                request.signal_input.len(),
+                request.input.len() + memo_payload_size(request.memo.as_ref()),
+            ]
+        }
+        _ => return Ok(Vec::new()),
+    };
+    Ok(sizes)
+}
+
+fn memo_payload_size(memo: Option<&cadence_api::types::Memo>) -> usize {
+    memo.and_then(|memo| memo.fields.as_ref())
+        .map_or(0, |fields| {
+            fields.iter().map(|(key, value)| key.len() + value.len()).sum::<usize>() + 48
+        })
 }
 
 fn validate_domain(request: &Value) -> Result<(), CadenceError> {
@@ -2812,6 +2861,48 @@ mod tests {
 
         assert_eq!(error.to_string(), "Blob data size exceeds limit.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn signal_rejects_oversized_input_before_history_dispatch() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let error = handler
+            .dispatch(
+                "SignalWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-23",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "signalName": "refresh",
+                    "input": "AQID"
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "Blob data size exceeds limit.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn start_blob_size_includes_go_memo_map_overhead() {
+        let request = serde_json::json!({
+            "domain": "shop",
+            "workflowId": "order-24",
+            "workflowType": {"name": "Order"},
+            "taskList": {"name": "orders"},
+            "input": "AQI=",
+            "memo": {"fields": {"note": "AQ=="}}
+        });
+
+        assert_eq!(
+            workflow_payload_sizes(WorkflowOperation::StartWorkflowExecution, &request).unwrap(),
+            vec![57]
+        );
     }
 
     #[tokio::test]
