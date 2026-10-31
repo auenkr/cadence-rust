@@ -429,6 +429,9 @@ jobs:
             crates/cadence-worker/src/failovermanager/domain.rs
             crates/cadence-worker/src/failovermanager/failover_v2.rs
             crates/cadence-worker/src/failovermanager/rebalance_v2.rs
+            crates/cadence-worker/src/esanalyzer/queries.rs
+            crates/cadence-worker/src/indexer/es_response.rs
+            crates/cadence-worker/src/indexer/fields.rs
           )
           rustfmt --edition 2021 --config skip_children=true "${files[@]}"
           git -C "$GITHUB_WORKSPACE" diff --binary -- "${files[@]/#/rust/}" > "$RUNNER_TEMP/worker-format.patch"
