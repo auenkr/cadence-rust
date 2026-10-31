@@ -107,8 +107,10 @@
 - Added Admin raw-history request validation (Go validation order, positive
   page size, paired event/version bounds, UUID input forms accepted by
   `google/uuid`) and Elasticsearch search-attribute type mapping with unit
-  cases. These working-tree changes are not included in run 41174245899 and
-  remain unverified until formatted and dispatched in a new package run.
+  cases. Commit `e09ab5cebf01a4a29b0b386d816f4f239e4bb1a6` is pushed. CI run
+  [41174552823](https://github.com/auenkr/cadence-rust/actions/runs/41174552823)
+  targets this head with formatting enabled and is in progress. These new cases
+  remain unverified until that run completes.
 
 The handlers remain a partial port. Domain methods are not wired to real
 persistence/runtime clients; update cooldown/failover transmission and domain
