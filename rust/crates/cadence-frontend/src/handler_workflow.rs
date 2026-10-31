@@ -252,6 +252,7 @@ pub struct Handler<B> {
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
     async_publisher: Option<Arc<dyn AsyncWorkflowPublisher>>,
+    blob_size_policy: Option<Arc<dyn WorkflowBlobSizePolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
@@ -287,6 +288,12 @@ pub trait AsyncWorkflowPublisher: Send + Sync {
         &'a self,
         message: crate::handler_workflow_async::AsyncWorkflowMessage,
     ) -> WorkflowFuture<'a>;
+}
+
+/// Live per-domain event-blob error limit used before dispatching workflow
+/// query input to History.
+pub trait WorkflowBlobSizePolicy: Send + Sync {
+    fn error_limit(&self, domain: &str) -> usize;
 }
 
 #[derive(serde::Serialize)]
@@ -371,6 +378,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -397,6 +405,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -428,6 +437,7 @@ impl<B: WorkflowBackend> Handler<B> {
             workflow_query_policy: None,
             isolation_group_state: None,
             async_publisher: None,
+            blob_size_policy: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -518,6 +528,11 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_async_publisher(mut self, publisher: Arc<dyn AsyncWorkflowPublisher>) -> Self {
         self.async_publisher = Some(publisher);
+        self
+    }
+
+    pub fn with_blob_size_policy(mut self, policy: Arc<dyn WorkflowBlobSizePolicy>) -> Self {
+        self.blob_size_policy = Some(policy);
         self
     }
 
@@ -681,6 +696,27 @@ impl<B: WorkflowBackend> Handler<B> {
             }
         }
         let request = self.validate_request(operation, request)?;
+        if operation == WorkflowOperation::QueryWorkflow {
+            if let (Some(policy), Some(domain)) = (
+                &self.blob_size_policy,
+                request.get("domain").and_then(Value::as_str),
+            ) {
+                if let Some(domains) = &self.domain_lookup {
+                    // Go resolves the domain before checking the input size.
+                    domains.domain_id(domain)?;
+                }
+                let query: tasks::QueryWorkflowRequest =
+                    serde_json::from_value(request.clone()).map_err(|error| {
+                        CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+                    })?;
+                let size = query.query.as_ref().map_or(0, |query| query.query_args.len());
+                if size > policy.error_limit(domain) {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "Blob data size exceeds limit.",
+                    )));
+                }
+            }
+        }
         if matches!(
             operation,
             WorkflowOperation::StartWorkflowExecution
@@ -1757,6 +1793,14 @@ mod tests {
 
     struct DrainedIsolationGroup;
 
+    struct SmallQueryBlobLimit;
+
+    impl WorkflowBlobSizePolicy for SmallQueryBlobLimit {
+        fn error_limit(&self, _: &str) -> usize {
+            2
+        }
+    }
+
     impl IsolationGroupState for DrainedIsolationGroup {
         fn is_drained(&self, _: &str, _: &str) -> Result<bool, String> {
             Ok(true)
@@ -2744,6 +2788,30 @@ mod tests {
             response["diagnosticWorkflowExecution"]["runId"],
             "diagnostic-run-existing"
         );
+    }
+
+    #[tokio::test]
+    async fn query_rejects_oversized_args_after_domain_resolution() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+        let error = handler
+            .dispatch(
+                "QueryWorkflow",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {
+                        "workflowId": "order-22",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "query": {"queryType": "status", "queryArgs": "AQID"}
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "Blob data size exceeds limit.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -654,3 +654,16 @@ Frontend parity until these are implemented and validated.
   `success` (Clippy, formatting, all 80 Frontend unit tests). It covers async
   queue encoding/publisher dispatch, Diagnose field order and duplicate-start
   handling, Restart's corrected JSON field, and isolation group checks.
+
+## Diagnose exactness and query payload checks — 2026-10-31
+
+- Added an injectable per-domain workflow-query blob-size limit. Query args are
+  decoded as Thrift byte payloads, domain lookup runs first, and oversized
+  requests return Go's `Blob data size exceeds limit.` error before dispatch.
+  The new regression test is awaiting CI.
+- Diagnose input now serializes a struct in Go's field order, and the duplicate
+  `WorkflowExecutionAlreadyStarted` case returns the existing diagnostic run.
+- Run [41185964550](https://github.com/auenkr/cadence-rust/actions/runs/41185964550)
+  completed `success` for exact SHA `91a9a1a8268f6f42cc775454ffcc6f2e98710183`
+  (Clippy, format, 81 tests). This is prior to the new query-size policy and
+  duplicate-start regression; the next run must validate them.
