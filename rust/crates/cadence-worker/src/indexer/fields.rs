@@ -34,10 +34,7 @@ pub fn is_valid_field_to_es(
     if valid_search_attributes.contains(field) {
         return true;
     }
-    matches!(
-        field,
-        MEMO | KAFKA_KEY | ENCODING | VISIBILITY_OPERATION
-    )
+    matches!(field, MEMO | KAFKA_KEY | ENCODING | VISIBILITY_OPERATION)
 }
 
 /// Go `fulfillDoc`: writes the four identifying fields into the document,
@@ -75,7 +72,11 @@ mod tests {
         assert!(is_valid_field_to_es(true, &attributes(&[]), MEMO));
         assert!(is_valid_field_to_es(true, &attributes(&[]), KAFKA_KEY));
         assert!(is_valid_field_to_es(true, &attributes(&[]), ENCODING));
-        assert!(is_valid_field_to_es(true, &attributes(&[]), VISIBILITY_OPERATION));
+        assert!(is_valid_field_to_es(
+            true,
+            &attributes(&[]),
+            VISIBILITY_OPERATION
+        ));
         assert!(!is_valid_field_to_es(true, &attributes(&[]), "stuff"));
     }
 
