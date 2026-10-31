@@ -1194,3 +1194,29 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   audit remains closed at 15 Go groups / 88 named rows.
 - No Cargo command was run locally. Exact-head package CI is required for this
   source change; record the run URL, tested head and conclusion after it ends.
+
+## Thrift domain persistence routing — 2026-10-31
+
+- Auditing the production Frontend domain manager found that HTTP domain
+  handlers used the configured `GoSqlFrontendDomainManager`, while Thrift /
+  YARPC handlers still called the shared in-memory `InMemoryDomainStore`
+  directly. Routed Thrift domain registration, description, listing, update,
+  deprecation, deletion, failover, failover-history, and task-token domain
+  lookup through `AppState.domain_manager`. This allows the existing MySQL,
+  PostgreSQL, SQLite, and Cassandra domain/metadata adapters to serve both
+  listener paths.
+- Source commit: `ca4a89f7414434bfab457d7d74f70f0b7124bcc4`, pushed to
+  `frontend-core2`.
+- Exact-head Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41206938291 checks
+  this commit; its result was `in_progress` at the last read. Update this
+  evidence with its terminal conclusion after it completes.
+- This closes the Thrift bypass only. Durable execution/history and visibility
+  managers are still absent; workflow execution, visibility reads and history
+  remain backed by in-memory state. Frontend also constructs no production
+  quota collection owners, and the AdminHandler remains a stub without Go's
+  domain DLQ and failover watcher workers. Ordered drain hooks are wired, but
+  these missing owners leave lifecycle parity open.
+- The request-validator audit remains closed at 15 Go table groups / 88 named
+  rows, with exact-head package CI evidence above. No Cargo command was run
+  locally.
