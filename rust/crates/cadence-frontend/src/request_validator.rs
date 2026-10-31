@@ -468,4 +468,28 @@ mod tests {
         })).unwrap_err();
         assert_eq!(err.message, "WorkflowId is not set on request.");
     }
+
+    #[test]
+    fn every_go_validator_entry_point_rejects_a_nil_request() {
+        let validator = RequestValidator::default();
+        let errors = [
+            validator.validate_refresh_workflow_tasks_request(None).unwrap_err(),
+            validator.validate_describe_task_list_request(None).unwrap_err(),
+            validator.validate_list_task_list_partitions_request(None).unwrap_err(),
+            validator.validate_get_task_lists_by_domain_request(None).unwrap_err(),
+            validator.validate_reset_sticky_task_list_request(None).unwrap_err(),
+            validator.validate_count_workflow_executions_request(None).unwrap_err(),
+            validator.validate_list_workflow_executions_request(None).unwrap_err(),
+            validator.validate_list_open_workflow_executions_request(None).unwrap_err(),
+            validator.validate_list_archived_workflow_executions_request(None).unwrap_err(),
+            validator.validate_list_closed_workflow_executions_request(None).unwrap_err(),
+            validator.validate_register_domain_request(None).unwrap_err(),
+            validator.validate_describe_domain_request(None).unwrap_err(),
+            validator.validate_update_domain_request(None).unwrap_err(),
+            validator.validate_delete_domain_request(None).unwrap_err(),
+            validator.validate_deprecate_domain_request(None).unwrap_err(),
+            validator.validate_failover_domain_request(None).unwrap_err(),
+        ];
+        assert!(errors.iter().all(|error| error.message == "Request is nil."));
+    }
 }
