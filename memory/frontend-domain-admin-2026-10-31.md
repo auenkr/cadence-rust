@@ -1002,6 +1002,12 @@ migration forward.
   with [41202217880](https://github.com/auenkr/cadence-rust/actions/runs/41202217880)
   for exact head `6842527a0cdf012a8e8e97bbc9028a1ef9bc6159`; it was in progress
   at the last check.
+- That run was cancelled by the later push. Run [41202398549](https://github.com/auenkr/cadence-rust/actions/runs/41202398549)
+  targeted `e5dd8a57fc60697babda927d2279550191342470` and failed before Cargo
+  at `Check changed Matching runtime formatting`, reporting rustfmt changes in
+  `service-core/src/admin.rs` around the domain queue response. Applied the
+  CI diff below. No Rust compilation ran in that attempt; redispatch after
+  pushing the formatting repair.
 - Continued the raw-history pagination audit against Go's `ReadRawHistoryBranch`
   contract. Rust's in-memory execution store treated any malformed internal
   cursor as offset zero, silently replaying the first page. Added validation
