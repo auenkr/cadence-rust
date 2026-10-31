@@ -224,7 +224,9 @@ pub fn open_configured_default_store(
             task_store,
             domain_metadata_source: Some(Arc::new(domain_metadata)),
             domain_persistence: Some(domain_persistence),
-            domain_metadata_persistence: None,
+            domain_metadata_persistence: Some(Arc::new(
+                cadence_persistence::matching_domain_cassandra::CassandraDomainMetadataPersistence::new(driver),
+            )),
         });
     }
     let sql = datastore.sql.as_ref().ok_or_else(|| {

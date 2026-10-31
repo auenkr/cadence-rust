@@ -275,6 +275,10 @@ jobs:
             crates/cadence-frontend/src/wrappers/versioncheck.rs
             crates/cadence-matching/src/launcher.rs
             crates/cadence-matching/src/grpc.rs
+            crates/cadence-matching/src/matching_task_store.rs
+            crates/cadence-persistence/src/cassandra.rs
+            crates/cadence-persistence/src/lib.rs
+            crates/cadence-persistence/src/matching_domain_cassandra.rs
             crates/cadence-service-core/src/handlers.rs
             crates/cadence-service-core/src/yarpc.rs
           )

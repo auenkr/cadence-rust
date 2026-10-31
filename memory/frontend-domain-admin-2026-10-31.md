@@ -729,3 +729,19 @@ migration forward.
   add Cassandra Go-schema create/update/delete with Go's LWT/version semantics,
   then select that writer in configured Frontend startup. No cargo was run
   locally.
+
+## Cassandra domain persistence slice — candidate
+
+- Added `CassandraDomainMetadataPersistence` against Go's legacy `domains`
+  and `domains_by_name_v2` schema. It maps the existing Go UDT fields, creates
+  the legacy UUID row, then uses a logged conditional batch for the v2 domain
+  write and singleton notification-version CAS. Updates use the same batch
+  fence; deletes remove both Go rows. Configured Matching store construction
+  now exposes this writer so Frontend's persisted manager can use Cassandra.
+- Added Scylla `SerializeValue` derives for the Go domain UDTs and registered
+  the persistence module. The CI formatter allowlist now includes these touched
+  files. `git diff --check` passed; no local Cargo/rustfmt/tests were run.
+- This is an unverified implementation candidate. The Go Cassandra domain
+  persistence tests and real Cassandra create/update/deprecate/restart oracle
+  have not been run. Exact-head CI is required; in particular confirm the
+  driver accepts the nested UDT bind shapes and conditional logged batch.
