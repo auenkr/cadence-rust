@@ -1361,3 +1361,30 @@ filter conflicts, visibility page limits, domain/token checks, lockdown,
 required domain data, and failover timeout boundaries; and page-size mutation
 checks. No new Rust source was changed in this audit; the latest source remains
 validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
+
+## Frontend core2 continuation checkpoint — 2026-10-31
+
+- Re-ran the Frontend package workflow against the exact pushed head
+  `ae2eb8eb7bf536c36ce18129b388e22533fbced3`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41210273775 concluded
+  `success`. Formatting, Clippy, and Frontend tests passed. This revalidates the
+  validator tests covering all 16 entry points and the audited 88 named Go
+  table rows. No Cargo command ran locally.
+- Persistence audit remains open. The configured SQL/Cassandra factory opens
+  Matching's task store and the existing Go-compatible domain plus metadata
+  persistence. It does not construct production execution, History, or
+  Visibility managers; Frontend workflow state and visibility/history paths
+  still use `InMemoryExecutionStore`. Existing MySQL/PostgreSQL/Cassandra
+  Matching adapters provide database and schema groundwork only; they are not
+  substitutes for these managers.
+- Shutdown call order is present in the shared launcher and matches Go's
+  health transition, failure-detection delay, API/Admin handler stop signals,
+  limiter stop hook, final drain, and resource cleanup. Full owner parity is
+  still open: the Rust production graph registers no seven Go global quota
+  collections, and the Rust Admin handler has no domain-DLQ/failover watcher
+  worker owners. This run did not change or close those implementation gaps.
+- No source code changed in this checkpoint. Current verified commit remains
+  the pushed `origin/frontend-core2` head above. Continue with production
+  visibility/history/execution managers and their configured SQL/Cassandra
+  selection; do not claim Frontend persistence or lifecycle parity from this
+  green package run.
