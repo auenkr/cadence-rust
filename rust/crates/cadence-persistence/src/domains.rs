@@ -1145,9 +1145,30 @@ impl GoSqlFrontendDomainManager {
     }
 
     fn publish(&self, staged: &InMemoryDomainStore, uuid: &str) {
-        let staged_inner = staged.inner.read().expect("domain store lock").clone();
-        *self.cache.inner.write().expect("domain store lock") = staged_inner;
-        if let Some(record) = Self::staged_record(staged, uuid) {
+        let Some(mut record) = Self::staged_record(staged, uuid) else { return };
+        let previous_failover_notification = {
+            let mut inner = self.cache.inner.write().expect("domain store lock");
+            let old_name = inner.by_id.get(uuid).cloned();
+            let old = old_name.as_ref().and_then(|name| inner.by_name.get(name)).cloned();
+            if let Some(old) = &old {
+                record.failover_audit.clone_from(&old.failover_audit);
+            }
+            if let Some(old_name) = old_name {
+                if old_name != record.info.name {
+                    inner.by_name.remove(&old_name);
+                }
+            }
+            inner.by_id.insert(record.info.uuid.clone(), record.info.name.clone());
+            inner.by_name.insert(record.info.name.clone(), record.clone());
+            inner.matching_failover_notification_version = Some(
+                inner.matching_failover_notification_version.unwrap_or_default()
+                    .max(record.failover_notification_version),
+            );
+            old.map(|old| old.failover_notification_version)
+        };
+        if previous_failover_notification.is_some_and(|previous| {
+            record.failover_notification_version > previous
+        }) {
             self.cache.notify_failover(&record);
         }
     }
@@ -1187,12 +1208,11 @@ impl FrontendDomainManager for GoSqlFrontendDomainManager {
         let uuid = response.domain_info.as_ref().map(|info| info.uuid.as_str()).unwrap_or_default();
         let record = Self::staged_record(&staged, uuid).expect("created domain record");
         let metadata = Self::record_metadata(&record, None);
-        self.persistence.create_domain(&metadata).map_err(|error| DomainAlreadyExistsError {
+        let notification_version = self.persistence.create_domain(&metadata).map_err(|error| DomainAlreadyExistsError {
             message: format!("Domain {} already exists or could not be created: {error}", record.info.name),
         })?;
-        let persisted = self.persistence.get_domain(None, Some(uuid)).map_err(|error| DomainAlreadyExistsError {
-            message: format!("Domain {} was created but could not be loaded: {error}", record.info.name),
-        })?;
+        let mut persisted = metadata;
+        persisted.notification_version = notification_version;
         staged.sync_matching_metadata(&[persisted]);
         self.publish(&staged, uuid);
         Ok(response)
