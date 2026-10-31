@@ -246,6 +246,18 @@ pub struct ListDynamicConfigResponse {
     pub entries: Vec<DynamicConfigEntry>,
 }
 
+// The operational-config Thrift messages have the same fields as their
+// regular-config counterparts; Go distinguishes them by the backing client
+// and namespace rather than by a different wire shape.
+pub type GetOperationalDynamicConfigRequest = GetDynamicConfigRequest;
+pub type GetOperationalDynamicConfigResponse = GetDynamicConfigResponse;
+pub type UpdateOperationalDynamicConfigRequest = UpdateDynamicConfigRequest;
+pub type UpdateOperationalDynamicConfigResponse = UpdateDynamicConfigResponse;
+pub type RestoreOperationalDynamicConfigRequest = RestoreDynamicConfigRequest;
+pub type RestoreOperationalDynamicConfigResponse = RestoreDynamicConfigResponse;
+pub type ListOperationalDynamicConfigRequest = ListDynamicConfigRequest;
+pub type ListOperationalDynamicConfigResponse = ListDynamicConfigResponse;
+
 // ---------------------------------------------------------------------------
 // Isolation groups
 // ---------------------------------------------------------------------------

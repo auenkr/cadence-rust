@@ -482,7 +482,7 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
     }
 }
 
-fn handle_get_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+fn handle_get_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
     let req: cadence_api::admin::GetDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.config_name.is_empty() {
@@ -491,7 +491,7 @@ fn handle_get_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
         ));
     }
     let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
-    let value = overlay.get(false, &req.config_name, &req.filters).ok_or_else(|| {
+    let value = overlay.get(operational, &req.config_name, &req.filters).ok_or_else(|| {
         AppError::internal(format!(
             "Failed to get dynamic config {:?} for the given filters.",
             req.config_name
@@ -502,7 +502,7 @@ fn handle_get_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
     }))
 }
 
-fn handle_update_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+fn handle_update_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
     let req: cadence_api::admin::UpdateDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.config_name.is_empty() {
@@ -515,11 +515,11 @@ fn handle_update_dynamic_config(state: &AppState, body: &Struct) -> HandlerResul
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .update(false, &req.config_name, req.config_values);
+        .update(operational, &req.config_name, req.config_values);
     Ok(wrap_success(&cadence_api::admin::UpdateDynamicConfigResponse {}))
 }
 
-fn handle_restore_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+fn handle_restore_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
     let req: cadence_api::admin::RestoreDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.config_name.is_empty() {
@@ -532,11 +532,11 @@ fn handle_restore_dynamic_config(state: &AppState, body: &Struct) -> HandlerResu
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .restore(false, &req.config_name, &req.filters);
+        .restore(operational, &req.config_name, &req.filters);
     Ok(wrap_success(&cadence_api::admin::RestoreDynamicConfigResponse {}))
 }
 
-fn handle_list_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
     let req: cadence_api::admin::ListDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     let entries = state
@@ -544,7 +544,7 @@ fn handle_list_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult 
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .list(false, &req.config_name);
+        .list(operational, &req.config_name);
     Ok(wrap_success(&cadence_api::admin::ListDynamicConfigResponse {
         entries,
     }))
@@ -1810,10 +1810,14 @@ pub async fn dispatch(
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
-        "GetDynamicConfig" => handle_get_dynamic_config(state, body),
-        "UpdateDynamicConfig" => handle_update_dynamic_config(state, body),
-        "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body),
-        "ListDynamicConfig" => handle_list_dynamic_config(state, body),
+        "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
+        "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
+        "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
+        "ListDynamicConfig" => handle_list_dynamic_config(state, body, false),
+        "GetOperationalDynamicConfig" => handle_get_dynamic_config(state, body, true),
+        "UpdateOperationalDynamicConfig" => handle_update_dynamic_config(state, body, true),
+        "RestoreOperationalDynamicConfig" => handle_restore_dynamic_config(state, body, true),
+        "ListOperationalDynamicConfig" => handle_list_dynamic_config(state, body, true),
         "UpdateDomain" => handle_update_domain(state, body).await,
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
         "DeleteDomain" => handle_delete_domain(state, body).await,
