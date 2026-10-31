@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn list_page_size_mutation_and_visibility_limit_match_go() {
-        let validator = RequestValidator::default();
+        let mut validator = RequestValidator::default();
         let mut request = ListWorkflowExecutionsRequest {
             domain: "d".into(),
             ..Default::default()
@@ -1764,7 +1764,8 @@ mod tests {
 
     #[test]
     fn go_failover_domain_table_success_and_lockdown_rows() {
-        let validator = RequestValidator::default();
+        let mut validator = RequestValidator::default();
+        validator.config.max_failover_timeout_seconds = 300;
         let active_active = cadence_api::types::ActiveClusters {
             active_clusters_by_cluster_attribute: Some(std::collections::HashMap::from([(
                 "region".to_string(),

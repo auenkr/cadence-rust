@@ -629,3 +629,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   compilation: the new active-active fixture omitted generated
   `ActiveClusters.active_clusters_by_region`. Added the defaulted field
   remainder; rerun exact-head Frontend CI after pushing the correction.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41188299657 checked
+  `19262480ab55a6fab5bd92824df58783197aa6fc`: formatting and Clippy passed,
+  while the Frontend test failed because the Go-shaped graceful timeout (120s)
+  exceeded Rust's default configured maximum (60s). The Go test fixture sets
+  the dynamic maximum to 300s; aligned the Rust fixture. Exact-head CI is
+  required after pushing this correction.
