@@ -1977,6 +1977,7 @@ mod tests {
                 visibility_archival_status: Some(ArchivalStatus::Disabled),
                 visibility_archival_uri: "visibility://archive".into(),
                 bad_binaries: None,
+                ..Default::default()
             },
             replication: DomainReplicationConfiguration {
                 active_cluster_name: "cluster-a".into(),

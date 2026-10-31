@@ -2450,12 +2450,7 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("d1", "uuid-1");
         store.create(info, cfg, rep, false).unwrap();
-        let before = store
-            .describe(&DescribeDomainRequest {
-                name: Some("d1".into()),
-                uuid: None,
-            })
-            .unwrap();
+        let before = store.record_by_name("d1").unwrap().config_version;
         store
             .deprecate(&DeprecateDomainRequest {
                 name: "d1".into(),
@@ -2472,7 +2467,10 @@ mod tests {
             got.domain_info.unwrap().status,
             Some(DomainStatus::Deprecated)
         );
-        assert_eq!(got.config_version, before.config_version + 1);
+        assert_eq!(
+            store.record_by_name("d1").unwrap().config_version,
+            before + 1
+        );
     }
 }
 
@@ -2591,7 +2589,11 @@ mod go_sql_frontend_manager_tests {
             ),
         );
         let manager =
-            GoSqlFrontendDomainManager::new(InMemoryDomainStore::new(), persistence.clone());
+            PersistedFrontendDomainManager::new(
+                InMemoryDomainStore::new(),
+                persistence.clone(),
+                std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+            );
         let domain_id = uuid::Uuid::from_u128(0x1234).to_string();
         let (mut info, config, replication) = super::tests::sample("durable", &domain_id);
         info.uuid = domain_id.clone();
@@ -2603,7 +2605,11 @@ mod go_sql_frontend_manager_tests {
 
         // A fresh Frontend cache must read the Go-format row from SQL.
         let restarted =
-            GoSqlFrontendDomainManager::new(InMemoryDomainStore::new(), persistence.clone());
+            PersistedFrontendDomainManager::new(
+                InMemoryDomainStore::new(),
+                persistence.clone(),
+                std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+            );
         let described = restarted
             .describe(&DescribeDomainRequest {
                 name: Some("durable".into()),
