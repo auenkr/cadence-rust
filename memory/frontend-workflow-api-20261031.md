@@ -630,3 +630,9 @@ Frontend parity until these are implemented and validated.
   24h/5m timeouts and AllowDuplicate policy, and treat
   WorkflowExecutionAlreadyStarted as a successful response carrying its run
   ID. A Go-mirroring request test is pending CI.
+- Run [41185052893](https://github.com/auenkr/cadence-rust/actions/runs/41185052893)
+  tested exact SHA `bb4247fe61d64c864a641244386a8a62eccce657`: Clippy and
+  formatting passed; 76/78 tests passed. The async publisher fixture lacked
+  Go-required `requestId`, and one Diagnose expectation had a mistyped run ID.
+  Both fixtures are corrected; CI rerun is pending. Diagnose now also checks
+  the system domain's isolation state before its internal Start call.

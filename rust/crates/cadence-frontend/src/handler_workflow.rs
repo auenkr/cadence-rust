@@ -699,7 +699,7 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         if operation == WorkflowOperation::DiagnoseWorkflowExecution {
             return self
-                .diagnose_workflow_execution(request, target_cluster)
+                .diagnose_workflow_execution(request, caller, target_cluster)
                 .await;
         }
         if matches!(
@@ -842,6 +842,7 @@ impl<B: WorkflowBackend> Handler<B> {
     async fn diagnose_workflow_execution(
         &self,
         request: Value,
+        caller: &CallerMetadata,
         target_cluster: Option<String>,
     ) -> Result<Value, CadenceError> {
         let domain = request
@@ -891,6 +892,17 @@ impl<B: WorkflowBackend> Handler<B> {
             WorkflowOperation::StartWorkflowExecution,
             start_request,
         )?;
+        if let Some(state) = &self.isolation_group_state {
+            if state
+                .is_drained(diagnostic_domain, &caller.isolation_group)
+                .unwrap_or(false)
+            {
+                return Err(CadenceError::BadRequest(BadRequestError::new(format!(
+                    "Domain {diagnostic_domain} is drained from isolation group {}.",
+                    caller.isolation_group
+                ))));
+            }
+        }
         let start_request = self.prepare_backend_request(
             WorkflowOperation::StartWorkflowExecution,
             start_request,
@@ -2619,6 +2631,7 @@ mod tests {
                 "StartWorkflowExecutionAsync",
                 serde_json::json!({
                     "request": {
+                        "requestId": "550e8400-e29b-41d4-a716-446655440001",
                         "domain": "shop",
                         "workflowId": "order-19",
                         "workflowType": {"name": "Order"},
@@ -2672,7 +2685,7 @@ mod tests {
         assert_eq!(calls[0].1["domainUUID"], "uuid:cadence-system");
         let start: cadence_api::types::StartWorkflowExecutionRequest =
             serde_json::from_value(calls[0].1["startRequest"].clone()).unwrap();
-        assert_eq!(start.workflow_id, "shop-5500e840-e29b-41d4-a716-446655440000");
+        assert_eq!(start.workflow_id, "shop-550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(
             start.workflow_id_reuse_policy,
             Some(cadence_api::enums::WorkflowIDReusePolicy::AllowDuplicate)
