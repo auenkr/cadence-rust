@@ -609,9 +609,14 @@ mod tests {
 
     #[test]
     fn global_domain_registration_requires_primary_cluster_before_name_validation() {
-        let mut state = cadence_service_core::handlers::AppState::default();
-        state.current_cluster_name = "cluster1".into();
-        state.cluster_metadata.current_cluster_name = "cluster1".into();
+        let state = cadence_service_core::handlers::AppState {
+            current_cluster_name: "cluster1".into(),
+            cluster_metadata: cadence_common::cluster::Metadata {
+                current_cluster_name: "cluster1".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let request = RegisterDomainRequest {
             is_global_domain: true,
             name: "bad_name".into(),
