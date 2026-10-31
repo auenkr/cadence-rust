@@ -501,7 +501,7 @@ these fixes; no green CI evidence covers the current changes.
   `format_frontend_files=true` mode; no Cargo/rustfmt command was run locally.
   Formatting CI run
   [41182558949](https://github.com/auenkr/cadence-rust/actions/runs/41182558949)
-  targets that same HEAD and was still `in_progress` at this save.
+  was superseded and cancelled when the follow-up commit was pushed.
 - Added `VisibilityFilterPolicy` to the workflow handler so filtered open and
   closed visibility requests can consult Go's live
   `DisableListVisibilityByFilter(domain)` setting after request validation and
@@ -518,3 +518,14 @@ these fixes; no green CI evidence covers the current changes.
   routing/filter configuration, and async ThriftRW publishing still need the
   corresponding injected service interfaces and implementations. No current
   source has a green exact-head CI result yet.
+- Formatting/Clippy CI run
+  [41182701977](https://github.com/auenkr/cadence-rust/actions/runs/41182701977)
+  tested exact head `f2e7317685d9aac6e39c5c6ad925b9f738823627`: rustfmt patch
+  generation, Clippy, and formatting passed; tests failed 68 passed / 2 failed.
+  Both new list-gate tests used lower-camel `startTimeFilter`, but the pinned
+  Thrift-compatible Rust request deserializer names the field `StartTimeFilter`,
+  so request validation correctly rejected the fixtures before reaching the
+  policy. The fixtures now use the Go JSON field spelling. The same follow-up
+  adds an injectable per-domain `HistoryPageSizePolicy`, matching Go's dynamic
+  `HistoryMaxPageSize(domain)` lookup, with a regression test; these corrections
+  have not yet been tested by CI.

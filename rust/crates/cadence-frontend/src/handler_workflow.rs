@@ -241,6 +241,7 @@ pub struct Handler<B> {
     backend: B,
     validator: crate::request_validator::RequestValidator,
     history_max_page_size: i32,
+    history_page_size_policy: Option<Arc<dyn HistoryPageSizePolicy>>,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
     access_control: Option<Arc<dyn RequestAuthorization>>,
     redirector: Option<Arc<dyn RequestRedirector>>,
@@ -286,6 +287,13 @@ pub trait VisibilityFilterPolicy: Send + Sync {
     fn filters_disabled(&self, domain: &str) -> bool;
 }
 
+/// Go resolves `HistoryMaxPageSize` from dynamic config for each request's
+/// domain. The static builder value remains a fallback for tests and bootstrap
+/// callers that have not installed the live Frontend config provider.
+pub trait HistoryPageSizePolicy: Send + Sync {
+    fn maximum_page_size(&self, domain: &str) -> i32;
+}
+
 /// Live `frontend.validSearchAttributes` property used by Go's local
 /// GetSearchAttributes handler and visibility validators.
 pub trait SearchAttributeProvider: Send + Sync {
@@ -311,6 +319,7 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator: crate::request_validator::RequestValidator::default(),
             history_max_page_size: 1000,
+            history_page_size_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -333,6 +342,7 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator,
             history_max_page_size: 1000,
+            history_page_size_policy: None,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
             redirector: None,
@@ -360,6 +370,7 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator,
             history_max_page_size: 1000,
+            history_page_size_policy: None,
             metrics,
             access_control: None,
             redirector: None,
@@ -421,6 +432,14 @@ impl<B: WorkflowBackend> Handler<B> {
     /// when GetWorkflowExecutionHistory omits a positive page size.
     pub fn with_history_max_page_size(mut self, maximum: i32) -> Self {
         self.history_max_page_size = maximum;
+        self
+    }
+
+    pub fn with_history_page_size_policy(
+        mut self,
+        policy: Arc<dyn HistoryPageSizePolicy>,
+    ) -> Self {
+        self.history_page_size_policy = Some(policy);
         self
     }
 
@@ -564,8 +583,10 @@ impl<B: WorkflowBackend> Handler<B> {
                 version_check.checker.as_ref(),
             )?;
         }
-        if !matches!(operation, WorkflowOperation::Health | WorkflowOperation::GetClusterInfo)
-            && self.shutting_down.load(Ordering::Acquire)
+        if !matches!(
+            operation,
+            WorkflowOperation::Health | WorkflowOperation::GetClusterInfo
+        ) && self.shutting_down.load(Ordering::Acquire)
         {
             return Err(CadenceError::Internal(
                 cadence_api::errors::InternalServiceError::new("Shutting down"),
@@ -719,15 +740,11 @@ impl<B: WorkflowBackend> Handler<B> {
                     "latestTime": time_filter.and_then(|v| v.get("latestTime")).cloned().unwrap_or(Value::Null),
                 });
                 if let Some(filter) = request.get("executionFilter") {
-                    internal["workflowId"] = filter
-                        .get("workflowId")
-                        .cloned()
-                        .unwrap_or(Value::Null);
+                    internal["workflowId"] =
+                        filter.get("workflowId").cloned().unwrap_or(Value::Null);
                 } else if let Some(filter) = request.get("typeFilter") {
-                    internal["workflowTypeName"] = filter
-                        .get("name")
-                        .cloned()
-                        .unwrap_or(Value::Null);
+                    internal["workflowTypeName"] =
+                        filter.get("name").cloned().unwrap_or(Value::Null);
                 }
                 if operation == WorkflowOperation::ListClosedWorkflowExecutions {
                     if let Some(status) = request.get("statusFilter") {
@@ -823,7 +840,13 @@ impl<B: WorkflowBackend> Handler<B> {
                 )?;
             }
             if request.maximum_page_size <= 0 {
-                request.maximum_page_size = self.history_max_page_size;
+                let domain = request.domain.clone();
+                request.maximum_page_size = self
+                    .history_page_size_policy
+                    .as_ref()
+                    .map_or(self.history_max_page_size, |policy| {
+                        policy.maximum_page_size(&domain)
+                    });
             }
             request.maximum_page_size = request.maximum_page_size.min(1000);
             set_i32_field(&mut value, "maximumPageSize", request.maximum_page_size);
@@ -1026,15 +1049,27 @@ impl<B: WorkflowBackend> Handler<B> {
             WorkflowOperation::ListOpenWorkflowExecutions
                 | WorkflowOperation::ListClosedWorkflowExecutions
         ) {
-            let has_filter = ["executionFilter", "typeFilter", "statusFilter"]
+            let filter_fields: &[&str] =
+                if operation == WorkflowOperation::ListClosedWorkflowExecutions {
+                    &["executionFilter", "typeFilter", "statusFilter"]
+                } else {
+                    &["executionFilter", "typeFilter"]
+                };
+            let has_filter = filter_fields
                 .iter()
                 .any(|key| value.get(*key).is_some_and(|filter| !filter.is_null()));
             if has_filter
-                && self.visibility_filter_policy.as_ref().is_some_and(|policy| {
-                    policy.filters_disabled(
-                        value.get("domain").and_then(Value::as_str).unwrap_or_default(),
-                    )
-                })
+                && self
+                    .visibility_filter_policy
+                    .as_ref()
+                    .is_some_and(|policy| {
+                        policy.filters_disabled(
+                            value
+                                .get("domain")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default(),
+                        )
+                    })
             {
                 return Err(CadenceError::BadRequest(BadRequestError::new(
                     "No permission to do this operation.",
@@ -1065,13 +1100,17 @@ fn encoded_task_token(request: &Value) -> Result<Vec<u8>, CadenceError> {
         .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
 }
 
-fn decode_workflow_task_token(request: &Value) -> Result<cadence_api::tasktoken::TaskToken, CadenceError> {
+fn decode_workflow_task_token(
+    request: &Value,
+) -> Result<cadence_api::tasktoken::TaskToken, CadenceError> {
     let encoded = encoded_task_token(request)?;
     cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&encoded)
         .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
 }
 
-fn decode_query_task_token(request: &Value) -> Result<cadence_api::tasktoken::QueryTaskToken, CadenceError> {
+fn decode_query_task_token(
+    request: &Value,
+) -> Result<cadence_api::tasktoken::QueryTaskToken, CadenceError> {
     let encoded = encoded_task_token(request)?;
     cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(&encoded)
         .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
@@ -1138,9 +1177,13 @@ fn prepare_by_id_task_request(
     let fields: &[&str] = match operation {
         WorkflowOperation::RecordActivityTaskHeartbeatByID => &["details", "identity"],
         WorkflowOperation::RespondActivityTaskCompletedByID => &["result", "identity"],
-        WorkflowOperation::RespondActivityTaskFailedByID => {
-            &["reason", "details", "identity", "failureOptions", "heartbeatDetails"]
-        }
+        WorkflowOperation::RespondActivityTaskFailedByID => &[
+            "reason",
+            "details",
+            "identity",
+            "failureOptions",
+            "heartbeatDetails",
+        ],
         WorkflowOperation::RespondActivityTaskCanceledByID => &["details", "identity"],
         _ => unreachable!("matched activity-by-ID operation"),
     };
@@ -1306,7 +1349,11 @@ mod tests {
     struct CapturingBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
 
     impl WorkflowBackend for CapturingBackend {
-        fn invoke<'a>(&'a self, operation: WorkflowOperation, request: Value) -> WorkflowFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            operation: WorkflowOperation,
+            request: Value,
+        ) -> WorkflowFuture<'a> {
             Box::pin(async move {
                 self.0.lock().unwrap().push((operation, request));
                 Ok(Value::Null)
@@ -1449,12 +1496,18 @@ mod tests {
         }
     }
 
+    struct DomainHistoryPageSize;
+
+    impl HistoryPageSizePolicy for DomainHistoryPageSize {
+        fn maximum_page_size(&self, domain: &str) -> i32 {
+            if domain == "shop" { 350 } else { 125 }
+        }
+    }
+
     struct StaticSearchAttributes;
 
     impl SearchAttributeProvider for StaticSearchAttributes {
-        fn valid_search_attributes(
-            &self,
-        ) -> HashMap<String, cadence_api::enums::IndexedValueType> {
+        fn valid_search_attributes(&self) -> HashMap<String, cadence_api::enums::IndexedValueType> {
             HashMap::from([(
                 "CustomKeywordField".to_owned(),
                 cadence_api::enums::IndexedValueType::Keyword,
@@ -1914,8 +1967,7 @@ mod tests {
     #[tokio::test]
     async fn describe_task_list_builds_go_matching_request_after_domain_lookup() {
         let backend = CapturingBackend::default();
-        let handler = Handler::new(backend)
-            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
         handler
             .dispatch(
                 "DescribeTaskList",
@@ -2174,7 +2226,8 @@ mod tests {
             ..Default::default()
         };
         let synthesized_request = serde_json::to_value(EncodedTaskTokenRequest {
-            task_token: &cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token).unwrap(),
+            task_token: &cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token)
+                .unwrap(),
         })
         .unwrap();
         let mut heartbeat_request = synthesized_request;
@@ -2320,6 +2373,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_page_size_policy_resolves_dynamic_default_by_domain() {
+        let handler = Handler::new(FakeBackend::default())
+            .with_history_page_size_policy(Arc::new(DomainHistoryPageSize));
+        let response = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf"},
+                    "maximumPageSize": 0
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response["maximumPageSize"], 350);
+    }
+
+    #[tokio::test]
     async fn count_visibility_query_uses_injected_go_validator() {
         let query_validator = Arc::new(RecordingVisibilityQuery::default());
         let handler = Handler::new(FakeBackend::default())
@@ -2353,7 +2425,7 @@ mod tests {
                 "ListOpenWorkflowExecutions",
                 serde_json::json!({
                     "domain": "shop",
-                    "startTimeFilter": {"earliestTime": 1, "latestTime": 2},
+                    "StartTimeFilter": {"earliestTime": 1, "latestTime": 2},
                     "executionFilter": {"workflowId": "wf"}
                 }),
             )
@@ -2374,7 +2446,7 @@ mod tests {
                 "ListOpenWorkflowExecutions",
                 serde_json::json!({
                     "domain": "shop",
-                    "startTimeFilter": {"earliestTime": 1, "latestTime": 2}
+                    "StartTimeFilter": {"earliestTime": 1, "latestTime": 2}
                 }),
             )
             .await
