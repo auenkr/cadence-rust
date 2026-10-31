@@ -77,7 +77,9 @@ pub struct ScanShardActivityParams {
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct FixerWorkflowParams {
+    #[serde(rename = "ScannerWorkflowWorkflowID")]
     pub scanner_workflow_workflow_id: String,
+    #[serde(rename = "ScannerWorkflowRunID")]
     pub scanner_workflow_run_id: String,
     pub fixer_workflow_config_overwrites: FixerWorkflowConfigOverrides,
 }
@@ -118,7 +120,9 @@ pub struct FixerWorkflowConfigOverrides {
     pub activity_batch_size: Option<i32>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize,
+)]
 #[serde(default, rename_all = "PascalCase")]
 pub struct ResolvedFixerWorkflowConfig {
     pub concurrency: i32,

@@ -235,7 +235,8 @@ persistence/invariant activities, heartbeat recovery, and executable worker
 pollers remain unimplemented. Scanner and fixer workflow/activity parameter
 types now also serialize with the Go exported-field JSON names, including nil
 list/range/map representations and pointer override fields; this wire fixture
-work is still waiting for CI.
+work is still waiting for CI. Acronym-bearing Go `...WorkflowID` and
+`...RunID` keys are explicitly retained in fixer workflow parameters.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
