@@ -1177,6 +1177,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   Clippy, and Frontend tests). Exact-head Matching CI
   https://github.com/auenkr/cadence-rust/actions/runs/41205392224 checked the
   same commit and succeeded, including the selector regression test.
+- Final exact-head Frontend CI for the follow-up evidence commit
+  https://github.com/auenkr/cadence-rust/actions/runs/41205927809 checked
+  `bcea3b3d176d326f3d1f6e4fb88de3118e97f80c` and succeeded (formatting,
+  Clippy, and Frontend tests). Matching CI at source-equivalent commit
+  `b48503c82adec46b89cdd4091d051d134df33beb` passed immediately before this
+  docs-only update. No Cargo command was run locally.
 - Lifecycle stop order is present in the shared runtime, but production still
   constructs no seven global quota collection owners and the AdminHandler is
   still a stub, so its Go DLQ/failover worker owners are absent. The validator
