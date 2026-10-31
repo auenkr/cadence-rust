@@ -871,3 +871,28 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   exact head `f93c0eb4bc4372fcf8766a3460e5061a7a04341f` and concluded
   `success` (formatting, Clippy, and tests). This compiles the SQL changes but
   does not exercise live SQL transactions or close the manager-wiring gaps.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41194688236 was
+  canceled after the branch advanced; it did not validate the follow-up.
+- Exact-head persistence-package CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41194826975 validated
+  head `f3d148ba1bad2a39a377a3ae3268c2eb5038f423` and concluded `success`
+  (formatting, Clippy, and tests). No Cargo command ran locally. This run
+  includes the shared SQL domain contract and compiles both backend adapters.
+  It does not exercise live SQL transactions or the Frontend manager factory.
+
+## Current open items after SQL contract CI
+
+- `GoSqlDomainPersistence` is implemented by MySQL/PostgreSQL, but the
+  Frontend launcher still selects only Matching's read-only domain source;
+  `AppState.domain_manager` remains `InMemoryDomainStore`. Cassandra writes
+  and live datastore CRUD interoperability are absent.
+- There are no production VisibilityManager, HistoryManager, or
+  ExecutionManager implementations selected by Go `defaultStore` and
+  `visibilityStore`. `AppState.executions` and visibility query evaluation
+  remain in memory.
+- Lifecycle drain order and listener teardown are wired. Go's seven global
+  limiter collections are not constructed in production, so the stop-owner
+  registry remains empty. This keeps lifecycle parity open.
+- The complete 91-case Go request-validator matrix remains closed by fresh
+  uncached CI run `41181338783` plus later failover/lockdown rows in
+  `41188887361`; validator code has not changed in this continuation.
