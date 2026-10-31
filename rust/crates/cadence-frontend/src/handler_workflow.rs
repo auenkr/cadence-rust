@@ -448,7 +448,7 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         if let Some(redirector) = &self.redirector {
             let redirect_request = request.clone();
-            let mut next = |target_cluster| {
+            let next = |target_cluster| {
                 self.dispatch_metered(operation, request.clone(), caller, target_cluster)
             };
             return redirector

@@ -758,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn workflow_redirector_routes_handler_calls_through_selected_cluster() {
         #[derive(Default)]
-        struct Backend(Mutex<Vec<Option<String>>>);
+        struct Backend(std::sync::Arc<Mutex<Vec<Option<String>>>>);
         impl crate::handler_workflow::WorkflowBackend for Backend {
             fn invoke<'a>(
                 &'a self,

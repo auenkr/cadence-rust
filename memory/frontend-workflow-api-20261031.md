@@ -363,3 +363,15 @@ these fixes; no green CI evidence covers the current changes.
 - This is progress evidence, not a parity completion claim. Continue porting
   service-specific request/response behavior and its Go-mirroring tests, then
   rerun exact-head package CI and record the run URL, head SHA and conclusion.
+- Redirection metric review found that Go increments its forwarding-policy
+  counter once per API invocation, including a retry after `DomainNotActive`.
+  Rust previously emitted one `ForwardRecord` per attempt. The implementation
+  now emits one record, carries Go's fallback `active_cluster` tag, preserves
+  the initial target tag, and records final success. Added assertions for both
+  synchronous and asynchronous retry paths.
+- Exact-head package run
+  [41180045387](https://github.com/auenkr/cadence-rust/actions/runs/41180045387)
+  tested `cfb892d59e77f282c3bf8c59b535b7171cfc1bca` and failed Clippy: the
+  redirect closure had an unnecessary `mut`, and the handler redirect test
+  expected a plain mutex instead of the shared `Arc<Mutex<_>>`. Both are fixed
+  in the current worktree; the next package run must validate those fixes.
