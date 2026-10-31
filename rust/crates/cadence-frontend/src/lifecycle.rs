@@ -1,6 +1,26 @@
 //! Frontend lifecycle state mirrors Go daemon states and health transitions.
 
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
+
+/// Go `frontend.Service.Stop` splits shutdownDrainDuration into the period
+/// peers need to observe unhealthy status and a final request-drain window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrainPlan {
+    pub failure_detection: Duration,
+    pub request_drain: Duration,
+}
+
+impl DrainPlan {
+    #[must_use]
+    pub fn from_go_shutdown_drain_duration(duration: Duration) -> Self {
+        let request_drain = duration.min(Duration::from_secs(1));
+        Self {
+            failure_detection: duration.saturating_sub(request_drain),
+            request_drain,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -45,5 +65,62 @@ impl Lifecycle {
             3 => State::Stopped,
             _ => State::Initialized,
         }
+    }
+
+    /// Execute Go Frontend's drain sequence. The hooks are supplied by the
+    /// service owner so health, API/admin handlers, quota collections and the
+    /// base resource stop in the same order as `frontend.Service.Stop`.
+    pub async fn shutdown<Health, HealthFuture, StopHandlers, StopHandlersFuture, StopLimiters, StopLimitersFuture, StopResource, StopResourceFuture>(
+        &self,
+        shutdown_drain_duration: Duration,
+        update_health: Health,
+        stop_handlers: StopHandlers,
+        stop_limiters: StopLimiters,
+        stop_resource: StopResource,
+    ) -> bool
+    where
+        Health: FnOnce() -> HealthFuture,
+        HealthFuture: std::future::Future<Output = ()>,
+        StopHandlers: FnOnce() -> StopHandlersFuture,
+        StopHandlersFuture: std::future::Future<Output = ()>,
+        StopLimiters: FnOnce() -> StopLimitersFuture,
+        StopLimitersFuture: std::future::Future<Output = ()>,
+        StopResource: FnOnce() -> StopResourceFuture,
+        StopResourceFuture: std::future::Future<Output = ()>,
+    {
+        if !self.begin_shutdown() {
+            return false;
+        }
+        let plan = DrainPlan::from_go_shutdown_drain_duration(shutdown_drain_duration);
+        update_health().await;
+        tokio::time::sleep(plan.failure_detection).await;
+        stop_handlers().await;
+        stop_limiters().await;
+        tokio::time::sleep(plan.request_drain).await;
+        stop_resource().await;
+        self.stop()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn go_shutdown_duration_split_matches_service() {
+        assert_eq!(
+            DrainPlan::from_go_shutdown_drain_duration(Duration::from_millis(500)),
+            DrainPlan {
+                failure_detection: Duration::ZERO,
+                request_drain: Duration::from_millis(500),
+            }
+        );
+        assert_eq!(
+            DrainPlan::from_go_shutdown_drain_duration(Duration::from_millis(2500)),
+            DrainPlan {
+                failure_detection: Duration::from_millis(1500),
+                request_drain: Duration::from_secs(1),
+            }
+        );
     }
 }
