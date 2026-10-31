@@ -684,3 +684,11 @@ migration forward.
   live membership; scheduler workflow interaction; RPC lifecycle/retries/
   metrics; mixed Go/Rust failure/restart/recovery gates; complete Go method
   audit. No parity claim is made.
+- Inspecting failed run [41194319599](https://github.com/auenkr/cadence-rust/actions/runs/41194319599)
+  logs corrected the failure report above: this run failed the existing
+  Matching launcher rustfmt check before reaching the Frontend code. The earlier
+  `Debug` issue belonged to preceding run [41193874841](https://github.com/auenkr/cadence-rust/actions/runs/41193874841).
+  Fixed the launcher formatting to the CI formatter's exact output. Run
+  [41194562850](https://github.com/auenkr/cadence-rust/actions/runs/41194562850)
+  was cancelled after this unrelated formatting fix changed the source; dispatch
+  fresh CI at the next pushed head.
