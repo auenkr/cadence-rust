@@ -745,3 +745,7 @@ migration forward.
   persistence tests and real Cassandra create/update/deprecate/restart oracle
   have not been run. Exact-head CI is required; in particular confirm the
   driver accepts the nested UDT bind shapes and conditional logged batch.
+- Follow-up review against `go/common/persistence/nosql/nosqlplugin/cassandra/
+  domain.go` corrected create ordering: the legacy row is inserted before the
+  metadata version is read. The zero-version CAS now binds a null version, as
+  Go's `updateMetadataBatch` does, while the v2 domain row retains version zero.
