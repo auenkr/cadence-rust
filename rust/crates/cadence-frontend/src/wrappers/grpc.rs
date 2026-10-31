@@ -55,6 +55,13 @@ pub fn error_code(error: &cadence_api::errors::CadenceError) -> tonic::Code {
     }
 }
 
+/// Convert a Cadence error at the gRPC boundary using Go's protobuf mapper.
+/// Keeping this as a single operation prevents adapters from retaining a
+/// typed error's message while accidentally assigning tonic's default code.
+pub fn to_status(error: &cadence_api::errors::CadenceError) -> tonic::Status {
+    tonic::Status::new(error_code(error), error_message(error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +84,8 @@ mod tests {
             error_code(&CadenceError::ServiceBusy(ServiceBusyError::new("busy"))),
             tonic::Code::ResourceExhausted
         );
+        let status = to_status(&CadenceError::BadRequest(BadRequestError::new("bad")));
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert_eq!(status.message(), "bad");
     }
 }
