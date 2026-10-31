@@ -1209,3 +1209,11 @@ Frontend parity until these are implemented and validated.
   this resume entry; next source work must implement the typed adapter and
   transport seam instead of treating the already-tested JSON handler boundary
   as runtime coverage.
+- Run [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
+  completed successfully for source SHA
+  `db22d15a3be324ee2ccb301f9f8b27fd9dd9323e`: Frontend Clippy, formatting,
+  tests, and runtime smoke passed. Documentation-only resume commit
+  `12aeb3c57904a67a52c1ba670237e7b6e93b6752` is the current branch head; it
+  does not change the tested Rust source. This CI run does not validate a mixed
+  Go History + Rust Matching/Frontend SDK workflow or the missing registered
+  WorkflowService adapter.
