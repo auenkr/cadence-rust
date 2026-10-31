@@ -320,3 +320,35 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Frontend stop hooks for separately owned workflow/admin handlers and global
   limiter collections also remain unwired; this package CI run does not validate
   those gaps.
+
+## Continuation verification — 2026-10-31
+
+- Fresh-target Frontend package workflow
+  https://github.com/auenkr/cadence-rust/actions/runs/41181848148 completed
+  with `success` at head `35e84865e01e5437a7a6afb16055741d531c88ab`.
+  This confirms formatting, Clippy and package tests for the pushed branch head;
+  no Cargo command was run locally.
+- The Go request-validator test matrix remains closed: the previous fresh-target
+  run `41181338783` passed all 91 named Go cases ported into Rust tests. No
+  validator code changed after that tested commit.
+- Lifecycle audit against `go/service/frontend/service.go:319-376`: the Rust
+  launcher publishes unhealthy readiness, waits the configured failure
+  detection interval, rejects new HTTP/YARPC calls, leaves up to one second for
+  drain, then tears down listeners and the configured Matching runtime and
+  membership. HTTP and YARPC share one Frontend admission gate, so workflow and
+  admin endpoints reject new calls together. However, there are no Frontend
+  global quota collection owners/`OnStop` implementations to wire yet. This
+  does not close exact shutdown parity.
+- Persistence audit remains open and unchanged: `AppState` still exposes
+  `InMemoryDomainStore` and `InMemoryExecutionStore`; the configured SQL/
+  Cassandra code opened by the launcher is Matching task persistence plus
+  read-only Go domain metadata. Production Frontend has no write-capable
+  domain/metadata manager, configured visibility manager, durable History
+  manager, or durable execution manager selected from the Go datastore config.
+  The `data_dir` JSON snapshots are development durability, not those managers.
+- No production persistence source or lifecycle owner code changed in this
+  continuation. Do not treat this checkpoint as completion: the branch's
+  remaining blockers are the five durable Frontend managers with Go SQL/
+  Cassandra selection, and the Frontend global quota stop owners. Existing
+  branch scope rules also reserve workflow handlers and wrappers for their
+  respective owners.
