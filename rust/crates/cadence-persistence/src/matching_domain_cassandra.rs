@@ -41,6 +41,7 @@ const UPDATE_METADATA: &str = "UPDATE domains_by_name_v2 SET notification_versio
 pub struct CassandraDomainMetadataPersistence {
     driver: Arc<CassandraBlockingSession>,
     serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+    metadata_reader: crate::matching_domain_metadata::CassandraDomainMetadataStore,
 }
 
 impl std::fmt::Debug for CassandraDomainMetadataPersistence {
@@ -54,8 +55,13 @@ impl CassandraDomainMetadataPersistence {
     pub fn new(
         driver: Arc<CassandraBlockingSession>,
         serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+        current_cluster: impl Into<String>,
     ) -> Self {
         Self {
+            metadata_reader: crate::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                driver.clone(),
+                current_cluster,
+            ),
             driver,
             serialization_encoding,
         }
@@ -551,6 +557,26 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             .map_err(|e| e.to_string())?
             .map(|(version,)| version)
             .unwrap_or(0))
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        self.metadata_reader
+            .get_domain(name, id)
+            .map_err(|error| error.to_string())
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+        self.metadata_reader
+            .list_domains(page_size, page_token)
+            .map_err(|error| error.to_string())
     }
 
     fn create_domain(

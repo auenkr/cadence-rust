@@ -209,7 +209,7 @@ pub fn open_configured_default_store(
         let domain_metadata =
             cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
                 driver.clone(),
-                active_cluster_name,
+                active_cluster_name.clone(),
             );
         let domain_persistence: Arc<
             dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence,
@@ -229,6 +229,7 @@ pub fn open_configured_default_store(
                 cadence_persistence::matching_domain_cassandra::CassandraDomainMetadataPersistence::new(
                     driver,
                     serialization_encoding,
+                    active_cluster_name,
                 ),
             )),
         });
