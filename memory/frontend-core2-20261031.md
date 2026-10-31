@@ -767,3 +767,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   follow-up.
 - Dispatch a fresh exact-head package workflow after pushing the limiter-owner
   change; record its final result below.
+- Initial exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41191487485
+  checked `02fb3c1c2b34eef79df8c4a3e3157ec6df7913e8` and concluded `failure`
+  in Clippy compilation. It identified the missing `tracing` dependency and
+  the `Debug` bound required by `AppState`; corrected the diagnostic path to
+  standard error and added the trait bound/test fixture derive. This run did
+  not reach formatting or tests; dispatch CI again after pushing the fix.

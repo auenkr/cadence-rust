@@ -40,7 +40,7 @@ use std::pin::Pin;
 
 /// A Frontend owned global quota collection. Go calls `OnStop` on each of its
 /// seven collections before opening the request drain window.
-pub trait FrontendLimiterCollection: Send + Sync {
+pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
     fn on_stop(
         &self,
@@ -181,14 +181,13 @@ impl AppState {
         for limiter in limiters {
             match tokio::time::timeout_at(deadline, limiter.on_stop()).await {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::error!(
-                    limiter = limiter.name(),
-                    error = %error,
-                    "failed to stop Frontend global rate limiter collection"
+                Ok(Err(error)) => eprintln!(
+                    "failed to stop Frontend global rate limiter collection {}: {error}",
+                    limiter.name()
                 ),
-                Err(_) => tracing::error!(
-                    limiter = limiter.name(),
-                    "timed out stopping Frontend global rate limiter collection"
+                Err(_) => eprintln!(
+                    "timed out stopping Frontend global rate limiter collection {}",
+                    limiter.name()
                 ),
             }
         }
@@ -2512,6 +2511,7 @@ mod frontend_drain_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
 
+    #[derive(Debug)]
     struct TestLimiter(Arc<AtomicUsize>);
 
     impl FrontendLimiterCollection for TestLimiter {
