@@ -5,6 +5,7 @@
 
 use cadence_api::enums::*;
 use cadence_api::errors::*;
+use cadence_api::admin::*;
 use cadence_api::schedule::*;
 use cadence_api::service_types::*;
 use cadence_api::tasks::*;
@@ -243,6 +244,140 @@ impl ToThrift for SearchAttributes {
         let mut f = Fields::new();
         f.omap_str_bytes(10, &self.indexed_fields);
         f.finish()
+    }
+}
+
+// Admin config and search-attribute RPCs (go/idls/thrift/admin.thrift,
+// config.thrift).
+impl FromThrift for DynamicConfigFilter {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            name: s.req_string(10, "")?,
+            value: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigFilter {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.ostruct(20, self.value.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for DynamicConfigValue {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            value: s.opt_struct(10)?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigValue {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.value.as_ref());
+        f.olist(20, &self.filters);
+        f.finish()
+    }
+}
+
+impl FromThrift for DynamicConfigEntry {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            name: s.req_string(10, "")?,
+            values: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigEntry {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.olist(20, &self.values);
+        f.finish()
+    }
+}
+
+impl FromThrift for GetDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for GetDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.value.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            config_values: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for UpdateDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for RestoreDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for RestoreDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for ListDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for ListDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.entries);
+        f.finish()
+    }
+}
+
+impl FromThrift for AddSearchAttributeRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            search_attribute: s.opt_map_str(10)?,
+            security_token: s.req_string(20, "")?,
+        })
+    }
+}
+
+impl ToThrift for AddSearchAttributeResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
     }
 }
 
