@@ -1120,3 +1120,23 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   registry therefore have no runtime owners to stop yet. Persistence and
   lifecycle remain open; this run is a green code checkpoint, not evidence of
   those missing implementations.
+
+## Store-role selection continuation — 2026-10-31
+
+- Added `PersistenceConfig::store_name_for` and `datastore_for` to centralize
+  Go's `defaultStore` versus `visibilityStore`/`advancedVisibilityStore`
+  selection and literal datastore-key behavior. Added config tests for a
+  separate SQL visibility backend, advanced-visibility fallback, missing names,
+  and whitespace-preserving key lookup.
+- This is selection groundwork only. No production Visibility, History, or
+  Execution manager was added or wired, and the configured visibility store is
+  still not opened by Frontend. SQL/Cassandra domain and metadata behavior
+  remains as described above.
+- The Go validator table audit remains complete: 15 groups, 88 named rows,
+  with exact-head Frontend CI recorded at runs `41201338466` and
+  `41201704498`. This source change does not alter validator code or tests.
+- Lifecycle's ordered health/failure-detection/handler/limiter/drain/resource
+  calls remain wired, but no production global quota collection instances or
+  AdminHandler worker owners are constructed. Lifecycle parity is still open.
+- No Cargo command was run locally. Dispatch exact-head Frontend CI for this
+  source change and append its URL, head SHA, and conclusion here.

@@ -560,6 +560,52 @@ pub struct ShardedNosqlConfig {
 }
 
 impl PersistenceConfig {
+    /// Resolve the datastore name used by Go's persistence client for a
+    /// manager role. Workflow execution, history, domains, and metadata use
+    /// `defaultStore`; visibility uses `visibilityStore`, falling back to
+    /// `advancedVisibilityStore` only when the regular store is unset.
+    ///
+    /// Keeping this selection in one place prevents a service from silently
+    /// routing visibility writes to the default store when the deployment
+    /// configured a separate visibility database.
+    pub fn store_name_for(&self, role: PersistenceStoreRole) -> Result<&str, String> {
+        let configured = match role {
+            PersistenceStoreRole::Default => &self.default_store,
+            PersistenceStoreRole::Visibility => {
+                if !self.visibility_store.is_empty() {
+                    &self.visibility_store
+                } else {
+                    &self.advanced_visibility_store
+                }
+            }
+        };
+        if configured.is_empty() {
+            return Err(match role {
+                PersistenceStoreRole::Default => {
+                    "Frontend persistence requires persistence.defaultStore".into()
+                }
+                PersistenceStoreRole::Visibility => {
+                    "Frontend persistence requires visibilityStore or advancedVisibilityStore".into()
+                }
+            });
+        }
+        if !self.datastores.contains_key(configured) {
+            return Err(format!(
+                "Frontend persistence store {configured:?} is not present in persistence.datastores"
+            ));
+        }
+        Ok(configured)
+    }
+
+    /// Resolve the backend selected for a manager role using Go's literal
+    /// datastore key lookup semantics.
+    pub fn datastore_for(&self, role: PersistenceStoreRole) -> Result<&DatastoreConfig, String> {
+        let name = self.store_name_for(role)?;
+        self.datastores.get(name).ok_or_else(|| {
+            format!("Frontend persistence store {name:?} is not present in persistence.datastores")
+        })
+    }
+
     /// Go `Persistence.FillDefaults` (`common/config/persistence.go:46-72`)
     /// for the fields this model carries.
     pub fn fill_defaults(&mut self) {
@@ -636,6 +682,12 @@ impl PersistenceConfig {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceStoreRole {
+    Default,
+    Visibility,
 }
 
 fn validate_sql(sql: &SqlConfig, advanced_only: bool) -> Result<(), String> {
@@ -1663,5 +1715,59 @@ shard-distributor-matching:
             .metrics
             .validate()
             .is_err());
+    }
+
+    #[test]
+    fn frontend_persistence_roles_select_go_default_and_visibility_stores() {
+        let mut persistence: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: primary\nvisibilityStore: visibility\ndatastores:\n  primary: {sql: {pluginName: sqlite, databaseName: primary.db}}\n  visibility: {sql: {pluginName: postgres, databaseName: visibility, connectAddr: 'localhost:5432'}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Default),
+            Ok("primary")
+        );
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok("visibility")
+        );
+        assert_eq!(
+            persistence
+                .datastore_for(PersistenceStoreRole::Visibility)
+                .unwrap()
+                .sql
+                .as_ref()
+                .unwrap()
+                .plugin_name,
+            "postgres"
+        );
+
+        persistence.visibility_store.clear();
+        persistence.advanced_visibility_store = "visibility".into();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok("visibility")
+        );
+    }
+
+    #[test]
+    fn frontend_persistence_selection_keeps_go_literal_store_names_and_errors() {
+        let mut persistence: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: ' primary '\nvisibilityStore: visibility\ndatastores:\n  primary: {sql: {pluginName: sqlite, databaseName: primary.db}}\n  visibility: {sql: {pluginName: sqlite, databaseName: visibility.db}}\n",
+        )
+        .unwrap();
+        assert!(persistence
+            .store_name_for(PersistenceStoreRole::Default)
+            .unwrap_err()
+            .contains("' primary '"));
+        persistence.default_store.clear();
+        assert!(persistence
+            .store_name_for(PersistenceStoreRole::Default)
+            .unwrap_err()
+            .contains("defaultStore"));
+        assert!(persistence
+            .store_name_for(PersistenceStoreRole::Visibility)
+            .unwrap_err()
+            .contains("visibilityStore"));
     }
 }
