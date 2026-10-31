@@ -80,6 +80,12 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   visibility selector fixture. Applied the runner's final four-line import
   ordering patch locally; run the package workflow once more on the resulting
   exact head before treating it as the validated checkpoint.
+- Exact-head package CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41176534728 validated
+  `f3ea32c83fe061effd54089863ad65d81b0b4928` and concluded `success`.
+  Formatting, Frontend package Clippy and all five current Frontend unit tests
+  passed. The test set includes nil-request coverage for all 16 validator
+  methods, but it is still not the full Go test matrix.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
