@@ -1506,6 +1506,14 @@ async fn run_with_lifecycle(
                     );
                 }
             }
+            if let Some(persistence) = state.domain_metadata_persistence.clone() {
+                state.domain_manager = std::sync::Arc::new(
+                    cadence_persistence::PersistedFrontendDomainManager::new(
+                        state.domains.clone(),
+                        persistence,
+                    ),
+                );
+            }
             let matching_domain_cache = if run_matching && !embedded_development {
                 let stores = configured_matching_stores
                     .as_ref()

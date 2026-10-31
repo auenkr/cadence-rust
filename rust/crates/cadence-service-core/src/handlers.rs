@@ -20,7 +20,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use cadence_api::enums::DomainStatus;
 use cadence_api::errors::{
-    BadRequestError, DomainAlreadyExistsError, EntityNotExistsError,
+    BadRequestError, EntityNotExistsError,
     WorkflowExecutionAlreadyCompletedError, WorkflowExecutionAlreadyStartedError,
 };
 use cadence_api::service_types::{
@@ -577,9 +577,20 @@ async fn register_domain(
             );
             (StatusCode::OK, Json(resp)).into_response()
         }
-        Err(DomainAlreadyExistsError { message }) => {
+        Err(cadence_persistence::FrontendDomainError::AlreadyExists(error)) => {
+            let message = error.message;
             error_response("DomainAlreadyExistsError", StatusCode::CONFLICT, message)
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -699,13 +710,23 @@ async fn failover_domain(
         .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
     {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
             error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
         }
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -757,13 +778,23 @@ async fn update_domain(
     }
     match state.domain_manager.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
             error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
         }
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             bad_request(BadRequestError::new(message))
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -788,7 +819,12 @@ async fn deprecate_domain(
     }
     match state.domain_manager.deprecate(&req) {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -1994,7 +2030,12 @@ async fn delete_domain(
             state.executions.unregister_domain(&req.name);
             StatusCode::OK.into_response()
         }
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 

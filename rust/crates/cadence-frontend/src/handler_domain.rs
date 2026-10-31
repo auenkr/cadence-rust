@@ -217,6 +217,7 @@ pub enum DomainHandlerError {
     AlreadyExists(DomainAlreadyExistsError),
     NotFound(EntityNotExistsError),
     Busy(ServiceBusyError),
+    Internal(String),
 }
 
 impl From<cadence_persistence::FailoverError> for DomainHandlerError {
@@ -227,6 +228,7 @@ impl From<cadence_persistence::FailoverError> for DomainHandlerError {
             cadence_persistence::FailoverError::Busy(message) => {
                 Self::Busy(ServiceBusyError::new(message))
             }
+            cadence_persistence::FailoverError::Persistence(message) => Self::Internal(message),
         }
     }
 }

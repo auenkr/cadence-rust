@@ -20,8 +20,8 @@ pub mod version_history;
 pub mod visibility;
 
 pub use domains::{
-    DomainRecord, FailoverError, FrontendDomainManager, GoSqlFrontendDomainManager,
-    InMemoryDomainStore,
+    DomainRecord, FailoverError, FrontendDomainError, FrontendDomainManager, InMemoryDomainStore,
+    PersistedFrontendDomainManager,
 };
 pub use executions::{
     AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
