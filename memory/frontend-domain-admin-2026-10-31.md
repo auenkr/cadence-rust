@@ -182,3 +182,10 @@ migration forward.
   owning the string inside `and_then`; this is required to restore the rebased
   branch build. Run [41175834322](https://github.com/auenkr/cadence-rust/actions/runs/41175834322)
   was dispatched at `e4731c654` before this fix and will not validate it.
+- Package run [41175929711](https://github.com/auenkr/cadence-rust/actions/runs/41175929711)
+  at exact source `2e8a43df447ba3daaf3d28477b58b727d4f446e9` compiled through
+  `cadence-service-core`, then failed in the rebased Frontend skeleton before
+  tests: `ResetStickyTaskListRequest` was imported from `cadence_api::tasks`
+  rather than `service_types`, and both generated gRPC clients wrapped the TLS
+  result in `Option<Option<ClientTls>>`. Fixed the import and flattened the
+  TLS construction. Dispatch a new CI run for the updated source.
