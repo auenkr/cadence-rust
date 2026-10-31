@@ -160,7 +160,7 @@ impl std::fmt::Display for ArchivalTransitionError {
             Self::InvalidEvent => f.write_str("Encountered illegal event: default URI is not set (should be impossible)"),
             Self::CannotHandleStateChange => f.write_str("Encountered current state and event that cannot be handled (should be impossible)"),
             Self::ImmutableUri => f.write_str("Cannot update existing archival URI"),
-            Self::InvalidUri(e) => e.fmt(f),
+            Self::InvalidUri(e) => std::fmt::Display::fmt(e, f),
         }
     }
 }
