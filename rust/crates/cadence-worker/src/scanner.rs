@@ -1,4 +1,6 @@
 //! Scanner and fixer system workflow names from Go `scanner`.
+pub mod tasklist;
+
 pub const TASK_LIST: &str = "cadence-sys-tl-scanner-tasklist-0";
 pub const WORKFLOW_ID: &str = "cadence-sys-tl-scanner";
 pub const SCAVENGER_ACTIVITY_TYPE: &str = "cadence-sys-tl-scanner-scvg-activity";

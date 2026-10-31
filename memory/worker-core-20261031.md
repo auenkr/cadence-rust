@@ -60,6 +60,13 @@ the breadth-first ordering and missing-entity behavior. API-specific batch
 operations, query paging, retries, heartbeat recovery, and V2 tuning are still
 unported.
 
+The scanner now has a nested task-list scavenger decision module. It mirrors
+Go's sorted-batch behavior, expired-task cutoff, fairness-cap overshoot at a
+whole-batch boundary, 48-hour idle deletion, and scanner task-list prefix
+protection. Go-derived tests cover cutoff, task ordering, fairness and the
+exact grace-period boundary. Persistence retries, executor pool lifecycle,
+orphan-task cleanup and task-list execution are still unported.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 
