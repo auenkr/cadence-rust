@@ -79,6 +79,11 @@ provider is wired into a poller, and the workflow replay runtime is absent.
 The Go parent-close workflow's activity schedule-to-start/start-to-close
 timeouts and unlimited retry policy bounds (10s initial, 1.7 coefficient,
 5m maximum, 20-year expiration) are now part of its tested contract.
+The remote forwarding planner now converts each active-cluster batch into a
+Go-shaped SignalWithStart request, carrying the original parent and execution
+details while allowing the caller to provide Go-compatible UUID/shard values.
+Its payload and cluster mapping have a fixture; production discovery and the
+actual RPC call are still not wired to the activity processor.
 
 Worker registration descriptors now include Go's task-list and history
 scavengers plus the concrete/current/timer scanner and fixer workflow types,

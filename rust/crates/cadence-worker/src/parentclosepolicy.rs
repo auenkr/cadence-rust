@@ -187,6 +187,33 @@ pub fn remote_signal_request(
     })
 }
 
+/// Build one remote SignalWithStart envelope per active cluster. Go uses one
+/// request ID and random processor shard per cluster; `select_identity`
+/// supplies those values so tests stay deterministic while production can use
+/// UUID/random-compatible sources.
+pub fn remote_signal_requests<F>(
+    parent_execution: &WorkflowExecution,
+    batches: Vec<RemoteBatch>,
+    mut select_identity: F,
+) -> anyhow::Result<Vec<(String, cadence_proto::api::SignalWithStartWorkflowExecutionRequest)>>
+where
+    F: FnMut() -> (usize, String),
+{
+    batches
+        .into_iter()
+        .map(|batch| {
+            let request = Request {
+                parent_execution: parent_execution.clone(),
+                executions: batch.executions,
+                domain_name: String::new(),
+            };
+            let (shard, request_id) = select_identity();
+            remote_signal_request(shard, request_id, &request)
+                .map(|rpc| (batch.cluster, rpc))
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     RequestCancel,
@@ -444,6 +471,43 @@ mod tests {
             rpc.signal_input.unwrap().data,
             br#"{"ParentExecution":{"WorkflowID":"","RunID":""},"Executions":[{"DomainID":"domain-id","DomainName":"domain","WorkflowID":"child","RunID":"run","Policy":1}],"DomainName":""}"#
         );
+    }
+
+    #[test]
+    fn inactive_domain_batches_become_remote_signal_with_start_envelopes() {
+        let parent = super::WorkflowExecution {
+            workflow_id: "parent".into(),
+            run_id: "parent-run".into(),
+        };
+        let batches = vec![super::RemoteBatch {
+            cluster: "cluster-b".into(),
+            executions: vec![super::RequestDetail {
+                domain_id: "domain-b".into(),
+                domain_name: "domain".into(),
+                workflow_id: "child".into(),
+                run_id: "child-run".into(),
+                policy: super::POLICY_TERMINATE,
+            }],
+        }];
+        let expected_executions = batches[0].executions.clone();
+        let mut identity_calls = 0;
+        let signals = super::remote_signal_requests(&parent, batches, || {
+            identity_calls += 1;
+            (4, "uuid-4".into())
+        })
+        .unwrap();
+        assert_eq!(identity_calls, 1);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].0, "cluster-b");
+        let signal = &signals[0].1;
+        assert_eq!(signal.start_request.as_ref().unwrap().request_id, "uuid-4");
+        let payload: super::Request = crate::workercommon::decode_json(
+            &signal.signal_input.as_ref().unwrap().data,
+        )
+        .unwrap();
+        assert_eq!(payload.parent_execution, parent);
+        assert_eq!(payload.executions, expected_executions);
+        assert!(payload.domain_name.is_empty());
     }
 
     #[test]
