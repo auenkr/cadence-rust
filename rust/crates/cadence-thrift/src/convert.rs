@@ -5939,7 +5939,6 @@ mod tests {
                 config_version: 0,
                 failover_version: 8,
                 previous_failover_version: -1,
-                ..Default::default()
             }),
             ..Default::default()
         };

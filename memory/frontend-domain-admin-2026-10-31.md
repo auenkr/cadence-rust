@@ -1054,3 +1054,8 @@ migration forward.
   (isolation groups, async-workflow configuration, ReapplyEvents and corrupt
   workflow maintenance). Added encoders using the IDL field IDs. Dispatch
   focused Thrift CI for the updated source; that run did not reach tests.
+- Follow-up [41204166761](https://github.com/auenkr/cadence-rust/actions/runs/41204166761)
+  reached Thrift test compilation at head `3e984033c0ff09ffd1b4dac9d1d1376f0ffaf186`
+  and failed Clippy on a now-redundant `..Default::default()` in the domain
+  replication task fixture. Removed that struct update; rerun the focused
+  package on the new head.
