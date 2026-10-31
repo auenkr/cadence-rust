@@ -1885,3 +1885,4 @@ Workflow method behavior and wrappers remain incomplete: the handler is not
 wired into production WorkflowService transport, history/archive/poll/respond
 transformations and the concrete History/Matching/visibility backend remain
 open. See `frontend-workflow-api-20261031.md`.
+- Frontend core2 continuation merged at `54c2e54c45141b5499ee4d896dad9a639631ff27`: shared frontend lifecycle drain/warmup, validator matrix and dynamic required-domain-data mapping, Matching gRPC admission/runtime, and read-only persistence metadata updates. Fresh package/runtime validation is required on the merge.

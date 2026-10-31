@@ -1858,6 +1858,7 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     let limit = state.grpc_max_message_size;
     let service = Frontend { state };
+    let admission = || frontend_admission_interceptor(service.state.frontend_accepting.clone());
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(cadence_proto::FILE_DESCRIPTOR_SET)
         .with_service_name("uber.cadence.api.v1.MetaAPI")
@@ -1875,38 +1876,62 @@ pub async fn serve(
     tonic::transport::Server::builder()
         .add_service(reflection)
         .add_service(
-            p::meta_api_server::MetaApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::meta_api_server::MetaApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::domain_api_server::DomainApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::domain_api_server::DomainApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::workflow_api_server::WorkflowApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::workflow_api_server::WorkflowApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::visibility_api_server::VisibilityApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::visibility_api_server::VisibilityApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::worker_api_server::WorkerApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::worker_api_server::WorkerApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::schedule_api_server::ScheduleApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::schedule_api_server::ScheduleApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            p::semaphore_api_server::SemaphoreApiServer::new(service.clone())
-                .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                p::semaphore_api_server::SemaphoreApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
-            cadence_proto::admin::admin_api_server::AdminApiServer::new(
-                crate::grpc_admin::Admin { frontend: service.clone() },
-            )
-            .max_decoding_message_size(limit),
+            tonic::service::interceptor::InterceptedService::new(
+                cadence_proto::admin::admin_api_server::AdminApiServer::new(
+                    crate::grpc_admin::Admin { frontend: service.clone() },
+                )
+                .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
             cadence_proto::sharddistributor::shard_distributor_api_server::ShardDistributorApiServer::new(
@@ -1935,4 +1960,16 @@ pub async fn serve(
         .serve(addr)
         .await?;
     Ok(())
+}
+
+fn frontend_admission_interceptor(
+    accepting: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> impl FnMut(tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> + Clone {
+    move |request| {
+        if accepting.load(std::sync::atomic::Ordering::Acquire) {
+            Ok(request)
+        } else {
+            Err(tonic::Status::unavailable("Frontend is shutting down."))
+        }
+    }
 }

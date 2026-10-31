@@ -735,6 +735,28 @@ pub fn string_list(values: impl PropertyValueSource) -> Vec<String> {
     }
 }
 
+/// Go `GetMapProperty` semantics used by frontend required-domain-data checks.
+/// An absent property is distinct from an explicitly configured empty map so
+/// callers can retain the service-config default only for the former.
+pub fn map_property(
+    values: impl PropertyValueSource,
+    default: std::collections::BTreeMap<String, Value>,
+) -> std::collections::BTreeMap<String, Value> {
+    let default_json = Value::Object(default.clone().into_iter().collect());
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Map, default_json, &BTreeMap::new())
+    {
+        return runtime_typed(result, (), "map")
+            .and_then(|value| value.as_object().cloned())
+            .map(|value| value.into_iter().collect())
+            .unwrap_or(default);
+    }
+    selected(values.snapshot_values(), None)
+        .and_then(|value| value.as_object().cloned())
+        .map(|value| value.into_iter().collect())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,6 +780,21 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn map_property_keeps_config_defaults_but_accepts_empty_overrides() {
+        let default = BTreeMap::from([("default".into(), json!(true))]);
+        let no_values: &[DynamicConfigValue] = &[];
+        assert_eq!(map_property(no_values, default.clone()), default);
+        assert_eq!(
+            map_property(&[entry(json!({"tier": true}), &[])][..], BTreeMap::new()),
+            BTreeMap::from([("tier".into(), json!(true))])
+        );
+        assert_eq!(
+            map_property(&[entry(json!({}), &[])][..], default.clone()),
+            BTreeMap::new()
+        );
     }
 
     #[test]

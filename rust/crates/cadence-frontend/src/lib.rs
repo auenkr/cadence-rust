@@ -25,7 +25,7 @@ pub const SERVICE_NAME: &str = "frontend";
 /// lifecycle. The shared runtime owns public gRPC, TChannel/Thrift, optional
 /// HTTP and health endpoints on the addresses from the Go service config.
 pub async fn run() -> anyhow::Result<()> {
-    cadence_matching::launcher::run(
+    cadence_matching::launcher::run_frontend(
         "cadence-frontend",
         Some(&[cadence_service_core::service::ServiceName::Frontend]),
     )

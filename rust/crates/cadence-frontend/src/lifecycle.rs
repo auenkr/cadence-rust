@@ -1,26 +1,8 @@
 //! Frontend lifecycle state mirrors Go daemon states and health transitions.
 
+pub use cadence_service_core::frontend_lifecycle::DrainPlan;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
-
-/// Go `frontend.Service.Stop` splits shutdownDrainDuration into the period
-/// peers need to observe unhealthy status and a final request-drain window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DrainPlan {
-    pub failure_detection: Duration,
-    pub request_drain: Duration,
-}
-
-impl DrainPlan {
-    #[must_use]
-    pub fn from_go_shutdown_drain_duration(duration: Duration) -> Self {
-        let request_drain = duration.min(Duration::from_secs(1));
-        Self {
-            failure_detection: duration.saturating_sub(request_drain),
-            request_drain,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -130,6 +112,49 @@ mod tests {
                 failure_detection: Duration::from_millis(1500),
                 request_drain: Duration::from_secs(1),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_runs_go_hooks_in_order_and_is_idempotent() {
+        let lifecycle = Lifecycle::default();
+        assert!(lifecycle.start());
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let push = |event: &'static str| {
+            let events = events.clone();
+            move || {
+                let events = events.clone();
+                async move {
+                    events.lock().unwrap().push(event);
+                }
+            }
+        };
+        assert!(
+            lifecycle
+                .shutdown(
+                    Duration::ZERO,
+                    push("health"),
+                    push("handlers"),
+                    push("limiters"),
+                    push("resource"),
+                )
+                .await
+        );
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["health", "handlers", "limiters", "resource"]
+        );
+        assert_eq!(lifecycle.state(), State::Stopped);
+        assert!(
+            !lifecycle
+                .shutdown(
+                    Duration::ZERO,
+                    || async {},
+                    || async {},
+                    || async {},
+                    || async {},
+                )
+                .await
         );
     }
 }

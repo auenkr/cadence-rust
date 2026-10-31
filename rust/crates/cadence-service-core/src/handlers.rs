@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
+use axum::middleware::{self, Next};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -74,6 +75,20 @@ pub struct AppState {
     pub current_cluster_name: String,
     pub cluster_metadata: cadence_common::cluster::Metadata,
     pub grpc_max_message_size: usize,
+    /// Frontend readiness and admission state are split so shutdown can first
+    /// fail health checks, wait for discovery, and only then reject new RPCs.
+    pub frontend_ready: Arc<std::sync::atomic::AtomicBool>,
+    /// Prevents the Go-compatible warmup timer from marking a stopping
+    /// Frontend healthy while shutdown is waiting for discovery/drain.
+    pub frontend_shutting_down: Arc<std::sync::atomic::AtomicBool>,
+    pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
+    /// Stop signal for AdminHandler-owned background workers (for example,
+    /// the Go domain DLQ and failover watchers). This is separate from the
+    /// API admission gate stopped by WorkflowHandler.Stop.
+    pub frontend_admin_shutdown: tokio::sync::watch::Sender<bool>,
+    /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
+    /// The launcher signals this only after request draining has completed.
+    pub background_shutdown: tokio::sync::watch::Sender<bool>,
     pub domains: InMemoryDomainStore,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
@@ -99,6 +114,11 @@ impl Default for AppState {
             current_cluster_name: "cluster0".to_string(),
             cluster_metadata: cadence_common::cluster::Metadata::default(),
             grpc_max_message_size: 4 * 1024 * 1024,
+            frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
+            background_shutdown: tokio::sync::watch::channel(false).0,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
@@ -112,6 +132,23 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Stop accepting API requests, matching Go's WorkflowHandler.Stop.
+    pub fn stop_frontend_handler(&self) {
+        self.frontend_accepting
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Stop AdminHandler-owned background workers before request draining.
+    /// Admin modules subscribe when they own a long-lived task.
+    pub fn stop_frontend_admin_handler(&self) {
+        self.frontend_admin_shutdown.send_replace(true);
+    }
+
+    /// Stop service-owned background loops, matching Go Frontend's `close(s.stopC)`.
+    pub fn stop_background_workers(&self) {
+        self.background_shutdown.send_replace(true);
+    }
+
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
@@ -325,6 +362,29 @@ fn task_error(e: TaskError) -> Response {
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"ok": true}))
+}
+
+async fn frontend_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let ok = state.frontend_ready.load(std::sync::atomic::Ordering::Acquire);
+    let status = if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    (status, Json(serde_json::json!({"ok": ok})))
+}
+
+async fn reject_frontend_during_shutdown(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if request.uri().path() != "/health"
+        && !state.frontend_accepting.load(std::sync::atomic::Ordering::Acquire)
+    {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Frontend is shutting down.".to_string(),
+        );
+    }
+    next.run(request).await
 }
 
 // ---------------------------------------------------------------------------
@@ -903,7 +963,7 @@ pub fn health_router() -> Router {
 pub fn router(state: AppState) -> Router {
     let shared = Arc::new(state);
     Router::new()
-        .route("/health", get(health))
+        .route("/health", get(frontend_health))
         .route("/api/v1/tasks/reset-sticky", post(reset_sticky_task_list))
         .route("/api/v1/domains/register", post(register_domain))
         .route("/api/v1/domains/describe", get(describe_domain))
@@ -1127,6 +1187,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/workflows/archived", post(list_archived_workflows))
         .route("/", post(crate::yarpc::yarpc_handler))
         .route("/{*rest}", post(crate::yarpc::yarpc_handler))
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            reject_frontend_during_shutdown,
+        ))
         .with_state(shared)
 }
 
@@ -2389,6 +2453,97 @@ pub fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
         keys: Some(cadence_api::search_attributes::default_indexed_keys()),
     }
 }
+
+#[cfg(test)]
+mod frontend_drain_tests {
+    use super::*;
+    use axum::body::Body;
+    use http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn stop_background_workers_broadcasts_the_go_stop_signal() {
+        let state = AppState::default();
+        let mut shutdown = state.background_shutdown.subscribe();
+        assert!(!*shutdown.borrow());
+
+        state.stop_background_workers();
+        shutdown.changed().await.unwrap();
+
+        assert!(*shutdown.borrow());
+    }
+
+    #[tokio::test]
+    async fn frontend_handler_stop_hooks_are_independent() {
+        let state = AppState::default();
+        let mut admin_shutdown = state.frontend_admin_shutdown.subscribe();
+        assert!(state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+
+        state.stop_frontend_handler();
+        assert!(!state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(!*admin_shutdown.borrow());
+
+        state.stop_frontend_admin_handler();
+        admin_shutdown.changed().await.unwrap();
+        assert!(*admin_shutdown.borrow());
+    }
+
+    #[tokio::test]
+    async fn frontend_health_fails_before_admission_closes() {
+        let state = AppState::default();
+        let ready = state.frontend_ready.clone();
+        let accepting = state.frontend_accepting.clone();
+        let app = router(state);
+
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        ready.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Requests continue while peers discover the unhealthy state; the
+        // admission gate closes only after that interval.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        accepting.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}
+
 async fn get_search_attributes() -> impl IntoResponse {
     Json(search_attributes())
 }

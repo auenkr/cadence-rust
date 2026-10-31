@@ -1562,12 +1562,30 @@ pub async fn dispatch(
     body: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    if method != "health"
+        && !state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Ok((
+            Struct::default(),
+            Some(("InternalServiceError", "Frontend is shutting down.".into())),
+        ));
+    }
     let outcome: HandlerResult = match method {
         "health" => Ok(Struct {
             fields: vec![(
                 0,
                 Value::Struct(Struct {
-                    fields: vec![(1, Value::Bool(true)), (2, Value::Bytes(b"OK".to_vec()))],
+                    fields: vec![
+                        (
+                            1,
+                            Value::Bool(state.frontend_ready.load(
+                                std::sync::atomic::Ordering::Acquire,
+                            )),
+                        ),
+                        (2, Value::Bytes(b"OK".to_vec())),
+                    ],
                 }),
             )],
         }),

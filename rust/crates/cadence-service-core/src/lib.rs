@@ -7,6 +7,7 @@ pub mod grpc_tls;
 #[allow(clippy::result_large_err)]
 pub mod grpc_shard;
 pub mod handlers;
+pub mod frontend_lifecycle;
 pub mod ringpop_discovery;
 pub mod ringpop_tchannel;
 pub mod service;
