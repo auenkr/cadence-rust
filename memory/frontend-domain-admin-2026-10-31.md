@@ -784,8 +784,10 @@ migration forward.
   `origin/frontend-domain-admin`.
 - Exact-head Frontend package CI was dispatched as
   [41196648311](https://github.com/auenkr/cadence-rust/actions/runs/41196648311).
-  It is pending; inspect the exact-head result before treating the rebased
-  source as validated. No Cargo command ran locally.
+  It failed before Cargo at `Check changed Matching runtime formatting`; the
+  failure was a single formatting difference in the rebased Matching launcher
+  call to `GoSqlFrontendDomainManager`. Applied the exact rustfmt diff from the
+  CI log; redispatch at the next push. No Cargo command ran locally.
 - Current blocker focus remains durable replication queue/audit behavior and
   failover history across restart. The domain manager writes SQL/Cassandra
   domain rows, but replication task publication/consumption is not backed by
