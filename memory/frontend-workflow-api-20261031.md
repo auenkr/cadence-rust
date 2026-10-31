@@ -140,6 +140,10 @@ these fixes; no green CI evidence covers the current changes.
   into the original JSON request without dropping unknown SDK fields.
 - Added handler tests for list page-size mutation and unknown-field retention,
   open-list validation, task-list validation, and rate-limit wrapper preflight.
+- Added a quota-dimension extractor for the generated rate-limit wrapper. It
+  uses nested async request fields, sticky task-list base names, and decodes
+  task-token requests before resolving their domain UUID through an injected
+  `DomainNameLookup`.
 - CI run
   [41175955180](https://github.com/auenkr/cadence-rust/actions/runs/41175955180)
   at `a26cf95b4e110bb4a2ec5902771d4e2a7552e0b4` was cancelled when a newer

@@ -60,6 +60,96 @@ pub struct QuotaInfo {
     pub task_list: String,
 }
 
+pub trait DomainNameLookup {
+    fn domain_name(&self, domain_id: &str) -> Result<String, CadenceError>;
+}
+
+/// Build the quota dimensions used by Go's generated wrapper. Task-token APIs
+/// look up the current domain name from the token's domain UUID; API methods
+/// with an explicit task list charge poll/start requests to its base name when
+/// it is sticky.
+pub fn quota_info(
+    operation: &str,
+    request: &serde_json::Value,
+    domains: &dyn DomainNameLookup,
+) -> Result<QuotaInfo, CadenceError> {
+    let fields = if matches!(
+        operation,
+        "StartWorkflowExecutionAsync" | "SignalWithStartWorkflowExecutionAsync"
+    ) {
+        request.get("request").unwrap_or(request)
+    } else {
+        request
+    };
+
+    let domain = if matches!(
+        operation,
+        "RecordActivityTaskHeartbeat"
+            | "RespondActivityTaskCanceled"
+            | "RespondActivityTaskCompleted"
+            | "RespondActivityTaskFailed"
+            | "RespondDecisionTaskCompleted"
+            | "RespondDecisionTaskFailed"
+            | "RespondQueryTaskCompleted"
+    ) {
+        let token: EncodedTaskToken = serde_json::from_value(request.clone()).map_err(|error| {
+            CadenceError::Unknown(error.to_string())
+        })?;
+        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&token.task_token)
+            .map_err(|error| CadenceError::Unknown(error.to_string()))?;
+        domains.domain_name(&token.domain_id)?
+    } else {
+        fields
+            .get("domain")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+
+    let task_list_name = if matches!(
+        operation,
+        "PollForActivityTask"
+            | "PollForDecisionTask"
+            | "StartWorkflowExecution"
+            | "StartWorkflowExecutionAsync"
+            | "SignalWithStartWorkflowExecution"
+            | "SignalWithStartWorkflowExecutionAsync"
+    ) {
+        let task_list = fields.get("taskList").unwrap_or(&serde_json::Value::Null);
+        task_list_quota_name(
+            task_list
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default(),
+            task_list
+                .get("baseName")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default(),
+            task_list
+                .get("kind")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or_default() as i32,
+        )
+    } else {
+        String::new()
+    };
+
+    Ok(QuotaInfo {
+        domain,
+        task_list: task_list_name,
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct EncodedTaskToken {
+    #[serde(
+        rename = "taskToken",
+        default,
+        deserialize_with = "cadence_api::b64::deserialize_bytes"
+    )]
+    task_token: Vec<u8>,
+}
+
 /// A wait result distinguishes caller cancellation from the frontend's
 /// configured poll-delay timeout. Go makes that distinction before deciding
 /// whether to return the throttling ServiceBusy error.
@@ -139,6 +229,23 @@ pub fn task_list_quota_name(name: &str, base_name: &str, kind: i32) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct DomainLookup;
+    impl DomainNameLookup for DomainLookup {
+        fn domain_name(&self, domain_id: &str) -> Result<String, CadenceError> {
+            assert_eq!(domain_id, "domain-id");
+            Ok("resolved-domain".to_owned())
+        }
+    }
+
+    #[derive(serde::Serialize)]
+    struct TokenRequest {
+        #[serde(
+            rename = "taskToken",
+            serialize_with = "cadence_api::b64::serialize_bytes"
+        )]
+        task_token: Vec<u8>,
+    }
 
     struct PermitPolicy {
         allow: bool,
@@ -225,6 +332,44 @@ mod tests {
     fn sticky_poll_is_charged_to_base_task_list() {
         assert_eq!(task_list_quota_name("sticky-name", "base", 1), "base");
         assert_eq!(task_list_quota_name("normal", "", 0), "normal");
+    }
+
+    #[test]
+    fn quota_dimensions_match_nested_async_and_token_requests() {
+        let async_request = serde_json::json!({
+            "request": {
+                "domain": "async-domain",
+                "taskList": {"name": "sticky", "baseName": "base", "kind": 1}
+            }
+        });
+        assert_eq!(
+            quota_info(
+                "StartWorkflowExecutionAsync",
+                &async_request,
+                &DomainLookup
+            )
+            .unwrap(),
+            QuotaInfo {
+                domain: "async-domain".into(),
+                task_list: "base".into()
+            }
+        );
+
+        let bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(
+            &cadence_api::tasktoken::TaskToken {
+                domain_id: "domain-id".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let request = serde_json::to_value(TokenRequest { task_token: bytes }).unwrap();
+        assert_eq!(
+            quota_info("RespondActivityTaskCompleted", &request, &DomainLookup).unwrap(),
+            QuotaInfo {
+                domain: "resolved-domain".into(),
+                task_list: String::new()
+            }
+        );
     }
 
     #[test]
