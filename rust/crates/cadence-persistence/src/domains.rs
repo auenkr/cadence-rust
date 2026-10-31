@@ -177,6 +177,20 @@ impl DomainRecord {
             ..Default::default()
         })
     }
+
+    /// Encode a domain replication task with Cadence's ThriftRW wire protocol,
+    /// matching Go's `codec.NewThriftRWEncoder` used by the queue producer.
+    pub fn encode_domain_replication_task(
+        &self,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<Vec<u8>, String> {
+        use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
+
+        let task = self.to_domain_replication_task(operation)?;
+        let mut writer = Writer::new();
+        write_struct(&mut writer, &task.to_thrift());
+        Ok(writer.into_bytes())
+    }
 }
 
 /// A recorded domain failover, mirroring Go's domain audit log rows for
@@ -1474,6 +1488,15 @@ mod tests {
         assert_eq!(attributes.failover_version, 42);
         assert_eq!(attributes.previous_failover_version, 41);
         assert_eq!(attributes.replication_config.unwrap().active_cluster_name, "active");
+
+        let encoded = record
+            .encode_domain_replication_task(cadence_api::enums::DomainOperation::Update)
+            .unwrap();
+        let mut reader = cadence_thrift::protocol::Reader::new(&encoded);
+        let decoded = cadence_thrift::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        assert!(matches!(decoded.get(10), Some(cadence_thrift::value::Value::I32(0))));
+        assert!(matches!(decoded.get(30), Some(cadence_thrift::value::Value::Struct(_))));
     }
 
     #[test]

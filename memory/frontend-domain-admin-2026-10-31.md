@@ -964,3 +964,10 @@ migration forward.
   generic Thrift value model; ThriftRW byte encoding, queue persistence and
   producer/consumer wiring remain open. No local Cargo command ran. The
   expanded source needs exact-head package CI.
+- Added `DomainRecord::encode_domain_replication_task`, which writes the Go
+  domain task envelope through the existing ThriftRW `Writer` path, and a
+  decode-side structural assertion for task type, nested attributes and full
+  byte consumption. This establishes the queue payload encoder; no Go-produced
+  byte-for-byte oracle exists yet. Queue persistence, mutation publication,
+  Admin read/ack behavior, and DLQ operations remain open. `git diff --check`
+  passed and no Cargo ran locally; this needs fresh exact-head CI.
