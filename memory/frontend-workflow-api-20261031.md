@@ -954,3 +954,17 @@ Frontend parity until these are implemented and validated.
   formatting and tests in the runner workspace with the poll ordering/error
   changes. The rustfmt artifact was downloaded; an exact committed-head run is
   pending.
+
+## Crash recovery — 2026-10-31
+
+- Resumed `t3/frontend-workflow-api` at `9e7000564` after confirming the
+  previous crash left one uncommitted change in `handler_workflow.rs`.
+- Preserved the Go `CreateChildContext(ctx, 0.05)` behavior for isolation-group
+  polling: the state wait deadline reserves 5% of the remaining caller deadline
+  for the subsequent Matching poll. Added an explicit regression assertion for
+  the 100-second case and kept integer rounding overflow-safe. Source is now
+  formatted; no Cargo command has been run locally.
+- This does not close the recorded History paging/archive, task payload
+  conversion, typed runtime wiring, or live persistence/visibility gaps. Push
+  this recovery checkpoint and validate the exact head on the Frontend package
+  workflow before selecting the next implementation slice.

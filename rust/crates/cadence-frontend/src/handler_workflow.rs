@@ -340,8 +340,9 @@ pub trait PollAdmissionPolicy: Send + Sync {
 }
 
 /// Wait for a drained poll isolation group to become healthy, as Go's
-/// `waitUntilIsolationGroupHealthy` does. `false` means the caller's poll
-/// deadline elapsed and the public response must be empty.
+/// `waitUntilIsolationGroupHealthy` does. The deadline leaves Go's five
+/// percent tailroom for the subsequent Matching long poll. `false` means the
+/// child wait deadline elapsed and the public response must be empty.
 pub trait PollIsolationGroupWaiter: Send + Sync {
     fn wait_until_healthy<'a>(
         &'a self,
@@ -1045,7 +1046,11 @@ impl<B: WorkflowBackend> Handler<B> {
             // Go logs state lookup failures and assumes the isolation group
             // is healthy so a cache outage cannot reject worker polls.
             let healthy = waiter
-                .wait_until_healthy(domain, &caller.isolation_group, caller.deadline)
+                .wait_until_healthy(
+                    domain,
+                    &caller.isolation_group,
+                    isolation_group_wait_deadline(caller.deadline),
+                )
                 .await
                 .unwrap_or(true);
             if !healthy {
@@ -2108,6 +2113,20 @@ fn validate_long_poll_deadline(deadline: Option<std::time::Instant>) -> Result<(
         )));
     }
     Ok(())
+}
+
+fn isolation_group_wait_deadline(
+    deadline: Option<std::time::Instant>,
+) -> Option<std::time::Instant> {
+    let deadline = deadline?;
+    let now = std::time::Instant::now();
+    let remaining = deadline.saturating_duration_since(now);
+    // Match Go's context timeout tailroom calculation without converting the
+    // full duration to a potentially overflowing Duration multiplication.
+    let tailroom_nanos = remaining.as_nanos().saturating_add(19) / 20;
+    let tailroom =
+        std::time::Duration::from_nanos(tailroom_nanos.min(u64::MAX as u128) as u64);
+    deadline.checked_sub(tailroom).or(Some(now))
 }
 
 fn normalize_archived_execution_times(response: &mut Value) {
@@ -3875,6 +3894,15 @@ mod tests {
             .unwrap();
         assert_eq!(response, Value::Null);
         assert_eq!(handler.backend.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn poll_isolation_wait_keeps_go_five_percent_deadline_tailroom() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(100);
+        let wait_deadline = isolation_group_wait_deadline(Some(deadline)).unwrap();
+        let remaining_tailroom = deadline.duration_since(wait_deadline);
+        assert!(remaining_tailroom >= std::time::Duration::from_millis(4_999));
+        assert!(remaining_tailroom <= std::time::Duration::from_millis(5_001));
     }
 
     #[tokio::test]
