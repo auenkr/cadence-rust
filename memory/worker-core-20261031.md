@@ -421,3 +421,13 @@ domain workflow-type Pinot query has `ORDER BY count` without `DESC`. This is
 kept as written. Not yet ported: the analyzer workflow, the version and
 type-count aggregation, store clients, metric emission and `analyzer.go`
 lifecycle.
+
+## Checkpoint — indexer response and field rules (2026-10-31, continuation)
+
+Package CI at `d956d2245`: https://github.com/auenkr/cadence-rust/actions/runs/41224085371 — success, 110 worker crate tests passed.
+Ported: `indexer/es_response.rs` (bulk status success/retry classification, single-part
+delete detection) and `indexer/fields.rs` (`isValidFieldToES`, `fulfillDoc`, reserved
+field names), with the Go-table cases from `esProcessor_test.go` and `indexer_test.go`.
+Still unported in indexer: Kafka consumer and message loops, `process`/`addMessageToES`
+and document generation from `indexer.Message`, the ES bulk processor and its ack/nack
+bookkeeping, dual migration indexer, and `Start`/`Stop`.
