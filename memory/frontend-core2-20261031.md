@@ -293,6 +293,10 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   point and set the validator matrix's graceful failover limit to the Go test's
   300-second value. These latest test corrections are pushed after run
   `41180907810` was dispatched and still need a new exact-head CI run.
+- Canceled run `41180907810` before Rust validation because it targeted the
+  earlier test head; dispatched exact-head run
+  https://github.com/auenkr/cadence-rust/actions/runs/41181022476 for
+  `3d57697610a143e317513f613a8484c7293d7c0e`.
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41179758023 at
   `3bc2dcca870ea3875d0915f6769d9b09ae9dcbe4` passed Frontend Clippy but failed
   the crate formatting step. The runner emitted 22 rustfmt hunks in
