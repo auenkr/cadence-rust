@@ -157,6 +157,10 @@ Implemented in this slice:
 
 ## Validation evidence
 
+- Package CI at exact source head `bb2042376618231a51e048aaaa64877eddf118d6`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41209390273 completed
+  with conclusion `success` (Worker Clippy, formatting and tests).
+
 - Local: `git diff --check` passed; no Cargo command was run.
 - Package CI at `f0a142870c9d9bec76f939840583d513ef848780` failed Clippy only
   on `result_large_err` for the two tonic WorkerAPI poll methods. Added the
