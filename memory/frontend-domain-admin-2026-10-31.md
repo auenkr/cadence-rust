@@ -604,3 +604,21 @@ migration forward.
   manager even after JSON paths used the seam. The remaining direct domain-store
   uses in Admin are cache/isolated config operations and require their own
   persistence contracts. `git diff --check` passes; no Cargo command was run.
+
+## Continuation — 2026-10-31
+
+- Exact-head package run [41193208098](https://github.com/auenkr/cadence-rust/actions/runs/41193208098)
+  failed at Clippy/type-check on pushed head
+  `6eb3514c2b0275b2c9ab6849246b8c788a4533df`. The failure was an unclosed
+  `frontend_drain_tests` module delimiter in `cadence-service-core/src/handlers.rs`,
+  exposed by the latest core2 rebase. Added the missing brace and pushed
+  `87d8dd286fbaeb5608593e4980046dac9b94c422`.
+- Exact-head package run [41193391363](https://github.com/auenkr/cadence-rust/actions/runs/41193391363)
+  was dispatched for `87d8dd286fbaeb5608593e4980046dac9b94c422`; result pending
+  at this save. No Cargo/rustfmt/test command ran locally.
+- Audit confirms configured SQL/Cassandra stores currently expose only read-only
+  Matching metadata interfaces; the Frontend manager is still the in-memory
+  implementation. Durable writes and replication queue production/consumption
+  remain primary blockers. Next work is to add transactional persistence and bind
+  it at configured Frontend startup before advancing the remaining Admin DLQ/
+  History, scheduler and membership gaps.
