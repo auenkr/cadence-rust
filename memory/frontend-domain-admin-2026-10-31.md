@@ -1247,3 +1247,13 @@ migration forward.
   Clippy stopped on two borrowed-string arguments to `AppError::internal` in
   the new Thrift History proxies. Converted both to owned strings. No tests
   ran; fresh exact-head package CI is required.
+- Corrected proxy commit `860cdc04e899be244a54290bce1582c537c45904` passed
+  exact-head package CI
+  [41216176446](https://github.com/auenkr/cadence-rust/actions/runs/41216176446).
+  Formatting, Clippy, Frontend package tests, and runtime smoke passed. No local
+  Cargo command ran.
+- Admin raw-history audit found the JSON path canonicalizes UUID spellings and
+  validates malformed persistence cursors, while the YARPC path does neither.
+  I am bringing those checks into parity before continuing broader
+  History-backed behavior; this is a source correction, not full raw-history
+  branch/persistence parity.

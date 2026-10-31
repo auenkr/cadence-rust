@@ -1990,3 +1990,8 @@ integration head requires fresh package CI.
 Exact-head CI 41215905318 passed formatting and found two borrowed-string
 arguments in the new YARPC History client error paths. Fixed both; the run did
 not reach tests and a fresh package CI run is required.
+
+The correction at `860cdc04e899be244a54290bce1582c537c45904` passed exact-head
+Frontend package CI [41216176446](https://github.com/auenkr/cadence-rust/actions/runs/41216176446),
+including Clippy, tests, and runtime smoke. The YARPC raw-history implementation
+still needs the JSON path's UUID canonicalization and cursor validation.
