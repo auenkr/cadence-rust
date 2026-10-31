@@ -76,6 +76,9 @@ activity failures. Go-mirroring tests cover the terminal race, remote routing,
 child-only guard, and unclassified failure behavior. The helper is still a
 testable orchestration boundary: no production domain-cache/remote-client
 provider is wired into a poller, and the workflow replay runtime is absent.
+The Go parent-close workflow's activity schedule-to-start/start-to-close
+timeouts and unlimited retry policy bounds (10s initial, 1.7 coefficient,
+5m maximum, 20-year expiration) are now part of its tested contract.
 
 Worker registration descriptors now include Go's task-list and history
 scavengers plus the concrete/current/timer scanner and fixer workflow types,

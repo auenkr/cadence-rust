@@ -12,6 +12,12 @@ pub const WORKFLOW_ID_PREFIX: &str = "parent-close-policy-workflow";
 pub const WORKFLOW_EXECUTION_TIMEOUT_SECONDS: i32 = 20 * 365 * 24 * 60 * 60;
 pub const WORKFLOW_TASK_TIMEOUT_SECONDS: i32 = 60;
 pub const REMOTE_WORKFLOW_IDENTITY: &str = "cadence-worker";
+pub const ACTIVITY_SCHEDULE_TO_START_TIMEOUT_SECONDS: u64 = 60;
+pub const ACTIVITY_START_TO_CLOSE_TIMEOUT_SECONDS: u64 = 5 * 60;
+pub const ACTIVITY_RETRY_INITIAL_INTERVAL_SECONDS: u64 = 10;
+pub const ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI: u64 = 1_700;
+pub const ACTIVITY_RETRY_MAXIMUM_INTERVAL_SECONDS: u64 = 5 * 60;
+pub const ACTIVITY_RETRY_EXPIRATION_SECONDS: u64 = 20 * 365 * 24 * 60 * 60;
 
 pub fn workflow_id(shard: usize) -> String {
     format!("{WORKFLOW_ID_PREFIX}-{shard}")
@@ -380,6 +386,12 @@ mod tests {
         assert_eq!(super::WORKFLOW_EXECUTION_TIMEOUT_SECONDS, 630_720_000);
         assert_eq!(super::WORKFLOW_TASK_TIMEOUT_SECONDS, 60);
         assert_eq!(super::REMOTE_WORKFLOW_IDENTITY, "cadence-worker");
+        assert_eq!(super::ACTIVITY_SCHEDULE_TO_START_TIMEOUT_SECONDS, 60);
+        assert_eq!(super::ACTIVITY_START_TO_CLOSE_TIMEOUT_SECONDS, 300);
+        assert_eq!(super::ACTIVITY_RETRY_INITIAL_INTERVAL_SECONDS, 10);
+        assert_eq!(super::ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI, 1_700);
+        assert_eq!(super::ACTIVITY_RETRY_MAXIMUM_INTERVAL_SECONDS, 300);
+        assert_eq!(super::ACTIVITY_RETRY_EXPIRATION_SECONDS, 630_720_000);
     }
 
     #[test]
