@@ -89,6 +89,76 @@ impl MatchingClient {
         request.set_timeout(timeout);
         request
     }
+
+    /// Dispatch the typed internal Matching long-poll used by Go Frontend.
+    /// Keeping this on the generated client makes the internal envelope and
+    /// long-poll deadline explicit at the service boundary.
+    pub async fn poll_for_activity_task(
+        &self,
+        request: cadence_proto::matching::PollForActivityTaskRequest,
+    ) -> Result<cadence_proto::matching::PollForActivityTaskResponse, tonic::Status> {
+        self.client
+            .clone()
+            .poll_for_activity_task(self.long_poll_request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn poll_for_decision_task(
+        &self,
+        request: cadence_proto::matching::PollForDecisionTaskRequest,
+    ) -> Result<cadence_proto::matching::PollForDecisionTaskResponse, tonic::Status> {
+        self.client
+            .clone()
+            .poll_for_decision_task(self.long_poll_request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    /// Explicitly remove a poller after its Frontend caller disconnects. Go's
+    /// request context is not propagated across this internal RPC boundary.
+    pub async fn cancel_outstanding_poll(
+        &self,
+        request: cadence_proto::matching::CancelOutstandingPollRequest,
+    ) -> Result<(), tonic::Status> {
+        self.client
+            .clone()
+            .cancel_outstanding_poll(self.request(request))
+            .await
+            .map(|_| ())
+    }
+}
+
+/// Construct Go's internal Matching activity-poll envelope from the typed
+/// public request and domain cache identity.
+pub fn activity_poll_request(
+    domain_id: String,
+    poller_id: String,
+    request: cadence_proto::api::PollForActivityTaskRequest,
+    isolation_group: String,
+) -> cadence_proto::matching::PollForActivityTaskRequest {
+    cadence_proto::matching::PollForActivityTaskRequest {
+        request: Some(request),
+        domain_id,
+        poller_id,
+        forwarded_from: String::new(),
+        isolation_group,
+    }
+}
+
+pub fn decision_poll_request(
+    domain_id: String,
+    poller_id: String,
+    request: cadence_proto::api::PollForDecisionTaskRequest,
+    isolation_group: String,
+) -> cadence_proto::matching::PollForDecisionTaskRequest {
+    cadence_proto::matching::PollForDecisionTaskRequest {
+        request: Some(request),
+        domain_id,
+        poller_id,
+        forwarded_from: String::new(),
+        isolation_group,
+    }
 }
 
 /// Build a lazy gRPC channel using the configured Go
@@ -104,4 +174,45 @@ pub fn generated(channel: Channel, max_message_size: usize) -> MatchingApiClient
     MatchingApiClient::new(channel)
         .max_decoding_message_size(max_message_size)
         .max_encoding_message_size(max_message_size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_poll_envelopes_match_go_matching_requests() {
+        let activity = activity_poll_request(
+            "domain-uuid".into(),
+            "poller-activity".into(),
+            cadence_proto::api::PollForActivityTaskRequest {
+                domain: "shop".into(),
+                identity: "worker".into(),
+                ..Default::default()
+            },
+            "group-a".into(),
+        );
+        assert_eq!(activity.domain_id, "domain-uuid");
+        assert_eq!(activity.poller_id, "poller-activity");
+        assert_eq!(activity.isolation_group, "group-a");
+        assert_eq!(activity.request.unwrap().domain, "shop");
+
+        let decision = decision_poll_request(
+            "domain-uuid".into(),
+            "poller-decision".into(),
+            cadence_proto::api::PollForDecisionTaskRequest {
+                domain: "shop".into(),
+                identity: "worker".into(),
+                binary_checksum: "checksum".into(),
+                ..Default::default()
+            },
+            "group-b".into(),
+        );
+        assert_eq!(decision.domain_id, "domain-uuid");
+        assert_eq!(decision.poller_id, "poller-decision");
+        assert_eq!(decision.isolation_group, "group-b");
+        let public = decision.request.unwrap();
+        assert_eq!(public.domain, "shop");
+        assert_eq!(public.binary_checksum, "checksum");
+    }
 }

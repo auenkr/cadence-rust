@@ -742,12 +742,19 @@ Frontend parity until these are implemented and validated.
   outcomes around the Go-equivalent payload size checks. Commit
   `322010a62920f31e48881061f4042baa07962a47` is pushed; package CI
   [41189493958](https://github.com/auenkr/cadence-rust/actions/runs/41189493958)
-  was still `in_progress` at the time of this save. It must not be described as
-  a pass until a terminal conclusion is recorded.
+  was cancelled when a newer source head was dispatched; it has no conclusion
+  and is not validation evidence.
 - Poll activity/decision now prepares the Go Matching envelope with resolved
   `domainUUID`, unique UUID `pollerID`, nested public `pollRequest`, and the
   caller isolation group. A regression test covers those fields and fresh IDs.
-  This change is uncommitted at this save and has no CI result yet.
+  This change is committed and pushed as
+  `9a42e581bbbcf6dd66f825bb158be49d615cb1f3`. Package CI
+  [41189699286](https://github.com/auenkr/cadence-rust/actions/runs/41189699286)
+  was still `in_progress` at this save and will be superseded by the typed
+  Matching client request methods described below.
+- Added typed Matching client calls for both long-poll RPCs and explicit
+  `CancelOutstandingPoll`, with builders for Go's internal request envelopes
+  and a constructor unit test. These edits are uncommitted and unvalidated.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
   `Handler` or compose its wrappers; poll cancellation/health-wait and response
