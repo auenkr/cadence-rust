@@ -1158,3 +1158,54 @@ Frontend parity until these are implemented and validated.
 - Exact-head package run [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
   is dispatched with `clean_target=true` for `db22d15a3be324ee2ccb301f9f8b27fd9dd9323e`;
   status and conclusion are pending.
+
+## Resume after crash — 2026-10-31
+
+- Current branch `t3/frontend-workflow-api` resumed at `cc7301a9c` (working
+  tree was clean). Read the repository instructions and memory index before
+  continuing. Exact-head run [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
+  targets `db22d15a3be324ee2ccb301f9f8b27fd9dd9323e`, with
+  `package=cadence-frontend` and `clean_target=true`. The Go source oracles
+  and formatting have passed; Clippy was in progress at last check. It has no
+  terminal conclusion yet and must be checked before recording acceptance.
+- Fetched `origin/frontend-core2`; its head is `fb0cd95b4`. Changes since the
+  existing integration add persistence-store selection and a Matching selector
+  error mapping, but do not add History/Matching workflow client adapters,
+  execution/visibility persistence interfaces, or archive readers. No new
+  interface commit was available to merge.
+- Re-audited the operation catalogue against Go's `WorkflowHandler` methods and
+  `task_list_handlers.go` / `refresh_workflow_tasks.go`. Workflow dispatch
+  already implements the per-operation validation and request-envelope shaping
+  (including task-list calls, poll envelopes and cancellation, task-token
+  responses, and archive read seams); those paths remain unit-tested only.
+  They still call the generic `WorkflowBackend` JSON seam, and are not connected
+  to the registered transports. `cadence-frontend::run()` selects the shared
+  launcher, whose gRPC `WorkflowApiServer` is registered with the existing
+  `cadence-matching::grpc::Frontend`; the Thrift dispatcher is similarly owned
+  by `cadence-service-core`. Thus a passing handler unit suite is not evidence
+  that these methods work as registered Frontend RPCs.
+- Concrete interfaces/runtime work still required:
+  1. A production `WorkflowBackend` that converts handler envelopes to the
+     generated typed History and Matching RPC requests, invokes the correct
+     cluster client, converts typed responses back without losing Cadence
+     error kinds, and covers every `WorkflowOperation`.
+  2. An execution/history persistence interface exposing mutable-state lookup
+     plus paged raw-history reads by branch token and persistence token; wire
+     `GetWorkflowExecutionHistory` through it, then apply continuation-token,
+     event-completeness, transient-decision and close-event rules.
+  3. A visibility manager interface for list/scan/count plus archive visibility
+     access. Existing archive traits have no production adapter. Document this
+     request to core2 and merge their interface when it lands.
+  4. A transport injection point shared by the Frontend launcher and registered
+     gRPC/Thrift services, so the composed access-control, metered,
+     rate-limit, version-check and cluster-redirection handler actually owns
+     public WorkflowService calls. The current dependency direction
+     (`cadence-frontend` -> `cadence-matching` launcher) prevents the matching
+     crate from directly depending on the Frontend Handler; factor an interface
+     into `cadence-service-core` or move runtime ownership before registration.
+  5. Mixed Go History + Rust Matching + Rust Frontend SDK gate, including
+     failure/restart/recovery checks, and a recorded binary SHA256.
+- No Cargo/rustfmt command was run locally. No new code change is claimed in
+  this resume entry; next source work must implement the typed adapter and
+  transport seam instead of treating the already-tested JSON handler boundary
+  as runtime coverage.
