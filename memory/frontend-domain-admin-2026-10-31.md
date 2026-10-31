@@ -1105,3 +1105,10 @@ migration forward.
   across lines. Applied that formatting-only repair. No cargo ran locally.
 - `git diff --check` passed. Dispatch a fresh `cadence-frontend` package run
   for the pushed repair; the earlier run does not validate it.
+- Formatting repair commit `7e9439c56a1fef7a67e49c807234ec4badb3480e` was checked by
+  exact-head run [41207071832](https://github.com/auenkr/cadence-rust/actions/runs/41207071832).
+  Formatting passed, but Clippy compilation failed because a merge left a
+  duplicate `GoSqlDomainPersistence for MySqlDomainMetadataStore` impl at lines
+  675 and 836. Removed the duplicate; the earlier implementation is retained
+  alongside the Frontend `DomainMetadataPersistence` impl. No local Cargo ran.
+  This repair needs fresh package CI.
