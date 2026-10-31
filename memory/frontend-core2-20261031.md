@@ -218,12 +218,22 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   owners, and the admin handler's domain DLQ/failover watcher workers are not
   implemented in Rust. Therefore the sequencing helper is present, but
   `service.go` lifecycle parity remains open.
-- Validator review confirms the Rust tests exercise the 16 Go entry points,
-  the Go error-string set, successful calls, representative limits/mutations,
-  filter cases, permission checks, failover bounds, and live dynamic updates.
-  The test suite is not yet a row-for-row port of all 88 named Go table cases;
-  do not call the requested full matrix complete based only on unique-message
-  coverage.
+- Row-by-row static audit of `go/service/frontend/api/request_validator_test.go`
+  counted all 15 tables and 88 named rows. Rust coverage maps as follows:
+  refresh (3) to nil/success/execution tests; describe task list (7), partitions
+  (6), get-task-lists (3), and reset-sticky (6) to domain-presence, task-list,
+  reset-identifier and success tests; count (3) and list (4) to nil/domain,
+  size-mutation and size-limit tests; open (9) and closed (11) to nil/domain,
+  all start-time omissions/order, all filter conflicts, default page mutation,
+  and max-page tests; archived (4) to nil/domain/default/max-page; deprecate
+  (4) and describe-domain (4) to success/nil/domain/token and name/UUID cases;
+  update (7) to success/nil/domain/retention/token and both lockdown shapes;
+  register (7) to success/nil/domain/name-length/retention/required-data/token;
+  failover (10) to active-passive, active-active, graceful, nil/domain/missing
+  shape, zero/negative/over-limit timeout and lockdown. Several rows are grouped
+  in Rust tests rather than retaining Go's `t.Run` names; the tested request
+  conditions and outcomes correspond to all named source rows. The CI run on
+  the pushed head below must pass before considering this matrix closed.
 - CI run to validate the role-selection change will be recorded here after
   completion. No Cargo command was run locally.
 
