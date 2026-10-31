@@ -395,3 +395,7 @@ migration forward.
   already has a dedicated `run_frontend` path with readiness/admission drain
   and shutdown ordering. Frontend-specific retry policy, request metrics,
   complete middleware and remote membership are still not integrated.
+- Clippy on run `41179058460` did not reach Frontend validation: the rebased
+  Thrift converter imports failed to compile. Added the six missing Admin
+  converter imports and applied the uploaded CI formatting patch. Fresh run
+  `41179320362` now targets `b5dedb6a4` and is pending; collect its final result.
