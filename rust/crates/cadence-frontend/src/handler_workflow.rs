@@ -290,10 +290,37 @@ pub trait AsyncWorkflowPublisher: Send + Sync {
     ) -> WorkflowFuture<'a>;
 }
 
-/// Live per-domain event-blob error limit used before dispatching workflow
-/// query input to History.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlobSizeOutcome {
+    WithinWarningLimit,
+    Warning,
+    Exceeded,
+}
+
+/// Go `CheckEventBlobSizeLimit` measurement. The observer records the timer,
+/// exponential histogram, structured warning/error tags and exceed counter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowBlobSizeMeasurement {
+    pub operation: &'static str,
+    pub domain: String,
+    pub workflow_id: String,
+    pub run_id: String,
+    pub actual_size: usize,
+    pub warning_limit: usize,
+    pub error_limit: usize,
+    pub configured_warning_above_error: bool,
+    pub outcome: BlobSizeOutcome,
+}
+
+/// Live per-domain event-blob limits and metrics/logging observer.
 pub trait WorkflowBlobSizePolicy: Send + Sync {
     fn error_limit(&self, domain: &str) -> usize;
+
+    fn warning_limit(&self, domain: &str) -> usize {
+        self.error_limit(domain)
+    }
+
+    fn observe(&self, _measurement: WorkflowBlobSizeMeasurement) {}
 }
 
 #[derive(serde::Serialize)]
@@ -714,8 +741,30 @@ impl<B: WorkflowBackend> Handler<B> {
                     // Go resolves the domain before checking the input size.
                     domains.domain_id(domain)?;
                 }
+                let error_limit = policy.error_limit(domain);
+                let configured_warning_limit = policy.warning_limit(domain);
+                let warning_limit = configured_warning_limit.min(error_limit);
+                let (workflow_id, run_id) = workflow_payload_execution(&request);
                 for size in workflow_payload_sizes(operation, &request)? {
-                    if size > policy.error_limit(domain) {
+                    let outcome = if size > error_limit {
+                        BlobSizeOutcome::Exceeded
+                    } else if size > warning_limit {
+                        BlobSizeOutcome::Warning
+                    } else {
+                        BlobSizeOutcome::WithinWarningLimit
+                    };
+                    policy.observe(WorkflowBlobSizeMeasurement {
+                        operation: operation.name(),
+                        domain: domain.to_owned(),
+                        workflow_id: workflow_id.clone(),
+                        run_id: run_id.clone(),
+                        actual_size: size,
+                        warning_limit,
+                        error_limit,
+                        configured_warning_above_error: configured_warning_limit > error_limit,
+                        outcome,
+                    });
+                    if outcome == BlobSizeOutcome::Exceeded {
                         return Err(CadenceError::BadRequest(BadRequestError::new(
                             "Blob data size exceeds limit.",
                         )));
@@ -1687,6 +1736,24 @@ fn memo_payload_size(memo: Option<&cadence_api::types::Memo>) -> usize {
         })
 }
 
+fn workflow_payload_execution(request: &Value) -> (String, String) {
+    let execution = request
+        .get("workflowExecution")
+        .or_else(|| request.get("execution"));
+    let workflow_id = request
+        .get("workflowId")
+        .or_else(|| execution.and_then(|execution| execution.get("workflowId")))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let run_id = execution
+        .and_then(|execution| execution.get("runId"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    (workflow_id, run_id)
+}
+
 fn validate_domain(request: &Value) -> Result<(), CadenceError> {
     if request.is_null() {
         return Err(cadence_api::validation::err_request_not_set().into());
@@ -1847,6 +1914,23 @@ mod tests {
     impl WorkflowBlobSizePolicy for SmallQueryBlobLimit {
         fn error_limit(&self, _: &str) -> usize {
             2
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingBlobSizePolicy(Mutex<Vec<WorkflowBlobSizeMeasurement>>);
+
+    impl WorkflowBlobSizePolicy for RecordingBlobSizePolicy {
+        fn error_limit(&self, _: &str) -> usize {
+            5
+        }
+
+        fn warning_limit(&self, _: &str) -> usize {
+            2
+        }
+
+        fn observe(&self, measurement: WorkflowBlobSizeMeasurement) {
+            self.0.lock().unwrap().push(measurement);
         }
     }
 
@@ -2886,6 +2970,44 @@ mod tests {
 
         assert_eq!(error.to_string(), "Blob data size exceeds limit.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn signal_blob_warning_reports_go_metric_dimensions_and_thresholds() {
+        let policy = Arc::new(RecordingBlobSizePolicy::default());
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(policy.clone());
+        handler
+            .dispatch(
+                "SignalWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-25",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "signalName": "refresh",
+                    "input": "AwQ="
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            policy.0.lock().unwrap().as_slice(),
+            &[WorkflowBlobSizeMeasurement {
+                operation: "SignalWorkflowExecution",
+                domain: "shop".into(),
+                workflow_id: "order-25".into(),
+                run_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+                actual_size: 2,
+                warning_limit: 2,
+                error_limit: 5,
+                configured_warning_above_error: false,
+                outcome: BlobSizeOutcome::WithinWarningLimit,
+            }]
+        );
     }
 
     #[test]
