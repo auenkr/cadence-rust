@@ -6,13 +6,19 @@ pub const HISTORY_TASK_LIST: &str = "cadence-sys-history-scanner-tasklist-0";
 pub const HISTORY_WORKFLOW_ID: &str = "cadence-sys-history-scanner";
 pub const HISTORY_SCAVENGER_ACTIVITY_TYPE: &str = "cadence-sys-history-scanner-scvg-activity";
 pub const CONCRETE_EXECUTIONS_TASK_LIST: &str = "cadence-sys-executions-scanner-tasklist-0";
+pub const CONCRETE_EXECUTIONS_WORKFLOW_ID: &str = "cadence-sys-executions-scanner";
 pub const CONCRETE_EXECUTIONS_FIXER_TASK_LIST: &str = "cadence-sys-executions-fixer-tasklist-0";
+pub const CONCRETE_EXECUTIONS_FIXER_WORKFLOW_ID: &str = "cadence-sys-executions-fixer";
 pub const CURRENT_EXECUTIONS_TASK_LIST: &str =
     "cadence-sys-current-executions-scanner-tasklist-0";
+pub const CURRENT_EXECUTIONS_WORKFLOW_ID: &str = "cadence-sys-current-executions-scanner";
 pub const CURRENT_EXECUTIONS_FIXER_TASK_LIST: &str =
     "cadence-sys-current-executions-fixer-tasklist-0";
+pub const CURRENT_EXECUTIONS_FIXER_WORKFLOW_ID: &str = "cadence-sys-current-executions-fixer";
 pub const TIMERS_TASK_LIST: &str = "cadence-sys-timers-scanner-tasklist-0";
+pub const TIMERS_WORKFLOW_ID: &str = "cadence-sys-timers-scanner";
 pub const TIMERS_FIXER_TASK_LIST: &str = "cadence-sys-timers-fixer-tasklist-0";
+pub const TIMERS_FIXER_WORKFLOW_ID: &str = "cadence-sys-timers-fixer";
 pub const TASK_LIST_WORKFLOW_TYPE: &str = "cadence-sys-tl-scanner-workflow";
 pub const HISTORY_WORKFLOW_TYPE: &str = "cadence-sys-history-scanner-workflow";
 pub const CONCRETE_EXECUTIONS_WORKFLOW_TYPE: &str = "cadence-sys-executions-scanner-workflow";
@@ -49,6 +55,50 @@ pub const HISTORY_START: StartOptions = StartOptions {
     cron_schedule: "0 */12 * * *",
     allow_duplicate: true,
 };
+pub const EXECUTIONS_START_OPTIONS: [StartOptions; 6] = [
+    StartOptions {
+        workflow_id: CONCRETE_EXECUTIONS_WORKFLOW_ID,
+        task_list: CONCRETE_EXECUTIONS_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+    StartOptions {
+        workflow_id: CONCRETE_EXECUTIONS_FIXER_WORKFLOW_ID,
+        task_list: CONCRETE_EXECUTIONS_FIXER_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+    StartOptions {
+        workflow_id: CURRENT_EXECUTIONS_WORKFLOW_ID,
+        task_list: CURRENT_EXECUTIONS_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+    StartOptions {
+        workflow_id: CURRENT_EXECUTIONS_FIXER_WORKFLOW_ID,
+        task_list: CURRENT_EXECUTIONS_FIXER_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+    StartOptions {
+        workflow_id: TIMERS_WORKFLOW_ID,
+        task_list: TIMERS_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+    StartOptions {
+        workflow_id: TIMERS_FIXER_WORKFLOW_ID,
+        task_list: TIMERS_FIXER_TASK_LIST,
+        execution_timeout_seconds: 20 * 365 * 24 * 60 * 60,
+        cron_schedule: "*/5 * * * *",
+        allow_duplicate: true,
+    },
+];
 
 pub const EXECUTIONS_CRON_SCHEDULE: &str = "*/5 * * * *";
 pub const ACTIVITY_SCHEDULE_TO_START_TIMEOUT_SECONDS: u64 = 5 * 60;
@@ -89,6 +139,27 @@ mod tests {
             "cadence-sys-timers-scanner-workflow"
         );
         assert_eq!(super::EXECUTIONS_CRON_SCHEDULE, "*/5 * * * *");
+        assert_eq!(super::CONCRETE_EXECUTIONS_WORKFLOW_ID, "cadence-sys-executions-scanner");
+        assert_eq!(
+            super::CONCRETE_EXECUTIONS_FIXER_WORKFLOW_ID,
+            "cadence-sys-executions-fixer"
+        );
+        assert_eq!(
+            super::CURRENT_EXECUTIONS_WORKFLOW_ID,
+            "cadence-sys-current-executions-scanner"
+        );
+        assert_eq!(
+            super::CURRENT_EXECUTIONS_FIXER_WORKFLOW_ID,
+            "cadence-sys-current-executions-fixer"
+        );
+        assert_eq!(super::TIMERS_WORKFLOW_ID, "cadence-sys-timers-scanner");
+        assert_eq!(super::TIMERS_FIXER_WORKFLOW_ID, "cadence-sys-timers-fixer");
+        assert_eq!(super::EXECUTIONS_START_OPTIONS.len(), 6);
+        assert!(super::EXECUTIONS_START_OPTIONS.iter().all(|options| {
+            options.execution_timeout_seconds == 630_720_000
+                && options.cron_schedule == "*/5 * * * *"
+                && options.allow_duplicate
+        }));
         assert_eq!(super::TASK_LIST_START.execution_timeout_seconds, 432_000);
         assert_eq!(super::HISTORY_START.execution_timeout_seconds, 630_720_000);
         assert_eq!(super::TASK_LIST_START.cron_schedule, "0 */12 * * *");

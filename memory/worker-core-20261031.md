@@ -16,10 +16,12 @@ contract test expected `cadence-sys-tl-scanner-tasklist`, while the Go source
 The continuation fixes that stale expectation and expands Rust scanner contract
 coverage to Go's task-list/history scanner workflow IDs and activity types,
 periodic start policies, timeouts, retry constants and workflow ID reuse
-behavior. Source inspection confirms Go uses 12-hour cron schedules for
-task-list/history scanning and five-minute schedules for execution/timer
-scanner/fixer workflows. This remains declarative parity coverage only; no
-scanner activities or deterministic workflow runtime have been implemented.
+behavior. It records all six execution/timer scanner and fixer workflow IDs,
+task lists and start policies. Source inspection confirms Go uses 12-hour cron
+schedules for task-list/history scanning and five-minute schedules for
+execution/timer scanner/fixer workflows. This remains declarative parity
+coverage only; no scanner activities or deterministic workflow runtime have
+been implemented.
 
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
