@@ -714,6 +714,53 @@ fn handle_describe_cluster() -> HandlerResult {
     )))
 }
 
+async fn handle_close_shard(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::CloseShardRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".into()))?;
+    let mut rpc = tonic::Request::new(cadence_proto::history::CloseShardRequest {
+        shard_id: req.shard_id,
+    });
+    set_history_admin_metadata(&mut rpc);
+    cadence_proto::history::history_api_client::HistoryApiClient::new(channel)
+        .close_shard(rpc)
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?;
+    Ok(wrap_success(&cadence_api::admin::CloseShardResponse {}))
+}
+
+async fn handle_remove_task(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::RemoveTaskRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let task_type = req
+        .task_type
+        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".into()))?;
+    let visibility_time = req.visibility_timestamp.map(|nanos| prost_types::Timestamp {
+        seconds: nanos.div_euclid(1_000_000_000),
+        nanos: nanos.rem_euclid(1_000_000_000) as i32,
+    });
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".into()))?;
+    let mut rpc = tonic::Request::new(cadence_proto::history::RemoveTaskRequest {
+        shard_id: req.shard_id,
+        task_type,
+        task_id: req.task_id,
+        visibility_time,
+        cluster_name: req.cluster_name,
+    });
+    set_history_admin_metadata(&mut rpc);
+    cadence_proto::history::history_api_client::HistoryApiClient::new(channel)
+        .remove_task(rpc)
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?;
+    Ok(wrap_success(&cadence_api::admin::RemoveTaskResponse {}))
+}
+
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2276,6 +2323,8 @@ pub async fn dispatch(
             handle_update_domain_async_workflow_configuration(state, body)
         }
         "ReapplyEvents" => handle_reapply_events(state, body),
+        "CloseShard" => handle_close_shard(state, body).await,
+        "RemoveTask" => handle_remove_task(state, body).await,
         "ResetQueue" => handle_reset_queue(state, body).await,
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
