@@ -352,3 +352,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Cassandra selection, and the Frontend global quota stop owners. Existing
   branch scope rules also reserve workflow handlers and wrappers for their
   respective owners.
+- After pushing this audit entry, the fresh-target package workflow
+  https://github.com/auenkr/cadence-rust/actions/runs/41182200811 completed
+  with `success` on exact head `def795959ee2b7771c34644a2c6a227fef2748ad`.
+  It passed the workflow's Go oracles, Formatting, Clippy, Test, and Frontend
+  runtime smoke steps. The audit-only commit that follows does not change Rust
+  source.
