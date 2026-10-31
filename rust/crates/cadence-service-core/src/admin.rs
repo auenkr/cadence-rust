@@ -710,12 +710,18 @@ pub async fn get_domain_replication_messages(
 ) -> Response {
     match domain_replication_messages_response(&state, req) {
         Ok(response) => ok_json(response),
-        Err(error) if error == "domain replication queue not enabled for cluster" => error_response(
+        Err(error) if error == "domain replication queue not enabled for cluster" => {
+            error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+        Err(error) => error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
             error,
         ),
-        Err(error) => error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
 
@@ -759,8 +765,7 @@ pub fn domain_replication_messages_response(
     }
     if let Some(last_processed) = req.last_processed_message_id {
         // Go deliberately treats ack update failures as warning-only.
-        let _ = persistence
-            .update_domain_replication_ack_level(req.cluster_name, last_processed);
+        let _ = persistence.update_domain_replication_ack_level(req.cluster_name, last_processed);
     }
     Ok(cadence_api::admin::GetDomainReplicationMessagesResponse {
         messages: Some(cadence_api::admin::ReplicationMessages {
