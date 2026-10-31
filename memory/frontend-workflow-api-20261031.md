@@ -202,6 +202,10 @@ these fixes; no green CI evidence covers the current changes.
   Added tests for validation-error metrics/tags and normalization of an
   uncategorized backend failure. These source changes have not yet been run by
   CI; `git diff --check` is the only local source check.
+- Continued the Go handler audit and added missing task-list validation to both
+  poll methods, plus required workflow/activity ID validation to heartbeat and
+  all three activity respond-by-ID methods. Regression tests mirror Go's
+  required-field error order.
 - Next exact-head CI must be dispatched after pushing the validator API fix and
   metering integration. No green CI result covers the current source.
 - Handler bodies still do not execute Go's workflow-engine transformations:

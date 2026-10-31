@@ -397,7 +397,13 @@ impl<B: WorkflowBackend> Handler<B> {
                 return Err(cadence_api::validation::err_signal_name_not_set().into());
             }
         }
-        if operation == WorkflowOperation::RecordActivityTaskHeartbeatByID {
+        if matches!(
+            operation,
+            WorkflowOperation::RecordActivityTaskHeartbeatByID
+                | WorkflowOperation::RespondActivityTaskCanceledByID
+                | WorkflowOperation::RespondActivityTaskCompletedByID
+                | WorkflowOperation::RespondActivityTaskFailedByID
+        ) {
             if value.is_null() {
                 return Err(cadence_api::validation::err_request_not_set().into());
             }
@@ -427,6 +433,16 @@ impl<B: WorkflowBackend> Handler<B> {
             }
         }
         match operation {
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask => {
+                let request: tasks::ListTaskListPartitionsRequest = parse_request(
+                    serde_json::json!({
+                        "domain": value.get("domain").cloned().unwrap_or(Value::Null),
+                        "taskList": value.get("taskList").cloned().unwrap_or(Value::Null),
+                    }),
+                )?;
+                self.validator
+                    .validate_list_task_list_partitions_request(Some(&request))?;
+            }
             WorkflowOperation::CountWorkflowExecutions => {
                 let request: service_types::CountWorkflowExecutionsRequest =
                     parse_request(value.clone())?;
@@ -905,6 +921,53 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(task_list_error.to_string(), "TaskList is not set on request.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_methods_validate_task_list_before_matching_call() {
+        let handler = Handler::new(FakeBackend::default());
+        for operation in ["PollForActivityTask", "PollForDecisionTask"] {
+            let error = handler
+                .dispatch(
+                    operation,
+                    serde_json::json!({"domain": "shop", "taskList": {"name": ""}}),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.to_string(), "TaskList is not set on request.");
+        }
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn by_id_activity_methods_validate_workflow_and_activity_ids() {
+        let handler = Handler::new(FakeBackend::default());
+        for operation in [
+            "RecordActivityTaskHeartbeatByID",
+            "RespondActivityTaskCanceledByID",
+            "RespondActivityTaskCompletedByID",
+            "RespondActivityTaskFailedByID",
+        ] {
+            let base = serde_json::json!({"domain": "shop"});
+            assert_eq!(
+                handler
+                    .dispatch(operation, base.clone())
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "WorkflowId is not set on request."
+            );
+            let workflow = serde_json::json!({"domain": "shop", "workflowId": "wf"});
+            assert_eq!(
+                handler
+                    .dispatch(operation, workflow)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "ActivityID is not set on request."
+            );
+        }
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
