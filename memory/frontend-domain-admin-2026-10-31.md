@@ -362,3 +362,14 @@ migration forward.
   that sets the property for one domain and confirms another remains disabled.
   Source `git diff --check` passed; Cargo was not run locally. This is a
   targeted behavior correction, not scheduler-workflow integration.
+- Exact-head package run [41178701269](https://github.com/auenkr/cadence-rust/actions/runs/41178701269)
+  targeted rebased source `29f68d576e47b2a61e68d2ca5c1076c24791c4f0` and was
+  still in progress at last inspection. It predates the scheduler-gate fix.
+  Run [41178781339](https://github.com/auenkr/cadence-rust/actions/runs/41178781339)
+  targets `c22a3555274b6288ca65b2be0b0f70738786e8f1`, but was pending at the
+  last inspection. Both require a final conclusion; neither covers the
+  additional schedule-validation-order fix below.
+- Corrected live YARPC schedule validation order for CreateSchedule and
+  UpdateSchedule so an empty domain returns Go's `Domain not set on request.`
+  before dynamic feature gating or schedule-ID checks. Dispatch fresh package CI
+  after committing this edit.

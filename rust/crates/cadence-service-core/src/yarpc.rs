@@ -1339,6 +1339,9 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::validation;
     let req: CreateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     schedule_gate(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1520,6 +1523,9 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::validation;
     let req: UpdateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
