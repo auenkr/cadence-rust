@@ -1059,3 +1059,26 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   limiter/drain/resource order, but the admin stop signal has no runtime
   subscribers and production constructs no global quota collection owners.
   These items remain open; this checkpoint is not Frontend completion.
+
+## Continuation audit — 2026-10-31
+
+- Re-read `go/service/frontend/service.go`, the persistence manager interfaces,
+  the configured-store factory and the Rust Frontend request path. Domain and
+  domain-metadata writes are already routed through the SQL/Cassandra Go-schema
+  adapter. The remaining production gap is not a missing factory call: the
+  Rust handlers still use `InMemoryExecutionStore`, and this branch has no
+  Go-schema History or Visibility manager implementation to select. Reusing
+  Matching's native task/domain adapters alone does not provide those stores.
+- The Go validator source still contains the same 15 table-driven groups and
+  91 named rows covered by the existing Rust matrix. No validator code changed
+  during this audit.
+- Fresh Frontend package CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41201338466 checked
+  exact head `f6d20834f59dc30127d8cb7203a5a41d79f8aa81` and concluded
+  `success` (formatting, Clippy, and tests). No Cargo command ran locally.
+- Lifecycle wiring still invokes the Go stop stages in order, but the Rust
+  process has no AdminHandler background-worker owners and registers no
+  production global quota collections. The admin stop signal and limiter stop
+  registry therefore have no runtime owners to stop yet. Persistence and
+  lifecycle remain open; this run is a green code checkpoint, not evidence of
+  those missing implementations.
