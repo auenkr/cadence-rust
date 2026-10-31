@@ -423,6 +423,7 @@ jobs:
           set +e
           cargo fmt --all -- --check > format.log 2>&1
           echo "$?" > workspace-format.exit
+          cat format.log
           exit 0
         continue-on-error: true
       - name: Check TLS-touched Rust files formatting
