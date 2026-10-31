@@ -17,6 +17,13 @@ use uuid::Uuid;
 
 const DOMAIN_PARTITION: i32 = 0;
 const DOMAIN_METADATA_NAME: &str = "cadence-domain-metadata";
+const DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
+const DOMAIN_QUEUE_METADATA_SELECT: &str = "SELECT cluster_ack_level, version FROM queue_metadata WHERE queue_type=?";
+const DOMAIN_QUEUE_METADATA_INSERT: &str = "INSERT INTO queue_metadata (queue_type, cluster_ack_level, version, created_time) VALUES (?, ?, ?, ?) IF NOT EXISTS";
+const DOMAIN_QUEUE_METADATA_UPDATE: &str = "UPDATE queue_metadata SET cluster_ack_level=?, version=?, last_updated_time=? WHERE queue_type=? IF version=?";
+const DOMAIN_QUEUE_LAST_ID: &str = "SELECT message_id FROM queue WHERE queue_type=? ORDER BY message_id DESC LIMIT 1";
+const DOMAIN_QUEUE_INSERT: &str = "INSERT INTO queue (queue_type, message_id, message_payload, created_time) VALUES (?, ?, ?, ?) IF NOT EXISTS";
+const DOMAIN_QUEUE_READ: &str = "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? LIMIT ?";
 const CREATE_DOMAIN: &str = "INSERT INTO domains (id, domain, created_time) VALUES (?, {name: ?}, ?) IF NOT EXISTS";
 const CREATE_DOMAIN_V2: &str = "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS";
 const UPDATE_DOMAIN_V2: &str = "UPDATE domains_by_name_v2 SET domain=?, config=?, replication_config=?, config_version=?, failover_version=?, failover_notification_version=?, previous_failover_version=?, failover_end_time=?, last_updated_time=?, notification_version=? WHERE domains_partition=? AND name=?";
@@ -44,6 +51,139 @@ impl CassandraDomainMetadataPersistence {
             driver,
             serialization_encoding,
         }
+    }
+
+    /// Append a ThriftRW domain task to Go's shared Cassandra queue schema.
+    /// Cassandra uses a conditional row insert; concurrent ID collisions are
+    /// surfaced as a condition failure, matching Go's current NoSQL queue
+    /// behavior.
+    pub fn enqueue_domain_replication_message(
+        &self,
+        payload: Vec<u8>,
+    ) -> Result<i64, String> {
+        use std::collections::HashMap;
+        let session = self.driver.session();
+        let current_time = Utc::now();
+        let ack_result = self
+            .driver
+            .run(session.query_unpaged(
+                DOMAIN_QUEUE_METADATA_SELECT,
+                (DOMAIN_REPLICATION_QUEUE_TYPE,),
+            ))
+            .map_err(|error| error.to_string())?;
+        let ack_rows = ack_result.into_rows_result().map_err(|error| error.to_string())?;
+        let mut ack_rows = ack_rows.rows::<(HashMap<String, i64>, i64)>().map_err(|error| error.to_string())?;
+        let ack_levels = if let Some(row) = ack_rows.next() {
+            row.map_err(|error| error.to_string())?.0
+        } else {
+            let empty = HashMap::new();
+            let result = self.driver.run(session.query_unpaged(
+                DOMAIN_QUEUE_METADATA_INSERT,
+                (DOMAIN_REPLICATION_QUEUE_TYPE, empty, 0_i64, current_time),
+            )).map_err(|error| error.to_string())?;
+            let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+            let applied = rows.maybe_first_row::<(bool,)>().map_err(|error| error.to_string())?
+                .map(|(value,)| value).ok_or_else(|| "Cassandra queue metadata LWT returned no result row".to_string())?;
+            let _ = applied; // another writer may have initialized the row; the read below is authoritative.
+            let result = self.driver.run(session.query_unpaged(
+                DOMAIN_QUEUE_METADATA_SELECT,
+                (DOMAIN_REPLICATION_QUEUE_TYPE,),
+            )).map_err(|error| error.to_string())?;
+            let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+            rows.maybe_first_row::<(HashMap<String, i64>, i64)>().map_err(|error| error.to_string())?
+                .map(|(levels, _)| levels).ok_or_else(|| "Cassandra queue metadata row was not created".to_string())?
+        };
+        let last_result = self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_LAST_ID,
+            (DOMAIN_REPLICATION_QUEUE_TYPE,),
+        )).map_err(|error| error.to_string())?;
+        let rows = last_result.into_rows_result().map_err(|error| error.to_string())?;
+        let last_id = rows.maybe_first_row::<(i64,)>().map_err(|error| error.to_string())?
+            .map(|(id,)| id).unwrap_or(-1);
+        let id = crate::matching_domain_mysql::next_domain_replication_message_id(
+            last_id,
+            ack_levels.values().copied(),
+        );
+        let result = self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_INSERT,
+            (DOMAIN_REPLICATION_QUEUE_TYPE, id, payload, current_time),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        let applied = rows.maybe_first_row::<(bool,)>().map_err(|error| error.to_string())?
+            .map(|(value,)| value).ok_or_else(|| "Cassandra queue insert LWT returned no result row".to_string())?;
+        if applied {
+            Ok(id)
+        } else {
+            Err(format!("domain replication queue message ID {id} already exists"))
+        }
+    }
+
+    /// Read ordered domain queue rows after the supplied cursor.
+    pub fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: i32,
+    ) -> Result<Vec<crate::matching_domain_mysql::DomainReplicationQueueMessage>, String> {
+        let session = self.driver.session();
+        let result = self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_READ,
+            (DOMAIN_REPLICATION_QUEUE_TYPE, last_message_id, max_count),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        rows.rows::<(i64, Vec<u8>)>().map_err(|error| error.to_string())?
+            .map(|row| {
+                let (id, payload) = row.map_err(|error| error.to_string())?;
+                Ok(crate::matching_domain_mysql::DomainReplicationQueueMessage { id, payload })
+            })
+            .collect()
+    }
+
+    /// Persist a monotonic consumer ack using the queue metadata version CAS.
+    pub fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        use std::collections::HashMap;
+        let session = self.driver.session();
+        let select = || self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_METADATA_SELECT,
+            (DOMAIN_REPLICATION_QUEUE_TYPE,),
+        )).map_err(|error| error.to_string());
+        let result = select()?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        let current = rows.maybe_first_row::<(HashMap<String, i64>, i64)>()
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "Cassandra domain replication queue metadata is missing".to_string())?;
+        let (mut levels, version) = current;
+        if levels.get(&cluster_name).is_some_and(|old| *old >= message_id) {
+            return Ok(());
+        }
+        levels.insert(cluster_name, message_id);
+        let result = self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_METADATA_UPDATE,
+            (levels, version + 1, Utc::now(), DOMAIN_REPLICATION_QUEUE_TYPE, version),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        let applied = rows.maybe_first_row::<(bool,)>().map_err(|error| error.to_string())?
+            .map(|(value,)| value).ok_or_else(|| "Cassandra queue ack LWT returned no result row".to_string())?;
+        if applied { Ok(()) } else { Err("concurrent domain replication queue ack update".into()) }
+    }
+
+    pub fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        use std::collections::HashMap;
+        let session = self.driver.session();
+        let result = self.driver.run(session.query_unpaged(
+            DOMAIN_QUEUE_METADATA_SELECT,
+            (DOMAIN_REPLICATION_QUEUE_TYPE,),
+        )).map_err(|error| error.to_string())?;
+        let rows = result.into_rows_result().map_err(|error| error.to_string())?;
+        Ok(rows.maybe_first_row::<(HashMap<String, i64>, i64)>()
+            .map_err(|error| error.to_string())?
+            .map(|(levels, _)| levels)
+            .unwrap_or_default())
     }
 
     fn serialize<T: ToThrift + ?Sized>(value: &T, encoding: BlobEncoding) -> Result<Vec<u8>, String> {
