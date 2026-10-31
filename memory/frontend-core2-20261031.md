@@ -320,9 +320,10 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   dispatched for the intermediate, now superseded lifecycle ordering at
   `f03448dc44c26a0c116e661b658b4db0dabe80ec`; it was still in progress when
   corrected. Do not use its result as validation of the corrected code.
-- Exact-head CI for the corrected lifecycle path is pending; dispatch after
-  pushing and record its run URL, head SHA, and conclusion here. Cargo remains
-  prohibited locally.
+- Exact-head package CI for the corrected lifecycle path is running at
+  https://github.com/auenkr/cadence-rust/actions/runs/41185646557, head
+  `fd34f333bd5dfe90a06f6be23833be7675718686`. Record its terminal conclusion
+  here. Cargo remains prohibited locally.
 
 ## Exact-head follow-up — 2026-10-31
 
