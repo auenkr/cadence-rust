@@ -714,7 +714,7 @@ fn handle_describe_cluster() -> HandlerResult {
     )))
 }
 
-fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     crate::admin::check_shard_id(state, req.shard_id)
@@ -727,10 +727,25 @@ fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request("Cluster name is not set.".to_string()));
     }
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".into()))?;
+    let request = cadence_proto::history::ResetQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type: req.task_type.unwrap_or_default(),
+    };
+    let mut rpc = tonic::Request::new(request);
+    set_history_admin_metadata(&mut rpc);
+    cadence_proto::history::history_api_client::HistoryApiClient::new(channel)
+        .reset_queue(rpc)
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?;
     Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
 }
 
-fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DescribeQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     crate::admin::check_shard_id(state, req.shard_id)
@@ -743,17 +758,44 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     if req.cluster_name.is_empty() {
         return Err(AppError::bad_request("Cluster name is not set.".to_string()));
     }
-    let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
-    let processing_queue_states = vec![
-        format!("{{\"queue\":\"decision\",\"pending\":{decisions}}}"),
-        format!("{{\"queue\":\"activity\",\"pending\":{activities}}}"),
-        format!("{{\"queue\":\"timer\",\"pending\":{timers}}}"),
-        format!("{{\"queue\":\"backoff\",\"pending\":{backoffs}}}"),
-        format!("{{\"queue\":\"schedule\",\"registered\":{schedules}}}"),
-    ];
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".into()))?;
+    let request = cadence_proto::history::DescribeQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type: req.task_type.unwrap_or_default(),
+    };
+    let mut rpc = tonic::Request::new(request);
+    set_history_admin_metadata(&mut rpc);
+    let processing_queue_states = cadence_proto::history::history_api_client::HistoryApiClient::new(
+        channel,
+    )
+    .describe_queue(rpc)
+    .await
+    .map_err(|error| AppError::internal(error.message().to_string()))?
+    .into_inner()
+    .processing_queue_states;
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
         processing_queue_states,
     }))
+}
+
+fn set_history_admin_metadata<T>(request: &mut tonic::Request<T>) {
+    request.metadata_mut().insert(
+        "rpc-service",
+        tonic::metadata::MetadataValue::from_static("cadence-history"),
+    );
+    request.metadata_mut().insert(
+        "rpc-caller",
+        tonic::metadata::MetadataValue::from_static("cadence-frontend"),
+    );
+    request.metadata_mut().insert(
+        "rpc-encoding",
+        tonic::metadata::MetadataValue::from_static("proto"),
+    );
+    request.set_timeout(Duration::from_secs(30));
 }
 
 fn handle_get_global_isolation_groups(state: &AppState, body: &Struct) -> HandlerResult {
@@ -2234,8 +2276,8 @@ pub async fn dispatch(
             handle_update_domain_async_workflow_configuration(state, body)
         }
         "ReapplyEvents" => handle_reapply_events(state, body),
-        "ResetQueue" => handle_reset_queue(state, body),
-        "DescribeQueue" => handle_describe_queue(state, body),
+        "ResetQueue" => handle_reset_queue(state, body).await,
+        "DescribeQueue" => handle_describe_queue(state, body).await,
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
         "MaintainCorruptWorkflow" => handle_maintain_corrupt_workflow(state, body),
