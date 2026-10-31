@@ -940,3 +940,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   transactions, production Visibility/History/Execution managers with Go SQL
   and Cassandra selection, actual global quota collection owners, and mixed
   Go/Rust failure/restart/recovery validation.
+- The first continuation run,
+  https://github.com/auenkr/cadence-rust/actions/runs/41196513194, checked
+  `e60d4d1e46709a6e54ae7b15a9a55e8a9f6bb47e` and concluded `failure` before
+  compilation because rustfmt requested one layout change in `launcher.rs`.
+  Applied the runner's exact formatting hunk; this run provides no compile or
+  test evidence.
