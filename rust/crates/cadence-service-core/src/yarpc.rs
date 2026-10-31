@@ -114,6 +114,15 @@ impl AppError {
             message,
         }
     }
+
+    fn internal(message: String) -> Self {
+        let error = cadence_api::errors::InternalServiceError::new(message.clone());
+        Self {
+            exc_name: "InternalServiceError",
+            value: error.to_thrift(),
+            message,
+        }
+    }
 }
 
 type HandlerResult = Result<Struct, AppError>;
@@ -471,6 +480,74 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(AppError::entity_not_exists(e.message)),
     }
+}
+
+fn handle_get_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::GetDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let value = overlay.get(false, &req.config_name, &req.filters).ok_or_else(|| {
+        AppError::internal(format!(
+            "Failed to get dynamic config {:?} for the given filters.",
+            req.config_name
+        ))
+    })?;
+    Ok(wrap_success(&cadence_api::admin::GetDynamicConfigResponse {
+        value: value.value,
+    }))
+}
+
+fn handle_update_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::UpdateDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .update(false, &req.config_name, req.config_values);
+    Ok(wrap_success(&cadence_api::admin::UpdateDynamicConfigResponse {}))
+}
+
+fn handle_restore_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::RestoreDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .restore(false, &req.config_name, &req.filters);
+    Ok(wrap_success(&cadence_api::admin::RestoreDynamicConfigResponse {}))
+}
+
+fn handle_list_dynamic_config(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::ListDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let entries = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .list(false, &req.config_name);
+    Ok(wrap_success(&cadence_api::admin::ListDynamicConfigResponse {
+        entries,
+    }))
 }
 
 async fn handle_signal(state: &AppState, body: &Struct) -> HandlerResult {
@@ -1648,6 +1725,10 @@ pub async fn dispatch(
         "ListArchivedWorkflowExecutions" => handle_visibility_archived(state, body).await,
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
+        "GetDynamicConfig" => handle_get_dynamic_config(state, body),
+        "UpdateDynamicConfig" => handle_update_dynamic_config(state, body),
+        "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body),
+        "ListDynamicConfig" => handle_list_dynamic_config(state, body),
         "UpdateDomain" => handle_update_domain(state, body).await,
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
         "DeleteDomain" => handle_delete_domain(state, body).await,
