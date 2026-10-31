@@ -548,6 +548,224 @@ pub fn describe_task_list_out(v: tk::DescribeTaskListResponse) -> p::DescribeTas
     }
 }
 
+/// Convert a proto poll request into the public API type. The `*_out`
+/// counterparts mirror this mapping for Frontend's internal Matching envelope.
+pub fn poll_for_decision_task_request_in(
+    v: p::PollForDecisionTaskRequest,
+) -> Result<tk::PollForDecisionTaskRequest, Status> {
+    Ok(tk::PollForDecisionTaskRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list).transpose()?,
+        identity: v.identity,
+        binary_checksum: v.binary_checksum,
+    })
+}
+pub fn poll_for_decision_task_request_out(
+    v: tk::PollForDecisionTaskRequest,
+) -> p::PollForDecisionTaskRequest {
+    p::PollForDecisionTaskRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list_out),
+        identity: v.identity,
+        binary_checksum: v.binary_checksum,
+    }
+}
+pub fn poll_for_activity_task_request_in(
+    v: p::PollForActivityTaskRequest,
+) -> Result<tk::PollForActivityTaskRequest, Status> {
+    Ok(tk::PollForActivityTaskRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list).transpose()?,
+        identity: v.identity,
+        task_list_metadata: v.task_list_metadata.map(task_list_metadata_in),
+    })
+}
+pub fn poll_for_activity_task_request_out(
+    v: tk::PollForActivityTaskRequest,
+) -> p::PollForActivityTaskRequest {
+    p::PollForActivityTaskRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list_out),
+        identity: v.identity,
+        task_list_metadata: v.task_list_metadata.map(task_list_metadata_out),
+    }
+}
+fn task_list_metadata_in(v: p::TaskListMetadata) -> t::TaskListMetadata {
+    t::TaskListMetadata {
+        max_tasks_per_second: v.max_tasks_per_second.map(|d| d.value),
+    }
+}
+fn task_list_metadata_out(v: t::TaskListMetadata) -> p::TaskListMetadata {
+    p::TaskListMetadata {
+        max_tasks_per_second: v
+            .max_tasks_per_second
+            .map(|value| prost_types::DoubleValue { value }),
+    }
+}
+pub fn describe_task_list_request_in(
+    v: p::DescribeTaskListRequest,
+) -> Result<tk::DescribeTaskListRequest, Status> {
+    Ok(tk::DescribeTaskListRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list).transpose()?,
+        task_list_type: enum_in(v.task_list_type, e::TaskListType::from_i32)?,
+        include_task_list_status: v.include_task_list_status,
+    })
+}
+pub fn describe_task_list_request_out(
+    v: tk::DescribeTaskListRequest,
+) -> p::DescribeTaskListRequest {
+    p::DescribeTaskListRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list_out),
+        task_list_type: v.task_list_type.map_or(0, |k| k as i32 + 1),
+        include_task_list_status: v.include_task_list_status,
+    }
+}
+/// Reverse of `describe_task_list_out`. The protobuf `partition_config` has no
+/// public API field and is dropped on both sides, as in the forward mapping.
+pub fn describe_task_list_in(
+    v: p::DescribeTaskListResponse,
+) -> Result<tk::DescribeTaskListResponse, Status> {
+    Ok(tk::DescribeTaskListResponse {
+        pollers: v.pollers.into_iter().map(poller_info_in).collect(),
+        task_list_status: v.task_list_status.map(task_list_status_in),
+        task_list: v.task_list.map(task_list).transpose()?,
+    })
+}
+fn poller_info_in(v: p::PollerInfo) -> t::PollerInfo {
+    t::PollerInfo {
+        last_access_time: v
+            .last_access_time
+            .map(|ts| ts.seconds * 1000 + i64::from(ts.nanos) / 1_000_000),
+        identity: v.identity,
+        rate_per_second: v.rate_per_second,
+    }
+}
+fn task_list_status_in(v: p::TaskListStatus) -> t::TaskListStatus {
+    t::TaskListStatus {
+        backlog_count_hint: v.backlog_count_hint,
+        read_level: v.read_level,
+        ack_level: v.ack_level,
+        rate_per_second: v.rate_per_second,
+        task_id_block: v.task_id_block.map(|b| t::TaskIDBlock {
+            start_id: b.start_id,
+            end_id: b.end_id,
+        }),
+        isolation_group_metrics: v
+            .isolation_group_metrics
+            .into_iter()
+            .map(|(group, m)| {
+                (
+                    group,
+                    t::IsolationGroupMetrics {
+                        new_tasks_per_second: m.new_tasks_per_second,
+                        poller_count: m.poller_count,
+                    },
+                )
+            })
+            .collect(),
+        new_tasks_per_second: v.new_tasks_per_second,
+        empty: v.empty,
+    }
+}
+pub fn list_task_list_partitions_request_in(
+    v: crate::matching::ListTaskListPartitionsRequest,
+) -> Result<tk::ListTaskListPartitionsRequest, Status> {
+    Ok(tk::ListTaskListPartitionsRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list).transpose()?,
+    })
+}
+pub fn list_task_list_partitions_request_out(
+    v: tk::ListTaskListPartitionsRequest,
+) -> crate::matching::ListTaskListPartitionsRequest {
+    crate::matching::ListTaskListPartitionsRequest {
+        domain: v.domain,
+        task_list: v.task_list.map(task_list_out),
+    }
+}
+pub fn list_task_list_partitions_out(
+    v: tk::ListTaskListPartitionsResponse,
+) -> crate::matching::ListTaskListPartitionsResponse {
+    crate::matching::ListTaskListPartitionsResponse {
+        activity_task_list_partitions: v
+            .activity_task_list_partitions
+            .into_iter()
+            .map(partition_metadata_out)
+            .collect(),
+        decision_task_list_partitions: v
+            .decision_task_list_partitions
+            .into_iter()
+            .map(partition_metadata_out)
+            .collect(),
+    }
+}
+pub fn list_task_list_partitions_in(
+    v: crate::matching::ListTaskListPartitionsResponse,
+) -> tk::ListTaskListPartitionsResponse {
+    tk::ListTaskListPartitionsResponse {
+        activity_task_list_partitions: v
+            .activity_task_list_partitions
+            .into_iter()
+            .map(partition_metadata_in)
+            .collect(),
+        decision_task_list_partitions: v
+            .decision_task_list_partitions
+            .into_iter()
+            .map(partition_metadata_in)
+            .collect(),
+    }
+}
+fn partition_metadata_in(v: p::TaskListPartitionMetadata) -> tk::TaskListPartitionMetadata {
+    tk::TaskListPartitionMetadata {
+        key: v.key,
+        owner_host_name: v.owner_host_name,
+    }
+}
+fn partition_metadata_out(v: tk::TaskListPartitionMetadata) -> p::TaskListPartitionMetadata {
+    p::TaskListPartitionMetadata {
+        key: v.key,
+        owner_host_name: v.owner_host_name,
+    }
+}
+pub fn get_task_lists_by_domain_request_in(
+    v: crate::matching::GetTaskListsByDomainRequest,
+) -> tk::GetTaskListsByDomainRequest {
+    tk::GetTaskListsByDomainRequest { domain: v.domain }
+}
+pub fn get_task_lists_by_domain_request_out(
+    v: tk::GetTaskListsByDomainRequest,
+) -> crate::matching::GetTaskListsByDomainRequest {
+    crate::matching::GetTaskListsByDomainRequest { domain: v.domain }
+}
+/// Matching's internal describe response carries the same fields as the API
+/// response plus `partition_config`, which the public mapping drops.
+fn matching_describe_task_list_in(
+    v: crate::matching::DescribeTaskListResponse,
+) -> Result<tk::DescribeTaskListResponse, Status> {
+    describe_task_list_in(p::DescribeTaskListResponse {
+        pollers: v.pollers,
+        task_list_status: v.task_list_status,
+        partition_config: v.partition_config,
+        task_list: v.task_list,
+    })
+}
+fn matching_describe_map_in(
+    m: std::collections::HashMap<String, crate::matching::DescribeTaskListResponse>,
+) -> Result<std::collections::HashMap<String, tk::DescribeTaskListResponse>, Status> {
+    m.into_iter()
+        .map(|(k, desc)| matching_describe_task_list_in(desc).map(|d| (k, d)))
+        .collect()
+}
+pub fn get_task_lists_by_domain_in(
+    v: crate::matching::GetTaskListsByDomainResponse,
+) -> Result<tk::GetTaskListsByDomainResponse, Status> {
+    Ok(tk::GetTaskListsByDomainResponse {
+        decision_task_list_map: Some(matching_describe_map_in(v.decision_task_list_map)?),
+        activity_task_list_map: Some(matching_describe_map_in(v.activity_task_list_map)?),
+    })
+}
 /// Convert a proto failover request, mirroring Go's proto→types mapping
 /// (`failover_timeout` duration → seconds; at most one of the active-cluster
 /// selectors is required by validation, not conversion).
@@ -913,5 +1131,145 @@ mod tests {
                 tonic::Code::InvalidArgument
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod reverse_tests {
+    use super::*;
+
+    fn task_list() -> t::TaskList {
+        t::TaskList {
+            name: "tl".to_string(),
+            base_name: "base".to_string(),
+            kind: Some(e::TaskListKind::Sticky),
+        }
+    }
+
+    #[test]
+    fn poll_requests_round_trip() {
+        let decision = tk::PollForDecisionTaskRequest {
+            domain: "d".to_string(),
+            task_list: Some(task_list()),
+            identity: "id".to_string(),
+            binary_checksum: "bc".to_string(),
+        };
+        let back = poll_for_decision_task_request_in(poll_for_decision_task_request_out(
+            decision.clone(),
+        ))
+        .unwrap();
+        assert_eq!(back, decision);
+
+        let activity = tk::PollForActivityTaskRequest {
+            domain: "d".to_string(),
+            task_list: Some(task_list()),
+            identity: "id".to_string(),
+            task_list_metadata: Some(t::TaskListMetadata {
+                max_tasks_per_second: Some(2.5),
+            }),
+        };
+        let back = poll_for_activity_task_request_in(poll_for_activity_task_request_out(
+            activity.clone(),
+        ))
+        .unwrap();
+        assert_eq!(back, activity);
+    }
+
+    #[test]
+    fn describe_task_list_round_trip_drops_only_unmapped_fields() {
+        let described = tk::DescribeTaskListResponse {
+            pollers: vec![t::PollerInfo {
+                last_access_time: Some(1_700_000_000_123),
+                identity: "worker".to_string(),
+                rate_per_second: 1.5,
+            }],
+            task_list_status: Some(t::TaskListStatus {
+                backlog_count_hint: 3,
+                read_level: 4,
+                ack_level: 5,
+                rate_per_second: 6.0,
+                task_id_block: Some(t::TaskIDBlock {
+                    start_id: 7,
+                    end_id: 8,
+                }),
+                new_tasks_per_second: 9.0,
+                empty: false,
+                isolation_group_metrics: [(
+                    "zone-a".to_string(),
+                    t::IsolationGroupMetrics {
+                        new_tasks_per_second: 1.0,
+                        poller_count: 2,
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            }),
+            task_list: None,
+        };
+        let back = describe_task_list_in(describe_task_list_out(described.clone())).unwrap();
+        assert_eq!(back, described);
+    }
+
+    #[test]
+    fn describe_task_list_request_round_trip() {
+        let request = tk::DescribeTaskListRequest {
+            domain: "d".to_string(),
+            task_list: Some(task_list()),
+            task_list_type: Some(e::TaskListType::Activity),
+            include_task_list_status: true,
+        };
+        let back =
+            describe_task_list_request_in(describe_task_list_request_out(request.clone())).unwrap();
+        assert_eq!(back, request);
+    }
+
+    #[test]
+    fn partition_requests_and_responses_round_trip() {
+        let request = tk::ListTaskListPartitionsRequest {
+            domain: "d".to_string(),
+            task_list: Some(task_list()),
+        };
+        let back = list_task_list_partitions_request_in(list_task_list_partitions_request_out(
+            request.clone(),
+        ))
+        .unwrap();
+        assert_eq!(back, request);
+
+        let response = tk::ListTaskListPartitionsResponse {
+            activity_task_list_partitions: vec![tk::TaskListPartitionMetadata {
+                key: "k1".to_string(),
+                owner_host_name: "host".to_string(),
+            }],
+            decision_task_list_partitions: Vec::new(),
+        };
+        let back =
+            list_task_list_partitions_in(list_task_list_partitions_out(response.clone()));
+        assert_eq!(back, response);
+    }
+
+    #[test]
+    fn task_lists_by_domain_response_maps_internal_describe() {
+        let internal = crate::matching::GetTaskListsByDomainResponse {
+            decision_task_list_map: [(
+                "dtl".to_string(),
+                crate::matching::DescribeTaskListResponse {
+                    pollers: Vec::new(),
+                    task_list_status: None,
+                    partition_config: None,
+                    task_list: Some(p::TaskList {
+                        name: "dtl".to_string(),
+                        kind: 0,
+                        base_name: String::new(),
+                    }),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            activity_task_list_map: Default::default(),
+        };
+        let mapped = get_task_lists_by_domain_in(internal).unwrap();
+        let decision = mapped.decision_task_list_map.unwrap();
+        assert_eq!(decision["dtl"].task_list.as_ref().unwrap().name, "dtl");
+        assert!(mapped.activity_task_list_map.unwrap().is_empty());
     }
 }
