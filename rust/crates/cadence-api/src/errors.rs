@@ -269,6 +269,8 @@ pub enum CadenceError {
     RetryTaskV2(#[from] RetryTaskV2Error),
     #[error(transparent)]
     AccessDenied(#[from] AccessDeniedError),
+    #[error(transparent)]
+    ClientVersionNotSupported(#[from] ClientVersionNotSupportedError),
     #[error("unknown: {0}")]
     Unknown(String),
 }
