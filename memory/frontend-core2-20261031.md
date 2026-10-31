@@ -239,6 +239,14 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Frontend formatting: rustfmt sorts the shared lifecycle re-export before
   imports. Applied the runner's one-line ordering patch. The run passed its Go
   oracle gates and Clippy; formatting stopped the test job.
+- The test-source inventory has 15 table-driven Go groups, 88 named rows, and
+  24 distinct expected-error messages; all 24 error strings are represented in
+  Rust after adding the exact 600/300 failover timeout case. This verifies
+  message coverage, while row-by-row request/condition coverage is still open.
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41184529249
+  checked `60a61a767dea5c6e067b1db49d798087224687fe` and concluded `success`.
+  Frontend formatting, package Clippy and tests passed, along with the enabled
+  Go oracle and compatibility checks. No Cargo command was run locally.
 - Validator audit: Go has 16 validation entry points and 15 table-driven test
   groups; Rust now has nil-request coverage for every entry point and expanded
   error, mutation, success, filter, permission, and failover matrices. Do not
