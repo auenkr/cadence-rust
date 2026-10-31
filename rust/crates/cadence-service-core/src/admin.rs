@@ -763,10 +763,10 @@ pub fn domain_replication_messages_response(
             Err(error) => return Err(format!("failed to decode domain replication task: {error}")),
         }
     }
-    if let Some(last_processed) = req.last_processed_message_id {
-        // Go deliberately treats ack update failures as warning-only.
-        let _ = persistence.update_domain_replication_ack_level(req.cluster_name, last_processed);
-    }
+    // Go calls UpdateAckLevel on every request. An omitted field uses the
+    // queue's -1 sentinel, and update failures are warning-only.
+    let last_processed = req.last_processed_message_id.unwrap_or(-1);
+    let _ = persistence.update_domain_replication_ack_level(req.cluster_name, last_processed);
     Ok(cadence_api::admin::GetDomainReplicationMessagesResponse {
         messages: Some(cadence_api::admin::ReplicationMessages {
             replication_tasks: tasks,
