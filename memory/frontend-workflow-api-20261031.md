@@ -472,3 +472,6 @@ these fixes; no green CI evidence covers the current changes.
   plus a unit test. Production config must inject this provider; absent one,
   the bootstrap/test backend path remains available. These latest edits have
   not yet been pushed or validated.
+- Added a Go-envelope test matrix for Signal, Terminate, Reset, Cancel and
+  Query History operations. This matrix and the local search-attribute change
+  are uncommitted at this save; the older CI run on `c0fd852` predates both.

@@ -1927,6 +1927,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workflow_history_operations_build_go_request_envelopes() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
+        let cases = [
+            (
+                "SignalWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "wf"},
+                    "signalName": "wake"
+                }),
+                "signalRequest",
+            ),
+            (
+                "TerminateWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "wf"}
+                }),
+                "terminateRequest",
+            ),
+            (
+                "ResetWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "wf"}
+                }),
+                "resetRequest",
+            ),
+            (
+                "RequestCancelWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {"workflowId": "wf"}
+                }),
+                "cancelRequest",
+            ),
+            (
+                "QueryWorkflow",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf"},
+                    "query": {"queryType": "status"}
+                }),
+                "request",
+            ),
+        ];
+        for (operation, request, envelope_field) in cases {
+            handler.dispatch(operation, request.clone()).await.unwrap();
+            let mut expected = serde_json::json!({"domainUUID": "uuid:shop"});
+            expected[envelope_field] = request;
+            let calls = handler.backend.0.lock().unwrap();
+            assert_eq!(calls.last().unwrap().1, expected, "{operation}");
+        }
+    }
+
+    #[tokio::test]
     async fn start_workflow_builds_history_request_with_domain_uuid() {
         let backend = CapturingBackend::default();
         let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
