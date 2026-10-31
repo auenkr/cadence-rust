@@ -214,6 +214,14 @@ pub trait WorkflowDomainLookup: Send + Sync {
 
 pub type WorkflowFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
+
+/// Go archival visibility provider. The adapter owns archival enablement,
+/// domain URI selection, archiver lookup and the backend Query call; the
+/// handler supplies the exact persisted request dimensions.
+pub trait ArchivedVisibilityReader: Send + Sync {
+    fn list_archived<'a>(&'a self, request: Value) -> WorkflowFuture<'a>;
+}
+
 pub type WorkflowNext<'a> = Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
 
 /// Outer cluster-redirection decorator. It can invoke `next` on the selected
@@ -256,6 +264,7 @@ pub struct Handler<B> {
     outstanding_poll_canceller: Option<Arc<dyn OutstandingPollCanceller>>,
     blob_size_policy: Option<Arc<dyn WorkflowBlobSizePolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
+    archived_visibility_reader: Option<Arc<dyn ArchivedVisibilityReader>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
     health_status: Arc<AtomicU8>,
@@ -438,6 +447,7 @@ impl<B: WorkflowBackend> Handler<B> {
             outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
+            archived_visibility_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -467,6 +477,7 @@ impl<B: WorkflowBackend> Handler<B> {
             outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
+            archived_visibility_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -501,6 +512,7 @@ impl<B: WorkflowBackend> Handler<B> {
             outstanding_poll_canceller: None,
             blob_size_policy: None,
             domain_lookup: None,
+            archived_visibility_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -616,6 +628,14 @@ impl<B: WorkflowBackend> Handler<B> {
     /// domain names; only the outbound service request receives the UUID.
     pub fn with_domain_lookup(mut self, lookup: Arc<dyn WorkflowDomainLookup>) -> Self {
         self.domain_lookup = Some(lookup);
+        self
+    }
+
+    pub fn with_archived_visibility_reader(
+        mut self,
+        reader: Arc<dyn ArchivedVisibilityReader>,
+    ) -> Self {
+        self.archived_visibility_reader = Some(reader);
         self
     }
 
@@ -777,6 +797,29 @@ impl<B: WorkflowBackend> Handler<B> {
             validate_long_poll_deadline(caller.deadline)?;
         }
         let request = self.validate_request(operation, request)?;
+        if operation == WorkflowOperation::ListArchivedWorkflowExecutions {
+            if let Some(reader) = &self.archived_visibility_reader {
+                let domain = request
+                    .get("domain")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let domain_uuid = self
+                    .domain_lookup
+                    .as_ref()
+                    .map(|domains| domains.domain_id(domain))
+                    .transpose()?
+                    .unwrap_or_default();
+                let archive_request = serde_json::json!({
+                    "domainUUID": domain_uuid,
+                    "pageSize": request.get("pageSize").cloned().unwrap_or(Value::Null),
+                    "nextPageToken": request.get("nextPageToken").cloned().unwrap_or(Value::Null),
+                    "query": request.get("query").cloned().unwrap_or(Value::Null),
+                });
+                let mut response = reader.list_archived(archive_request).await?;
+                normalize_archived_execution_times(&mut response);
+                return Ok(response);
+            }
+        }
         if matches!(
             operation,
             WorkflowOperation::QueryWorkflow
@@ -1966,6 +2009,27 @@ fn validate_long_poll_deadline(deadline: Option<std::time::Instant>) -> Result<(
     Ok(())
 }
 
+fn normalize_archived_execution_times(response: &mut Value) {
+    if let Some(executions) = response.get_mut("executions").and_then(Value::as_array_mut) {
+        for execution in executions {
+            let execution_time = execution
+                .get("executionTime")
+                .filter(|value| !value.is_null())
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
+            if execution_time == 0 {
+                if let Some(start_time) = execution
+                    .get("startTime")
+                    .filter(|value| !value.is_null())
+                    .cloned()
+                {
+                    execution["executionTime"] = start_time;
+                }
+            }
+        }
+    }
+}
+
 fn validate_execution_field(request: &Value, field: &str) -> Result<(), CadenceError> {
     let execution = request
         .get(field)
@@ -2144,6 +2208,21 @@ mod tests {
     }
 
     struct StaticDomainLookup;
+
+    #[derive(Default)]
+    struct RecordingArchivedVisibilityReader(Mutex<Vec<Value>>);
+
+    impl ArchivedVisibilityReader for RecordingArchivedVisibilityReader {
+        fn list_archived<'a>(&'a self, request: Value) -> WorkflowFuture<'a> {
+            self.0.lock().unwrap().push(request);
+            Box::pin(async {
+                Ok(serde_json::json!({
+                    "executions": [{"startTime": 123, "executionTime": 0}],
+                    "nextPageToken": "AQI="
+                }))
+            })
+        }
+    }
 
     struct DrainedIsolationGroup;
 
@@ -2382,6 +2461,37 @@ mod tests {
             &[WorkflowOperation::StartWorkflowExecution]
         );
         assert!(handler.dispatch("NotAnApi", Value::Null).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn archived_visibility_uses_domain_uuid_and_go_execution_time_fallback() {
+        let reader = Arc::new(RecordingArchivedVisibilityReader::default());
+        let handler = Handler::new(FakeBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_archived_visibility_reader(reader.clone());
+        let response = handler
+            .dispatch(
+                "ListArchivedWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "archive-domain",
+                    "pageSize": 23,
+                    "nextPageToken": "AQID",
+                    "query": "WorkflowType = 'sample'"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.0.lock().unwrap().as_slice(),
+            &[serde_json::json!({
+                "domainUUID": "uuid:archive-domain",
+                "pageSize": 23,
+                "nextPageToken": "AQID",
+                "query": "WorkflowType = 'sample'"
+            })]
+        );
+        assert_eq!(response["executions"][0]["executionTime"], 123);
+        assert_eq!(response["nextPageToken"], "AQI=");
     }
 
     #[tokio::test]
