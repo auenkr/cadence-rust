@@ -1120,5 +1120,5 @@ Frontend parity until these are implemented and validated.
   boundary. Both source changes require fresh exact-head CI.
 - Follow-up run [41199957815](https://github.com/auenkr/cadence-rust/actions/runs/41199957815)
   was dispatched for `cadence-frontend` with `clean_target=true` at exact head
-  `83ef830f5d7d687d5a9cf206544abac5dc03bf48`; status is pending/in progress,
+  `83ef830f5dbfa7357ee6c57f5265a638706ee59f`; status is pending/in progress,
   with no conclusion yet.
