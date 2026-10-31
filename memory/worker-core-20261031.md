@@ -186,10 +186,13 @@ Implemented in this slice:
   `success`; Clippy, formatting and tests passed for the task-list scavenger
   change. This predates the parent-close History outcome processor in the
   current working tree; dispatch package CI after that change is pushed.
-- Package CI at source head `5e6098131ac32220515af213780c1b1fb8fb65c` is
-  running as `41208131617` and validates the parent-close History outcome
-  processor. The scanner registration descriptors were added afterward, so
-  they require a later exact-head run.
+- Exact-head CI for the parent-close and scanner-registration changes was
+  dispatched at head `d3f9797ab940ebd71f7623564b9a3184e5b8b097`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41208541121. Clippy
+  failed because the scanner registration test destructured zipped pairs as
+  triples; the production registration code compiled. The tuple pattern is
+  corrected locally and requires a new exact-head run. Older runs
+  `41208131617` and `41208329760` were cancelled as superseded.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

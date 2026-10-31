@@ -199,7 +199,7 @@ mod tests {
     fn worker_registration_names_and_task_lists_match_go() {
         let registrations = super::registrations();
         assert_eq!(registrations.len(), 8);
-        for (registration, workflow_type, task_list) in registrations.iter().zip([
+        for (registration, (workflow_type, task_list)) in registrations.iter().zip([
             (super::TASK_LIST_WORKFLOW_TYPE, super::TASK_LIST),
             (super::HISTORY_WORKFLOW_TYPE, super::HISTORY_TASK_LIST),
             (
