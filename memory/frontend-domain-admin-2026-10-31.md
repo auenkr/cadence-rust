@@ -96,6 +96,16 @@
 
 ## Continuation checkpoint
 
+- After the `origin/frontend-core2` + `origin/t3/frontend-workflow-api` +
+  `origin/master` integration, package run
+  [41207364204](https://github.com/auenkr/cadence-rust/actions/runs/41207364204)
+  failed at head `91e51d48b0a19b0e4b42036de75c278d0864d8ca` while compiling
+  `cadence-service-core`. The failures were a duplicate `RefreshWorkflowTasks`
+  handler left by the merge, two missing `FailoverError::Persistence` arms,
+  missing `FromThrift` trait qualification in Admin DLQ decoding, and an
+  outdated raw-history blob encoding assignment. These issues are being fixed
+  before the next package run; this run is not a passing validation.
+
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.
 - CI run [41174245899](https://github.com/auenkr/cadence-rust/actions/runs/41174245899)

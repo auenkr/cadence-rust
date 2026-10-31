@@ -861,7 +861,7 @@ pub async fn read_dlq_messages(
                         &mut cadence_thrift::protocol::Reader::new(&row.payload),
                     )
                     .map_err(|error| error.to_string())?;
-                    cadence_api::types::ReplicationTask::from_thrift(&thrift)
+                    <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(&thrift)
                         .map_err(|error| error.to_string())
                 })();
                 match task {

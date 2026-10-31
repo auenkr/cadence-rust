@@ -484,6 +484,9 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
         Err(cadence_persistence::FailoverError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::FailoverError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
     }
 }
 
@@ -837,7 +840,7 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
                 next_page_token,
                 history_batches: vec![cadence_api::types::DataBlob {
                     encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
-                    data: cadence_thrift::history_blob::encode(events),
+                    data: cadence_thrift::history_blob::encode(events).data,
                 }],
                 version_history: Some(target_history),
             }))
@@ -1268,21 +1271,6 @@ async fn handle_signal_with_start_async(state: &AppState, body: &Struct) -> Hand
     ))
 }
 
-async fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::types::RefreshWorkflowTasksRequest;
-    use cadence_api::validation;
-    let req: RefreshWorkflowTasksRequest =
-        decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
-    validation::check_execution(req.execution.as_ref())
-        .map_err(|e| AppError::bad_request(e.message))?;
-    let execution = req.execution.clone().unwrap_or_default();
-    executions
-        .refresh_tasks(&req.domain, &execution)
-        .map_err(mutation_error)?;
-    Ok(Struct { fields: vec![] })
-}
-
 async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::types::FailoverDomainRequest;
     use cadence_api::validation;
@@ -1303,6 +1291,9 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
         Err(cadence_persistence::FailoverError::Invalid(message)) => {
             Err(AppError::bad_request(message))
+        }
+        Err(cadence_persistence::FailoverError::Persistence(message)) => {
+            Err(AppError::internal(message))
         }
     }
 }
@@ -2032,7 +2023,7 @@ pub async fn dispatch(
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
-        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
+        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body).await,
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
@@ -2052,7 +2043,6 @@ pub async fn dispatch(
         "TerminateWorkflowExecution" => handle_terminate(state, body).await,
         "RestartWorkflowExecution" => handle_restart(state, body).await,
         "ResetWorkflowExecution" => handle_reset(state, body).await,
-        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body).await,
         "DiagnoseWorkflowExecution" => handle_diagnose(state, body).await,
         "CreateSemaphore" => handle_create_semaphore(state, body).await,
         "CreateSchedule" => handle_create_schedule(state, body).await,
