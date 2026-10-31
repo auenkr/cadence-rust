@@ -5936,6 +5936,9 @@ mod tests {
             domain_task_attributes: Some(DomainTaskAttributes {
                 domain_operation: Some(DomainOperation::Update),
                 id: "domain-uuid".into(),
+                info: None,
+                config: None,
+                replication_config: None,
                 config_version: 0,
                 failover_version: 8,
                 previous_failover_version: -1,
