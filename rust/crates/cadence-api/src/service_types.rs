@@ -316,13 +316,9 @@ impl UpdateDomainRequest {
             || self.delete_bad_binary.is_some()
     }
     pub fn is_failover(&self) -> bool {
-        self.replication_configuration.as_ref().is_some_and(|r| {
-            r.active_cluster_name.is_some()
-                || r.active_clusters
-                    .as_ref()
-                    .and_then(|a| a.active_clusters_by_cluster_attribute.as_ref())
-                    .is_some_and(|s| !s.is_empty())
-        }) || self.failover_timeout_in_seconds.is_some_and(|v| v > 0)
+        self.replication_configuration
+            .as_ref()
+            .is_some_and(|r| r.active_cluster_name.is_some() || r.active_clusters.is_some())
     }
 }
 

@@ -1,0 +1,64 @@
+# Frontend core continuation — 2026-10-31
+
+Branch: `frontend-core2`, based on `origin/frontend-core` at start.
+
+## Work in this slice
+
+- Replaced the two-method Frontend validator skeleton with all 16 methods in
+  `go/service/frontend/api/request_validator.go`, including validation order,
+  Go error text, page-size default mutation, visibility filters, admin token,
+  required domain data, retention, lockdown, and failover timeout checks.
+- Added dynamic overlay reads to validator limits so active property changes
+  are observed on each validation call. The API accepts the runtime overlay
+  via `RequestValidator::with_dynamic_config`.
+- Replaced channel-only History and Matching constructors with generated
+  `HistoryApiClient` and `MatchingApiClient` wrappers. Added peer TLS channel
+  construction through `cadence-service-core::grpc_tls`, including configured
+  mTLS credentials and CA/server-name behavior.
+- Corrected `UpdateDomainRequest::is_failover` to match Go's pointer-presence
+  rule: active-cluster fields determine failover; the failover timeout alone
+  does not. Empty-but-present active cluster data still counts as present.
+- Added focused validator tests for page mutation/visibility limits, validation
+  order, and execution identity checks.
+
+## CI evidence
+
+- Requested package workflow at the first pushed head:
+  https://github.com/auenkr/cadence-rust/actions/runs/41174450063
+  head `e268cf3c5ed7e1160e5df74a2e663b6f6dd144fd`. It was `in_progress` at the
+  last read; that run predates the follow-up dynamic-config changes below.
+- A new package CI run is required after the current commit is pushed. Record
+  its final conclusion here. No Cargo command was run locally.
+
+## Remaining gaps (this branch is not Frontend complete)
+
+- Wire the shared dynamic overlay into the production Frontend validator
+  construction path. The constructor seam is present, but current Frontend
+  launcher reuses the Matching launcher and does not yet instantiate a native
+  Frontend dependency graph.
+- Make dynamic property bindings fully Go-equivalent, including the complete
+  default/filter table and warning metrics/logging for max ID lengths.
+- History/Matching clients still need Go call-site semantics: membership/ring
+  peer discovery and refresh, TChannel variants, per-call routing, auth metadata
+  where configured, timeout/retry/error classification, and parity tests.
+- Frontend persistence is not wired. `cadence-persistence` currently exposes
+  in-memory domain/execution stores and Matching-specific native SQL/Cassandra
+  components; production Frontend needs domain, metadata, visibility, history,
+  and execution managers matching Go datastore selection.
+- Go Frontend service lifecycle is not wired: startup ownership, readiness and
+  listener health drain, failure-detection delay, handler stop, ratelimiter
+  stop, request drain, and resource shutdown remain open.
+- Port the Go request-validator test matrix beyond the focused tests here, then
+  run exact-head Clippy, formatting and crate tests on GitHub Actions.
+- No mixed original-Go History/Matching service validation, SDK workflows,
+  failure/restart/recovery gate, or Frontend parity audit has run for this
+  branch.
+
+## Source pointers
+
+- Go: `go/service/frontend/api/request_validator.go`,
+  `go/service/frontend/validate/errors.go`, `go/service/frontend/service.go`.
+- Rust: `rust/crates/cadence-frontend/src/request_validator.rs`,
+  `history_client.rs`, `matching_client.rs`, and
+  `rust/crates/cadence-api/src/service_types.rs`.
+- Previous skeleton analysis and baseline CI: `frontend-core-20261031.md`.
