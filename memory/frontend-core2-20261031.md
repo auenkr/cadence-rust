@@ -389,3 +389,8 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   parity requires adding their actual owners and lifecycle registration, not
   empty hooks. Background worker shutdown is now covered, but this does not
   close all lifecycle ownership.
+- Fresh-target run https://github.com/auenkr/cadence-rust/actions/runs/41183322028
+  validated source head `ed6f8294b06d19ffe2bb2fefda99813e0ec58c2b` and concluded
+  `success`. Go oracle checks, changed Matching formatting, Frontend formatting,
+  Clippy, Frontend tests, and the Go-development-config runtime smoke all passed.
+  The run confirms the shutdown worker ownership and formatting correction.
