@@ -2,13 +2,16 @@
 use cadence_proto::history::history_api_client::HistoryApiClient;
 use cadence_service_core::{config::TlsConfig, grpc_tls::{self, ClientTls}};
 use std::time::Duration;
-use tonic::transport::Channel;
+use tonic::{transport::Channel, Request};
+
+pub const DEFAULT_HISTORY_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct HistoryClient {
     channel: Channel,
     client: HistoryApiClient<Channel>,
     tls: Option<ClientTls>,
+    rpc_timeout: Duration,
 }
 
 impl HistoryClient {
@@ -16,7 +19,7 @@ impl HistoryClient {
         let client = HistoryApiClient::new(channel.clone())
             .max_decoding_message_size(max_message_size)
             .max_encoding_message_size(max_message_size);
-        Self { channel, client, tls: None }
+        Self { channel, client, tls: None, rpc_timeout: DEFAULT_HISTORY_RPC_TIMEOUT }
     }
 
     pub fn client(&self) -> HistoryApiClient<Channel> { self.client.clone() }
@@ -33,6 +36,22 @@ impl HistoryClient {
     }
 
     pub fn tls(&self) -> Option<&ClientTls> { self.tls.as_ref() }
+
+    pub fn with_rpc_timeout(mut self, timeout: Duration) -> Self {
+        self.rpc_timeout = timeout;
+        self
+    }
+
+    /// Attach the same caller identity, encoding and per-attempt timeout used
+    /// by Cadence's Go outbound RPC wrappers.
+    pub fn request<T>(&self, payload: T) -> Request<T> {
+        let mut request = Request::new(payload);
+        request.metadata_mut().insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-history"));
+        request.metadata_mut().insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-frontend"));
+        request.metadata_mut().insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
+        request.set_timeout(self.rpc_timeout);
+        request
+    }
 }
 
 /// Build a lazy gRPC channel using the configured Go `services.history.rpc`

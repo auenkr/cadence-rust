@@ -94,6 +94,12 @@ impl RequestValidator {
         cadence_persistence::dynamic_config::string(dynamic.property_values(key), default)
     }
 
+    fn dynamic_string_domain(&self, key: &str, domain: &str, default: &str) -> String {
+        let Some(dynamic) = &self.dynamic else { return default.to_owned() };
+        let Ok(dynamic) = dynamic.lock() else { return default.to_owned() };
+        cadence_persistence::dynamic_config::string_domain(dynamic.property_values(key), domain, default)
+    }
+
     fn visibility_max_page_size(&self, domain: &str) -> i32 {
         self.dynamic_integer("frontend.visibilityMaxPageSize", Some(domain), i64::from(self.config.visibility_max_page_size)) as i32
     }
@@ -110,15 +116,15 @@ impl RequestValidator {
         }
     }
 
-    fn page_size_too_large(&self, size: i32) -> bool {
-        let domain_uses_advanced = self.dynamic_string("system.readVisibilityStoreName", "db") != "db";
+    fn page_size_too_large(&self, size: i32, domain: &str) -> bool {
+        let domain_uses_advanced = self.dynamic_string_domain("system.readVisibilityStoreName", domain, "db") != "db";
         self.config.advanced_visibility_store
             && domain_uses_advanced
             && size > self.es_index_max_result_window()
     }
 
-    fn check_page_size(&self, size: i32) -> Result<(), BadRequestError> {
-        if self.page_size_too_large(size) {
+    fn check_page_size(&self, size: i32, domain: &str) -> Result<(), BadRequestError> {
+        if self.page_size_too_large(size, domain) {
             return Err(Self::bad(format!(
                 "Pagesize is larger than allow {}",
                 self.es_index_max_result_window()
@@ -234,7 +240,7 @@ impl RequestValidator {
         if request.page_size <= 0 {
             request.page_size = self.visibility_max_page_size(&request.domain);
         }
-        self.check_page_size(request.page_size)
+        self.check_page_size(request.page_size, &request.domain)
     }
 
     pub fn validate_list_open_workflow_executions_request(
@@ -250,7 +256,7 @@ impl RequestValidator {
         if request.maximum_page_size <= 0 {
             request.maximum_page_size = self.visibility_max_page_size(&request.domain);
         }
-        self.check_page_size(request.maximum_page_size)
+        self.check_page_size(request.maximum_page_size, &request.domain)
     }
 
     pub fn validate_list_archived_workflow_executions_request(
@@ -290,7 +296,7 @@ impl RequestValidator {
         if request.maximum_page_size <= 0 {
             request.maximum_page_size = self.visibility_max_page_size(&request.domain);
         }
-        self.check_page_size(request.maximum_page_size)
+        self.check_page_size(request.maximum_page_size, &request.domain)
     }
 
     pub fn validate_register_domain_request(
