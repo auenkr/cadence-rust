@@ -798,3 +798,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   read-only domain metadata source. SQL/Cassandra CRUD transactions and
   Frontend domain manager selection are still unimplemented. Visibility,
   History, and Execution manager implementations are also still absent.
+- Exact-head CI run https://github.com/auenkr/cadence-rust/actions/runs/41193143738
+  checked `808dce3263eec85feb2edd0e1b26e70e0d26f070` and concluded `success`.
+  It passed the enabled Go oracle checks, formatting, Clippy and Frontend tests,
+  including the cache-sharing assertion. This validates the injectable
+  in-memory adapter only; production persistence and real limiter owners remain
+  open.
