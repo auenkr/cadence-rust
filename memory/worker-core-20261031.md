@@ -166,9 +166,13 @@ Implemented in this slice:
 - Package CI at exact source head `56650b9d7ba8c59d4a6dbc698f6ce0e49a25593c`:
   https://github.com/auenkr/cadence-rust/actions/runs/41210084086 completed
   with conclusion `success`, validating scanner config resolution, fixer
-  defaults, shard selection and workflow initialization. Go-compatible
-  workflow/activity JSON payload and fixer-restart additions at later heads
-  remain unvalidated.
+  defaults, shard selection and workflow initialization.
+- Package CI at exact source head `54a5e23565c652c4f8bffcd32ed9a6ee64a5064f`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41210382452 completed
+  with conclusion `success`, validating the scanner/fixer Go JSON field names,
+  nullable workflow arguments and fixer restart parameters. Retry/version
+  constants and the corrupt-key page accumulator added at later heads still
+  require an exact-head run.
 - Package CI at exact source head `bb2042376618231a51e048aaaa64877eddf118d6`:
   https://github.com/auenkr/cadence-rust/actions/runs/41209390273 completed
   with conclusion `success` (Worker Clippy, formatting and tests).
@@ -235,22 +239,62 @@ worker assignment and batch boundary behavior, generic scanner config
 resolution (dynamic values, hook config, then explicit overrides), Go fixer
 defaults, and `Shards` validation/flattening with half-open ranges and list
 ordering. `ScannerSelection::new` also mirrors `NewScannerWorkflow`'s name-first
-validation and selected-shard bounds. These additions have Go-derived unit
-fixtures but are not yet validated by CI. Workflow replay, scanner
-persistence/invariant activities, heartbeat recovery, and executable worker
-pollers remain unimplemented. Scanner and fixer workflow/activity parameter
-types now also serialize with the Go exported-field JSON names, including nil
-list/range/map representations, pointer override fields, and the optional
-starting shard used for fixer restart; this wire fixture work is still waiting
-for CI. Acronym-bearing Go `...WorkflowID` and `...RunID` keys are explicitly
-retained in fixer workflow parameters.
+validation and selected-shard bounds. Scanner config resolution, fixer defaults,
+shard selection and workflow initialization passed package CI at head
+`56650b9d7ba8c59d4a6dbc698f6ce0e49a25593c`. Workflow replay,
+scanner persistence/invariant activities, heartbeat recovery, and executable
+worker pollers remain unimplemented. Scanner and fixer workflow/activity parameter
+types serialize with Go exported-field JSON names, including nil list/range/map
+representations, pointer override fields, and the optional starting shard used
+for fixer restart. These payload fixtures passed CI at head
+`54a5e23565c652c4f8bffcd32ed9a6ee64a5064f`. Acronym-bearing Go
+`...WorkflowID` and `...RunID` keys are explicitly retained.
 Scanner workflow contract constants now also mirror the Go short/long
 activity schedule-to-start, start-to-close and heartbeat timeouts, retry
 initial/max/expiration values, non-retriable error names, and the fixer dynamic
-config version gate. Those constants and the wire payload fixtures remain
-pending package CI. The fixer corrupt-key page accumulator now preserves Go's
+config version gate. The constants and corrupt-key page accumulator remain
+pending package CI. A sparse shard query paginator now mirrors Go's numeric
+range scan, result-count limit, bound checks and next-ID token behavior. The
+fixer corrupt-key page accumulator preserves Go's
 first-page request, continuation through empty pages, entry order, min/max
 aggregation only for non-empty pages, and terminal pagination token.
+
+## Handoff checkpoint — 2026-10-31
+
+Branch `worker-core` is pushed. This handoff adds `scanner/pagination.rs`, a
+Go-shaped sparse shard-map paginator with exact bound errors, numeric range
+scanning, result-count limits and next-ID tokens. It is included in the handoff
+commit but has not been run through CI. `git diff --check` is the only local
+validation; no Cargo or rustfmt command was run.
+
+Last verified Actions run is
+https://github.com/auenkr/cadence-rust/actions/runs/41210382452, conclusion
+`success`, exact validated source head
+`54a5e23565c652c4f8bffcd32ed9a6ee64a5064f`. It covered scanner/fixer payload
+field names and nullable workflow arguments. Current source is newer than that
+run; the retry/version constants, corrupt-key page accumulator, sparse shard
+query paginator and handoff edits have no exact-head validation yet.
+
+Worker parity remains incomplete. `WorkerService::start` deliberately refuses
+to poll because deterministic replay and executable activity handlers are
+absent. Remaining work for the successor:
+
+1. Run `gh workflow run rust-ci.yml --ref worker-core -f package=cadence-worker`
+   on the pushed handoff head, then record URL, head SHA and conclusion here.
+2. Continue scanner/executions: port scan/fix aggregators and query/report
+   contracts, persistence iterators and blobstore activities, history/execution
+   and timer workflow algorithms, activity heartbeat/resume semantics, and
+   compare their JSON and retry behavior with Go tests.
+3. Implement and wire decision/activity pollers, deterministic workflow replay,
+   registration dispatch, graceful lifecycle/drain, and the Frontend gRPC/
+   Thrift client discovery, auth, retry and metrics required by system workers.
+4. Continue remaining internal modules in requested order: archiver,
+   failovermanager, domaindeprecation, scheduler, esanalyzer, indexer,
+   replicator, diagnostics and asyncworkflow. Port their dependencies,
+   configuration, lifecycle and workflow interactions, not only registrations.
+5. Add mixed original-Go/Rust SDK compatibility, service interaction,
+   failure, restart and recovery gates. Finish the Worker parity audit before
+   claiming service completion.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

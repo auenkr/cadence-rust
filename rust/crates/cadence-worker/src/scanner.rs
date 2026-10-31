@@ -3,6 +3,7 @@ pub mod tasklist;
 pub mod shard_batches;
 pub mod executions;
 pub mod shards;
+pub mod pagination;
 
 pub const TASK_LIST: &str = "cadence-sys-tl-scanner-tasklist-0";
 pub const WORKFLOW_ID: &str = "cadence-sys-tl-scanner";
