@@ -399,3 +399,16 @@ migration forward.
   Thrift converter imports failed to compile. Added the six missing Admin
   converter imports and applied the uploaded CI formatting patch. Fresh run
   `41179320362` now targets `b5dedb6a4` and is pending; collect its final result.
+
+## Rebased Admin converter repair — 2026-10-31
+
+- CI run [41179320362](https://github.com/auenkr/cadence-rust/actions/runs/41179320362)
+  is cancelled at pre-repair head `b5dedb6a40c93508d5ec383f2804f3ed4779a6d1`;
+  it does not validate the latest source. The uploaded CI rustfmt patch was
+  applied and missing Admin Thrift converter imports were added. Removed the
+  now-obsolete Frontend module stub dispatch methods from `handler_admin.rs`
+  and `handler_domain.rs`; those modules expose implemented methods instead.
+- Latest core2 remote advanced since the previous rebase; rebase this checkpoint
+  onto its current fetched head before dispatching exact-head package CI.
+  Domain/Admin/Schedule parity gaps remain extensive; no service completion
+  claim is made.
