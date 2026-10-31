@@ -181,6 +181,39 @@ where
     }
 }
 
+/// Shared decorator adapter for `handler_workflow::Handler`. The generated Go
+/// wrapper skips methods without an authorization declaration, so that
+/// behavior is kept in `attributes_for_request` rather than in the caller.
+pub struct HandlerAuthorization<A, M> {
+    authorizer: A,
+    metrics: M,
+}
+
+impl<A, M> HandlerAuthorization<A, M> {
+    pub fn new(authorizer: A, metrics: M) -> Self {
+        Self {
+            authorizer,
+            metrics,
+        }
+    }
+}
+
+impl<A, M> crate::handler_workflow::RequestAuthorization for HandlerAuthorization<A, M>
+where
+    A: Authorizer + Send + Sync,
+    A::Error: Send + Sync,
+    M: AuthorizationMetrics + Send + Sync,
+{
+    fn authorize(
+        &self,
+        operation: &str,
+        request: &Value,
+        actor: &str,
+    ) -> Result<(), CadenceError> {
+        authorize_request(operation, request, actor, &self.authorizer, &self.metrics)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

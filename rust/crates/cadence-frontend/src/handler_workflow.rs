@@ -178,6 +178,35 @@ pub struct Handler<B> {
     backend: B,
     validator: crate::request_validator::RequestValidator,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
+    access_control: Option<Arc<dyn RequestAuthorization>>,
+    version_check: Option<VersionCheck>,
+    rate_limit: Option<Arc<dyn RequestRateLimit>>,
+}
+
+/// Caller metadata carried by the transport into the same wrapper layers that
+/// Go reads from its request context. The plain `dispatch` entry point uses
+/// empty metadata for internal callers; transports should call
+/// `dispatch_with_metadata` with the received identity and version headers.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CallerMetadata {
+    pub actor: String,
+    pub client_impl: String,
+    pub feature_version: String,
+}
+
+pub trait RequestAuthorization: Send + Sync {
+    fn authorize(&self, operation: &str, request: &Value, actor: &str)
+        -> Result<(), CadenceError>;
+}
+
+pub trait RequestRateLimit: Send + Sync {
+    fn allow(&self, operation: &str, request: &Value) -> Result<(), CadenceError>;
+}
+
+#[derive(Clone)]
+struct VersionCheck {
+    enabled: bool,
+    checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
 }
 
 #[derive(Default)]
@@ -193,6 +222,9 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator: crate::request_validator::RequestValidator::default(),
             metrics: Arc::new(NoopWorkflowMetrics),
+            access_control: None,
+            version_check: None,
+            rate_limit: None,
         }
     }
 
@@ -204,6 +236,9 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator,
             metrics: Arc::new(NoopWorkflowMetrics),
+            access_control: None,
+            version_check: None,
+            rate_limit: None,
         }
     }
 
@@ -220,19 +255,61 @@ impl<B: WorkflowBackend> Handler<B> {
             backend,
             validator,
             metrics,
+            access_control: None,
+            version_check: None,
+            rate_limit: None,
         }
     }
 
+    /// Install the Go access-control decorator. This check intentionally runs
+    /// outside metering, matching `accesscontrolled.NewAPIHandler` being the
+    /// outermost Go handler decorator.
+    pub fn with_access_control(mut self, authorizer: Arc<dyn RequestAuthorization>) -> Self {
+        self.access_control = Some(authorizer);
+        self
+    }
+
+    /// Install the Go version-check decorator. It runs after rate-limit
+    /// request preflight and before the API handler, inside metering.
+    pub fn with_version_check(
+        mut self,
+        enabled: bool,
+        checker: Arc<dyn crate::wrappers::versioncheck::VersionChecker + Send + Sync>,
+    ) -> Self {
+        self.version_check = Some(VersionCheck { enabled, checker });
+        self
+    }
+
+    /// Install the quota policy used by the generated rate-limited wrapper.
+    /// The request-shape checks still run first, as they do in Go.
+    pub fn with_rate_limit(mut self, rate_limit: Arc<dyn RequestRateLimit>) -> Self {
+        self.rate_limit = Some(rate_limit);
+        self
+    }
+
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
+        self.dispatch_with_metadata(operation, request, &CallerMetadata::default())
+            .await
+    }
+
+    pub async fn dispatch_with_metadata(
+        &self,
+        operation: &str,
+        request: Value,
+        caller: &CallerMetadata,
+    ) -> Result<Value, CadenceError> {
         let operation = WorkflowOperation::from_name(operation).ok_or_else(|| {
             CadenceError::BadRequest(BadRequestError::new(format!(
                 "unknown workflow operation: {operation}"
             )))
         })?;
+        if let Some(access_control) = &self.access_control {
+            access_control.authorize(operation.name(), &request, &caller.actor)?;
+        }
         let start = std::time::Instant::now();
         self.metrics.increment_requests(operation.name());
         let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
-        let result = self.dispatch_operation(operation, request).await;
+        let result = self.dispatch_operation(operation, request, caller).await;
         let elapsed = start.elapsed();
         self.metrics
             .record_operation(operation.name(), elapsed, &tags);
@@ -252,8 +329,21 @@ impl<B: WorkflowBackend> Handler<B> {
         &self,
         operation: WorkflowOperation,
         request: Value,
+        caller: &CallerMetadata,
     ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
+        if let Some(rate_limit) = &self.rate_limit {
+            rate_limit.allow(operation.name(), &request)?;
+        }
+        if let Some(version_check) = &self.version_check {
+            crate::wrappers::versioncheck::check(
+                operation.name(),
+                version_check.enabled,
+                &caller.client_impl,
+                &caller.feature_version,
+                version_check.checker.as_ref(),
+            )?;
+        }
         let request = self.validate_request(operation, request)?;
         self.backend.invoke(operation, request).await
     }
@@ -687,6 +777,54 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingAuthorization(Mutex<Vec<String>>);
+
+    impl RequestAuthorization for RecordingAuthorization {
+        fn authorize(
+            &self,
+            operation: &str,
+            _: &Value,
+            actor: &str,
+        ) -> Result<(), CadenceError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{operation}:{actor}"));
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct DenyRateLimit(Mutex<Vec<String>>);
+
+    impl RequestRateLimit for DenyRateLimit {
+        fn allow(&self, operation: &str, _: &Value) -> Result<(), CadenceError> {
+            self.0.lock().unwrap().push(operation.to_owned());
+            Err(CadenceError::ServiceBusy(
+                cadence_api::errors::ServiceBusyError::new("limited"),
+            ))
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingVersionCheck(Mutex<Vec<(String, String)>>);
+
+    impl crate::wrappers::versioncheck::VersionChecker for RecordingVersionCheck {
+        fn client_supported(
+            &self,
+            _: bool,
+            client_impl: &str,
+            feature_version: &str,
+        ) -> Result<(), cadence_api::errors::ClientVersionNotSupportedError> {
+            self.0.lock().unwrap().push((
+                client_impl.to_owned(),
+                feature_version.to_owned(),
+            ));
+            Ok(())
+        }
+    }
+
     #[test]
     fn operation_names_round_trip_and_include_list_tasklist_surface() {
         assert_eq!(WorkflowOperation::ALL.len(), 40);
@@ -787,6 +925,83 @@ mod tests {
             *metrics.counters.lock().unwrap(),
             [crate::wrappers::metered::Counter::Failures]
         );
+    }
+
+    #[tokio::test]
+    async fn wrapper_order_is_access_then_metered_rate_limit_then_version() {
+        let authorization = Arc::new(RecordingAuthorization::default());
+        let rate_limit = Arc::new(DenyRateLimit::default());
+        let version = Arc::new(RecordingVersionCheck::default());
+        let metrics = Arc::new(RecordingMetrics::default());
+        let handler = Handler::with_metrics(
+            FakeBackend::default(),
+            crate::request_validator::RequestValidator::default(),
+            metrics.clone(),
+        )
+        .with_access_control(authorization.clone())
+        .with_rate_limit(rate_limit.clone())
+        .with_version_check(true, version.clone());
+        let error = handler
+            .dispatch_with_metadata(
+                "DescribeWorkflowExecution",
+                serde_json::json!({"domain": "shop", "workflowExecution": {"workflowId": "wf"}}),
+                &CallerMetadata {
+                    actor: "sdk-worker".to_owned(),
+                    client_impl: "go-sdk".to_owned(),
+                    feature_version: "1.2".to_owned(),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "limited");
+        assert_eq!(
+            *authorization.0.lock().unwrap(),
+            ["DescribeWorkflowExecution:sdk-worker"]
+        );
+        assert_eq!(
+            *rate_limit.0.lock().unwrap(),
+            ["DescribeWorkflowExecution"]
+        );
+        assert!(version.0.lock().unwrap().is_empty());
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+        assert_eq!(
+            *metrics.requests.lock().unwrap(),
+            ["DescribeWorkflowExecution"]
+        );
+    }
+
+    #[tokio::test]
+    async fn access_control_denial_is_outside_metering() {
+        struct Deny;
+        impl RequestAuthorization for Deny {
+            fn authorize(
+                &self,
+                _: &str,
+                _: &Value,
+                _: &str,
+            ) -> Result<(), CadenceError> {
+                Err(CadenceError::AccessDenied(
+                    cadence_api::errors::AccessDeniedError::new("Request unauthorized."),
+                ))
+            }
+        }
+
+        let metrics = Arc::new(RecordingMetrics::default());
+        let handler = Handler::with_metrics(
+            FakeBackend::default(),
+            crate::request_validator::RequestValidator::default(),
+            metrics.clone(),
+        )
+        .with_access_control(Arc::new(Deny));
+        let error = handler
+            .dispatch("StartWorkflowExecution", serde_json::json!({"domain": "shop"}))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "Request unauthorized.");
+        assert!(metrics.requests.lock().unwrap().is_empty());
+        assert!(metrics.counters.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
