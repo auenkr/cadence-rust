@@ -2698,6 +2698,7 @@ mod tests {
                     feature_version: "1.2".to_owned(),
                     isolation_group: String::new(),
                     original_headers: HashMap::new(),
+                    deadline: None,
                 },
             )
             .await

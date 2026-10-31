@@ -863,3 +863,32 @@ Frontend parity until these are implemented and validated.
   remain absent. No Frontend + Go History + Rust Matching SDK gate has been
   added or run. Current package CI validates only the handler's unit-test
   backend and is not mixed-service proof.
+
+## Archived visibility and core2 domain seam — continuation
+
+- Added an `ArchivedVisibilityReader` injection seam to `Handler` and routed
+  validated `ListArchivedWorkflowExecutions` requests through it with domain
+  UUID, page size, continuation token and query. Applied Go's execution-time
+  fallback (start time when archive execution time is zero) and added a
+  Go-shaped request/response test.
+- Added `PersistenceWorkflowDomainLookup`, adapting the new core2
+  `FrontendDomainManager` interface to workflow handler UUID lookups while
+  retaining typed `EntityNotExists` errors. The exact test uses the in-memory
+  manager only and is not a production manager implementation.
+- Core2 commits `f644498bf` and `808dce326` were cherry-picked as
+  `a9bc2634a` and `10a863d8e`. The full core2 head was not merged because its
+  divergent snapshot deletes the workflow implementation. Its domain-manager
+  interface and cache-sharing test are now present; SQL/Cassandra persistence
+  and the History/Matching adapter work remain open.
+- Exact-head package run
+  [41193312332](https://github.com/auenkr/cadence-rust/actions/runs/41193312332)
+  checked `e3f6698ff7323bba90e160c4d5130c25886ca230` and failed at Clippy
+  before tests. It found an ambiguous error conversion in the existing
+  Matching poll canceller and a caller-metadata fixture missing the new
+  deadline field. Both are fixed in the follow-up commit; a new run must
+  validate the fixes and archived visibility test.
+- The archived reader remains an adapter seam: archival enablement, domain URI
+  lookup, archiver provider selection, and querying still need a production
+  implementation. Workflow operations are not registered through this
+  `Handler` in the service's actual Thrift/gRPC runtime, and the package run is
+  not mixed Go History + Rust Matching/SDK evidence.

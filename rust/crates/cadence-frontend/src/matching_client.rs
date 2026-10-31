@@ -57,7 +57,9 @@ impl<R: MatchingClientResolver> crate::handler_workflow::OutstandingPollCancelle
                 .cancel_outstanding_poll(request)
                 .await
                 .map_err(|status| {
-                    cadence_api::errors::InternalServiceError::new(status.to_string()).into()
+                    cadence_api::errors::CadenceError::from(
+                        cadence_api::errors::InternalServiceError::new(status.to_string()),
+                    )
                 })?;
             Ok(serde_json::Value::Null)
         })
