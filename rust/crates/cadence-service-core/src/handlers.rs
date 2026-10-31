@@ -824,7 +824,12 @@ async fn list_failover_history(
             }),
         )
             .into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 

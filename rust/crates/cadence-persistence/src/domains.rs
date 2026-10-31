@@ -285,7 +285,7 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
         domain_id: &str,
         page_size: usize,
         page_token: &[u8],
-    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError>;
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError>;
 
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError>;
 
@@ -1457,8 +1457,9 @@ impl FrontendDomainManager for InMemoryDomainStore {
         domain_id: &str,
         page_size: usize,
         page_token: &[u8],
-    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError> {
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError> {
         InMemoryDomainStore::failover_history(self, domain_id, page_size, page_token)
+            .map_err(FrontendDomainError::from)
     }
 
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
@@ -1567,10 +1568,11 @@ impl PersistedFrontendDomainManager {
     fn record_failover_audit(
         &self,
         before: &DescribeDomainResponse,
+        before_failover_end: Option<i64>,
         updated: &DomainRecord,
     ) -> Result<(), FrontendDomainError> {
         use crate::domain_audit::{
-            encode_domain_state, new_event_id, DomainAuditLog,
+            encode_domain_state, new_event_id, DomainAuditLog, DomainAuditState,
             DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
         };
         if !self.persistence.supports_domain_audit_log() {
@@ -1581,6 +1583,14 @@ impl PersistedFrontendDomainManager {
             uuid: None,
         })?;
         let now_nanos = updated.last_updated_time_nanos;
+        let state_before = DomainAuditState {
+            describe: before.clone(),
+            failover_expire_nanos: before_failover_end,
+        };
+        let state_after = DomainAuditState {
+            describe: after,
+            failover_expire_nanos: updated.failover_end_time,
+        };
         let log = DomainAuditLog {
             event_id: new_event_id(now_nanos),
             domain_id: updated.info.uuid.clone(),
@@ -1590,8 +1600,10 @@ impl PersistedFrontendDomainManager {
             identity: String::new(),
             identity_type: String::new(),
             comment: "domain failover".into(),
-            state_before: encode_domain_state(before).map_err(FrontendDomainError::Persistence)?,
-            state_after: encode_domain_state(&after).map_err(FrontendDomainError::Persistence)?,
+            state_before: encode_domain_state(&state_before)
+                .map_err(FrontendDomainError::Persistence)?,
+            state_after: encode_domain_state(&state_after)
+                .map_err(FrontendDomainError::Persistence)?,
         };
         self.persistence
             .create_domain_audit_log(&log)
@@ -1668,7 +1680,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             return Err(error);
         }
         if updated.failover_version != old.failover_version {
-            self.record_failover_audit(&before, &updated)?;
+            self.record_failover_audit(&before, old.failover_end_time, &updated)?;
             self.cache.notify_failover(&updated);
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
@@ -1698,7 +1710,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
-        self.record_failover_audit(&before, &updated)?;
+        self.record_failover_audit(&before, old.failover_end_time, &updated)?;
         self.cache.notify_failover(&updated);
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
@@ -1709,9 +1721,32 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         domain_id: &str,
         page_size: usize,
         page_token: &[u8],
-    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError> {
-        self.cache
-            .failover_history(domain_id, page_size, page_token)
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError> {
+        if !self.persistence.supports_domain_audit_log() {
+            return self
+                .cache
+                .failover_history(domain_id, page_size, page_token)
+                .map_err(FrontendDomainError::from);
+        }
+        // Go reads the audit table directly (no domain lookup) and filters
+        // rows with no cluster change, so restarts keep the full history.
+        let token = (!page_token.is_empty()).then_some(page_token);
+        let page = self
+            .persistence
+            .get_domain_audit_logs(
+                domain_id,
+                crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+                page_size,
+                token,
+            )
+            .map_err(FrontendDomainError::Persistence)?;
+        let mut events = Vec::new();
+        for log in &page.logs {
+            let event = crate::domain_audit::failover_event(log)
+                .map_err(FrontendDomainError::Persistence)?;
+            events.extend(event);
+        }
+        Ok((events, page.next_page_token.unwrap_or_default()))
     }
 
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {

@@ -1536,7 +1536,10 @@ async fn handle_list_failover_history(state: &AppState, body: &Struct) -> Handle
             failover_events: events,
             next_page_token,
         })),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 

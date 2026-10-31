@@ -1571,10 +1571,9 @@ impl MatchingDomainMetadataStore {
                     },
                 )
                 .map_err(|error| sqlite_operation_error(error, deadline))?;
-            let collected = mapped
+            mapped
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| sqlite_operation_error(error, deadline))?;
-            collected
+                .map_err(|error| sqlite_operation_error(error, deadline))?
         };
         let mut logs = Vec::with_capacity(rows.len());
         for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in rows {
