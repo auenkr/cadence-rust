@@ -1187,5 +1187,8 @@ migration forward.
 - Corrected the DLQ page-size behavior found during source comparison:
   `ReadDLQMessages` now uses Go's 1000-message default, while `MergeDLQMessages`
   passes its requested maximum through unchanged. Added unit coverage for the
-  read default. This follow-up and the conflict resolution require a fresh
-  exact-head Frontend package run.
+  read default. Follow-up run
+  [41210614227](https://github.com/auenkr/cadence-rust/actions/runs/41210614227)
+  checked `2bf8ce9909da0c46f7dadeb3c4ae6b600bd7fccd` and also failed before
+  Cargo: one line in the merge helper needed rustfmt's single-line layout.
+  Applied that exact correction; fresh exact-head package CI is pending.

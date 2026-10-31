@@ -1017,8 +1017,7 @@ pub fn merge_domain_dlq_messages(
     })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id =
-        decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
+    let first_message_id = decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     // Go passes MergeDLQMessages.MaximumPageSize through unchanged. Unlike
     // ReadDLQMessages, it does not apply the 1000-message read default.
