@@ -1359,3 +1359,34 @@ No Cargo or rustfmt ran locally. No Rust binary SHA256 exists for these runs
    transport injection point from gap 4 in the earlier list.
 4. Mixed Go History + Rust Matching/Frontend SDK gate, failure/restart/recovery,
    and recorded binary SHA256. Not started.
+
+## Registration audit — 2026-10-31 (no runtime change)
+
+Attempted next gap: route the registered WorkflowService through
+`handler_workflow::Handler`. Decided NOT to land a partial swap. Facts:
+
+- Registered gRPC WorkflowApi is `impl WorkflowApi for Frontend` in
+  `cadence-matching/src/grpc.rs` (~line 686), with 48 RPCs. Each one calls the
+  local persistence/engine directly (or Matching HTTP via `self.call`).
+- `Handler` exposes only `dispatch(operation: &str, Value)` (JSON seam). There
+  is no typed per-RPC entry point, so every RPC needs a proto->API request
+  converter and an API->proto response converter. `cadence-proto::convert` has
+  reverse converters only for the task-list family (poll requests, Describe,
+  ListPartitions, GetTaskListsByDomain) and `start`/`failover`/`schedule`/
+  `query_completed`. Missing: poll responses, History events, and most other
+  workflow request/response types.
+- Public Thrift/TChannel dispatch lives in `cadence-service-core::yarpc` and has
+  its own persistence calls. Routing only gRPC would make the two transports
+  diverge.
+- Injection: `launcher.rs` calls `grpc::serve(addr, AppState)` (~line 1864)
+  with `Frontend { state }` built inside matching. A Frontend-owned override
+  needs a field on `AppState` or a new parameter threaded through
+  `run_with_lifecycle`. Matching cannot depend on cadence-frontend, so the
+  trait must live in cadence-service-core or cadence-proto.
+
+Decision needed before more code: (A) cut over gRPC and Thrift together, only
+once every operation has a typed backend and converters (no partial regression);
+or (B) route per operation with legacy fallback, gRPC first, accepting a window
+where Thrift and gRPC behave differently. Recommended: B for gRPC with
+per-operation parity tests, then Thrift, then delete the fallback. Neither has
+been implemented.
