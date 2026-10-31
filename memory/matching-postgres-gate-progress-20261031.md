@@ -19,3 +19,10 @@ Root cause of the isolation leak: Rust selector leaked every task as partition_c
 - Gate run https://github.com/auenkr/cadence-rust/actions/runs/41154146996 head 063ad3aff conclusion success, gate.exit 0, binary sha256: cd367d0bfc00db7dd04b8366827712ccefbac26b5474f8684e3f8e18a7ddd8a1
 - rust-ci cadence-matching run https://github.com/auenkr/cadence-rust/actions/runs/41154144862 success.
 Remaining: 9 lanes (mysql-probes, thrift, configstore, shard-distributor, two-node MySQL, cassandra, adaptive, active offer, TLS), fresh package-unset CI, parity audit.
+
+## All ten mixed lanes passed on head 0d691c97 (tag validation/matching-lanes-0d691c97), all conclusion success
+- postgres 41154146996 (head 063ad3aff), mysql-probes 41154780491, thrift 41155481347, configstore 41156027489, shard-distributor 41157479184, adaptive 41157944954
+- two-node MySQL 41158499439, Cassandra 41158502700, active offer 41158506029, production TLS 41158509097
+- package-unset workspace rust-ci (clippy then tests) 41159060501 success on 0d691c97.
+Binary SHA256 values are in each run's artifacts (ci-evidence/g-<id>); postgres: cd367d0b...d8a1.
+Remaining before closing Matching: parity audit/requirement-to-evidence matrix review, then History.
