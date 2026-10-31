@@ -805,7 +805,7 @@ impl<B: WorkflowBackend> Handler<B> {
             "executionStartToCloseTimeoutSeconds": started.get("executionStartToCloseTimeoutSeconds").cloned().unwrap_or(Value::Null),
             "taskStartToCloseTimeoutSeconds": started.get("taskStartToCloseTimeoutSeconds").cloned().unwrap_or(Value::Null),
             "identity": request.get("identity").cloned().unwrap_or(Value::Null),
-            "workflowIDReusePolicy": 3,
+            "workflowIdReusePolicy": 3,
             "delayStartSeconds": 0
         });
         for field in [
@@ -886,7 +886,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 .get("identity")
                 .cloned()
                 .unwrap_or_else(|| Value::String(String::new())),
-            "workflowIDReusePolicy": 1
+            "workflowIdReusePolicy": 1
         });
         let start_request = self.validate_request(
             WorkflowOperation::StartWorkflowExecution,
@@ -2580,7 +2580,7 @@ mod tests {
         assert_eq!(calls[1].0, WorkflowOperation::StartWorkflowExecution);
         assert_eq!(calls[1].1["domainUUID"], "uuid:shop");
         let start = &calls[1].1["startRequest"];
-        assert_eq!(start["workflowIDReusePolicy"], 3);
+        assert_eq!(start["workflowIdReusePolicy"], 3);
         assert_eq!(start["domain"], "shop");
         assert_eq!(start["workflowId"], "order-1");
         assert_eq!(start["workflowType"]["name"], "Order");
@@ -2636,6 +2636,8 @@ mod tests {
                         "workflowId": "order-19",
                         "workflowType": {"name": "Order"},
                         "taskList": {"name": "orders"},
+                        "executionStartToCloseTimeoutSeconds": 100,
+                        "taskStartToCloseTimeoutSeconds": 10,
                         "input": "AQI="
                     }
                 }),

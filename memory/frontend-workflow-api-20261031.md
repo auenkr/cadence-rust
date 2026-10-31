@@ -636,3 +636,9 @@ Frontend parity until these are implemented and validated.
   Go-required `requestId`, and one Diagnose expectation had a mistyped run ID.
   Both fixtures are corrected; CI rerun is pending. Diagnose now also checks
   the system domain's isolation state before its internal Start call.
+- CI run [41185389191](https://github.com/auenkr/cadence-rust/actions/runs/41185389191)
+  tested exact SHA `3165f28eff7ccf0b8484fbb7d5ef9c2b5d697ef4`: Clippy and
+  formatting passed; 76/78 tests passed. The async fixture needed valid
+  start/decision timeouts, and the Cadence Thrift JSON spelling is
+  `workflowIdReusePolicy` (lowercase `d`), correcting both Diagnose and
+  Restart. These fixes await CI.
