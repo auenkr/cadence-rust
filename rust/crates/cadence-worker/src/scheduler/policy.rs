@@ -155,7 +155,11 @@ pub fn handle_unpause(state: &mut PauseState, catch_up_policy: CatchUpPolicy) ->
 /// Go `generateWorkflowID`: `<prefix>-<RFC 3339 UTC scheduled time>`, with the
 /// schedule ID as the prefix when none is set.
 pub fn generate_workflow_id(prefix: &str, schedule_id: &str, scheduled_time_nanos: i64) -> String {
-    let prefix = if prefix.is_empty() { schedule_id } else { prefix };
+    let prefix = if prefix.is_empty() {
+        schedule_id
+    } else {
+        prefix
+    };
     format!("{prefix}-{}", format_rfc3339_utc(scheduled_time_nanos))
 }
 
@@ -195,10 +199,22 @@ mod tests {
 
     #[test]
     fn buffer_limit_falls_back_to_the_system_limit() {
-        assert_eq!(effective_buffer_limit(0), (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT));
-        assert_eq!(effective_buffer_limit(-3), (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT));
-        assert_eq!(effective_buffer_limit(1001), (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT));
-        assert_eq!(effective_buffer_limit(5), (5, BUFFER_OVERFLOW_REASON_USER_LIMIT));
+        assert_eq!(
+            effective_buffer_limit(0),
+            (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT)
+        );
+        assert_eq!(
+            effective_buffer_limit(-3),
+            (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT)
+        );
+        assert_eq!(
+            effective_buffer_limit(1001),
+            (1000, BUFFER_OVERFLOW_REASON_SYSTEM_LIMIT)
+        );
+        assert_eq!(
+            effective_buffer_limit(5),
+            (5, BUFFER_OVERFLOW_REASON_USER_LIMIT)
+        );
     }
 
     #[test]
@@ -307,5 +323,4 @@ mod tests {
             "wf-1970-01-01T00:00:00Z"
         );
     }
-
 }
