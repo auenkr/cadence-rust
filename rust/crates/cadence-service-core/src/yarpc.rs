@@ -123,6 +123,17 @@ impl AppError {
             message,
         }
     }
+
+    fn workflow_already_completed(message: String) -> Self {
+        let error = cadence_api::errors::WorkflowExecutionAlreadyCompletedError::new(
+            message.clone(),
+        );
+        Self {
+            exc_name: "WorkflowExecutionAlreadyCompletedError",
+            value: error.to_thrift(),
+            message,
+        }
+    }
 }
 
 type HandlerResult = Result<Struct, AppError>;
@@ -667,6 +678,68 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
         processing_queue_states,
     }))
+}
+
+fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::DeleteWorkflowRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let execution = req.workflow_execution.unwrap_or_default();
+    if execution.workflow_id.is_empty() {
+        return Err(AppError::bad_request(
+            "Execution is not set on request.".to_string(),
+        ));
+    }
+    let executions = require_domain_thrift(state, &req.domain)?;
+    match executions.delete_run(&req.domain, &execution) {
+        Ok((history_deleted, executions_deleted, visibility_deleted)) => Ok(wrap_success(
+            &cadence_api::admin::DeleteWorkflowResponse {
+                history_deleted,
+                executions_deleted,
+                visibility_deleted,
+            },
+        )),
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
+}
+
+fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::RefreshWorkflowTasksRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let domain = if req.domain.is_empty() {
+        state
+            .domains
+            .describe(&DescribeDomainRequest {
+                name: None,
+                uuid: Some(req.domain_id.clone()),
+            })
+            .map_err(|error| AppError::entity_not_exists(error.message))?
+            .domain_info
+            .map(|info| info.name)
+            .unwrap_or_default()
+    } else {
+        req.domain
+    };
+    if domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
+    let execution = req.workflow_execution.unwrap_or_default();
+    cadence_api::validation::check_execution(Some(&execution))
+        .map_err(|error| AppError::bad_request(error.message))?;
+    let executions = require_domain_thrift(state, &domain)?;
+    match executions.refresh_tasks(&domain, &execution) {
+        Ok(()) => Ok(Struct { fields: Vec::new() }),
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
 }
 
 fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
@@ -1936,6 +2009,8 @@ pub async fn dispatch(
         "ResetQueue" => handle_reset_queue(state, body),
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
+        "DeleteWorkflow" => handle_delete_workflow(state, body),
+        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
