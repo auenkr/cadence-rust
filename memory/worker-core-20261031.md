@@ -37,6 +37,13 @@ internal History envelope. Error classification, domain-cache lookup,
 cross-cluster forwarding and processor lifecycle are still outstanding; this
 adapter is not yet wired into an executable processor.
 
+The processor contract now also includes Go's remote workflow ID format,
+signal timeout, 20-year execution timeout, 60-second workflow task timeout and
+`cadence-worker` remote identity. Domain-resolution planning matches Go's
+lookup-before-Abandon order and treats missing domains as successful skips;
+other lookup errors stop the batch. Remote client discovery/signal-with-start
+and History status classification remain open.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 

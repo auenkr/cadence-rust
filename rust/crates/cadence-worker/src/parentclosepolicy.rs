@@ -7,6 +7,15 @@ pub const POLICY_ABANDON: i32 = 0;
 pub const POLICY_REQUEST_CANCEL: i32 = 1;
 pub const POLICY_TERMINATE: i32 = 2;
 pub const TERMINATE_REASON: &str = "by parent close policy";
+pub const SIGNAL_TIMEOUT_MILLIS: u64 = 400;
+pub const WORKFLOW_ID_PREFIX: &str = "parent-close-policy-workflow";
+pub const WORKFLOW_EXECUTION_TIMEOUT_SECONDS: i32 = 20 * 365 * 24 * 60 * 60;
+pub const WORKFLOW_TASK_TIMEOUT_SECONDS: i32 = 60;
+pub const REMOTE_WORKFLOW_IDENTITY: &str = "cadence-worker";
+
+pub fn workflow_id(shard: usize) -> String {
+    format!("{WORKFLOW_ID_PREFIX}-{shard}")
+}
 
 /// Internal History RPC adapter used by Go's parent-close processor activity.
 /// This preserves the resolved domain UUID and parent-child validation fields
@@ -147,42 +156,70 @@ pub struct Operation {
     pub external_workflow_execution: Option<WorkflowExecution>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DomainLookupError {
+    EntityNotExists,
+    Other(String),
+}
+
 /// Convert a signal payload into the ordered History calls used by the Go
 /// activity. Missing per-child domain names fall back to the legacy request
 /// field; Abandon entries are intentionally omitted.
 pub fn operations(request: &Request) -> Result<Vec<Operation>, String> {
+    operations_with_domain_resolution(request, |_| {
+        Err(DomainLookupError::Other(
+            "domain ID is absent and no domain cache resolver was provided".to_owned(),
+        ))
+    })
+}
+
+/// Apply Go's domain-cache lookup ordering before interpreting the policy.
+/// Missing domains are successful skips; other lookup errors stop processing.
+pub fn operations_with_domain_resolution<F>(
+    request: &Request,
+    mut resolve_domain_id: F,
+) -> Result<Vec<Operation>, String>
+where
+    F: FnMut(&str) -> Result<String, DomainLookupError>,
+{
     let child_workflow_only = !request.parent_execution.workflow_id.is_empty()
         && !request.parent_execution.run_id.is_empty();
-    request
-        .executions
-        .iter()
-        .filter_map(|execution| {
-            let action = match execution.policy {
-                POLICY_ABANDON => return None,
-                POLICY_REQUEST_CANCEL => Action::RequestCancel,
-                POLICY_TERMINATE => Action::Terminate,
-                policy => {
-                    return Some(Err(format!("unknown parent close policy: {policy}")));
-                }
-            };
-            Some(Ok(Operation {
-                action,
-                domain_id: execution.domain_id.clone(),
-                domain_name: if execution.domain_name.is_empty() {
-                    request.domain_name.clone()
-                } else {
-                    execution.domain_name.clone()
-                },
-                workflow_id: execution.workflow_id.clone(),
-                first_execution_run_id: execution.run_id.clone(),
-                identity: WORKFLOW_TYPE,
-                reason: (action == Action::Terminate).then_some(TERMINATE_REASON),
-                child_workflow_only,
-                external_workflow_execution: child_workflow_only
-                    .then(|| request.parent_execution.clone()),
-            }))
-        })
-        .collect()
+    let mut operations = Vec::with_capacity(request.executions.len());
+    for execution in &request.executions {
+        let domain_name = if execution.domain_name.is_empty() {
+            request.domain_name.as_str()
+        } else {
+            execution.domain_name.as_str()
+        };
+        let domain_id = if execution.domain_id.is_empty() {
+            match resolve_domain_id(domain_name) {
+                Ok(domain_id) => domain_id,
+                Err(DomainLookupError::EntityNotExists) => continue,
+                Err(DomainLookupError::Other(error)) => return Err(error),
+            }
+        } else {
+            execution.domain_id.clone()
+        };
+        let action = match execution.policy {
+            POLICY_ABANDON => continue,
+            POLICY_REQUEST_CANCEL => Action::RequestCancel,
+            POLICY_TERMINATE => Action::Terminate,
+            policy => return Err(format!("unknown parent close policy: {policy}")),
+        };
+        operations.push(Operation {
+            action,
+            domain_id,
+            domain_name: domain_name.to_owned(),
+            workflow_id: execution.workflow_id.clone(),
+            first_execution_run_id: execution.run_id.clone(),
+            identity: WORKFLOW_TYPE,
+            reason: (action == Action::Terminate).then_some(TERMINATE_REASON),
+            child_workflow_only,
+            external_workflow_execution: child_workflow_only
+                .then(|| request.parent_execution.clone()),
+        });
+    }
+    Ok(operations)
 }
 
 pub fn registration() -> crate::runtime::WorkflowRegistration {
@@ -201,6 +238,11 @@ mod tests {
         assert_eq!(super::WORKFLOW_TYPE, "cadence-sys-parent-close-policy-workflow");
         assert_eq!(super::ACTIVITY_TYPE, "cadence-sys-parent-close-policy-activity");
         assert_eq!(super::SIGNAL_NAME, "ParentClosePolicyProcessorChannelName");
+        assert_eq!(super::workflow_id(7), "parent-close-policy-workflow-7");
+        assert_eq!(super::SIGNAL_TIMEOUT_MILLIS, 400);
+        assert_eq!(super::WORKFLOW_EXECUTION_TIMEOUT_SECONDS, 630_720_000);
+        assert_eq!(super::WORKFLOW_TASK_TIMEOUT_SECONDS, 60);
+        assert_eq!(super::REMOTE_WORKFLOW_IDENTITY, "cadence-worker");
     }
 
     #[test]
@@ -259,5 +301,25 @@ mod tests {
         assert_eq!(operation.first_execution_run_id, "run-1");
         assert!(operation.child_workflow_only);
         assert_eq!(operation.external_workflow_execution, Some(request.parent_execution));
+    }
+
+    #[test]
+    fn processor_resolves_domain_before_abandon_and_skips_missing_domains() {
+        let request = super::Request {
+            domain_name: "legacy-domain".to_owned(),
+            executions: vec![super::RequestDetail {
+                policy: super::POLICY_ABANDON,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut requested_domain = String::new();
+        let operations = super::operations_with_domain_resolution(&request, |domain| {
+            requested_domain = domain.to_owned();
+            Err(super::DomainLookupError::EntityNotExists)
+        })
+        .unwrap();
+        assert_eq!(requested_domain, "legacy-domain");
+        assert!(operations.is_empty());
     }
 }
