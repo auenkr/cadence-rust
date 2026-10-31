@@ -25,6 +25,10 @@ on:
         description: "Apply rustfmt to the four query-touched Matching files and upload the patch"
         type: boolean
         default: false
+      format_worker_files:
+        description: "Apply rustfmt to the Worker archiver/domain/replicator/asyncworkflow files and upload the patch"
+        type: boolean
+        default: false
       go_sdk_compile:
         description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
         type: boolean
@@ -402,6 +406,34 @@ jobs:
           name: tls-format-patch
           retention-days: 3
           path: ${{ runner.temp }}/tls-format.patch
+      - name: Format Worker parity files
+        if: inputs.format_worker_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          files=(
+            crates/cadence-worker/src/archiver.rs
+            crates/cadence-worker/src/archiver/request.rs
+            crates/cadence-worker/src/archiver/util.rs
+            crates/cadence-worker/src/archiver/workflow.rs
+            crates/cadence-worker/src/asyncworkflow.rs
+            crates/cadence-worker/src/asyncworkflow/consumer_manager.rs
+            crates/cadence-worker/src/domaindeprecation.rs
+            crates/cadence-worker/src/domaindeprecation/entities.rs
+            crates/cadence-worker/src/domaindeprecation/helpers.rs
+            crates/cadence-worker/src/domaindeprecation/workflow.rs
+            crates/cadence-worker/src/replicator.rs
+            crates/cadence-worker/src/replicator/domain_replication_processor.rs
+          )
+          rustfmt --edition 2021 --config skip_children=true "${files[@]}"
+          git -C "$GITHUB_WORKSPACE" diff --binary -- "${files[@]/#/rust/}" > "$RUNNER_TEMP/worker-format.patch"
+      - name: Upload Worker formatting patch
+        if: inputs.format_worker_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/worker-format.patch
       - name: Select fresh final target
         if: inputs.clean_target == true
         run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/cargo-target-final" >> "$GITHUB_ENV"
