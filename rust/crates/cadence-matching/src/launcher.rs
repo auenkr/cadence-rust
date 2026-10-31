@@ -1385,6 +1385,15 @@ async fn run_with_lifecycle(
             // persistence factory. The shared Matching adapters provide the
             // native SQL/Cassandra pools and read-compatible domain metadata
             // source; keep the handles alive for the process lifetime.
+            let serialization_encoding_config = state.admin.dynamic_config.clone();
+            let serialization_encoding: std::sync::Arc<dyn Fn() -> String + Send + Sync> =
+                std::sync::Arc::new(move || {
+                    let overlay = serialization_encoding_config.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::string(
+                        overlay.property_values("history.serializationEncoding"),
+                        "thriftrw",
+                    )
+                });
             let configured_matching_stores = if (run_matching || run_frontend)
                 && !embedded_development
             {
@@ -1401,22 +1410,14 @@ async fn run_with_lifecycle(
                             false,
                         )
                     });
-                let serialization_encoding_config = state.admin.dynamic_config.clone();
-                let serialization_encoding: std::sync::Arc<dyn Fn() -> String + Send + Sync> =
-                    std::sync::Arc::new(move || {
-                        let overlay = serialization_encoding_config.lock().expect("admin lock");
-                        cadence_persistence::dynamic_config::string(
-                            overlay.property_values("history.serializationEncoding"),
-                            "thriftrw",
-                        )
-                    });
+                let task_store_serialization_encoding = serialization_encoding.clone();
                 eprintln!("Matching startup: opening configured stores");
                 let mut stores = tokio::task::spawn_blocking(move || {
                     crate::matching_task_store::open_configured_default_store(
                         &persistence,
                         &cluster_name,
                         all_consistency_delete,
-                        serialization_encoding,
+                        task_store_serialization_encoding,
                     )
                 })
                 .await
@@ -1511,6 +1512,7 @@ async fn run_with_lifecycle(
                     std::sync::Arc::new(cadence_persistence::PersistedFrontendDomainManager::new(
                         state.domains.clone(),
                         persistence,
+                        serialization_encoding,
                     ));
             }
             let matching_domain_cache = if run_matching && !embedded_development {

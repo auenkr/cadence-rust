@@ -763,3 +763,12 @@ migration forward.
 - At edit time branch head was `b8e692f6c9b126e5acfed3ad6d71901ad19f23c5`;
   Frontend CI run [41195683733](https://github.com/auenkr/cadence-rust/actions/runs/41195683733)
   was still running for the preceding head and does not validate this change.
+- Pushed source head `3911f668de1d24e4afe87b5af5b4b1693fa65eb8`; exact-head
+  Frontend CI [41195924069](https://github.com/auenkr/cadence-rust/actions/runs/41195924069)
+  failed Clippy with two Cassandra writer type errors (`ToThrift`'s `Sized`
+  generic and byte-encoded bad-binary encoding). Both were repaired. During
+  failure review, found the SQL path also encoded nested domain blobs as JSON;
+  this continuation changes the shared DomainRecord conversion to Go's typed
+  ThriftRW / dynamic encoding (active clusters use `thriftrw_snappy`) and wires
+  the same dynamic encoding closure into `PersistedFrontendDomainManager`.
+  These repairs are pending push and exact-head CI; no local Cargo command ran.

@@ -46,7 +46,7 @@ impl CassandraDomainMetadataPersistence {
         }
     }
 
-    fn serialize<T: ToThrift>(value: &T, encoding: BlobEncoding) -> Result<Vec<u8>, String> {
+    fn serialize<T: ToThrift + ?Sized>(value: &T, encoding: BlobEncoding) -> Result<Vec<u8>, String> {
         let mut writer = Writer::new();
         write_struct(&mut writer, &value.to_thrift());
         encoding
@@ -69,6 +69,9 @@ impl CassandraDomainMetadataPersistence {
         &self,
         metadata: &MatchingDomainMetadata,
     ) -> Result<CassandraDomainConfigUdt, String> {
+        if let Some(error) = &metadata.config_decode_error {
+            return Err(error.clone());
+        }
         let encoding = BlobEncoding::parse(&(self.serialization_encoding)())
             .map_err(|error| error.to_string())?;
         let blob = |value: Option<&dyn ToThrift>, encoding: BlobEncoding| {
@@ -98,7 +101,7 @@ impl CassandraDomainMetadataPersistence {
             visibility_archival_status: Some(metadata.visibility_archival_status_raw as i32),
             visibility_archival_uri: Some(metadata.configuration.visibility_archival_uri.clone()),
             bad_binaries: blob(bad_binaries, encoding)?,
-            bad_binaries_encoding: metadata.decoded_bad_binaries.as_ref().map(|_| encoding.as_str().to_owned()),
+            bad_binaries_encoding: metadata.decoded_bad_binaries.as_ref().map(|_| encoding.as_str().as_bytes().to_vec()),
             isolation_groups: blob(isolation_groups, encoding)?,
             isolation_groups_encoding: metadata.decoded_isolation_groups.as_ref().map(|_| encoding.as_str().to_owned()),
             async_workflow_config: blob(async_config, encoding)?,
