@@ -272,6 +272,9 @@ pub struct CallerMetadata {
     pub feature_version: String,
     /// Isolation group carried by Cadence's request context.
     pub isolation_group: String,
+    /// Inbound request deadline. Go rejects long polls without one and polls
+    /// whose remaining budget is shorter than two seconds.
+    pub deadline: Option<std::time::Instant>,
     /// Original transport headers copied into Go's async queue message.
     pub original_headers: HashMap<String, String>,
 }
@@ -767,6 +770,12 @@ impl<B: WorkflowBackend> Handler<B> {
                     .map_err(|error| CadenceError::Unknown(error.to_string()));
             }
         }
+        if matches!(
+            operation,
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
+        ) {
+            validate_long_poll_deadline(caller.deadline)?;
+        }
         let request = self.validate_request(operation, request)?;
         if matches!(
             operation,
@@ -895,6 +904,16 @@ impl<B: WorkflowBackend> Handler<B> {
                 )
                 .await?
             {
+                return Ok(serde_json::json!({}));
+            }
+        }
+        if matches!(
+            operation,
+            WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
+        ) {
+            // Go repeats this check after the isolation-group wait because
+            // the wait consumes part of the caller's long-poll budget.
+            if validate_long_poll_deadline(caller.deadline).is_err() {
                 return Ok(serde_json::json!({}));
             }
         }
@@ -1927,6 +1946,22 @@ fn validate_domain(request: &Value) -> Result<(), CadenceError> {
         .is_empty()
     {
         return Err(cadence_api::validation::err_domain_not_set().into());
+    }
+    Ok(())
+}
+
+fn validate_long_poll_deadline(deadline: Option<std::time::Instant>) -> Result<(), CadenceError> {
+    let Some(deadline) = deadline else {
+        return Err(CadenceError::BadRequest(BadRequestError::new(
+            "Context timeout is not set.",
+        )));
+    };
+    if deadline.saturating_duration_since(std::time::Instant::now())
+        < std::time::Duration::from_secs(2)
+    {
+        return Err(CadenceError::BadRequest(BadRequestError::new(
+            "Context timeout is too short.",
+        )));
     }
     Ok(())
 }
@@ -3369,16 +3404,46 @@ mod tests {
     #[tokio::test]
     async fn poll_methods_validate_task_list_before_matching_call() {
         let handler = Handler::new(FakeBackend::default());
+        let caller = CallerMetadata {
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+            ..Default::default()
+        };
         for operation in ["PollForActivityTask", "PollForDecisionTask"] {
             let error = handler
-                .dispatch(
+                .dispatch_with_metadata(
                     operation,
                     serde_json::json!({"domain": "shop", "taskList": {"name": ""}}),
+                    &caller,
                 )
                 .await
                 .unwrap_err();
             assert_eq!(error.to_string(), "TaskList is not set on request.");
         }
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn poll_requires_context_deadline_and_two_second_minimum() {
+        let handler = Handler::new(FakeBackend::default());
+        let request = serde_json::json!({
+            "domain": "shop",
+            "taskList": {"name": "orders"}
+        });
+        let missing = handler
+            .dispatch("PollForActivityTask", request.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(missing.to_string(), "Context timeout is not set.");
+
+        let short_deadline = CallerMetadata {
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let short = handler
+            .dispatch_with_metadata("PollForActivityTask", request, &short_deadline)
+            .await
+            .unwrap_err();
+        assert_eq!(short.to_string(), "Context timeout is too short.");
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
@@ -3390,6 +3455,7 @@ mod tests {
             .with_poll_admission(admission.clone());
         let caller = CallerMetadata {
             isolation_group: "blue-workers".into(),
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
             ..Default::default()
         };
         let response = handler
@@ -3423,6 +3489,7 @@ mod tests {
             .with_domain_lookup(Arc::new(StaticDomainLookup));
         let caller = CallerMetadata {
             isolation_group: "blue-workers".into(),
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
             ..Default::default()
         };
         for operation in ["PollForActivityTask", "PollForDecisionTask"] {

@@ -36,6 +36,20 @@
   checksum, decision-poll flag, empty response and skipped backend dispatch.
   This remains unvalidated pending package CI and still needs runtime policy
   wiring plus request-deadline/cancellation integration.
+- Added Go's two-second minimum inbound long-poll deadline check and exact
+  missing/too-short errors, repeated after the admission wait with Go's empty
+  response behavior. Tests cover missing/short deadlines and pass valid
+  deadlines into the existing poll mapping tests. The transport still needs to
+  supply `CallerMetadata.deadline` and install the admission policy.
+- Latest fetched `origin/frontend-core2` is `7d6dbaf25`. Its additions after
+  the merged `02fb3c1c2` limiter work are a small compile fix already applied
+  here and documentation; no new History/Matching adapter or persistence
+  interface is available. Its branch snapshot omits the workflow implementation
+  commits because it diverged from this task branch, so it was not merged.
+- Run [41192747664](https://github.com/auenkr/cadence-rust/actions/runs/41192747664)
+  at `f0ada38db53d0cdd3eecd8c0f5d0f83ef76ade97` was still `in_progress` at the
+  last status read. The next exact-head package run covers the poll admission,
+  deadline, and test changes.
 
 ## Current branch and skeleton state
 
