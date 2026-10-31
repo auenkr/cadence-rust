@@ -8,6 +8,8 @@ use crate::matching_cassandra_exec::{bound, BoundValues};
 use crate::matching_domain_metadata::{
     DomainMetadataPersistence, MatchingDomainMetadata,
 };
+use crate::matching_blob::BlobEncoding;
+use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
 use chrono::{DateTime, Utc};
 use scylla::statement::{batch::{Batch, BatchType}, Statement};
 use std::sync::Arc;
@@ -24,6 +26,7 @@ const UPDATE_METADATA: &str = "UPDATE domains_by_name_v2 SET notification_versio
 /// tables and the same conditional metadata-version fence as Go's CDB.
 pub struct CassandraDomainMetadataPersistence {
     driver: Arc<CassandraBlockingSession>,
+    serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
 }
 
 impl std::fmt::Debug for CassandraDomainMetadataPersistence {
@@ -33,8 +36,22 @@ impl std::fmt::Debug for CassandraDomainMetadataPersistence {
 }
 
 impl CassandraDomainMetadataPersistence {
-    pub fn new(driver: Arc<CassandraBlockingSession>) -> Self {
-        Self { driver }
+    pub fn new(
+        driver: Arc<CassandraBlockingSession>,
+        serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+    ) -> Self {
+        Self {
+            driver,
+            serialization_encoding,
+        }
+    }
+
+    fn serialize<T: ToThrift>(value: &T, encoding: BlobEncoding) -> Result<Vec<u8>, String> {
+        let mut writer = Writer::new();
+        write_struct(&mut writer, &value.to_thrift());
+        encoding
+            .encode(&writer.into_bytes())
+            .map_err(|error| error.to_string())
     }
 
     fn domain_udt(metadata: &MatchingDomainMetadata) -> Result<CassandraDomainUdt, String> {
@@ -48,14 +65,30 @@ impl CassandraDomainMetadataPersistence {
         })
     }
 
-    fn config_udt(metadata: &MatchingDomainMetadata) -> CassandraDomainConfigUdt {
-        let blob = |value: &Option<crate::matching_domain_metadata::GoDomainBlob>| {
-            value.as_ref().map(|value| value.data.clone())
+    fn config_udt(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<CassandraDomainConfigUdt, String> {
+        let encoding = BlobEncoding::parse(&(self.serialization_encoding)())
+            .map_err(|error| error.to_string())?;
+        let blob = |value: Option<&dyn ToThrift>, encoding: BlobEncoding| {
+            value
+                .map(|value| Self::serialize(value, encoding))
+                .transpose()
         };
-        let encoding = |value: &Option<crate::matching_domain_metadata::GoDomainBlob>| {
-            value.as_ref().map(|value| value.encoding.clone())
-        };
-        CassandraDomainConfigUdt {
+        let bad_binaries = metadata
+            .decoded_bad_binaries
+            .as_ref()
+            .map(|value| value as &dyn ToThrift);
+        let isolation_groups = metadata
+            .decoded_isolation_groups
+            .as_ref()
+            .map(|value| value as &dyn ToThrift);
+        let async_config = metadata
+            .decoded_async_workflow_config
+            .as_ref()
+            .map(|value| value as &dyn ToThrift);
+        Ok(CassandraDomainConfigUdt {
             retention: metadata.configuration.workflow_execution_retention_period_in_days,
             emit_metric: metadata.configuration.emit_metric,
             archival_bucket: Some(metadata.archival_bucket.clone()),
@@ -64,33 +97,34 @@ impl CassandraDomainMetadataPersistence {
             history_archival_uri: Some(metadata.configuration.history_archival_uri.clone()),
             visibility_archival_status: Some(metadata.visibility_archival_status_raw as i32),
             visibility_archival_uri: Some(metadata.configuration.visibility_archival_uri.clone()),
-            bad_binaries: blob(&metadata.bad_binaries),
-            bad_binaries_encoding: encoding(&metadata.bad_binaries).map(String::into_bytes),
-            isolation_groups: blob(&metadata.isolation_groups),
-            isolation_groups_encoding: encoding(&metadata.isolation_groups),
-            async_workflow_config: blob(&metadata.async_workflow_config),
-            async_workflow_config_encoding: encoding(&metadata.async_workflow_config),
-        }
+            bad_binaries: blob(bad_binaries, encoding)?,
+            bad_binaries_encoding: metadata.decoded_bad_binaries.as_ref().map(|_| encoding.as_str().to_owned()),
+            isolation_groups: blob(isolation_groups, encoding)?,
+            isolation_groups_encoding: metadata.decoded_isolation_groups.as_ref().map(|_| encoding.as_str().to_owned()),
+            async_workflow_config: blob(async_config, encoding)?,
+            async_workflow_config_encoding: metadata.decoded_async_workflow_config.as_ref().map(|_| encoding.as_str().to_owned()),
+        })
     }
 
-    fn replication_udt(metadata: &MatchingDomainMetadata) -> CassandraDomainReplicationConfigUdt {
-        let active = metadata.active_clusters_config.as_ref();
-        CassandraDomainReplicationConfigUdt {
+    fn replication_udt(metadata: &MatchingDomainMetadata) -> Result<CassandraDomainReplicationConfigUdt, String> {
+        let active = metadata.replication.active_clusters.as_ref();
+        let encoding = BlobEncoding::ThriftRWSnappy;
+        Ok(CassandraDomainReplicationConfigUdt {
             active_cluster_name: Some(metadata.replication.active_cluster_name.clone()),
             clusters: Some(metadata.replication.clusters.iter().map(|cluster| {
                 CassandraClusterReplicationConfigUdt { cluster_name: Some(cluster.cluster_name.clone()) }
             }).collect()),
-            active_clusters_config: active.map(|value| value.data.clone()),
-            active_clusters_config_encoding: active.map(|value| value.encoding.clone()),
-        }
+            active_clusters_config: active.map(|value| Self::serialize(value, encoding)).transpose()?,
+            active_clusters_config_encoding: active.map(|_| encoding.as_str().to_owned()),
+        })
     }
 
     fn bound_domain(metadata: &MatchingDomainMetadata) -> Result<CassandraDomainUdt, String> {
         Self::domain_udt(metadata)
     }
 
-    fn mutation_values(metadata: &MatchingDomainMetadata) -> Result<(CassandraDomainUdt, CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt), String> {
-        Ok((Self::domain_udt(metadata)?, Self::config_udt(metadata), Self::replication_udt(metadata)))
+    fn mutation_values(&self, metadata: &MatchingDomainMetadata) -> Result<(CassandraDomainUdt, CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt), String> {
+        Ok((Self::domain_udt(metadata)?, self.config_udt(metadata)?, Self::replication_udt(metadata)?))
     }
 
     fn lwt(&self, query: &str, values: BoundValues) -> Result<bool, String> {
@@ -111,8 +145,12 @@ impl CassandraDomainMetadataPersistence {
             .map(|(applied,)| applied).ok_or_else(|| "Cassandra conditional batch returned no result row".to_string())
     }
 
-    fn update_values(metadata: &MatchingDomainMetadata, expected: i64) -> Result<BoundValues, String> {
-        let (domain, config, replication) = Self::mutation_values(metadata)?;
+    fn update_values(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected: i64,
+    ) -> Result<BoundValues, String> {
+        let (domain, config, replication) = self.mutation_values(metadata)?;
         Ok(vec![
             bound(domain), bound(config), bound(replication), bound(metadata.config_version),
             bound(metadata.failover_version), bound(metadata.failover_notification_version),
@@ -150,7 +188,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         // Go inserts the legacy UUID row before reading the current singleton
         // version and opening its conditional batch.
         let expected_version = self.metadata_version()?;
-        let (domain, config, replication) = Self::mutation_values(metadata)?;
+        let (domain, config, replication) = self.mutation_values(metadata)?;
         let created = DateTime::<Utc>::from_timestamp_nanos(metadata.last_updated_time_nanos);
         let create_values = vec![
             bound(DOMAIN_PARTITION), bound(metadata.info.name.clone()), bound(domain), bound(config),
@@ -168,7 +206,7 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
     }
 
     fn update_domain(&self, metadata: &MatchingDomainMetadata, expected_version: i64) -> Result<(), String> {
-        let update = Self::update_values(metadata, expected_version)?;
+        let update = self.update_values(metadata, expected_version)?;
         if self.batch_lwt(&[UPDATE_DOMAIN_V2, UPDATE_METADATA], vec![update, Self::metadata_cas_values(expected_version)])? {
             Ok(())
         } else {

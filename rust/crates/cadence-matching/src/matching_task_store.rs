@@ -211,7 +211,10 @@ pub fn open_configured_default_store(
             domain_metadata_source: Some(Arc::new(domain_metadata)),
             domain_persistence: Some(domain_persistence),
             domain_metadata_persistence: Some(Arc::new(
-                cadence_persistence::matching_domain_cassandra::CassandraDomainMetadataPersistence::new(driver),
+                cadence_persistence::matching_domain_cassandra::CassandraDomainMetadataPersistence::new(
+                    driver,
+                    serialization_encoding,
+                ),
             )),
         });
     }
