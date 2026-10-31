@@ -1141,3 +1141,11 @@ Frontend parity until these are implemented and validated.
 - Fresh-target run [41200219212](https://github.com/auenkr/cadence-rust/actions/runs/41200219212)
   is dispatched for `cadence-frontend` with `clean_target=true` at
   `974a6efc7db54ca8600bc3799457e7721041751f`; outcome is pending.
+- Follow-up source audit confirmed the Cassandra domain adapter is selected by
+  `open_configured_default_store` for Cassandra, exposed as
+  `ConfiguredMatchingStores::domain_persistence`, and wrapped in
+  `GoSqlFrontendDomainManager` by the Frontend launcher. The new Cassandra
+  write implementation is therefore connected to Frontend domain operations;
+  this does not add workflow execution, history, or visibility persistence.
+  Run 41200219212 remains in progress (last observed in its Go owner-ordering
+  oracle stage); no CI conclusion yet.
