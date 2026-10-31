@@ -772,3 +772,23 @@ migration forward.
   ThriftRW / dynamic encoding (active clusters use `thriftrw_snappy`) and wires
   the same dynamic encoding closure into `PersistedFrontendDomainManager`.
   These repairs are pending push and exact-head CI; no local Cargo command ran.
+
+## Rebase onto latest core2 — 2026-10-31
+
+- Fetched `origin/frontend-core2` at `bce4cbe99` and rebased this branch onto
+  that tip. The source commits replayed with two manual conflict resolutions:
+  retained core2's SQL persistence contract and existing Frontend persisted
+  manager, while preserving the Frontend mutation adapter for Cassandra and
+  the cross-backend startup wiring. The rebase completed at
+  `0fd27b832a52a7b0ac26673cd20b42d3cf1babc2` and was force-pushed to
+  `origin/frontend-domain-admin`.
+- Exact-head Frontend package CI was dispatched as
+  [41196648311](https://github.com/auenkr/cadence-rust/actions/runs/41196648311).
+  It is pending; inspect the exact-head result before treating the rebased
+  source as validated. No Cargo command ran locally.
+- Current blocker focus remains durable replication queue/audit behavior and
+  failover history across restart. The domain manager writes SQL/Cassandra
+  domain rows, but replication task publication/consumption is not backed by
+  persistence yet. Admin DLQ/history, live membership, scheduler workflow
+  wiring, RPC lifecycle/metrics, and mixed Go/Rust failure/restart/recovery
+  validation remain open.
