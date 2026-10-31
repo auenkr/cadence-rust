@@ -93,3 +93,29 @@
   authorization, metrics/logging, and SDK mixed-service tests remain open.
 - The current source has not yet had a completed fresh CI result. Mixed
   Go/Rust failure, restart and recovery validation has not been run.
+
+## Continuation checkpoint
+
+- Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
+  the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.
+- CI run [41174245899](https://github.com/auenkr/cadence-rust/actions/runs/41174245899)
+  completed `success` at exact head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.
+  It passed package Clippy, Formatting, and Test; Frontend runtime smoke was
+  skipped because this was a package-selected run. The workflow's
+  `format_frontend_files` option ran rustfmt on the CI runner and its
+  `frontend-format-patch` artifact was applied to the branch.
+- Added Admin raw-history request validation (Go validation order, positive
+  page size, paired event/version bounds, UUID input forms accepted by
+  `google/uuid`) and Elasticsearch search-attribute type mapping with unit
+  cases. These working-tree changes are not included in run 41174245899 and
+  remain unverified until formatted and dispatched in a new package run.
+
+The handlers remain a partial port. Domain methods are not wired to real
+persistence/runtime clients; update cooldown/failover transmission and domain
+replication queue work are missing. Admin authorization and dynamic-config
+backing integration, live membership collection, search-attribute dynamic
+config/ES mapping mutation, DLQ/queue RPCs and full raw-history pagination are
+missing. Schedule validation helpers are not wired to scheduler workflows;
+RPC lifecycle, retries, authorization and operational metrics remain missing.
+Do not treat helper tests or this CI run as Frontend parity or move the service
+migration forward.
