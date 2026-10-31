@@ -9,7 +9,7 @@ use crate::matching_domain_metadata::{
     MatchingDomainPage,
 };
 use crate::matching_mysql::{MySqlTaskStore, MySqlTaskStoreConfig};
-use mysql_async::prelude::Queryable as AsyncQueryable;
+use mysql_async::{prelude::Queryable as AsyncQueryable, TxOpts};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -217,6 +217,102 @@ impl MySqlDomainMetadataStore {
     /// Read the cluster-wide notification version from Go's single metadata row.
     pub fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
         self.get_metadata_version_with_timeout(GO_DOMAIN_PERSISTENCE_TIMEOUT)
+    }
+
+    /// Insert a Go-compatible domain row and advance the shared metadata
+    /// notification version in the same transaction. `expected_version` is
+    /// the value read before building the domain update, matching Go's
+    /// lock-and-compare persistence contract.
+    pub fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        self.write_domain(metadata, expected_version, true)
+    }
+
+    /// Replace the serialized Go domain row and advance its notification
+    /// version atomically.
+    pub fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        self.write_domain(metadata, expected_version, false)
+    }
+
+    /// Delete a domain by UUID, matching Go's SQL DeleteDomain contract. Go
+    /// does not advance `domain_metadata.notification_version` for deletion.
+    pub fn delete_domain(&self, id: &str) -> Result<(), MatchingDomainMetadataError> {
+        let uuid = uuid::Uuid::parse_str(id)
+            .map_err(|_| MatchingDomainMetadataError::InvalidUuid(id.to_owned()))?;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    connection
+                        .exec_drop(
+                            "DELETE FROM domains WHERE shard_id = ? AND id = ?",
+                            (GO_DEFAULT_SHARD_ID, uuid.as_bytes().to_vec()),
+                        )
+                        .await
+                })
+            })
+            .map_err(query_error)
+    }
+
+    fn write_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+        create: bool,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid).map_err(|_| {
+            MatchingDomainMetadataError::InvalidUuid(metadata.info.uuid.clone())
+        })?;
+        let name = metadata.info.name.clone();
+        let is_global_domain = metadata.is_global_domain;
+        let data = crate::matching_domain_metadata::encode_go_sql_domain_metadata(metadata)?;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let mut transaction = connection.start_transaction(TxOpts::default()).await?;
+                    if create {
+                        transaction
+                            .exec_drop(
+                                "INSERT INTO domains (shard_id, id, name, data, data_encoding, is_global) VALUES (?, ?, ?, ?, 'thriftrw', ?)",
+                                (GO_DEFAULT_SHARD_ID, uuid.as_bytes().to_vec(), name, data, is_global_domain),
+                            )
+                            .await?;
+                    } else {
+                        transaction
+                            .exec_drop(
+                                "UPDATE domains SET data = ?, data_encoding = 'thriftrw' WHERE shard_id = ? AND id = ?",
+                                (data, GO_DEFAULT_SHARD_ID, uuid.as_bytes().to_vec()),
+                            )
+                            .await?;
+                        if transaction.affected_rows() != 1 {
+                            return Err(mysql_async::Error::Other(Box::new(std::io::Error::other(
+                                "domain update affected no rows",
+                            ))));
+                        }
+                    }
+                    transaction
+                        .exec_drop(
+                            "UPDATE domain_metadata SET notification_version = notification_version + 1 WHERE notification_version = ?",
+                            (expected_version,),
+                        )
+                        .await?;
+                    if transaction.affected_rows() != 1 {
+                        return Err(mysql_async::Error::Other(Box::new(std::io::Error::other(
+                            "domain metadata notification version changed",
+                        ))));
+                    }
+                    transaction.commit().await
+                })
+            })
+            .map_err(query_error)
     }
 
     /// Read metadata with the remaining Go cache refresh budget.
