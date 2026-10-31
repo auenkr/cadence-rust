@@ -1081,3 +1081,17 @@ migration forward.
   membership, domain update cooldown and failover audit, Admin backing stores,
   and mixed Go/Rust failure/restart/recovery acceptance. This slice does not
   claim Frontend parity.
+
+## DLQ acknowledgement boundaries — 2026-10-31
+
+- Added dedicated DLQ acknowledgement-level persistence for MySQL,
+  PostgreSQL, and Cassandra using Go's `queue_metadata` row for queue type -1.
+  Domain DLQ reads now begin at the stored `domainReplication` ack level (or a
+  supplied page cursor); purge deletes `(ackLevel, inclusiveEnd]`, then advances
+  the ack level while preserving Go's warning-only update failure behavior.
+  Default inclusive end now uses Go's `math.MaxInt64 - 1` sentinel. Added
+  little-endian token regression coverage.
+- Exact-head package CI run
+  [41206134407](https://github.com/auenkr/cadence-rust/actions/runs/41206134407)
+  is still running against `8a1dd43aed112ff951c9c949180079f0347387c1` and does
+  not validate this added ack-level slice. No local Cargo command was run.

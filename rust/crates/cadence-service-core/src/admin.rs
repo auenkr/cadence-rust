@@ -824,9 +824,8 @@ pub async fn read_dlq_messages(
             "domain replication DLQ is unavailable for this persistence backend".into(),
         );
     };
-    let first_message_id = match decode_domain_dlq_page_token(&req.next_page_token) {
-        Ok(Some(id)) => id,
-        Ok(None) => -1,
+    let ack_levels = match persistence.get_domain_replication_dlq_ack_levels() {
+        Ok(levels) => levels,
         Err(error) => {
             return crate::handlers::error_response(
                 "InternalServiceError",
@@ -835,7 +834,19 @@ pub async fn read_dlq_messages(
             )
         }
     };
-    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX);
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    let first_message_id = match decode_domain_dlq_page_token(&req.next_page_token) {
+        Ok(Some(id)) => id,
+        Ok(None) => ack_level,
+        Err(error) => {
+            return crate::handlers::error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let page_size = if req.maximum_page_size > 0 {
         req.maximum_page_size as usize
     } else {
@@ -910,9 +921,26 @@ pub async fn purge_dlq_messages(
             "domain replication DLQ is unavailable for this persistence backend".into(),
         );
     };
-    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX);
-    match persistence.delete_domain_replication_dlq_range(-1, end_message_id) {
-        Ok(()) => ok_json(cadence_api::admin::PurgeDLQMessagesResponse {}),
+    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let ack_levels = match persistence.get_domain_replication_dlq_ack_levels() {
+        Ok(levels) => levels,
+        Err(error) => {
+            return crate::handlers::error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    match persistence.delete_domain_replication_dlq_range(ack_level, end_message_id) {
+        Ok(()) => {
+            // Go logs, but does not fail the purge, when the acknowledgement
+            // metadata update fails after the range delete succeeds.
+            let _ = persistence
+                .update_domain_replication_dlq_ack_level("domainReplication".into(), end_message_id);
+            ok_json(cadence_api::admin::PurgeDLQMessagesResponse {})
+        }
         Err(error) => crate::handlers::error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -928,7 +956,9 @@ fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
     if token.len() != 8 {
         return Err(format!("invalid next page token {token:?}"));
     }
-    Ok(Some(i64::from_le_bytes(token.try_into().expect("8-byte token"))))
+    Ok(Some(i64::from_le_bytes(
+        token.try_into().expect("8-byte token"),
+    )))
 }
 
 fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
@@ -1529,6 +1559,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn domain_dlq_page_tokens_use_go_little_endian_message_ids() {
+        let token = encode_domain_dlq_page_token(0x0102_0304_0506_0708);
+        assert_eq!(token, vec![8, 7, 6, 5, 4, 3, 2, 1]);
+        assert_eq!(
+            decode_domain_dlq_page_token(&token),
+            Ok(Some(0x0102_0304_0506_0708))
+        );
+        assert_eq!(decode_domain_dlq_page_token(&[]), Ok(None));
+        assert!(decode_domain_dlq_page_token(&[1]).is_err());
+    }
 
     #[test]
     fn describe_cluster_matches_go_versions_and_single_host_rings() {

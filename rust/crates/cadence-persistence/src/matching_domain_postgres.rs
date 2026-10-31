@@ -214,6 +214,23 @@ impl PostgresDomainMetadataStore {
         cluster_name: String,
         message_id: i64,
     ) -> Result<(), MatchingDomainMetadataError> {
+        self.update_queue_ack_level(GO_DOMAIN_REPLICATION_QUEUE_TYPE, cluster_name, message_id)
+    }
+
+    pub fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        self.update_queue_ack_level(GO_DOMAIN_REPLICATION_DLQ_TYPE, cluster_name, message_id)
+    }
+
+    fn update_queue_ack_level(
+        &self,
+        queue_type: i32,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
         let mut client = self
@@ -225,7 +242,7 @@ impl PostgresDomainMetadataStore {
         let current = transaction
             .query_opt(
                 "SELECT data FROM queue_metadata WHERE queue_type=$1 FOR UPDATE",
-                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+                &[&queue_type],
             )
             .map_err(domain_error)?
             .map(|row| row.try_get::<_, Vec<u8>>(0))
@@ -255,14 +272,14 @@ impl PostgresDomainMetadataStore {
             transaction
                 .execute(
                     "UPDATE queue_metadata SET data=$1 WHERE queue_type=$2",
-                    &[&data, &GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+                    &[&data, &queue_type],
                 )
                 .map_err(domain_error)?;
         } else {
             transaction
                 .execute(
                     "INSERT INTO queue_metadata (queue_type, data) VALUES ($1, $2)",
-                    &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE, &data],
+                    &[&queue_type, &data],
                 )
                 .map_err(domain_error)?;
         }
@@ -271,6 +288,19 @@ impl PostgresDomainMetadataStore {
 
     pub fn get_domain_replication_ack_levels(
         &self,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        self.get_queue_ack_levels(GO_DOMAIN_REPLICATION_QUEUE_TYPE)
+    }
+
+    pub fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        self.get_queue_ack_levels(GO_DOMAIN_REPLICATION_DLQ_TYPE)
+    }
+
+    fn get_queue_ack_levels(
+        &self,
+        queue_type: i32,
     ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
@@ -283,7 +313,7 @@ impl PostgresDomainMetadataStore {
         let data = transaction
             .query_opt(
                 "SELECT data FROM queue_metadata WHERE queue_type=$1",
-                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+                &[&queue_type],
             )
             .map_err(domain_error)?
             .map(|row| row.try_get::<_, Vec<u8>>(0))
@@ -719,6 +749,26 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
     fn domain_replication_dlq_size(&self) -> Result<i64, String> {
         PostgresDomainMetadataStore::domain_replication_dlq_size(self)
             .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        PostgresDomainMetadataStore::get_domain_replication_dlq_ack_levels(self)
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        PostgresDomainMetadataStore::update_domain_replication_dlq_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
+        .map_err(|error| error.to_string())
     }
 
     fn get_domain_replication_ack_levels(

@@ -245,6 +245,20 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     fn domain_replication_dlq_size(&self) -> Result<i64, String> {
         Err("domain replication DLQ is unavailable for this persistence backend".into())
     }
+
+    fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn update_domain_replication_dlq_ack_level(
+        &self,
+        _cluster_name: String,
+        _message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
 }
 
 /// Convert Cassandra's nested domain/config/replication UDTs through the same

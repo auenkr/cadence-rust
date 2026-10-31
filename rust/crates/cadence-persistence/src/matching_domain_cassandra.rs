@@ -192,11 +192,28 @@ impl CassandraDomainMetadataPersistence {
         cluster_name: String,
         message_id: i64,
     ) -> Result<(), String> {
+        self.update_queue_ack_level(DOMAIN_REPLICATION_QUEUE_TYPE, cluster_name, message_id)
+    }
+
+    pub fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        self.update_queue_ack_level(DOMAIN_REPLICATION_DLQ_TYPE, cluster_name, message_id)
+    }
+
+    fn update_queue_ack_level(
+        &self,
+        queue_type: i32,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
         use std::collections::HashMap;
         let session = self.driver.session();
         let select = || self.driver.run(session.query_unpaged(
             DOMAIN_QUEUE_METADATA_SELECT,
-            (DOMAIN_REPLICATION_QUEUE_TYPE,),
+            (queue_type,),
         )).map_err(|error| error.to_string());
         let result = select()?;
         let rows = result.into_rows_result().map_err(|error| error.to_string())?;
@@ -210,7 +227,7 @@ impl CassandraDomainMetadataPersistence {
         levels.insert(cluster_name, message_id);
         let result = self.driver.run(session.query_unpaged(
             DOMAIN_QUEUE_METADATA_UPDATE,
-            (levels, version + 1, Utc::now(), DOMAIN_REPLICATION_QUEUE_TYPE, version),
+            (levels, version + 1, Utc::now(), queue_type, version),
         )).map_err(|error| error.to_string())?;
         let rows = result.into_rows_result().map_err(|error| error.to_string())?;
         let applied = rows.maybe_first_row::<(bool,)>().map_err(|error| error.to_string())?
@@ -221,11 +238,24 @@ impl CassandraDomainMetadataPersistence {
     pub fn get_domain_replication_ack_levels(
         &self,
     ) -> Result<std::collections::HashMap<String, i64>, String> {
+        self.get_queue_ack_levels(DOMAIN_REPLICATION_QUEUE_TYPE)
+    }
+
+    pub fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        self.get_queue_ack_levels(DOMAIN_REPLICATION_DLQ_TYPE)
+    }
+
+    fn get_queue_ack_levels(
+        &self,
+        queue_type: i32,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
         use std::collections::HashMap;
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
             DOMAIN_QUEUE_METADATA_SELECT,
-            (DOMAIN_REPLICATION_QUEUE_TYPE,),
+            (queue_type,),
         )).map_err(|error| error.to_string())?;
         let rows = result.into_rows_result().map_err(|error| error.to_string())?;
         Ok(rows.maybe_first_row::<(HashMap<String, i64>, i64)>()
@@ -462,6 +492,24 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
 
     fn domain_replication_dlq_size(&self) -> Result<i64, String> {
         CassandraDomainMetadataPersistence::domain_replication_dlq_size(self)
+    }
+
+    fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        CassandraDomainMetadataPersistence::get_domain_replication_dlq_ack_levels(self)
+    }
+
+    fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        CassandraDomainMetadataPersistence::update_domain_replication_dlq_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
     }
 
     fn get_domain_replication_ack_levels(

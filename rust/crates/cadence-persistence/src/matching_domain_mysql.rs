@@ -541,6 +541,23 @@ impl MySqlDomainMetadataStore {
         cluster_name: String,
         message_id: i64,
     ) -> Result<(), MatchingDomainMetadataError> {
+        self.update_queue_ack_level(GO_DOMAIN_REPLICATION_QUEUE_TYPE, cluster_name, message_id)
+    }
+
+    pub fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        self.update_queue_ack_level(GO_DOMAIN_REPLICATION_DLQ_TYPE, cluster_name, message_id)
+    }
+
+    fn update_queue_ack_level(
+        &self,
+        queue_type: i32,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
         use mysql_async::prelude::Queryable;
         let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
         self.pool
@@ -552,7 +569,7 @@ impl MySqlDomainMetadataStore {
                     let current: Option<Vec<u8>> = transaction
                         .exec_first(
                             "SELECT data FROM queue_metadata WHERE queue_type=? FOR UPDATE",
-                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                            (queue_type,),
                         )
                         .await?;
                     let has_current = current.is_some();
@@ -575,14 +592,14 @@ impl MySqlDomainMetadataStore {
                         transaction
                             .exec_drop(
                                 "UPDATE queue_metadata SET data=? WHERE queue_type=?",
-                                (data, GO_DOMAIN_REPLICATION_QUEUE_TYPE),
+                                (data, queue_type),
                             )
                             .await?;
                     } else {
                         transaction
                             .exec_drop(
                                 "INSERT INTO queue_metadata (queue_type, data) VALUES (?, ?)",
-                                (GO_DOMAIN_REPLICATION_QUEUE_TYPE, data),
+                                (queue_type, data),
                             )
                             .await?;
                     }
@@ -595,6 +612,19 @@ impl MySqlDomainMetadataStore {
     pub fn get_domain_replication_ack_levels(
         &self,
     ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        self.get_queue_ack_levels(GO_DOMAIN_REPLICATION_QUEUE_TYPE)
+    }
+
+    pub fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        self.get_queue_ack_levels(GO_DOMAIN_REPLICATION_DLQ_TYPE)
+    }
+
+    fn get_queue_ack_levels(
+        &self,
+        queue_type: i32,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
         use mysql_async::prelude::Queryable;
         let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
         self.pool
@@ -603,7 +633,7 @@ impl MySqlDomainMetadataStore {
                     let data: Option<Vec<u8>> = connection
                         .exec_first(
                             "SELECT data FROM queue_metadata WHERE queue_type=?",
-                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                            (queue_type,),
                         )
                         .await?;
                     data.map(|data| serde_json::from_slice(&data))
@@ -760,6 +790,26 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
     fn domain_replication_dlq_size(&self) -> Result<i64, String> {
         MySqlDomainMetadataStore::domain_replication_dlq_size(self)
             .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        MySqlDomainMetadataStore::get_domain_replication_dlq_ack_levels(self)
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain_replication_dlq_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::update_domain_replication_dlq_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
+        .map_err(|error| error.to_string())
     }
 
     fn get_domain_replication_ack_levels(
