@@ -1471,3 +1471,7 @@ migration forward.
 - Other audit operation types (create/update/deprecate/delete) are not written.
   `ListFailoverHistory` does not read them, so this is not blocking parity for
   that RPC, but Go's audit table is incomplete until they are added.
+- CI for slice `20ba8199a`: package `cadence-persistence` run
+  https://github.com/auenkr/cadence-rust/actions/runs/41220848025 was queued
+  (in_progress) at handoff. Conclusion not yet observed. Check it before any
+  further work and record the final conclusion here.
