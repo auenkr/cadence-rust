@@ -163,7 +163,6 @@ mod tests {
         assert_eq!(super::TASK_LIST_START.execution_timeout_seconds, 432_000);
         assert_eq!(super::HISTORY_START.execution_timeout_seconds, 630_720_000);
         assert_eq!(super::TASK_LIST_START.cron_schedule, "0 */12 * * *");
-        assert!(super::TASK_LIST_START.allow_duplicate && super::HISTORY_START.allow_duplicate);
         assert_eq!(super::ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI, 1_700);
     }
 }

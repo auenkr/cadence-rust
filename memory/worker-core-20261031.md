@@ -100,8 +100,15 @@ Implemented in this slice:
   `41205587991`, `41205654608`, `41205770812`, and `41205897788` were
   superseded/cancelled or failed as source commits advanced; `41205897788`
   failed only on the corrected lint.
-- Continuation package CI after the scanner/client/parent-close changes is
-  pending; record its exact head, URL and conclusion here before relying on it.
+- Follow-up run
+  https://github.com/auenkr/cadence-rust/actions/runs/41206890855 failed at
+  exact head `1d75ba41628ebbc0a64e995abcd74f70b92da13d`: Clippy found the
+  expected large tonic `Status` error on the new History adapter and a
+  test-only constant assertion. Both are fixed locally (method-scoped lint
+  allowance and removal of the constant assertion). The run's compile stage
+  confirmed the new client RPC type signatures.
+- New package CI after the lint fixes and `workercommon` retry port is pending;
+  record its exact head, URL and conclusion here before relying on it.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

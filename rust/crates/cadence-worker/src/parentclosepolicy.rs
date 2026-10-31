@@ -23,6 +23,8 @@ impl HistoryClient {
         }
     }
 
+    // Match generated tonic client RPC methods, which return Status directly.
+    #[allow(clippy::result_large_err)]
     pub async fn apply(&mut self, operation: &Operation) -> Result<(), tonic::Status> {
         use cadence_proto::{api, history};
 
