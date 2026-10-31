@@ -3,7 +3,7 @@
 
 use cadence_api::{
     errors::BadRequestError,
-    schedule::CreateScheduleRequest,
+    schedule::{CreateScheduleRequest, UpdateScheduleRequest},
     validation,
 };
 
@@ -50,8 +50,50 @@ pub fn validate_create_request(
     cadence_common::cron::validate_schedule(&spec.cron_expression, now)
         .map_err(BadRequestError::new)?;
     validation::validate_schedule_spec(Some(spec))?;
+    if request.action.is_none() {
+        return Err(BadRequestError::new("Action is not set on request."));
+    }
     validation::validate_schedule_action_complete(request.action.as_ref())?;
     validation::validate_schedule_policies(request.policies.as_ref())?;
+    validation::validate_schedule_search_attributes(request.search_attributes.as_ref())
+}
+
+/// Validate the fields Go checks before signaling a scheduler workflow during
+/// `UpdateSchedule`. Omitted fields are unchanged; a supplied action replaces
+/// the previous action and must therefore be complete.
+pub fn validate_update_request(request: &UpdateScheduleRequest) -> Result<(), BadRequestError> {
+    if request.domain.is_empty() {
+        return Err(validation::err_domain_not_set());
+    }
+    if request.schedule_id.is_empty() {
+        return Err(BadRequestError::new("ScheduleID is not set on request."));
+    }
+    if request.spec.is_none()
+        && request.action.is_none()
+        && request.policies.is_none()
+        && request.search_attributes.is_none()
+    {
+        return Err(BadRequestError::new(
+            "At least one of Spec, Action, Policies, or SearchAttributes must be set on request.",
+        ));
+    }
+    validation::validate_schedule_policies(request.policies.as_ref())?;
+    if let Some(spec) = request.spec.as_ref() {
+        if !spec.cron_expression.is_empty() {
+            let now = cadence_common::cron::naive_from_nanos(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as i64)
+                    .unwrap_or(0),
+            );
+            cadence_common::cron::validate_schedule(&spec.cron_expression, now)
+                .map_err(BadRequestError::new)?;
+        }
+        validation::validate_schedule_spec(Some(spec))?;
+    }
+    if request.action.is_some() {
+        validation::validate_schedule_action_complete(request.action.as_ref())?;
+    }
     validation::validate_schedule_search_attributes(request.search_attributes.as_ref())
 }
 
@@ -104,5 +146,39 @@ mod tests {
             r#"{"domain":"payments","scheduleId":"daily","spec":{"cronExpression":"0 0 * * *"},"action":{"startWorkflow":{"workflowType":{"name":"settle"},"taskList":{"name":"payments"},"executionStartToCloseTimeoutSeconds":60}}}"#,
         ).unwrap();
         assert!(validate_create_request(&request, true).is_ok());
+    }
+
+    #[test]
+    fn create_reports_missing_action_before_action_completeness() {
+        let request: CreateScheduleRequest = serde_json::from_str(
+            r#"{"domain":"payments","scheduleId":"daily","spec":{"cronExpression":"0 0 * * *"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            validate_create_request(&request, true).unwrap_err().message,
+            "Action is not set on request."
+        );
+    }
+
+    #[test]
+    fn update_requires_a_change_and_validates_replaced_action() {
+        let base = UpdateScheduleRequest {
+            domain: "payments".into(),
+            schedule_id: "daily".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_update_request(&base).unwrap_err().message,
+            "At least one of Spec, Action, Policies, or SearchAttributes must be set on request."
+        );
+
+        let action_update = UpdateScheduleRequest {
+            action: Some(Default::default()),
+            ..base
+        };
+        assert_eq!(
+            validate_update_request(&action_update).unwrap_err().message,
+            "Action.StartWorkflow is not set on request."
+        );
     }
 }
