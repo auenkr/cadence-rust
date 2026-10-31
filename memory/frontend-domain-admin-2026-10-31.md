@@ -912,3 +912,25 @@ migration forward.
   completed `success` (Clippy, Formatting, Test and Frontend runtime smoke).
   This validates the configured domain persistence integration and current
   CRUD routing source, but does not close the parity blockers listed above.
+
+## Core2 refresh after domain CRUD CI — 2026-10-31
+
+- `origin/frontend-core2` advanced to `f0736ac8c` and was not an ancestor of the
+  domain-admin branch. Rebased all 110 feature commits onto that fetched tip;
+  Git reported a clean replay with no conflicts. This rebase changes commit IDs,
+  so force-with-lease push and exact-head package CI are required before using
+  prior CI as current evidence. The last successful pre-rebase source head was
+  `014526620ae4d5983e62148e0df23c707d5ded4f` (run 41199384065).
+
+- Continued onto fetched `origin/frontend-core2` tip `0a5008ffa` after it
+  advanced through `f0736ac8c`. The 110 Frontend commits replayed cleanly;
+  rebase result before this evidence update: `72bae2b688438b3e797d69696357be62a1648035`.
+  Prior CI is stale after the rebase. Push with force-with-lease and dispatch
+  exact-head Frontend package CI before relying on this source.
+- Current concrete replication gap: persisted Domain CRUD is routed through
+  SQL/Cassandra metadata writers, but mutations do not publish Go-compatible
+  domain tasks, the service has no queue manager, and Admin `GetDomainReplicationMessages`
+  still returns Go's disabled-queue error unconditionally. Existing failover
+  audit rows and queue persistence also are not connected to the durable
+  manager. I am auditing the Go queue/read contracts before implementing the
+  next bounded queue slice; no parity claim is made.
