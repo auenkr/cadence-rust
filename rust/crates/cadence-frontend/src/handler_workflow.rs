@@ -2932,6 +2932,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn open_visibility_filter_builds_go_persistence_request() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
+        handler
+            .dispatch(
+                "ListOpenWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "shop",
+                    "maximumPageSize": 25,
+                    "StartTimeFilter": {"earliestTime": 10, "latestTime": 20},
+                    "executionFilter": {"workflowId": "order-27"}
+                }),
+            )
+            .await
+            .unwrap();
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::ListOpenWorkflowExecutions);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "domain": "shop",
+                "pageSize": 25,
+                "nextPageToken": null,
+                "earliestTime": 10,
+                "latestTime": 20,
+                "workflowId": "order-27"
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn activity_heartbeat_decodes_token_and_builds_go_history_envelope() {
         let token = cadence_api::tasktoken::TaskToken {
             domain_id: "domain-uuid".into(),
