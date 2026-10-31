@@ -2124,8 +2124,7 @@ fn isolation_group_wait_deadline(
     // Match Go's context timeout tailroom calculation without converting the
     // full duration to a potentially overflowing Duration multiplication.
     let tailroom_nanos = remaining.as_nanos().saturating_add(19) / 20;
-    let tailroom =
-        std::time::Duration::from_nanos(tailroom_nanos.min(u64::MAX as u128) as u64);
+    let tailroom = std::time::Duration::from_nanos(tailroom_nanos.min(u64::MAX as u128) as u64);
     deadline.checked_sub(tailroom).or(Some(now))
 }
 

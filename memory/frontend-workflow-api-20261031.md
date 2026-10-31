@@ -968,3 +968,20 @@ Frontend parity until these are implemented and validated.
   conversion, typed runtime wiring, or live persistence/visibility gaps. Push
   this recovery checkpoint and validate the exact head on the Frontend package
   workflow before selecting the next implementation slice.
+- Fetched `origin/frontend-core2` at `965cd1213`. The new source commits are
+  `bce4cbe99`, `585adeec1`, and `e60d4d1e4` (SQL domain manager wiring,
+  persistence-error cache safety, and durable-delete cache reconciliation),
+  with rustfmt follow-up `965cd1213`. Cherry-picked these as
+  `f52b2e51f`, `11795ffa9`, `13f212bf2`, and `88a9e4894`; retained the
+  workflow-api branch's handler and memory state because the peer branch's
+  diverged snapshot deletes those workflow files. The persistence manager is
+  now selected for Frontend SQL stores, but it does not supply History,
+  Visibility, or execution managers and does not close the archive adapters.
+- CI run [41196664233](https://github.com/auenkr/cadence-rust/actions/runs/41196664233)
+  checked `f0d6d4b44fbab5b8c521bf5fc8abd227a7c635d0` and concluded `failure`
+  at Formatting only: rustfmt wanted the 5% deadline expression on one line.
+  It did not compile or test that head. Run
+  [41196876683](https://github.com/auenkr/cadence-rust/actions/runs/41196876683)
+  was dispatched at `88a9e48945cd078630203ae022e3f9de2fabd5a3` and is in
+  progress; this latest formatting correction still needs a new exact-head
+  run.
