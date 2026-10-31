@@ -1122,3 +1122,13 @@ Frontend parity until these are implemented and validated.
   was dispatched for `cadence-frontend` with `clean_target=true` at exact head
   `83ef830f5dbfa7357ee6c57f5265a638706ee59f`; status is pending/in progress,
   with no conclusion yet.
+- Runtime registration audit found the concrete public gRPC server in
+  `cadence-matching/src/grpc.rs::serve`: it registers the generated
+  `WorkflowApiServer` with the existing `Frontend` implementation. Thrift
+  dispatch lives in `cadence-service-core/src/yarpc.rs`. The Frontend crate's
+  `run()` only selects that shared launcher, and neither transport currently
+  dispatches through `handler_workflow::Handler` or its composed policies.
+  Replacing the runtime path needs an adapter joining typed public protobuf /
+  Thrift requests to the handler and a production `WorkflowBackend`; current
+  History/Matching client shells are low-level RPC clients and are not that
+  adapter.
