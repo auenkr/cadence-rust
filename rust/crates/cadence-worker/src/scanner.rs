@@ -110,8 +110,141 @@ pub const ACTIVITY_RETRY_INITIAL_INTERVAL_SECONDS: u64 = 10;
 pub const ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI: u64 = 1_700;
 pub const ACTIVITY_RETRY_MAXIMUM_INTERVAL_SECONDS: u64 = 5 * 60;
 
+// Registered shardscanner activities from Go's
+// `scanner/shardscanner/activities.go`.
+pub const SHARD_SCANNER_EMIT_METRICS_ACTIVITY: &str =
+    "cadence-sys-shardscanner-emit-metrics-activity";
+pub const SHARD_SCANNER_CONFIG_ACTIVITY: &str = "cadence-sys-shardscanner-config-activity";
+pub const SHARD_FIXER_CONFIG_ACTIVITY: &str = "cadence-sys-shardscanner-fixer-config-activity";
+pub const SHARD_SCAN_ACTIVITY: &str = "cadence-sys-shardscanner-scanshard-activity";
+pub const SHARD_CORRUPTED_KEYS_ACTIVITY: &str = "cadence-sys-shardscanner-corruptedkeys-activity";
+pub const SHARD_FIX_ACTIVITY: &str = "cadence-sys-shardscanner-fixshard-activity";
+
+/// Workflow and activity registration descriptors used by the Go Worker
+/// process. These names are part of persisted history and must stay exact.
+pub fn registrations() -> Vec<crate::runtime::WorkflowRegistration> {
+    use crate::runtime::WorkflowRegistration;
+
+    vec![
+        WorkflowRegistration {
+            workflow_type: TASK_LIST_WORKFLOW_TYPE,
+            task_list: TASK_LIST,
+            activities: &[SCAVENGER_ACTIVITY_TYPE],
+        },
+        WorkflowRegistration {
+            workflow_type: HISTORY_WORKFLOW_TYPE,
+            task_list: HISTORY_TASK_LIST,
+            activities: &[HISTORY_SCAVENGER_ACTIVITY_TYPE],
+        },
+        WorkflowRegistration {
+            workflow_type: CONCRETE_EXECUTIONS_WORKFLOW_TYPE,
+            task_list: CONCRETE_EXECUTIONS_TASK_LIST,
+            activities: &[
+                SHARD_SCANNER_EMIT_METRICS_ACTIVITY,
+                SHARD_SCANNER_CONFIG_ACTIVITY,
+                SHARD_SCAN_ACTIVITY,
+            ],
+        },
+        WorkflowRegistration {
+            workflow_type: CONCRETE_EXECUTIONS_FIXER_WORKFLOW_TYPE,
+            task_list: CONCRETE_EXECUTIONS_FIXER_TASK_LIST,
+            activities: &[
+                SHARD_FIXER_CONFIG_ACTIVITY,
+                SHARD_CORRUPTED_KEYS_ACTIVITY,
+                SHARD_FIX_ACTIVITY,
+            ],
+        },
+        WorkflowRegistration {
+            workflow_type: CURRENT_EXECUTIONS_WORKFLOW_TYPE,
+            task_list: CURRENT_EXECUTIONS_TASK_LIST,
+            activities: &[
+                SHARD_SCANNER_EMIT_METRICS_ACTIVITY,
+                SHARD_SCANNER_CONFIG_ACTIVITY,
+                SHARD_SCAN_ACTIVITY,
+            ],
+        },
+        WorkflowRegistration {
+            workflow_type: CURRENT_EXECUTIONS_FIXER_WORKFLOW_TYPE,
+            task_list: CURRENT_EXECUTIONS_FIXER_TASK_LIST,
+            activities: &[
+                SHARD_FIXER_CONFIG_ACTIVITY,
+                SHARD_CORRUPTED_KEYS_ACTIVITY,
+                SHARD_FIX_ACTIVITY,
+            ],
+        },
+        WorkflowRegistration {
+            workflow_type: TIMERS_WORKFLOW_TYPE,
+            task_list: TIMERS_TASK_LIST,
+            activities: &[
+                SHARD_SCANNER_EMIT_METRICS_ACTIVITY,
+                SHARD_SCANNER_CONFIG_ACTIVITY,
+                SHARD_SCAN_ACTIVITY,
+            ],
+        },
+        WorkflowRegistration {
+            workflow_type: TIMERS_FIXER_WORKFLOW_TYPE,
+            task_list: TIMERS_FIXER_TASK_LIST,
+            activities: &[
+                SHARD_FIXER_CONFIG_ACTIVITY,
+                SHARD_CORRUPTED_KEYS_ACTIVITY,
+                SHARD_FIX_ACTIVITY,
+            ],
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn worker_registration_names_and_task_lists_match_go() {
+        let registrations = super::registrations();
+        assert_eq!(registrations.len(), 8);
+        for (registration, workflow_type, task_list) in registrations.iter().zip([
+            (super::TASK_LIST_WORKFLOW_TYPE, super::TASK_LIST),
+            (super::HISTORY_WORKFLOW_TYPE, super::HISTORY_TASK_LIST),
+            (
+                super::CONCRETE_EXECUTIONS_WORKFLOW_TYPE,
+                super::CONCRETE_EXECUTIONS_TASK_LIST,
+            ),
+            (
+                super::CONCRETE_EXECUTIONS_FIXER_WORKFLOW_TYPE,
+                super::CONCRETE_EXECUTIONS_FIXER_TASK_LIST,
+            ),
+            (
+                super::CURRENT_EXECUTIONS_WORKFLOW_TYPE,
+                super::CURRENT_EXECUTIONS_TASK_LIST,
+            ),
+            (
+                super::CURRENT_EXECUTIONS_FIXER_WORKFLOW_TYPE,
+                super::CURRENT_EXECUTIONS_FIXER_TASK_LIST,
+            ),
+            (super::TIMERS_WORKFLOW_TYPE, super::TIMERS_TASK_LIST),
+            (
+                super::TIMERS_FIXER_WORKFLOW_TYPE,
+                super::TIMERS_FIXER_TASK_LIST,
+            ),
+        ]) {
+            assert_eq!(registration.workflow_type, workflow_type);
+            assert_eq!(registration.task_list, task_list);
+        }
+        assert_eq!(
+            registrations[2].activities,
+            &[
+                super::SHARD_SCANNER_EMIT_METRICS_ACTIVITY,
+                super::SHARD_SCANNER_CONFIG_ACTIVITY,
+                super::SHARD_SCAN_ACTIVITY,
+            ]
+        );
+        assert_eq!(
+            registrations[3].activities,
+            &[
+                super::SHARD_FIXER_CONFIG_ACTIVITY,
+                super::SHARD_CORRUPTED_KEYS_ACTIVITY,
+                super::SHARD_FIX_ACTIVITY,
+            ]
+        );
+    }
+
     #[test]
     fn scanner_workflow_types_match_go() {
         assert_eq!(super::TASK_LIST, "cadence-sys-tl-scanner-tasklist-0");

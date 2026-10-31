@@ -77,6 +77,13 @@ child-only guard, and unclassified failure behavior. The helper is still a
 testable orchestration boundary: no production domain-cache/remote-client
 provider is wired into a poller, and the workflow replay runtime is absent.
 
+Worker registration descriptors now include Go's task-list and history
+scavengers plus the concrete/current/timer scanner and fixer workflow types,
+task lists and shardscanner activity names. `WorkerService` exposes these
+descriptors along with parent-close and batcher registrations. This records
+registration contracts only; no corresponding pollers, replay handlers or
+scanner persistence activities are executable yet.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 
@@ -162,6 +169,10 @@ Implemented in this slice:
   `success`; Clippy, formatting and tests passed for the task-list scavenger
   change. This predates the parent-close History outcome processor in the
   current working tree; dispatch package CI after that change is pushed.
+- Package CI at source head `5e6098131ac32220515af213780c1b1fb8fb65c` is
+  running as `41208131617` and validates the parent-close History outcome
+  processor. The scanner registration descriptors were added afterward, so
+  they require a later exact-head run.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

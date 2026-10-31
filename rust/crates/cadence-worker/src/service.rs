@@ -15,6 +15,9 @@ impl Default for WorkerService {
         for registration in crate::batcher::registrations() {
             let _ = registry.register(registration);
         }
+        for registration in crate::scanner::registrations() {
+            let _ = registry.register(registration);
+        }
         Self {
             lifecycle: Lifecycle::default(),
             registry,
