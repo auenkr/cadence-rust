@@ -956,3 +956,11 @@ migration forward.
   local Cargo command ran. Run 41200689933 tests only the API model at
   `6594677941446b80bc8ed38ff14a19896ee6c460`; the expanded task mapping needs
   fresh exact-head CI.
+- Added the Thrift converter for the domain replication task envelope using
+  Go's field IDs 10-80, including explicitly present zero-valued version
+  fields. DomainConfiguration now carries Go's isolation-group (field 60) and
+  async-workflow (field 120) settings through its Thrift converter. Added a
+  converter test checking the exact field IDs and values. This produces the
+  generic Thrift value model; ThriftRW byte encoding, queue persistence and
+  producer/consumer wiring remain open. No local Cargo command ran. The
+  expanded source needs exact-head package CI.

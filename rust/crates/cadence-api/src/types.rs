@@ -578,8 +578,8 @@ pub struct DomainTaskAttributes {
 pub struct ReplicationTask {
     #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
     pub task_type: Option<crate::enums::ReplicationTaskType>,
-    #[serde(rename = "sourceTaskId", default, skip_serializing_if = "is_zero_i64")]
-    pub source_task_id: i64,
+    #[serde(rename = "sourceTaskId", default, skip_serializing_if = "Option::is_none")]
+    pub source_task_id: Option<i64>,
     #[serde(rename = "domainTaskAttributes", default, skip_serializing_if = "Option::is_none")]
     pub domain_task_attributes: Option<DomainTaskAttributes>,
 }
