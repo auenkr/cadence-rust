@@ -991,3 +991,9 @@ Frontend parity until these are implemented and validated.
   at `5bd5458fd6dc1c2277c571ff2572fb3dba49cb06`; it was in progress at this
   update. It includes the core2 SQL manager and the rustfmt correction; wait for
   its terminal result before recording CI acceptance.
+- Added reverse UUID-to-domain-name lookup to `WorkflowDomainLookup`, backed
+  by `FrontendDomainManager::describe`, with success and not-found assertions.
+  Go resolves this name before evaluating per-domain blob warning/error limits
+  on token-based activity responses; the policy remains to be applied to those
+  response paths in the next source slice. This addition is unvalidated until
+  an exact-head Frontend CI run finishes.

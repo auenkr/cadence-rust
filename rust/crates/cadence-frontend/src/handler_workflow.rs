@@ -210,6 +210,13 @@ pub trait WorkflowBackend: Send + Sync {
 /// this seam separate lets the RPC and persistence adapters share it.
 pub trait WorkflowDomainLookup: Send + Sync {
     fn domain_id(&self, domain: &str) -> Result<String, CadenceError>;
+
+    /// Resolve the name used by Go's domain-filtered dynamic configuration
+    /// from an activity task token's domain UUID. Lightweight test adapters
+    /// may omit reverse lookup; production persistence adapters provide it.
+    fn domain_name(&self, _domain_id: &str) -> Result<Option<String>, CadenceError> {
+        Ok(None)
+    }
 }
 
 /// Domain lookup adapter for the persistence boundary installed by the
@@ -228,6 +235,16 @@ impl PersistenceWorkflowDomainLookup {
 impl WorkflowDomainLookup for PersistenceWorkflowDomainLookup {
     fn domain_id(&self, domain: &str) -> Result<String, CadenceError> {
         self.manager.domain_id(domain).map_err(Into::into)
+    }
+
+    fn domain_name(&self, domain_id: &str) -> Result<Option<String>, CadenceError> {
+        let described = self
+            .manager
+            .describe(&cadence_api::service_types::DescribeDomainRequest {
+                uuid: Some(domain_id.to_owned()),
+                ..Default::default()
+            })?;
+        Ok(described.domain_info.map(|info| info.name))
     }
 }
 
@@ -2730,8 +2747,16 @@ mod tests {
             lookup.domain_id("cached-domain").unwrap(),
             "cached-domain-uuid"
         );
+        assert_eq!(
+            lookup.domain_name("cached-domain-uuid").unwrap(),
+            Some("cached-domain".into())
+        );
         assert!(matches!(
             lookup.domain_id("missing"),
+            Err(CadenceError::EntityNotExists(_))
+        ));
+        assert!(matches!(
+            lookup.domain_name("missing-uuid"),
             Err(CadenceError::EntityNotExists(_))
         ));
     }
