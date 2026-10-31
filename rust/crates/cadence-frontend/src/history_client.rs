@@ -28,7 +28,7 @@ impl HistoryClient {
     /// Dial a discovered History peer using the same TLS config loader used by
     /// Matching's native History client (mTLS, CA roots and server-name rules).
     pub fn for_peer(peer: &str, tls: Option<&TlsConfig>, max_message_size: usize) -> anyhow::Result<Self> {
-        let tls = tls.map(grpc_tls::client_tls).transpose()?;
+        let tls = tls.map(grpc_tls::client_tls).transpose()?.flatten();
         let channel = grpc_tls::endpoint_channel(peer, tls.as_ref())?;
         let mut client = Self::from_channel(channel, max_message_size);
         client.tls = tls;

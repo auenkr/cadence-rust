@@ -28,7 +28,7 @@ impl MatchingClient {
     /// Dial a discovered Matching peer with the shared Go-compatible TLS
     /// loader, including client credentials, CA roots and server-name rules.
     pub fn for_peer(peer: &str, tls: Option<&TlsConfig>, max_message_size: usize) -> anyhow::Result<Self> {
-        let tls = tls.map(grpc_tls::client_tls).transpose()?;
+        let tls = tls.map(grpc_tls::client_tls).transpose()?.flatten();
         let channel = grpc_tls::endpoint_channel(peer, tls.as_ref())?;
         let mut client = Self::from_channel(channel, max_message_size);
         client.tls = tls;
