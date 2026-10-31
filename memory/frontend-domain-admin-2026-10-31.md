@@ -244,3 +244,15 @@ migration forward.
   Admin DLQ/replication/queue paths, raw-history version-branch paging, Domain
   replication transmission/durable metadata, scheduler workflow interactions,
   lifecycle/retry/metrics and mixed Go/Rust validation remain open.
+
+## Operational dynamic-config dispatch
+
+- Added Rust Admin aliases for Go's operational dynamic-config messages (same
+  Thrift field shapes) and reused the shared overlay with its operational
+  namespace for `GetOperationalDynamicConfig`,
+  `UpdateOperationalDynamicConfig`, `RestoreOperationalDynamicConfig`, and
+  `ListOperationalDynamicConfig`. Commit `6e6298dd2` is pushed.
+- CI run [41177987741](https://github.com/auenkr/cadence-rust/actions/runs/41177987741)
+  targets exact head `6e6298dd2`; status was pending at dispatch. This run
+  includes package Clippy, formatting, and tests. No local Cargo command was
+  run.
