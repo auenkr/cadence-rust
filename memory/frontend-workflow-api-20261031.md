@@ -760,6 +760,12 @@ Frontend parity until these are implemented and validated.
   Clippy before tests because tonic `Status` triggers `result_large_err` on
   generated RPC client wrappers. The narrow lint allowance is the current
   uncommitted fix; package CI must be rerun.
+- Added typed History client calls for start, signal, signal-with-start,
+  terminate, reset, describe, query, cancel, sticky reset, mutable-state reads,
+  decision/activity completion/failure/cancel, and heartbeat. Added a client
+  metadata/timeout unit test. These edits are uncommitted and will supersede
+  the pending CI run [41190049756](https://github.com/auenkr/cadence-rust/actions/runs/41190049756)
+  for exact head `4dd5a5177f5068c68199699fab589e85dbb57528`.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
   `Handler` or compose its wrappers; poll cancellation/health-wait and response
