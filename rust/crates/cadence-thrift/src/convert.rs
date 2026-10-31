@@ -112,6 +112,7 @@ wrap_enum!(
     DecisionTaskFailedCause,
     DecisionTaskTimedOutCause,
     DecisionType,
+    DomainOperation,
     DomainStatus,
     EncodingType,
     EventType,
@@ -128,6 +129,7 @@ wrap_enum!(
     QueryRejectCondition,
     QueryResultType,
     QueryTaskCompletedType,
+    ReplicationTaskType,
     ScheduleCatchUpPolicy,
     ScheduleOverlapPolicy,
     SignalExternalWorkflowExecutionFailedCause,
@@ -796,11 +798,13 @@ impl FromThrift for DomainConfiguration {
         Ok(Self {
             workflow_execution_retention_period_in_days: s.opt_i32(10)?.unwrap_or(0),
             emit_metric: s.opt_bool(20)?.unwrap_or(true),
+            isolation_groups: s.opt_struct(60)?,
             bad_binaries: s.opt_struct(70)?,
             history_archival_status: s.opt_enum(80)?,
             history_archival_uri: s.req_string(90, "")?,
             visibility_archival_status: s.opt_enum(100)?,
             visibility_archival_uri: s.req_string(110, "")?,
+            async_workflow_config: s.opt_struct(120)?,
         })
     }
 }
@@ -817,11 +821,13 @@ impl ToThrift for DomainConfiguration {
         // IDL default is `emitMetric = true`: Go readers apply the default
         // when absent, so always write to preserve an explicit false.
         f.fields.push((20, Value::Bool(self.emit_metric)));
+        f.ostruct(60, self.isolation_groups.as_ref());
         f.ostruct(70, self.bad_binaries.as_ref());
         f.oenum(80, self.history_archival_status);
         f.sstr(90, &self.history_archival_uri);
         f.oenum(100, self.visibility_archival_status);
         f.sstr(110, &self.visibility_archival_uri);
+        f.ostruct(120, self.async_workflow_config.as_ref());
         f.finish()
     }
 }
@@ -1097,6 +1103,34 @@ impl ToThrift for DomainReplicationConfiguration {
         f.sstr(10, &self.active_cluster_name);
         f.olist(20, &self.clusters);
         f.ostruct(30, self.active_clusters.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for DomainTaskAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.domain_operation);
+        f.sstr(20, &self.id);
+        f.ostruct(30, self.info.as_ref());
+        f.ostruct(40, self.config.as_ref());
+        f.ostruct(50, self.replication_config.as_ref());
+        // Go's transmission handler always sets these pointer fields, including
+        // zero-valued versions, so they must remain present on the wire.
+        f.fields.push((60, Value::I64(self.config_version)));
+        f.fields.push((70, Value::I64(self.failover_version)));
+        f.fields
+            .push((80, Value::I64(self.previous_failover_version)));
+        f.finish()
+    }
+}
+
+impl ToThrift for ReplicationTask {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.task_type);
+        f.oi64(20, self.source_task_id);
+        f.ostruct(30, self.domain_task_attributes.as_ref());
         f.finish()
     }
 }
@@ -5750,6 +5784,33 @@ mod tests {
             domain: "payments".into(),
             execution: Some(WorkflowExecution::new("wf", "run")),
         });
+    }
+
+    #[test]
+    fn domain_replication_task_uses_go_wire_field_ids() {
+        let task = ReplicationTask {
+            task_type: Some(ReplicationTaskType::Domain),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(DomainOperation::Update),
+                id: "domain-uuid".into(),
+                config_version: 0,
+                failover_version: 8,
+                previous_failover_version: -1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let thrift = task.to_thrift();
+        assert!(matches!(thrift.get(10), Some(Value::I32(0))));
+        let attributes = match thrift.get(30) {
+            Some(Value::Struct(attributes)) => attributes,
+            other => panic!("expected domain task attributes, got {other:?}"),
+        };
+        assert!(matches!(attributes.get(10), Some(Value::I32(1))));
+        assert!(matches!(attributes.get(20), Some(Value::Bytes(id)) if id == b"domain-uuid"));
+        assert!(matches!(attributes.get(60), Some(Value::I64(0))));
+        assert!(matches!(attributes.get(70), Some(Value::I64(8))));
+        assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
     }
 
     #[test]
