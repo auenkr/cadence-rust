@@ -71,35 +71,40 @@ impl DomainRecord {
     pub fn to_matching_metadata(
         &self,
         notification_version: i64,
+        serialization_encoding: &str,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainMetadata, String> {
         use crate::matching_domain_metadata::{GoDomainBlob, MatchingDomainMetadata};
+        use crate::matching_blob::BlobEncoding;
+        use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
 
-        fn json_blob<T: serde::Serialize>(value: &T) -> Result<GoDomainBlob, String> {
-            serde_json::to_vec(value)
-                .map(|data| GoDomainBlob {
-                    data,
-                    encoding: "json".to_string(),
-                })
-                .map_err(|error| error.to_string())
+        fn thrift_blob<T: ToThrift>(value: &T, encoding: BlobEncoding) -> Result<GoDomainBlob, String> {
+            let mut writer = Writer::new();
+            write_struct(&mut writer, &value.to_thrift());
+            Ok(GoDomainBlob {
+                data: encoding.encode(&writer.into_bytes()).map_err(|error| error.to_string())?,
+                encoding: encoding.as_str().to_string(),
+            })
         }
+
+        let encoding = BlobEncoding::parse(serialization_encoding).map_err(|error| error.to_string())?;
 
         let bad_binaries = self
             .configuration
             .bad_binaries
             .as_ref()
-            .map(json_blob)
+            .map(|value| thrift_blob(value, encoding))
             .transpose()?;
-        let isolation_groups = self.isolation_groups.as_ref().map(json_blob).transpose()?;
+        let isolation_groups = self.isolation_groups.as_ref().map(|value| thrift_blob(value, encoding)).transpose()?;
         let async_workflow_config = self
             .async_workflow_config
             .as_ref()
-            .map(json_blob)
+            .map(|value| thrift_blob(value, encoding))
             .transpose()?;
         let active_clusters_config = self
             .replication
             .active_clusters
             .as_ref()
-            .map(json_blob)
+            .map(|value| thrift_blob(value, BlobEncoding::ThriftRWSnappy))
             .transpose()?;
         let status_raw = self.info.status.unwrap_or(DomainStatus::Registered) as i32;
         let history_archival_status_raw = self
@@ -1193,6 +1198,7 @@ impl FrontendDomainManager for InMemoryDomainStore {
 pub struct PersistedFrontendDomainManager {
     cache: InMemoryDomainStore,
     persistence: Arc<dyn crate::matching_domain_metadata::DomainMetadataPersistence>,
+    serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
     mutation_lock: std::sync::Mutex<()>,
 }
 
@@ -1207,10 +1213,12 @@ impl PersistedFrontendDomainManager {
     pub fn new(
         cache: InMemoryDomainStore,
         persistence: Arc<dyn crate::matching_domain_metadata::DomainMetadataPersistence>,
+        serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
     ) -> Self {
         Self {
             cache,
             persistence,
+            serialization_encoding,
             mutation_lock: std::sync::Mutex::new(()),
         }
     }
@@ -1228,7 +1236,7 @@ impl PersistedFrontendDomainManager {
         create: bool,
     ) -> Result<(), FrontendDomainError> {
         let metadata = record
-            .to_matching_metadata(expected_version)
+            .to_matching_metadata(expected_version, &(self.serialization_encoding)())
             .map_err(FrontendDomainError::Persistence)?;
         let result = if create {
             self.persistence.create_domain(&metadata, expected_version)
