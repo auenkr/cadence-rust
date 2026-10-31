@@ -13,6 +13,10 @@ on:
         description: "Apply rustfmt to Frontend skeleton files and upload the patch"
         type: boolean
         default: false
+      frontend_runtime_smoke:
+        description: "Build and start the Frontend with Go development YAML; probe health and search attributes"
+        type: boolean
+        default: false
       clean_target:
         description: "Use a fresh uncached target for final validation"
         type: boolean
@@ -542,6 +546,60 @@ jobs:
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Frontend runtime smoke with Go development config
+        if: success() && inputs.frontend_runtime_smoke == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build -p cadence-frontend --bin cadence-frontend
+          binary="${CARGO_TARGET_DIR:-$PWD/target}/debug/cadence-frontend"
+          "$binary" \
+            --config "$GITHUB_WORKSPACE/go/config/development.yaml" \
+            start --services frontend --port 18080 --grpc-port 17833 --tchannel-port 17933 \
+            > "$RUNNER_TEMP/frontend-runtime.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill -TERM "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:18080/health > "$RUNNER_TEMP/frontend-health.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/frontend-runtime.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" != 1 ]; then
+            cat "$RUNNER_TEMP/frontend-runtime.log"
+            exit 1
+          fi
+          curl --silent --show-error --fail \
+            http://127.0.0.1:18080/api/v1/search-attributes \
+            > "$RUNNER_TEMP/frontend-search-attributes.json"
+          python3 - "$RUNNER_TEMP/frontend-health.json" "$RUNNER_TEMP/frontend-search-attributes.json" <<'PY'
+          import json, sys
+          health = json.load(open(sys.argv[1], encoding="utf-8"))
+          attributes = json.load(open(sys.argv[2], encoding="utf-8"))
+          assert health.get("ok") is True, health
+          assert "keys" in attributes, attributes
+          PY
+          cat "$RUNNER_TEMP/frontend-runtime.log"
+      - name: Upload Frontend runtime smoke evidence
+        if: always() && inputs.frontend_runtime_smoke == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-runtime-smoke
+          retention-days: 3
+          path: |
+            ${{ runner.temp }}/frontend-runtime.log
+            ${{ runner.temp }}/frontend-health.json
+            ${{ runner.temp }}/frontend-search-attributes.json
       - name: Upload Go panic quote oracle evidence
         if: always() && (inputs.package == 'cadence-matching' || inputs.package == '')
         uses: actions/upload-artifact@v4
