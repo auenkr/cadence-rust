@@ -549,5 +549,16 @@ these fixes; no green CI evidence covers the current changes.
   `19156796c49a117e828af8433b7ddb2a9299edea`. Formatting/package CI run
   [41183386357](https://github.com/auenkr/cadence-rust/actions/runs/41183386357)
   tested this exact SHA and concluded `success`; runner formatting changes were
-  applied locally and are being pushed, then normal package CI will be run on
-  the formatted head.
+  applied locally and pushed in `bb9a33c0f0e49a0c8dcc205db02d6251a826e6d9`;
+  normal package CI is recorded below.
+- Normal package CI run
+  [41183655544](https://github.com/auenkr/cadence-rust/actions/runs/41183655544)
+  validated formatted exact head `bb9a33c0f0e49a0c8dcc205db02d6251a826e6d9`
+  with conclusion `success` (Clippy, formatting, and Frontend unit tests).
+  This confirms the dynamic list-filter/query policies and page-size behavior
+  compile and pass their tests, but does not establish full Frontend parity.
+- `origin/frontend-core2` advanced beyond the validator/client commit already
+  incorporated in this branch. Its later commits currently concern lifecycle
+  drain and configured persistence bootstrap. They were not merged into this
+  workflow slice to avoid overlapping the worker-owned lifecycle/persistence
+  work; re-audit its final public interfaces before integration.
