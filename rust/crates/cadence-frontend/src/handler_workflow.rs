@@ -466,10 +466,7 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
-    pub fn with_workflow_query_policy(
-        mut self,
-        policy: Arc<dyn WorkflowQueryPolicy>,
-    ) -> Self {
+    pub fn with_workflow_query_policy(mut self, policy: Arc<dyn WorkflowQueryPolicy>) -> Self {
         self.workflow_query_policy = Some(policy);
         self
     }
@@ -906,15 +903,14 @@ impl<B: WorkflowBackend> Handler<B> {
                 validate_execution_field(&value, field)?;
             }
             if operation == WorkflowOperation::QueryWorkflow {
-                if self
-                    .workflow_query_policy
-                    .as_ref()
-                    .is_some_and(|policy| {
-                        policy.query_disallowed(
-                            value.get("domain").and_then(Value::as_str).unwrap_or_default(),
-                        )
-                    })
-                {
+                if self.workflow_query_policy.as_ref().is_some_and(|policy| {
+                    policy.query_disallowed(
+                        value
+                            .get("domain")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    )
+                }) {
                     return Err(CadenceError::BadRequest(BadRequestError::new(
                         "Domain is not allowed to query, please contact cadence team to re-enable queries.",
                     )));

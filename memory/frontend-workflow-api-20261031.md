@@ -537,11 +537,17 @@ these fixes; no green CI evidence covers the current changes.
   formatting checkpoint, followed by normal exact-head package CI.
 - Normal package CI run
   [41183294319](https://github.com/auenkr/cadence-rust/actions/runs/41183294319)
-  targets exact head `430259a93046d7f2d1dbb915597200fb35daf534`; it was
-  `in_progress` at this save. Its Go raw-byte oracle step was still running, so
-  no conclusion is available yet.
+  targeted exact head `430259a93046d7f2d1dbb915597200fb35daf534`, but was
+  cancelled after the next code checkpoint was pushed while its Go raw-byte
+  oracle step was running. It has no conclusion and is not validation evidence.
 - Continued the Go `QueryWorkflow` body audit. Added an injectable dynamic
   `WorkflowQueryPolicy` and Go's exact `DisallowQuery` error. It runs after
   domain/execution validation and before checking the Query payload, preserving
-  Go validation precedence; the regression test checks this ordering. This
-  source is currently uncommitted and needs format/package CI.
+  Go validation precedence; the regression test checks this ordering. The
+  regression test still needs format/package CI.
+- Pushed query-policy implementation and test at
+  `19156796c49a117e828af8433b7ddb2a9299edea`. Formatting/package CI run
+  [41183386357](https://github.com/auenkr/cadence-rust/actions/runs/41183386357)
+  tested this exact SHA and concluded `success`; runner formatting changes were
+  applied locally and are being pushed, then normal package CI will be run on
+  the formatted head.
