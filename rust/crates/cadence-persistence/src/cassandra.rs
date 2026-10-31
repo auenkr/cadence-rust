@@ -4,11 +4,11 @@
 //! service paths; they must not call a nested runtime or synchronously wait on
 //! driver futures from Tokio workers.
 
+use crate::semaphores::{SemaphoreBucketPage, SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE};
 use crate::{
     AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, SemaphorePersistence,
     SemaphoreRow,
 };
-use crate::semaphores::{SemaphoreBucketPage, SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use scylla::{

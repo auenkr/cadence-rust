@@ -21,11 +21,13 @@ const GO_DEFAULT_TIME_FORMAT: &str = "2006-01-02T15:04:05.000000000Z07:00";
 pub struct ConfiguredMatchingStores {
     pub task_store: Arc<dyn MatchingTaskStore>,
     /// The same backend/pool exposed through the byte-preserving contract.
-    pub native_task_store: Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
+    pub native_task_store:
+        Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
     /// Transactional Go SQL domain/metadata manager when this backend exposes
     /// the existing SQL domain row schema (currently MySQL and PostgreSQL).
-    pub domain_persistence: Option<Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence>>,
+    pub domain_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence>>,
     /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
     pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
 }
@@ -140,12 +142,19 @@ pub async fn open_configured_semaphore_stores(
         }
         let config = cassandra_config(nosql)?;
         let session = Arc::new(config.connect().await?);
-        let store = Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session));
-        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
+        let store =
+            Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session));
+        return Ok(ConfiguredSemaphoreStores {
+            legacy: store.clone(),
+            native: store,
+        });
     }
     if datastore.sql.is_some() {
         let store = Arc::new(cadence_persistence::SqlUnsupportedSemaphorePersistence);
-        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
+        return Ok(ConfiguredSemaphoreStores {
+            legacy: store.clone(),
+            native: store,
+        });
     }
     anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
 }
@@ -184,12 +193,13 @@ pub fn open_configured_default_store(
                 driver,
                 active_cluster_name,
             );
-        let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> =
-            Arc::new(
-                cadence_persistence::matching_domain_metadata::CassandraFrontendDomainPersistence::new(
-                    domain_metadata.clone(),
-                ),
-            );
+        let domain_persistence: Arc<
+            dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence,
+        > = Arc::new(
+            cadence_persistence::matching_domain_metadata::CassandraFrontendDomainPersistence::new(
+                domain_metadata.clone(),
+            ),
+        );
         return Ok(ConfiguredMatchingStores {
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
@@ -506,7 +516,10 @@ mod tests {
 
     fn nosql_from_yaml(body: &str) -> crate::config::NosqlConfig {
         let yaml = format!("persistence:\n  datastores:\n    c:\n      nosql:\n        pluginName: cassandra\n        hosts: \"h1,h2\"\n        keyspace: cadence\n{body}");
-        crate::config::Config::from_yaml(&yaml).unwrap().persistence.datastores["c"]
+        crate::config::Config::from_yaml(&yaml)
+            .unwrap()
+            .persistence
+            .datastores["c"]
             .nosql
             .clone()
             .unwrap()
@@ -530,7 +543,8 @@ mod tests {
 
     #[test]
     fn cassandra_config_ignores_disabled_tls_and_rejects_unsupported_proto() {
-        let nosql = nosql_from_yaml("        tls:\n          enabled: false\n          caFile: /ca.pem\n");
+        let nosql =
+            nosql_from_yaml("        tls:\n          enabled: false\n          caFile: /ca.pem\n");
         assert!(cassandra_config(&nosql).unwrap().tls.is_none());
         let nosql = nosql_from_yaml("        protoVersion: 3\n");
         let error = cassandra_config(&nosql).unwrap_err().to_string();
@@ -565,19 +579,52 @@ mod tests {
             ..Default::default()
         }));
         let stores = open_configured_default_store(
-            &config, "active", Arc::new(|| false), Arc::new(|| "thriftrw".into()),
-        ).unwrap();
+            &config,
+            "active",
+            Arc::new(|| false),
+            Arc::new(|| "thriftrw".into()),
+        )
+        .unwrap();
         let legacy_key = TaskListKey {
-            domain_id: uuid::Uuid::from_u128(1), name: "shared".into(), task_type: 0,
+            domain_id: uuid::Uuid::from_u128(1),
+            name: "shared".into(),
+            task_type: 0,
         };
         let lease = stores.task_store.lease(&legacy_key, 0, 0, 1).unwrap();
         let key = TaskListKeyBytes::from(legacy_key.clone());
-        assert_eq!(stores.native_task_store.get_task_list(&key).unwrap().range_id, lease.range_id);
-        let renewed = stores.native_task_store.lease(&key, 0, lease.range_id, 2).unwrap();
-        assert_eq!(stores.task_store.get_task_list(&legacy_key).unwrap().range_id, renewed.range_id);
-        let raw_key = TaskListKeyBytes { name: GoString::from(&b"q\xff"[..]), ..key };
+        assert_eq!(
+            stores
+                .native_task_store
+                .get_task_list(&key)
+                .unwrap()
+                .range_id,
+            lease.range_id
+        );
+        let renewed = stores
+            .native_task_store
+            .lease(&key, 0, lease.range_id, 2)
+            .unwrap();
+        assert_eq!(
+            stores
+                .task_store
+                .get_task_list(&legacy_key)
+                .unwrap()
+                .range_id,
+            renewed.range_id
+        );
+        let raw_key = TaskListKeyBytes {
+            name: GoString::from(&b"q\xff"[..]),
+            ..key
+        };
         stores.native_task_store.lease(&raw_key, 0, 0, 3).unwrap();
-        assert_eq!(stores.native_task_store.get_task_list(&raw_key).unwrap().range_id, 1);
+        assert_eq!(
+            stores
+                .native_task_store
+                .get_task_list(&raw_key)
+                .unwrap()
+                .range_id,
+            1
+        );
     }
 
     #[test]

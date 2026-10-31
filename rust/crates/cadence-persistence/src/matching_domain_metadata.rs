@@ -311,18 +311,16 @@ impl CassandraFrontendDomainPersistence {
             owner_email: Some(metadata.info.owner_email.clone()),
         };
         let config = CassandraDomainConfigUdt {
-            retention: metadata.configuration.workflow_execution_retention_period_in_days,
+            retention: metadata
+                .configuration
+                .workflow_execution_retention_period_in_days,
             emit_metric: metadata.configuration.emit_metric,
             archival_bucket: Some(metadata.archival_bucket.clone()),
             archival_status: Some(i32::from(metadata.archival_status_raw)),
             history_archival_status: Some(i32::from(metadata.history_archival_status_raw)),
             history_archival_uri: Some(metadata.configuration.history_archival_uri.clone()),
-            visibility_archival_status: Some(i32::from(
-                metadata.visibility_archival_status_raw,
-            )),
-            visibility_archival_uri: Some(
-                metadata.configuration.visibility_archival_uri.clone(),
-            ),
+            visibility_archival_status: Some(i32::from(metadata.visibility_archival_status_raw)),
+            visibility_archival_uri: Some(metadata.configuration.visibility_archival_uri.clone()),
             bad_binaries: metadata.bad_binaries.as_ref().map(|blob| blob.data.clone()),
             bad_binaries_encoding: metadata
                 .bad_binaries
@@ -369,13 +367,11 @@ impl CassandraFrontendDomainPersistence {
         (info, config, replication)
     }
 
-    fn applied(result: scylla::response::query_result::QueryResult) -> Result<bool, MatchingDomainMetadataError> {
-        let rows = result
-            .into_rows_result()
-            .map_err(Self::cql_error)?;
-        let mut columns = rows
-            .rows::<(bool,)>()
-            .map_err(Self::cql_error)?;
+    fn applied(
+        result: scylla::response::query_result::QueryResult,
+    ) -> Result<bool, MatchingDomainMetadataError> {
+        let rows = result.into_rows_result().map_err(Self::cql_error)?;
+        let mut columns = rows.rows::<(bool,)>().map_err(Self::cql_error)?;
         columns
             .next()
             .transpose()
@@ -589,7 +585,8 @@ impl CassandraDomainMetadataStore {
         name: &str,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
+            CassandraNullableDomainUdt,
         };
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
@@ -689,7 +686,8 @@ impl CassandraDomainMetadataStore {
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
+            CassandraNullableDomainUdt,
         };
         use scylla::{response::PagingState, statement::Statement};
         if page_size == 0 {
@@ -918,13 +916,17 @@ impl MatchingDomainMetadataStore {
         busy_timeout: Duration,
     ) -> Result<Self, MatchingDomainMetadataError> {
         let flags = match mode {
-            "rw" => OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | OpenFlags::SQLITE_OPEN_URI,
-            "rwc" => OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | OpenFlags::SQLITE_OPEN_URI,
+            "rw" => {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_URI
+            }
+            "rwc" => {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_CREATE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_URI
+            }
             "ro" => {
                 return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
                     "Frontend domain manager requires a writable SQLite mode".into(),
@@ -1200,7 +1202,9 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
             params![metadata.info.name, blob, ENCODING_THRIFT_RW, GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice()],
         )?;
         if changed != 1 {
-            return Err(MatchingDomainMetadataError::NotFound(metadata.info.uuid.clone()));
+            return Err(MatchingDomainMetadataError::NotFound(
+                metadata.info.uuid.clone(),
+            ));
         }
         let current: i64 = transaction.query_row(
             "SELECT notification_version FROM domain_metadata",
@@ -1214,7 +1218,10 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
         }
         let changed = transaction.execute(
             "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
-            params![expected_notification_version + 1, expected_notification_version],
+            params![
+                expected_notification_version + 1,
+                expected_notification_version
+            ],
         )?;
         if changed != 1 {
             return Err(MatchingDomainMetadataError::InvalidBlob(
@@ -1305,7 +1312,11 @@ pub fn encode_go_sql_domain_metadata(
     put(16, Value::I32(metadata.status_raw));
     put(
         18,
-        Value::I16(metadata.configuration.workflow_execution_retention_period_in_days as i16),
+        Value::I16(
+            metadata
+                .configuration
+                .workflow_execution_retention_period_in_days as i16,
+        ),
     );
     put(20, Value::Bool(metadata.configuration.emit_metric));
     put(22, text(&metadata.archival_bucket));
@@ -1817,10 +1828,19 @@ mod tests {
         assert_eq!(decoded.archival_bucket, metadata.archival_bucket);
         assert_eq!(decoded.config_version, metadata.config_version);
         assert_eq!(decoded.notification_version, metadata.notification_version);
-        assert_eq!(decoded.failover_notification_version, metadata.failover_notification_version);
+        assert_eq!(
+            decoded.failover_notification_version,
+            metadata.failover_notification_version
+        );
         assert_eq!(decoded.failover_version, metadata.failover_version);
-        assert_eq!(decoded.previous_failover_version, metadata.previous_failover_version);
-        assert_eq!(decoded.last_updated_time_nanos, metadata.last_updated_time_nanos);
+        assert_eq!(
+            decoded.previous_failover_version,
+            metadata.previous_failover_version
+        );
+        assert_eq!(
+            decoded.last_updated_time_nanos,
+            metadata.last_updated_time_nanos
+        );
     }
 
     #[test]
@@ -1875,7 +1895,11 @@ mod tests {
         store.update_domain(&persisted, 8).unwrap();
         assert_eq!(store.get_metadata_version().unwrap(), 9);
         assert_eq!(
-            store.get_domain(Some("persisted-domain"), None).unwrap().info.description,
+            store
+                .get_domain(Some("persisted-domain"), None)
+                .unwrap()
+                .info
+                .description,
             "updated"
         );
         store.delete_domain(&uuid.to_string()).unwrap();
