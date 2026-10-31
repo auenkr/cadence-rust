@@ -6,11 +6,13 @@ use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 use cadence_api::{
     admin::{
         AddSearchAttributeRequest, AddSearchAttributeResponse, DynamicConfigEntry,
-        DynamicConfigFilter, DynamicConfigValue, GetDynamicConfigResponse,
+        DescribeClusterResponse, DynamicConfigFilter, DynamicConfigValue, GetDynamicConfigResponse,
+        HostInfo, MembershipInfo, PersistenceFeature, PersistenceInfo, RingInfo,
         RestoreDynamicConfigResponse, UpdateDynamicConfigResponse,
     },
     enums::IndexedValueType,
     errors::{BadRequestError, EntityNotExistsError, InternalServiceError},
+    types::SupportedClientVersions,
 };
 use cadence_service_core::admin::DynamicConfigOverlay;
 
@@ -30,6 +32,83 @@ impl std::fmt::Display for AdminError {
 }
 
 impl std::error::Error for AdminError {}
+
+/// Membership snapshot collected from the live Frontend resolver before the
+/// response is built. Keeping collection separate preserves Go's failure
+/// boundary: resolver errors must be returned before this helper is called.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MembershipSnapshot {
+    pub current_host_identity: Option<String>,
+    /// Ring order and member order are preserved from membership discovery.
+    pub rings: Vec<(String, Vec<String>)>,
+}
+
+/// Build the `DescribeCluster` response using Go's public SDK constraints,
+/// membership fields, and persistence feature keys.
+#[must_use]
+pub fn describe_cluster_response(
+    membership: Option<&MembershipSnapshot>,
+    history_backend: impl Into<String>,
+    visibility_backend: impl Into<String>,
+    advanced_visibility_enabled: bool,
+) -> DescribeClusterResponse {
+    let mut membership_info = MembershipInfo::default();
+    if let Some(snapshot) = membership {
+        membership_info.current_host = snapshot
+            .current_host_identity
+            .as_ref()
+            .map(|identity| HostInfo {
+                identity: identity.clone(),
+            });
+        for (role, identities) in &snapshot.rings {
+            let members = identities
+                .iter()
+                .map(|identity| HostInfo {
+                    identity: identity.clone(),
+                })
+                .collect::<Vec<_>>();
+            membership_info
+                .reachable_members
+                .extend(identities.iter().cloned());
+            membership_info.rings.push(RingInfo {
+                role: role.clone(),
+                member_count: members.len() as i32,
+                members,
+            });
+        }
+    }
+
+    let persistence_info = BTreeMap::from([
+        (
+            "historyStore".to_string(),
+            PersistenceInfo {
+                backend: history_backend.into(),
+                features: Vec::new(),
+            },
+        ),
+        (
+            "visibilityStore".to_string(),
+            PersistenceInfo {
+                backend: visibility_backend.into(),
+                features: vec![PersistenceFeature {
+                    key: "advancedVisibilityEnabled".into(),
+                    enabled: advanced_visibility_enabled,
+                }],
+            },
+        ),
+    ])
+    .into_iter()
+    .collect();
+
+    DescribeClusterResponse {
+        supported_client_versions: Some(SupportedClientVersions {
+            go_sdk: "<=1.7.0".into(),
+            java_sdk: "<=1.5.0".into(),
+        }),
+        membership_info: Some(membership_info),
+        persistence_info: Some(persistence_info),
+    }
+}
 
 /// State used by Admin RPCs. `DynamicConfigOverlay` preserves the ordered
 /// values and normal/operational namespaces that Go's config clients expose.
@@ -173,5 +252,36 @@ mod tests {
         };
         assert!(matches!(handler.add_search_attributes(Some(&conflicting)), Err(AdminError::BadRequest(_))));
         assert_eq!(handler.search_attributes()["CustomOne"], IndexedValueType::String);
+    }
+
+    #[test]
+    fn describe_cluster_builds_go_shaped_membership_and_persistence_fields() {
+        let membership = MembershipSnapshot {
+            current_host_identity: Some("frontend-1".into()),
+            rings: vec![
+                ("frontend".into(), vec!["frontend-1".into(), "frontend-2".into()]),
+                ("history".into(), vec!["history-1".into()]),
+            ],
+        };
+        let response = describe_cluster_response(Some(&membership), "sql", "elasticsearch", true);
+        let versions = response.supported_client_versions.unwrap();
+        assert_eq!(versions.go_sdk, "<=1.7.0");
+        assert_eq!(versions.java_sdk, "<=1.5.0");
+        let membership = response.membership_info.unwrap();
+        assert_eq!(membership.current_host.unwrap().identity, "frontend-1");
+        assert_eq!(
+            membership.reachable_members,
+            vec![
+                "frontend-1".to_string(),
+                "frontend-2".to_string(),
+                "history-1".to_string(),
+            ]
+        );
+        assert_eq!(membership.rings[0].member_count, 2);
+        let persistence = response.persistence_info.unwrap();
+        assert_eq!(persistence["historyStore"].backend, "sql");
+        assert_eq!(persistence["visibilityStore"].backend, "elasticsearch");
+        assert_eq!(persistence["visibilityStore"].features[0].key, "advancedVisibilityEnabled");
+        assert!(persistence["visibilityStore"].features[0].enabled);
     }
 }
