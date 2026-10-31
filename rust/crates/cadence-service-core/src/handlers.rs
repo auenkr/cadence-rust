@@ -503,6 +503,13 @@ async fn register_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterDomainRequest>,
 ) -> Response {
+    // Go checks primary-cluster ownership before inspecting the requested
+    // name, so preserve that error precedence for global-domain registration.
+    if req.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return bad_request(BadRequestError::new(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.",
+        ));
+    }
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
@@ -522,7 +529,7 @@ async fn register_domain(
         description: req.description.clone(),
         owner_email: req.owner_email.clone(),
         data: req.data.clone(),
-        uuid: uuid::Uuid::new_v4().to_string(),
+        uuid: uuid::Uuid::now_v7().to_string(),
     };
     let configuration = cadence_api::types::DomainConfiguration {
         workflow_execution_retention_period_in_days: req
