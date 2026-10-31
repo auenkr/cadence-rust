@@ -132,3 +132,26 @@ missing. Schedule validation helpers are not wired to scheduler workflows;
 RPC lifecycle, retries, authorization and operational metrics remain missing.
 Do not treat helper tests or this CI run as Frontend parity or move the service
 migration forward.
+
+## Continued implementation — after frontend-core2 landed
+
+- Rebased onto `origin/frontend-core2` at `6ecd41134` (which includes the
+  generated History/Matching clients, dynamic validator seam and lifecycle
+  helpers) and pushed the rebased branch. Rebase retained both core2 and
+  domain/admin progress history entries.
+- Replaced the Domain handler's unit-only boundary with stateful operations
+  over the shared `cadence-service-core::handlers::AppState`: RegisterDomain,
+  DescribeDomain, ListDomains, UpdateDomain and DeprecateDomain. Registration
+  now performs primary-cluster gating, duplicate-before-name validation,
+  enabled-cluster replication validation, dynamic retention checks, v7 UUID
+  creation, and domain/execution-store registration. Updates use the existing
+  persistence domain-update controller for cooldown/failover classification;
+  deprecation checks global-domain primary ownership. Added direct handler
+  unit cases for CRUD ordering and global registration gating.
+- Added `uuid` as a direct Frontend dependency with v7 enabled; updated the
+  workspace lockfile dependency list by hand. No local Cargo command was run.
+- This code has not been validated on CI yet. Dispatch a fresh
+  `cadence-frontend` run on the pushed rebased source. Do not claim Domain
+  parity: update/deprecate transmission and audit, archival provider behavior,
+  durable metadata/version locking and replication queue integration still
+  require implementation. Admin and Schedule RPC dispatch wiring is also open.
