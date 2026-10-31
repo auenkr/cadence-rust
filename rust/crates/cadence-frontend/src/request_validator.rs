@@ -1778,6 +1778,7 @@ mod tests {
                     )])),
                 },
             )])),
+            ..Default::default()
         };
         for request in [
             FailoverDomainRequest {

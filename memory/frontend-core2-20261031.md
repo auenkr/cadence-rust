@@ -623,3 +623,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Go's pre-drain handler-stop phase. Added a focused ordering/independence test.
   Admin watcher implementations can subscribe to the signal as those handlers
   are ported. Exact-head package CI is pending; no local Cargo command was run.
+- The first CI for these latest changes, run
+  https://github.com/auenkr/cadence-rust/actions/runs/41188086803, checked
+  `717ea4a9ae8eb80c9147707bb3c686dcc5b95e66` and failed during Clippy test
+  compilation: the new active-active fixture omitted generated
+  `ActiveClusters.active_clusters_by_region`. Added the defaulted field
+  remainder; rerun exact-head Frontend CI after pushing the correction.
