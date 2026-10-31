@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cadence_api::{
     enums::ArchivalStatus,
     errors::BadRequestError,
+    service_types::UpdateDomainRequest,
     types::{ActiveClusters, DomainConfiguration, DomainReplicationConfiguration},
 };
 
@@ -129,6 +130,53 @@ pub fn validate_clusters_not_removed(
     } else {
         Ok(())
     }
+}
+
+/// The Go `UpdateDomainRequest.IsAFailoverRequest` predicate. A timeout is a
+/// failover only when it is positive; the presence of an active cluster or a
+/// non-empty active-active attribute scope also selects the failover path.
+#[must_use]
+pub fn is_failover_request(request: &UpdateDomainRequest) -> bool {
+    request.replication_configuration.as_ref().is_some_and(|replication| {
+        replication.active_cluster_name.is_some()
+            || replication
+                .active_clusters
+                .as_ref()
+                .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+                .is_some_and(|scopes| !scopes.is_empty())
+    }) || request.failover_timeout_in_seconds.is_some_and(|timeout| timeout > 0)
+}
+
+/// Reject mixed configuration and failover requests before the failover path
+/// can silently discard configuration fields. This is the guard in Go's
+/// `handlerImpl.UpdateDomain`.
+pub fn validate_update_request(request: &UpdateDomainRequest) -> Result<(), BadRequestError> {
+    if request.is_config_update() && is_failover_request(request) {
+        return Err(bad(
+            "Cannot set active cluster to current cluster when other parameters are set.",
+        ));
+    }
+    Ok(())
+}
+
+/// Local domains cannot alter replication configuration or request any kind
+/// of failover. Go checks presence of these fields, including a zero or
+/// negative timeout, independent of `IsAFailoverRequest`.
+pub fn validate_local_domain_update(request: &UpdateDomainRequest) -> Result<(), BadRequestError> {
+    let has_replication_update = request
+        .replication_configuration
+        .as_ref()
+        .is_some_and(|replication| {
+            replication.active_cluster_name.is_some()
+                || replication.active_clusters.is_some()
+                || replication.clusters.is_some()
+        });
+    if has_replication_update || request.failover_timeout_in_seconds.is_some() {
+        return Err(bad(
+            "Local domains cannot perform failovers or change replication configuration",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,3 +359,54 @@ mod tests {
                 .message,
             "invalid failover version: -1"
         );
+    }
+
+    #[test]
+    fn update_classification_and_local_domain_guards_match_go_presence_rules() {
+        use cadence_api::service_types::{
+            DomainReplicationConfigurationUpdate, UpdateDomainInfo, UpdateDomainRequest,
+        };
+
+        let zero_timeout = UpdateDomainRequest {
+            failover_timeout_in_seconds: Some(0),
+            ..Default::default()
+        };
+        assert!(!is_failover_request(&zero_timeout));
+        assert!(validate_local_domain_update(&zero_timeout).is_err());
+
+        let active_cluster_only = UpdateDomainRequest {
+            replication_configuration: Some(DomainReplicationConfigurationUpdate {
+                active_cluster_name: Some("cluster-a".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(is_failover_request(&active_cluster_only));
+        assert_eq!(
+            validate_local_domain_update(&active_cluster_only)
+                .unwrap_err()
+                .message,
+            "Local domains cannot perform failovers or change replication configuration"
+        );
+
+        let mixed = UpdateDomainRequest {
+            updated_info: Some(UpdateDomainInfo {
+                description: Some("new description".into()),
+                ..Default::default()
+            }),
+            replication_configuration: active_cluster_only.replication_configuration,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_update_request(&mixed).unwrap_err().message,
+            "Cannot set active cluster to current cluster when other parameters are set."
+        );
+
+        let negative_timeout = UpdateDomainRequest {
+            failover_timeout_in_seconds: Some(-1),
+            ..Default::default()
+        };
+        assert!(!is_failover_request(&negative_timeout));
+        assert!(validate_local_domain_update(&negative_timeout).is_err());
+    }
+}
