@@ -2028,9 +2028,12 @@ removed it and recorded the repair in the Frontend integration log.
 Then merged current `origin/frontend-core2` (`ce13c6b89`) and `origin/master`
 (`51260ba6a`); the workflow-api ref remains an ancestor. Existing run
 [41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105)
-is still in progress at old source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`
-and predates these latest merges. The pushed handoff head needs fresh exact-head
-Frontend package CI. See `memory/frontend-domain-admin-2026-10-31.md`.
+was cancelled at old source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`
+when superseded by a fresh exact-head package run. See
+`memory/frontend-domain-admin-2026-10-31.md`.
 Fresh run [41219703865](https://github.com/auenkr/cadence-rust/actions/runs/41219703865)
 targets `834ee549388110ab1ab00de08a5c74a4179abfa4`; last observed status is
 in progress, with no conclusion yet. Run 41219576105 was cancelled.
+During handoff merged documentation-only tips `origin/frontend-core2`
+(`9dc7d51a4`) and `origin/t3/frontend-workflow-api` (`04e5fcf98`); run
+41219703865 still covers unchanged Rust source SHA `834ee549388110ab1ab00de08a5c74a4179abfa4`.

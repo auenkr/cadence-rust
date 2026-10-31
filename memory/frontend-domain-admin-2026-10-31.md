@@ -1403,11 +1403,9 @@ migration forward.
   [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
   failed Clippy at that SHA because of a redundant `&str.clone()`; the fix is
   commit `ce2aab17b`.
-- **Current tree is not CI-validated and must not be marked green.** Dispatch
-  `gh workflow run rust-ci.yml --ref frontend-domain-admin -f package=cadence-frontend`
-  after pushing the handoff commit, check `gh run list/view`, fix any failures,
-  and record the exact pushed source SHA and final conclusion here before more
-  feature work.
+- **Current tree is not CI-validated and must not be marked green.** Check the
+  exact-head run below, fix any failures, and record its final conclusion
+  before more feature work.
 - Fresh package run
   [41219703865](https://github.com/auenkr/cadence-rust/actions/runs/41219703865)
   targets source/head SHA `834ee549388110ab1ab00de08a5c74a4179abfa4`. Last
@@ -1416,6 +1414,13 @@ migration forward.
   was cancelled when this fresh run superseded it. The final handoff-log commit
   after dispatch is documentation-only and does not change the Rust source in
   run 41219703865.
+- During handoff, upstream workers advanced both documentation refs again:
+  merged `origin/frontend-core2` at `9dc7d51a414af8c92874fb9826ba5c4276db67b1`
+  and `origin/t3/frontend-workflow-api` at
+  `04e5fcf9815a6c27545fd50277b2d2135dcc6f79`. Both deltas were memory-only;
+  `origin/master` remains `51260ba6a301d8ebb431832adc995a039526ba18`. The latest
+  tips are ancestors of this handoff branch and do not change the Rust source
+  targeted by run 41219703865.
 - Next implementation slice: port Go's failover-history persistence across
   restart. `InMemoryDomainStore.failover_history` currently reads the in-memory
   `DomainRecord.failover_audit`, while `PersistedFrontendDomainManager` only
