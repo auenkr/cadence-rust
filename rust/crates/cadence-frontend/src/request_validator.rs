@@ -1342,4 +1342,113 @@ mod tests {
             "Domain not set on request."
         );
     }
+
+    #[test]
+    fn go_validator_matrix_covers_task_list_reset_and_failover_boundaries() {
+        let mut validator = RequestValidator::default();
+        validator.config.max_task_list_name_length = 2;
+
+        let mut describe = DescribeTaskListRequest {
+            domain: "domain".into(),
+            task_list: None,
+            task_list_type: None,
+            include_task_list_status: false,
+        };
+        assert_eq!(
+            validator
+                .validate_describe_task_list_request(Some(&describe))
+                .unwrap_err()
+                .message,
+            "TaskListType is not set on request."
+        );
+        describe.task_list_type = Some(cadence_api::TaskListType::Decision);
+        assert_eq!(
+            validator
+                .validate_describe_task_list_request(Some(&describe))
+                .unwrap_err()
+                .message,
+            "TaskList is not set on request."
+        );
+        describe.task_list = Some(TaskList {
+            name: "long".into(),
+            kind: None,
+            base_name: String::new(),
+        });
+        assert_eq!(
+            validator
+                .validate_describe_task_list_request(Some(&describe))
+                .unwrap_err()
+                .message,
+            "TaskList length exceeds limit."
+        );
+
+        let partitions = ListTaskListPartitionsRequest {
+            domain: "domain".into(),
+            task_list: Some(TaskList {
+                name: "long".into(),
+                kind: None,
+                base_name: String::new(),
+            }),
+        };
+        assert_eq!(
+            validator
+                .validate_list_task_list_partitions_request(Some(&partitions))
+                .unwrap_err()
+                .message,
+            "TaskList length exceeds limit."
+        );
+
+        let mut reset = ResetStickyTaskListRequest {
+            domain: String::new(),
+            execution: None,
+        };
+        assert_eq!(
+            validator
+                .validate_reset_sticky_task_list_request(Some(&reset))
+                .unwrap_err()
+                .message,
+            "Domain not set on request."
+        );
+        reset.domain = "domain".into();
+        assert_eq!(
+            validator
+                .validate_reset_sticky_task_list_request(Some(&reset))
+                .unwrap_err()
+                .message,
+            "Execution is not set on request."
+        );
+
+        let mut failover = FailoverDomainRequest {
+            domain_name: String::new(),
+            domain_active_cluster_name: None,
+            active_clusters: None,
+            reason: None,
+            failover_timeout_in_seconds: None,
+            first_execution_run_id: String::new(),
+        };
+        assert_eq!(
+            validator
+                .validate_failover_domain_request(Some(&failover))
+                .unwrap_err()
+                .message,
+            "Domain not set on request."
+        );
+        failover.domain_name = "domain".into();
+        assert_eq!(
+            validator
+                .validate_failover_domain_request(Some(&failover))
+                .unwrap_err()
+                .message,
+            "DomainActiveClusterName or ActiveClusters must be provided to failover the domain"
+        );
+        validator.config.lockdown = true;
+        failover.active_clusters = Some(cadence_api::types::ActiveClusters::default());
+        assert_eq!(
+            validator
+                .validate_failover_domain_request(Some(&failover))
+                .unwrap_err()
+                .message,
+            "Domain is not accepting fail overs at this time due to lockdown."
+        );
+    }
 }

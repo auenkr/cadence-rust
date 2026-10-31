@@ -743,11 +743,9 @@ pub fn map_property(
     default: std::collections::BTreeMap<String, Value>,
 ) -> std::collections::BTreeMap<String, Value> {
     let default_json = Value::Object(default.clone().into_iter().collect());
-    if let Some(result) = values.runtime_value(
-        RuntimePropertyType::Map,
-        default_json,
-        &BTreeMap::new(),
-    ) {
+    if let Some(result) =
+        values.runtime_value(RuntimePropertyType::Map, default_json, &BTreeMap::new())
+    {
         return runtime_typed(result, (), "map")
             .and_then(|value| value.as_object().cloned())
             .map(|value| value.into_iter().collect())

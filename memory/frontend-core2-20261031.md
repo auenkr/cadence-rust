@@ -226,3 +226,21 @@ CI for this continuation must include `cadence-frontend` Clippy and tests on a
 fresh target, plus the Frontend formatting patch for the new launcher and
 shared HTTP handler changes. Record exact head and final run conclusion below.
 - Previous skeleton analysis and baseline CI: `frontend-core-20261031.md`.
+
+## Exact-head follow-up — 2026-10-31
+
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41178553763 at
+  `be0432cc7dcffc39469bad1d7e09b6bebc34231d` concluded `failure` in Clippy.
+  It reported the non-idiomatic `and_then(Some(...))` dynamic-map binding and
+  needless struct update warnings in test code.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41178835295 at
+  `45e7c95d44070cdf40e98c59e82674d8e1aa004e` concluded `failure` in the
+  changed Matching runtime formatting gate, before Clippy/tests. The runner
+  reported a rustfmt-only hunk in `cadence-persistence/src/dynamic_config.rs`;
+  that hunk is fixed in the next checkpoint. It does not validate Frontend.
+- Current uncommitted work adds exact error checks for missing task-list type,
+  missing/oversized task lists, reset-sticky domain/execution, and failover
+  request shape/lockdown. Its CI validation remains pending.
+- The branch still has no write-capable durable Frontend domain/metadata,
+  visibility, History, or execution manager and no full Go handler/quota stop
+  owners. Read-only domain bootstrap and listener drain are not full parity.
