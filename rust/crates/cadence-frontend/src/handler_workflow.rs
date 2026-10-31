@@ -12,6 +12,7 @@ use cadence_api::{service_types, tasks};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum WorkflowOperation {
@@ -173,6 +174,14 @@ pub fn unimplemented_operation(operation: &str) -> cadence_api::errors::Internal
 pub struct Handler<B> {
     backend: B,
     validator: crate::request_validator::RequestValidator,
+    metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
+}
+
+#[derive(Default)]
+struct NoopWorkflowMetrics;
+
+impl crate::wrappers::metered::Metrics for NoopWorkflowMetrics {
+    fn increment(&self, _: crate::wrappers::metered::Counter) {}
 }
 
 impl<B: WorkflowBackend> Handler<B> {
@@ -180,6 +189,7 @@ impl<B: WorkflowBackend> Handler<B> {
         Self {
             backend,
             validator: crate::request_validator::RequestValidator::default(),
+            metrics: Arc::new(NoopWorkflowMetrics),
         }
     }
 
@@ -187,7 +197,27 @@ impl<B: WorkflowBackend> Handler<B> {
         backend: B,
         validator: crate::request_validator::RequestValidator,
     ) -> Self {
-        Self { backend, validator }
+        Self {
+            backend,
+            validator,
+            metrics: Arc::new(NoopWorkflowMetrics),
+        }
+    }
+
+    /// Construct a handler with the Frontend metered-wrapper sink. The
+    /// middleware is outside validation and backend dispatch, matching Go's
+    /// generated wrapper order: validation/backend errors are normalized and
+    /// counted at the API boundary.
+    pub fn with_metrics(
+        backend: B,
+        validator: crate::request_validator::RequestValidator,
+        metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
+    ) -> Self {
+        Self {
+            backend,
+            validator,
+            metrics,
+        }
     }
 
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
@@ -196,6 +226,30 @@ impl<B: WorkflowBackend> Handler<B> {
                 "unknown workflow operation: {operation}"
             )))
         })?;
+        let start = std::time::Instant::now();
+        self.metrics.increment_requests(operation.name());
+        let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
+        let result = self.dispatch_operation(operation, request).await;
+        let elapsed = start.elapsed();
+        self.metrics
+            .record_operation(operation.name(), elapsed, &tags);
+        self.metrics
+            .record_latency_histogram(operation.name(), elapsed);
+        match result {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                let (error, counter) = crate::wrappers::metered::normalize_error(error);
+                self.metrics.increment(counter);
+                Err(error)
+            }
+        }
+    }
+
+    async fn dispatch_operation(
+        &self,
+        operation: WorkflowOperation,
+        request: Value,
+    ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
         let request = self.validate_request(operation, request)?;
         self.backend.invoke(operation, request).await
@@ -229,7 +283,10 @@ impl<B: WorkflowBackend> Handler<B> {
                 serde_json::from_value(request_value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
-            self.validator.validate_start(Some(&request))?;
+            cadence_api::validation::validate_start_workflow_execution_request(
+                Some(&request),
+                &cadence_api::validation::Limits::default(),
+            )?;
             if matches!(
                 operation,
                 WorkflowOperation::SignalWithStartWorkflowExecution
@@ -257,8 +314,7 @@ impl<B: WorkflowBackend> Handler<B> {
                     "Domain not set on request.",
                 )));
             }
-            self.validator
-                .validate_execution(request.execution.as_ref())?;
+            cadence_api::validation::check_execution(request.execution.as_ref())?;
             if !request.next_page_token.is_empty() {
                 let token = crate::handler_workflow_history::deserialize_history_token(
                     &request.next_page_token,
@@ -311,7 +367,7 @@ impl<B: WorkflowBackend> Handler<B> {
                     )));
                 }
             } else {
-                validate_execution_field(&value, field, &self.validator)?;
+                validate_execution_field(&value, field)?;
             }
             if operation == WorkflowOperation::QueryWorkflow {
                 let query = value.get("query").filter(|query| !query.is_null());
@@ -512,18 +568,14 @@ fn validate_domain(request: &Value) -> Result<(), CadenceError> {
     Ok(())
 }
 
-fn validate_execution_field(
-    request: &Value,
-    field: &str,
-    validator: &crate::request_validator::RequestValidator,
-) -> Result<(), CadenceError> {
+fn validate_execution_field(request: &Value, field: &str) -> Result<(), CadenceError> {
     let execution = request
         .get(field)
         .cloned()
         .map(serde_json::from_value::<cadence_api::types::WorkflowExecution>)
         .transpose()
         .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))?;
-    validator.validate_execution(execution.as_ref())?;
+    cadence_api::validation::check_execution(execution.as_ref())?;
     Ok(())
 }
 
@@ -533,7 +585,53 @@ mod tests {
     use std::sync::Mutex;
 
     #[derive(Default)]
+    struct RecordingMetrics {
+        requests: Mutex<Vec<String>>,
+        counters: Mutex<Vec<crate::wrappers::metered::Counter>>,
+        operations: Mutex<Vec<(String, Vec<crate::wrappers::metered::MetricTag>)>>,
+        latency_samples: Mutex<Vec<String>>,
+    }
+
+    impl crate::wrappers::metered::Metrics for RecordingMetrics {
+        fn increment(&self, counter: crate::wrappers::metered::Counter) {
+            self.counters.lock().unwrap().push(counter);
+        }
+
+        fn increment_requests(&self, operation: &str) {
+            self.requests.lock().unwrap().push(operation.to_owned());
+        }
+
+        fn record_operation(
+            &self,
+            operation: &str,
+            _: std::time::Duration,
+            tags: &[crate::wrappers::metered::MetricTag],
+        ) {
+            self.operations
+                .lock()
+                .unwrap()
+                .push((operation.to_owned(), tags.to_vec()));
+        }
+
+        fn record_latency_histogram(&self, operation: &str, _: std::time::Duration) {
+            self.latency_samples.lock().unwrap().push(operation.to_owned());
+        }
+    }
+
+    #[derive(Default)]
     struct FakeBackend(Mutex<Vec<WorkflowOperation>>);
+
+    struct FailingBackend(&'static str);
+
+    impl WorkflowBackend for FailingBackend {
+        fn invoke<'a>(
+            &'a self,
+            _: WorkflowOperation,
+            _: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>> {
+            Box::pin(async move { Err(CadenceError::Unknown(self.0.to_owned())) })
+        }
+    }
 
     #[derive(serde::Serialize)]
     struct EncodedHistoryToken {
@@ -591,6 +689,66 @@ mod tests {
             &[WorkflowOperation::StartWorkflowExecution]
         );
         assert!(handler.dispatch("NotAnApi", Value::Null).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_runs_go_metered_wrapper_around_validation_and_backend() {
+        let metrics = Arc::new(RecordingMetrics::default());
+        let handler = Handler::with_metrics(
+            FakeBackend::default(),
+            crate::request_validator::RequestValidator::default(),
+            metrics.clone(),
+        );
+        let error = handler
+            .dispatch("DescribeWorkflowExecution", serde_json::json!({}))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "Domain not set on request.");
+        assert_eq!(*metrics.requests.lock().unwrap(), ["DescribeWorkflowExecution"]);
+        assert_eq!(
+            *metrics.counters.lock().unwrap(),
+            [crate::wrappers::metered::Counter::BadRequest]
+        );
+        assert_eq!(
+            metrics.operations.lock().unwrap()[0].0,
+            "DescribeWorkflowExecution"
+        );
+        assert_eq!(
+            metrics.operations.lock().unwrap()[0].1,
+            crate::wrappers::metered::request_tags(
+                "DescribeWorkflowExecution",
+                &serde_json::json!({})
+            )
+        );
+        assert_eq!(
+            *metrics.latency_samples.lock().unwrap(),
+            ["DescribeWorkflowExecution"]
+        );
+    }
+
+    #[tokio::test]
+    async fn metered_wrapper_normalizes_uncategorized_backend_errors() {
+        let metrics = Arc::new(RecordingMetrics::default());
+        let handler = Handler::with_metrics(
+            FailingBackend("backend broke"),
+            crate::request_validator::RequestValidator::default(),
+            metrics.clone(),
+        );
+        let error = handler
+            .dispatch("Health", Value::Null)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, CadenceError::Internal(_)));
+        assert_eq!(
+            error.to_string(),
+            "cadence internal uncategorized error, msg: backend broke"
+        );
+        assert_eq!(
+            *metrics.counters.lock().unwrap(),
+            [crate::wrappers::metered::Counter::Failures]
+        );
     }
 
     #[tokio::test]

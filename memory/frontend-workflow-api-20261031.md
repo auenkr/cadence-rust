@@ -183,3 +183,35 @@ these fixes; no green CI evidence covers the current changes.
 - Full Go method body behavior, broad Go-mirroring tests, mixed Go/Rust SDK
   compatibility, failure/restart/recovery validation, and a green CI result
   for the current source remain outstanding. Do not mark Frontend complete.
+
+## Follow-up after user's continuation — 2026-10-31
+
+- The branch is `t3/frontend-workflow-api` at the `frontend-core` base with
+  `frontend-core2` merged. The remote branch had no worktree changes before
+  this continuation.
+- CI run
+  [41176804275](https://github.com/auenkr/cadence-rust/actions/runs/41176804275)
+  tested `4d66d043d471db8584cf47cd3aa6683c6b81ccc6` and concluded `failure`.
+  Clippy found stale calls to `RequestValidator::validate_start` and
+  `validate_execution` after frontend-core2 changed that API. The handler now
+  calls the shared `cadence_api::validation` Go-parity helpers directly.
+- `Handler::dispatch` now composes the metered wrapper around rate-limit
+  preflight, request validation, and backend invocation. It emits operation
+  request/timing metrics and per-request tags, normalizes typed/uncategorized
+  errors with Go's counter mapping, and allows a metrics sink to be injected.
+  Added tests for validation-error metrics/tags and normalization of an
+  uncategorized backend failure. These source changes have not yet been run by
+  CI; `git diff --check` is the only local source check.
+- Next exact-head CI must be dispatched after pushing the validator API fix and
+  metering integration. No green CI result covers the current source.
+- Handler bodies still do not execute Go's workflow-engine transformations:
+  backend calls are currently generic `WorkflowBackend::invoke` operations.
+  The production runtime currently routes through shared `cadence-service-core`
+  handlers and does not instantiate this Frontend crate handler. Needed
+  interfaces remain domain/cache/config, generated History/Matching typed
+  calls, visibility query validation/storage/archive, task-token codec, and
+  caller context for version/rate-limit/auth. The frontend-core2 owner owns
+  clients and persistence; request those missing interfaces from that owner
+  rather than duplicating them. Stateful redirect, authorization, quota,
+  transport conversion, mixed-cluster compatibility and SDK recovery tests
+  still need live wiring and parity tests.
