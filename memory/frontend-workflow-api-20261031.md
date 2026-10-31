@@ -1014,3 +1014,8 @@ Frontend parity until these are implemented and validated.
   metric dimension and by-ID cancellation test added after that run. New exact
   head package CI is required; the workflow run did not reach Frontend Clippy or
   tests.
+- Run [41197496023](https://github.com/auenkr/cadence-rust/actions/runs/41197496023)
+  checked `b53cfd6198693a601bc16b09284122b08fa10349`; formatting passed, but
+  Clippy found three issues in the imported manager (needless lifetime and two
+  redundant closures) before checking Frontend. Fixed those directly. The
+  next exact-head CI must reach Frontend Clippy and tests.
