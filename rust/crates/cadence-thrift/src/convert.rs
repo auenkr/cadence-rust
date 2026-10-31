@@ -1129,9 +1129,34 @@ impl ToThrift for ReplicationTask {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         f.oenum(10, self.task_type);
-        f.oi64(20, self.source_task_id);
-        f.ostruct(30, self.domain_task_attributes.as_ref());
+        f.oi64(11, self.source_task_id);
+        f.ostruct(20, self.domain_task_attributes.as_ref());
         f.finish()
+    }
+}
+
+impl FromThrift for ReplicationTask {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            task_type: s.opt_enum(10)?,
+            source_task_id: s.opt_i64(11)?,
+            domain_task_attributes: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl FromThrift for DomainTaskAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_operation: s.opt_enum(10)?,
+            id: s.req_string(20, "")?,
+            info: s.opt_struct(30)?,
+            config: s.opt_struct(40)?,
+            replication_config: s.opt_struct(50)?,
+            config_version: s.opt_i64(60)?.unwrap_or_default(),
+            failover_version: s.opt_i64(70)?.unwrap_or_default(),
+            previous_failover_version: s.opt_i64(80)?.unwrap_or_default(),
+        })
     }
 }
 
@@ -5790,6 +5815,7 @@ mod tests {
     fn domain_replication_task_uses_go_wire_field_ids() {
         let task = ReplicationTask {
             task_type: Some(ReplicationTaskType::Domain),
+            source_task_id: Some(42),
             domain_task_attributes: Some(DomainTaskAttributes {
                 domain_operation: Some(DomainOperation::Update),
                 id: "domain-uuid".into(),
@@ -5802,7 +5828,8 @@ mod tests {
         };
         let thrift = task.to_thrift();
         assert!(matches!(thrift.get(10), Some(Value::I32(0))));
-        let attributes = match thrift.get(30) {
+        assert!(matches!(thrift.get(11), Some(Value::I64(42))));
+        let attributes = match thrift.get(20) {
             Some(Value::Struct(attributes)) => attributes,
             other => panic!("expected domain task attributes, got {other:?}"),
         };
@@ -5811,6 +5838,7 @@ mod tests {
         assert!(matches!(attributes.get(60), Some(Value::I64(0))));
         assert!(matches!(attributes.get(70), Some(Value::I64(8))));
         assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
+        assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
     }
 
     #[test]
