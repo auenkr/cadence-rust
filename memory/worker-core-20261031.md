@@ -222,9 +222,11 @@ The shardscanner execution slice now includes `getBatchIndices`'s round-robin
 worker assignment and batch boundary behavior, generic scanner config
 resolution (dynamic values, hook config, then explicit overrides), Go fixer
 defaults, and `Shards` validation/flattening with half-open ranges and list
-ordering. These additions have Go-derived unit fixtures but are not yet
-validated by CI. Workflow replay, scanner persistence/invariant activities,
-heartbeat recovery, and executable worker pollers remain unimplemented.
+ordering. `ScannerSelection::new` also mirrors `NewScannerWorkflow`'s name-first
+validation and selected-shard bounds. These additions have Go-derived unit
+fixtures but are not yet validated by CI. Workflow replay, scanner
+persistence/invariant activities, heartbeat recovery, and executable worker
+pollers remain unimplemented.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.

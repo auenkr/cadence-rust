@@ -67,9 +67,45 @@ impl Shards {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScannerSelection {
+    pub workflow_name: String,
+    pub shard_ids: Vec<i32>,
+    pub min_shard: i32,
+    pub max_shard: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScannerSelectionError {
+    WorkflowNameMissing,
+    InvalidShards(ShardsError),
+}
+
+impl ScannerSelection {
+    /// Mirrors `NewScannerWorkflow`: require a name before validating and
+    /// flattening the configured shard set.
+    pub fn new(name: impl Into<String>, shards: &Shards) -> Result<Self, ScannerSelectionError> {
+        let workflow_name = name.into();
+        if workflow_name.is_empty() {
+            return Err(ScannerSelectionError::WorkflowNameMissing);
+        }
+        let (shard_ids, min_shard, max_shard) = shards
+            .flatten()
+            .map_err(ScannerSelectionError::InvalidShards)?;
+        Ok(Self {
+            workflow_name,
+            shard_ids,
+            min_shard,
+            max_shard,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ShardRange, Shards, ShardsError};
+    use super::{
+        ScannerSelection, ScannerSelectionError, ShardRange, Shards, ShardsError,
+    };
 
     #[test]
     fn go_shards_validation_distinguishes_nil_empty_and_conflicting_inputs() {
@@ -124,6 +160,39 @@ mod tests {
             }
             .flatten(),
             Ok((vec![9, 3, 7, 3], 3, 9))
+        );
+    }
+
+    #[test]
+    fn scanner_construction_checks_name_before_shards_like_go() {
+        let no_shards = Shards {
+            list: None,
+            range: None,
+        };
+        assert_eq!(
+            ScannerSelection::new("", &no_shards),
+            Err(ScannerSelectionError::WorkflowNameMissing)
+        );
+        assert_eq!(
+            ScannerSelection::new("executions", &no_shards),
+            Err(ScannerSelectionError::InvalidShards(
+                ShardsError::MustProvideListOrRange
+            ))
+        );
+        assert_eq!(
+            ScannerSelection::new(
+                "executions",
+                &Shards {
+                    list: None,
+                    range: Some(ShardRange { min: 4, max: 7 }),
+                }
+            ),
+            Ok(ScannerSelection {
+                workflow_name: "executions".to_owned(),
+                shard_ids: vec![4, 5, 6],
+                min_shard: 4,
+                max_shard: 6,
+            })
         );
     }
 }
