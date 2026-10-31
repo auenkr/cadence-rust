@@ -1118,3 +1118,7 @@ Frontend parity until these are implemented and validated.
   that import. Also added typed History client methods for `RefreshWorkflowTasks`
   and `DescribeMutableState`, which Go Frontend uses through the History
   boundary. Both source changes require fresh exact-head CI.
+- Follow-up run [41199957815](https://github.com/auenkr/cadence-rust/actions/runs/41199957815)
+  was dispatched for `cadence-frontend` with `clean_target=true` at exact head
+  `83ef830f5d7d687d5a9cf206544abac5dc03bf48`; status is pending/in progress,
+  with no conclusion yet.
