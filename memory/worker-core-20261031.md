@@ -350,7 +350,7 @@ run. The Worker service still refuses to poll (`WorkerService::start`).
 - `c36d3636d` domaindeprecation + replicator: https://github.com/auenkr/cadence-rust/actions/runs/41220829725 — success (clippy, tests 75 passed)
 - `2941fc090` asyncworkflow consumer manager: https://github.com/auenkr/cadence-rust/actions/runs/41221234665 — success (format log shows pre-existing diffs; none needed to be fixed in this slice)
 - `bc75c173c` format patch dispatch (`format_worker_files=true`): https://github.com/auenkr/cadence-rust/actions/runs/41221597606 — success, 81 worker crate tests passed, `worker-format-patch` artifact produced
-- `34edff969` applied that CI rustfmt patch (formatting only): see the final CI run recorded below.
+- `34edff969` applied that CI rustfmt patch (formatting only). Final exact-head CI at `80b2efb54` (head includes the memory-only docs commit; source identical to `34edff969`): https://github.com/auenkr/cadence-rust/actions/runs/41221962961 — success, 81 worker crate tests passed. None of this session's files appear in its format log.
 
 ### CI tooling changes this session
 
@@ -363,10 +363,13 @@ run. The Worker service still refuses to poll (`WorkerService::start`).
 
 ### Next steps for the successor
 
-1. Format-check the whole worker crate against a CI run: the format log lists
-   pre-existing diffs in `batcher.rs`, `client.rs`, `failovermanager.rs`,
-   `launcher.rs`, `parentclosepolicy.rs` and others. Extend the format patch
-   list to those files, or wait until each is ported. Do not hand-format.
+1. Format the earlier-session Worker files from CI output, not by hand. The
+   format log of run 41221962961 lists diffs in `batcher.rs` (1), `client.rs` (3),
+   `failovermanager.rs` (4), `launcher.rs` (1), `parentclosepolicy.rs` (8),
+   `scanner.rs` (5), `scanner/executions.rs` (3), `scanner/pagination.rs` (1),
+   `scanner/shard_batches.rs` (1), `scanner/shards.rs` (1), `scanner/tasklist.rs`
+   (3), `service.rs` (1), `workercommon.rs` (1) and `tests/go_contracts.rs` (3).
+   Add them to `format_worker_files`, dispatch, and apply the artifact.
 2. Archiver: `client.go` (ArchiveRequest signal send with rate limits),
    `pump.go`, `handler.go`, `activities.go`, then the workflow body. Each needs
    the Rust Cadence client and blobstore/History/visibility dependencies.
