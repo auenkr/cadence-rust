@@ -157,8 +157,9 @@ mod base64_opt {
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         match bytes {
-            Some(bytes) => serializer
-                .serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes)),
+            Some(bytes) => {
+                serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+            }
             None => serializer.serialize_none(),
         }
     }
@@ -191,10 +192,7 @@ mod base64_map {
                 let encoded: BTreeMap<&String, String> = map
                     .iter()
                     .map(|(key, value)| {
-                        (
-                            key,
-                            base64::engine::general_purpose::STANDARD.encode(value),
-                        )
+                        (key, base64::engine::general_purpose::STANDARD.encode(value))
                     })
                     .collect();
                 serializer.collect_map(encoded)

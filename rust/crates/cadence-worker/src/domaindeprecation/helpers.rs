@@ -26,13 +26,19 @@ mod tests {
 
     #[test]
     fn preserves_go_error_reasons_and_defaults() {
-        assert_eq!(ERR_DOMAIN_DOES_NOT_EXIST_NON_RETRYABLE, "domain does not exist");
+        assert_eq!(
+            ERR_DOMAIN_DOES_NOT_EXIST_NON_RETRYABLE,
+            "domain does not exist"
+        );
         assert_eq!(ERR_ACCESS_DENIED_NON_RETRYABLE, "AccessDeniedError");
         assert_eq!(
             ERR_WORKFLOW_ALREADY_COMPLETED_NON_RETRYABLE,
             "WorkflowExecutionAlreadyCompletedError"
         );
-        assert_eq!(ERR_ACTIVE_POLLERS_NON_RETRYABLE, "domain has active pollers");
+        assert_eq!(
+            ERR_ACTIVE_POLLERS_NON_RETRYABLE,
+            "domain has active pollers"
+        );
         assert_eq!(DEFAULT_RPS, 50);
         assert_eq!(DEFAULT_CONCURRENCY, 5);
         assert_eq!(DEFAULT_PAGE_SIZE, 1000);

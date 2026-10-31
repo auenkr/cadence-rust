@@ -26,9 +26,9 @@ pub fn hash<T: Serialize>(value: &T) -> u64 {
 fn fnv1a_64(bytes: &[u8]) -> u64 {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    bytes
-        .iter()
-        .fold(OFFSET_BASIS, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(PRIME))
+    bytes.iter().fold(OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+    })
 }
 
 /// Reports whether two hash lists hold the same values with the same counts,
@@ -149,6 +149,9 @@ mod tests {
     fn search_attributes_convert_to_strings() {
         let attributes = BTreeMap::from([("CustomKey".to_owned(), b"value".to_vec())]);
         let converted = convert_search_attributes_to_string(&attributes);
-        assert_eq!(converted.get("CustomKey").map(String::as_str), Some("value"));
+        assert_eq!(
+            converted.get("CustomKey").map(String::as_str),
+            Some("value")
+        );
     }
 }

@@ -25,7 +25,10 @@ mod tests {
     #[test]
     fn caps_limits_above_half_the_workflow_timeout() {
         let maximum = Duration::from_secs(15 * 24 * 60 * 60);
-        assert_eq!(iteration_time_limit(Duration::from_secs(365 * 24 * 60 * 60)), maximum);
+        assert_eq!(
+            iteration_time_limit(Duration::from_secs(365 * 24 * 60 * 60)),
+            maximum
+        );
         assert_eq!(iteration_time_limit(maximum), maximum);
     }
 }

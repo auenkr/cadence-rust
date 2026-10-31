@@ -170,7 +170,10 @@ mod tests {
 
     #[test]
     fn dead_letter_requires_domain_attributes() {
-        assert_eq!(require_domain_attributes::<u8>(None), Err(MISSING_DOMAIN_ATTRIBUTE_MESSAGE));
+        assert_eq!(
+            require_domain_attributes::<u8>(None),
+            Err(MISSING_DOMAIN_ATTRIBUTE_MESSAGE)
+        );
         assert_eq!(require_domain_attributes(Some(7u8)), Ok(7));
     }
 

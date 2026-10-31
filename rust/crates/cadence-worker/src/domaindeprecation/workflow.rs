@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use crate::batcher::{BatchParams, TerminateParams};
 use crate::domaindeprecation::helpers::{
-    DEFAULT_ACTIVITY_HEARTBEAT_TIMEOUT, DEFAULT_ATTEMPTS_ON_RETRYABLE_ERROR,
-    DEFAULT_CONCURRENCY, DEFAULT_MAX_ACTIVITY_RETRIES, DEFAULT_PAGE_SIZE, DEFAULT_RPS,
-    ERR_ACCESS_DENIED_NON_RETRYABLE, ERR_ACTIVE_POLLERS_NON_RETRYABLE,
-    ERR_DOMAIN_DOES_NOT_EXIST_NON_RETRYABLE, ERR_WORKFLOW_ALREADY_COMPLETED_NON_RETRYABLE,
+    DEFAULT_ACTIVITY_HEARTBEAT_TIMEOUT, DEFAULT_ATTEMPTS_ON_RETRYABLE_ERROR, DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_ACTIVITY_RETRIES, DEFAULT_PAGE_SIZE, DEFAULT_RPS, ERR_ACCESS_DENIED_NON_RETRYABLE,
+    ERR_ACTIVE_POLLERS_NON_RETRYABLE, ERR_DOMAIN_DOES_NOT_EXIST_NON_RETRYABLE,
+    ERR_WORKFLOW_ALREADY_COMPLETED_NON_RETRYABLE,
 };
 use crate::domaindeprecation::BATCH_WORKFLOW_ID_PREFIX;
 
@@ -110,8 +110,14 @@ mod tests {
 
     #[test]
     fn preserves_go_timeouts_and_retry_policy() {
-        assert_eq!(WORKFLOW_START_TO_CLOSE_TIMEOUT, Duration::from_secs(30 * 24 * 60 * 60));
-        assert_eq!(WORKFLOW_TASK_START_TO_CLOSE_TIMEOUT, Duration::from_secs(300));
+        assert_eq!(
+            WORKFLOW_START_TO_CLOSE_TIMEOUT,
+            Duration::from_secs(30 * 24 * 60 * 60)
+        );
+        assert_eq!(
+            WORKFLOW_TASK_START_TO_CLOSE_TIMEOUT,
+            Duration::from_secs(300)
+        );
         assert_eq!(MAX_BATCH_WORKFLOW_ATTEMPTS, 3);
         assert_eq!(VISIBILITY_REFRESH_WAIT_TIME, Duration::from_secs(180));
         assert_eq!(ACTIVITY_SCHEDULE_TO_START_TIMEOUT, Duration::from_secs(300));
@@ -167,10 +173,22 @@ mod tests {
 
     #[test]
     fn attempt_loop_decisions_match_go() {
-        assert_eq!(after_open_workflow_check(1, false), AttemptOutcome::Completed);
-        assert_eq!(after_open_workflow_check(3, false), AttemptOutcome::Completed);
-        assert_eq!(after_open_workflow_check(1, true), AttemptOutcome::RetryBatch);
-        assert_eq!(after_open_workflow_check(2, true), AttemptOutcome::RetryBatch);
+        assert_eq!(
+            after_open_workflow_check(1, false),
+            AttemptOutcome::Completed
+        );
+        assert_eq!(
+            after_open_workflow_check(3, false),
+            AttemptOutcome::Completed
+        );
+        assert_eq!(
+            after_open_workflow_check(1, true),
+            AttemptOutcome::RetryBatch
+        );
+        assert_eq!(
+            after_open_workflow_check(2, true),
+            AttemptOutcome::RetryBatch
+        );
         assert_eq!(after_open_workflow_check(3, true), AttemptOutcome::Failed);
     }
 }
