@@ -269,6 +269,18 @@ pub struct DomainConfiguration {
     )]
     pub bad_binaries: Option<BadBinaries>,
     #[serde(
+        rename = "isolationGroups",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub isolation_groups: Option<IsolationGroupConfiguration>,
+    #[serde(
+        rename = "asyncWorkflowConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub async_workflow_config: Option<AsyncWorkflowConfiguration>,
+    #[serde(
         rename = "historyArchivalStatus",
         default,
         skip_serializing_if = "Option::is_none"

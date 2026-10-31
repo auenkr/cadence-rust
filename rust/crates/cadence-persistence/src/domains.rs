@@ -144,6 +144,39 @@ impl DomainRecord {
             config_decode_error: None,
         })
     }
+
+    /// Build the Go-compatible domain replication task payload from a domain
+    /// snapshot. The queue codec wraps this model in ThriftRW before storage.
+    pub fn to_domain_replication_task(
+        &self,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<cadence_api::types::ReplicationTask, String> {
+        use cadence_api::{enums::ReplicationTaskType, types::{DomainTaskAttributes, ReplicationTask}};
+
+        let status = self.info.status.ok_or_else(|| {
+            format!("invalid domain status for domain {}", self.info.name)
+        })?;
+        if !matches!(status, DomainStatus::Registered | DomainStatus::Deprecated) {
+            return Err(format!("invalid domain status for domain {}", self.info.name));
+        }
+        let mut configuration = self.configuration.clone();
+        configuration.isolation_groups = self.isolation_groups.clone();
+        configuration.async_workflow_config = self.async_workflow_config.clone();
+        Ok(ReplicationTask {
+            task_type: Some(ReplicationTaskType::Domain),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(operation),
+                id: self.info.uuid.clone(),
+                info: Some(self.info.clone()),
+                config: Some(configuration),
+                replication_config: Some(self.replication.clone()),
+                config_version: self.config_version,
+                failover_version: self.failover_version,
+                previous_failover_version: self.previous_failover_version,
+            }),
+            ..Default::default()
+        })
+    }
 }
 
 /// A recorded domain failover, mirroring Go's domain audit log rows for
@@ -1408,6 +1441,39 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn domain_replication_task_carries_domain_snapshot_versions() {
+        let (info, configuration, replication) = sample("replicated", "domain-uuid");
+        let record = DomainRecord {
+            info,
+            configuration,
+            replication,
+            failover_version: 42,
+            notification_version: 9,
+            failover_notification_version: 3,
+            is_global_domain: true,
+            archival_bucket: String::new(),
+            failover_audit: Vec::new(),
+            config_version: 7,
+            last_updated_time_nanos: 123,
+            failover_end_time: None,
+            previous_failover_version: 41,
+            isolation_groups: None,
+            async_workflow_config: None,
+        };
+        let task = record
+            .to_domain_replication_task(cadence_api::enums::DomainOperation::Update)
+            .unwrap();
+        assert_eq!(task.task_type, Some(cadence_api::enums::ReplicationTaskType::Domain));
+        let attributes = task.domain_task_attributes.unwrap();
+        assert_eq!(attributes.id, "domain-uuid");
+        assert_eq!(attributes.domain_operation, Some(cadence_api::enums::DomainOperation::Update));
+        assert_eq!(attributes.config_version, 7);
+        assert_eq!(attributes.failover_version, 42);
+        assert_eq!(attributes.previous_failover_version, 41);
+        assert_eq!(attributes.replication_config.unwrap().active_cluster_name, "active");
     }
 
     #[test]

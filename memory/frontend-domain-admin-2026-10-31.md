@@ -947,7 +947,12 @@ migration forward.
 - Started the next queue slice by adding the Go numeric enums and typed domain
   replication task envelope to `cadence-api`, preserving Go JSON field names
   and omitting zero scalar fields. Added a focused field/enum contract test.
-  This is only the model layer; ThriftRW encoding, durable SQL/Cassandra queue
-  operations, publication on domain mutations, and Admin queue reads remain
-  open. `git diff --check` passed; no local Cargo command ran. Await exact-head
-  Frontend CI after push.
+  Added the `DomainRecord` to task mapping for create/update/delete operations;
+  it carries the persisted domain snapshot and Go config/failover versions,
+  including isolation and async-workflow config fields. Added a persistence
+  unit case for the mapped versions. This is only the model layer; ThriftRW
+  encoding, durable SQL/Cassandra queue operations, publication on domain
+  mutations, and Admin queue reads remain open. `git diff --check` passed; no
+  local Cargo command ran. Run 41200689933 tests only the API model at
+  `6594677941446b80bc8ed38ff14a19896ee6c460`; the expanded task mapping needs
+  fresh exact-head CI.
