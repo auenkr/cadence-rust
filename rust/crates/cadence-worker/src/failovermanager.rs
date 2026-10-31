@@ -1,4 +1,7 @@
-//! Failover-manager workflow registration names from Go `failovermanager`.
+//! Failover-manager workflow registration names and shared helpers from Go `failovermanager`.
+
+pub mod shared;
+
 pub const TASK_LIST: &str = "cadence-sys-failoverManager-tasklist";
 pub const LEGACY_WORKFLOW_TYPE: &str = "cadence-sys-failoverManager-workflow";
 pub const FAILOVER_V2_WORKFLOW_TYPE: &str = "cadence-sys-failover-v2-workflow";
