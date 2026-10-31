@@ -1019,3 +1019,8 @@ Frontend parity until these are implemented and validated.
   Clippy found three issues in the imported manager (needless lifetime and two
   redundant closures) before checking Frontend. Fixed those directly. The
   next exact-head CI must reach Frontend Clippy and tests.
+- Exact-head retry run
+  [41197682310](https://github.com/auenkr/cadence-rust/actions/runs/41197682310)
+  targets `d5cd40fc6d05a9fdc8b89703b927b96c95f41be2`; it was in progress at
+  this update. It contains the manager corrections plus the Frontend token
+  payload changes. Record terminal conclusion when complete.
