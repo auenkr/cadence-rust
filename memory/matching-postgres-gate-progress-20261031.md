@@ -13,3 +13,9 @@ Open failure (runs 41126816223, 41129774119, 41131219584, PostgreSQL lane):
 Other threads dispatch gates concurrently on this repo and cancel each other's runs via the concurrency group.
 
 Still pending: remaining lanes, fresh package-unset workspace CI, parity audit.
+
+## UPDATE: PostgreSQL lane ACCEPTED (1/10)
+Root cause of the isolation leak: Rust selector leaked every task as partition_change when no partition config was stored; Go PartitionReadConfig returns the default partition (ok). Fixed in matching_runtime_native.rs.
+- Gate run https://github.com/auenkr/cadence-rust/actions/runs/41154146996 head 063ad3aff conclusion success, gate.exit 0, binary sha256: cd367d0bfc00db7dd04b8366827712ccefbac26b5474f8684e3f8e18a7ddd8a1
+- rust-ci cadence-matching run https://github.com/auenkr/cadence-rust/actions/runs/41154144862 success.
+Remaining: 9 lanes (mysql-probes, thrift, configstore, shard-distributor, two-node MySQL, cassandra, adaptive, active offer, TLS), fresh package-unset CI, parity audit.
