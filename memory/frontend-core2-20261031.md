@@ -706,7 +706,8 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   treat the SQLite Matching metadata reader as a production DomainManager.
   The write-capable production SQL adapter must share the existing MySQL/
   PostgreSQL connection and transaction behavior, while Cassandra must follow
-  `go/common/persistence/cassandra/cassandra_domain_store.go`.
+  `go/common/persistence/nosql/nosql_domain_store.go` and
+  `go/common/persistence/nosql/nosqlplugin/cassandra/domain.go`.
 
 ## Persistence manager contract inventory — continuation
 
