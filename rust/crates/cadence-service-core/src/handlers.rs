@@ -232,6 +232,17 @@ impl AppState {
         }
     }
 
+    /// Read the scheduler gate through the same per-domain dynamic-config
+    /// overlay used by Frontend property readers and Admin updates.
+    pub fn scheduler_enabled_for_domain(&self, domain: &str) -> bool {
+        let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
+        cadence_persistence::dynamic_config::boolean(
+            overlay.property_values("worker.enableScheduler"),
+            Some(domain),
+            self.scheduler_enabled,
+        )
+    }
+
     pub fn execution_store(
         &self,
         domain: &str,
@@ -1870,7 +1881,7 @@ pub enum DescribeTaskListError {
 /// Reject schedule APIs when the scheduler is disabled, mirroring Go's
 /// `EnableScheduler` gate with its exact message.
 fn require_scheduler(state: &AppState, domain: &str) -> Option<Response> {
-    if state.scheduler_enabled {
+    if state.scheduler_enabled_for_domain(domain) {
         return None;
     }
     Some(error_response(
@@ -2602,6 +2613,32 @@ mod frontend_drain_tests {
 
         assert_eq!(stopped.load(Ordering::SeqCst), 1);
         assert!(state.frontend_limiters.lock().unwrap().is_empty());
+    #[test]
+    fn scheduler_gate_reads_domain_filtered_dynamic_config_updates() {
+        use cadence_api::{admin::{DynamicConfigFilter, DynamicConfigValue}, enums::EncodingType, types::DataBlob};
+
+        let state = AppState::default();
+        let domain_filter = DynamicConfigFilter {
+            name: "domainName".into(),
+            value: Some(DataBlob {
+                encoding_type: Some(EncodingType::JSON),
+                data: br#""payments""#.to_vec(),
+            }),
+        };
+        state.admin.dynamic_config.lock().unwrap().update(
+            false,
+            "worker.enableScheduler",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob {
+                    encoding_type: Some(EncodingType::JSON),
+                    data: b"true".to_vec(),
+                }),
+                filters: vec![domain_filter],
+            }],
+        );
+
+        assert!(state.scheduler_enabled_for_domain("payments"));
+        assert!(!state.scheduler_enabled_for_domain("billing"));
     }
 
     #[test]
