@@ -73,20 +73,26 @@ impl DomainRecord {
         notification_version: i64,
         serialization_encoding: &str,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainMetadata, String> {
-        use crate::matching_domain_metadata::{GoDomainBlob, MatchingDomainMetadata};
         use crate::matching_blob::BlobEncoding;
+        use crate::matching_domain_metadata::{GoDomainBlob, MatchingDomainMetadata};
         use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
 
-        fn thrift_blob<T: ToThrift>(value: &T, encoding: BlobEncoding) -> Result<GoDomainBlob, String> {
+        fn thrift_blob<T: ToThrift>(
+            value: &T,
+            encoding: BlobEncoding,
+        ) -> Result<GoDomainBlob, String> {
             let mut writer = Writer::new();
             write_struct(&mut writer, &value.to_thrift());
             Ok(GoDomainBlob {
-                data: encoding.encode(&writer.into_bytes()).map_err(|error| error.to_string())?,
+                data: encoding
+                    .encode(&writer.into_bytes())
+                    .map_err(|error| error.to_string())?,
                 encoding: encoding.as_str().to_string(),
             })
         }
 
-        let encoding = BlobEncoding::parse(serialization_encoding).map_err(|error| error.to_string())?;
+        let encoding =
+            BlobEncoding::parse(serialization_encoding).map_err(|error| error.to_string())?;
 
         let bad_binaries = self
             .configuration
@@ -94,7 +100,11 @@ impl DomainRecord {
             .as_ref()
             .map(|value| thrift_blob(value, encoding))
             .transpose()?;
-        let isolation_groups = self.isolation_groups.as_ref().map(|value| thrift_blob(value, encoding)).transpose()?;
+        let isolation_groups = self
+            .isolation_groups
+            .as_ref()
+            .map(|value| thrift_blob(value, encoding))
+            .transpose()?;
         let async_workflow_config = self
             .async_workflow_config
             .as_ref()
@@ -107,16 +117,14 @@ impl DomainRecord {
             .map(|value| thrift_blob(value, BlobEncoding::ThriftRWSnappy))
             .transpose()?;
         let status_raw = self.info.status.unwrap_or(DomainStatus::Registered) as i32;
-        let history_archival_status_raw = self
-            .configuration
-            .history_archival_status
-            .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled)
-            as i16;
-        let visibility_archival_status_raw = self
-            .configuration
-            .visibility_archival_status
-            .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled)
-            as i16;
+        let history_archival_status_raw =
+            self.configuration
+                .history_archival_status
+                .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled) as i16;
+        let visibility_archival_status_raw =
+            self.configuration
+                .visibility_archival_status
+                .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled) as i16;
         Ok(MatchingDomainMetadata {
             info: self.info.clone(),
             configuration: self.configuration.clone(),
@@ -151,13 +159,20 @@ impl DomainRecord {
         &self,
         operation: cadence_api::enums::DomainOperation,
     ) -> Result<cadence_api::types::ReplicationTask, String> {
-        use cadence_api::{enums::ReplicationTaskType, types::{DomainTaskAttributes, ReplicationTask}};
+        use cadence_api::{
+            enums::ReplicationTaskType,
+            types::{DomainTaskAttributes, ReplicationTask},
+        };
 
-        let status = self.info.status.ok_or_else(|| {
-            format!("invalid domain status for domain {}", self.info.name)
-        })?;
+        let status = self
+            .info
+            .status
+            .ok_or_else(|| format!("invalid domain status for domain {}", self.info.name))?;
         if !matches!(status, DomainStatus::Registered | DomainStatus::Deprecated) {
-            return Err(format!("invalid domain status for domain {}", self.info.name));
+            return Err(format!(
+                "invalid domain status for domain {}",
+                self.info.name
+            ));
         }
         let mut configuration = self.configuration.clone();
         configuration.isolation_groups = self.isolation_groups.clone();
@@ -341,7 +356,10 @@ fn now_nanos() -> i64 {
 impl InMemoryDomainStore {
     fn restore_record(&self, record: DomainRecord) {
         let mut inner = self.inner.write().expect("domain store lock");
-        if let Some(old_name) = inner.by_id.insert(record.info.uuid.clone(), record.info.name.clone()) {
+        if let Some(old_name) = inner
+            .by_id
+            .insert(record.info.uuid.clone(), record.info.name.clone())
+        {
             if old_name != record.info.name {
                 inner.by_name.remove(&old_name);
             }
@@ -496,8 +514,12 @@ impl InMemoryDomainStore {
         if !record.is_global_domain {
             return;
         }
-        let active_active = record.replication.active_clusters.as_ref().is_some_and(|active| {
-            active
+        let active_active = record
+            .replication
+            .active_clusters
+            .as_ref()
+            .is_some_and(|active| {
+                active
                     .active_clusters_by_cluster_attribute
                     .as_ref()
                     .is_some_and(|scopes| {
@@ -508,7 +530,7 @@ impl InMemoryDomainStore {
                                 .is_some_and(|attributes| !attributes.is_empty())
                         })
                     })
-        });
+            });
         if active_active {
             return;
         }
@@ -1346,9 +1368,13 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let version = self.current_metadata_version()?;
         let name = info.name.clone();
-        let response = self
-            .cache
-            .create_with_version(info, configuration, replication, is_global_domain, failover_version)?;
+        let response = self.cache.create_with_version(
+            info,
+            configuration,
+            replication,
+            is_global_domain,
+            failover_version,
+        )?;
         let record = self
             .cache
             .record_by_name(&name)
@@ -1431,7 +1457,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         page_size: usize,
         page_token: &[u8],
     ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), EntityNotExistsError> {
-        self.cache.failover_history(domain_id, page_size, page_token)
+        self.cache
+            .failover_history(domain_id, page_size, page_token)
     }
 
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
@@ -1529,14 +1556,23 @@ mod tests {
         let task = record
             .to_domain_replication_task(cadence_api::enums::DomainOperation::Update)
             .unwrap();
-        assert_eq!(task.task_type, Some(cadence_api::enums::ReplicationTaskType::Domain));
+        assert_eq!(
+            task.task_type,
+            Some(cadence_api::enums::ReplicationTaskType::Domain)
+        );
         let attributes = task.domain_task_attributes.unwrap();
         assert_eq!(attributes.id, "domain-uuid");
-        assert_eq!(attributes.domain_operation, Some(cadence_api::enums::DomainOperation::Update));
+        assert_eq!(
+            attributes.domain_operation,
+            Some(cadence_api::enums::DomainOperation::Update)
+        );
         assert_eq!(attributes.config_version, 7);
         assert_eq!(attributes.failover_version, 42);
         assert_eq!(attributes.previous_failover_version, 41);
-        assert_eq!(attributes.replication_config.unwrap().active_cluster_name, "active");
+        assert_eq!(
+            attributes.replication_config.unwrap().active_cluster_name,
+            "active"
+        );
 
         let encoded = record
             .encode_domain_replication_task(cadence_api::enums::DomainOperation::Update)
@@ -1544,8 +1580,14 @@ mod tests {
         let mut reader = cadence_thrift::protocol::Reader::new(&encoded);
         let decoded = cadence_thrift::value::read_struct(&mut reader).unwrap();
         assert_eq!(reader.remaining(), 0);
-        assert!(matches!(decoded.get(10), Some(cadence_thrift::value::Value::I32(0))));
-        assert!(matches!(decoded.get(30), Some(cadence_thrift::value::Value::Struct(_))));
+        assert!(matches!(
+            decoded.get(10),
+            Some(cadence_thrift::value::Value::I32(0))
+        ));
+        assert!(matches!(
+            decoded.get(30),
+            Some(cadence_thrift::value::Value::Struct(_))
+        ));
     }
 
     #[test]
@@ -1650,7 +1692,9 @@ mod tests {
         // An ordinary domain configuration publication has a newer metadata
         // notification but the same failover notification version.
         metadata.notification_version = 7;
-        metadata.configuration.workflow_execution_retention_period_in_days = 18;
+        metadata
+            .configuration
+            .workflow_execution_retention_period_in_days = 18;
         domains.sync_matching_metadata(&[metadata.clone()]);
         assert_eq!(
             domains
@@ -1765,14 +1809,24 @@ mod tests {
         {
             let mut inner = store.inner.write().unwrap();
             let record = inner.by_name.get_mut("d").unwrap();
-            record.replication.active_clusters = Some(serde_json::from_value(serde_json::json!({
-                "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
-                    "r": {"activeClusterName": "passive"}
-                }}}
-            })).unwrap());
+            record.replication.active_clusters = Some(
+                serde_json::from_value(serde_json::json!({
+                    "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
+                        "r": {"activeClusterName": "passive"}
+                    }}}
+                }))
+                .unwrap(),
+            );
         }
         assert!(store.is_active_in("id", "passive").unwrap());
-        store.inner.write().unwrap().by_name.get_mut("d").unwrap().failover_end_time = Some(0);
+        store
+            .inner
+            .write()
+            .unwrap()
+            .by_name
+            .get_mut("d")
+            .unwrap()
+            .failover_end_time = Some(0);
         assert!(!store.is_active_in("id", "active").unwrap());
         assert!(!store.is_active_in("id", "passive").unwrap());
         assert!(store.is_active_in("missing", "active").is_err());
@@ -2040,19 +2094,23 @@ mod tests {
         let (info, cfg, rep) = sample("d1", "uuid-1");
         store.create(info, cfg, rep, false).unwrap();
         let updated = store
-            .update(&UpdateDomainRequest {
-                name: "d1".into(),
-                updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
-                    description: Some("new".into()),
+            .update(
+                &UpdateDomainRequest {
+                    name: "d1".into(),
+                    updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
+                        description: Some("new".into()),
+                        ..Default::default()
+                    }),
+                    configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
+                        history_archival_status: Some(ArchivalStatus::Enabled),
+                        history_archival_uri: Some("file:///tmp/history".into()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
-                    history_archival_status: Some(ArchivalStatus::Enabled),
-                    history_archival_uri: Some("file:///tmp/history".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }, &cluster_metadata(), &test_policy())
+                },
+                &cluster_metadata(),
+                &test_policy(),
+            )
             .unwrap();
         let info = updated.domain_info.unwrap();
         assert_eq!(info.description, "new");
@@ -2207,10 +2265,8 @@ mod go_sql_frontend_manager_tests {
                 "cluster-a",
             ),
         );
-        let manager = GoSqlFrontendDomainManager::new(
-            InMemoryDomainStore::new(),
-            persistence.clone(),
-        );
+        let manager =
+            GoSqlFrontendDomainManager::new(InMemoryDomainStore::new(), persistence.clone());
         let domain_id = uuid::Uuid::from_u128(0x1234).to_string();
         let (mut info, config, replication) = super::tests::sample("durable", &domain_id);
         info.uuid = domain_id.clone();
@@ -2221,10 +2277,8 @@ mod go_sql_frontend_manager_tests {
         assert_eq!(persistence.get_metadata_version().unwrap(), 8);
 
         // A fresh Frontend cache must read the Go-format row from SQL.
-        let restarted = GoSqlFrontendDomainManager::new(
-            InMemoryDomainStore::new(),
-            persistence.clone(),
-        );
+        let restarted =
+            GoSqlFrontendDomainManager::new(InMemoryDomainStore::new(), persistence.clone());
         let described = restarted
             .describe(&DescribeDomainRequest {
                 name: Some("durable".into()),

@@ -8,15 +8,14 @@ use cadence_api::admin::{
     DescribeClusterResponse, DescribeQueueRequest, DescribeQueueResponse, DynamicConfigEntry,
     DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
     GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
-    GetDomainIsolationGroupsResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
-    GetDomainReplicationMessagesRequest, GetDomainReplicationMessagesResponse,
-    ReplicationMessages,
+    GetDomainIsolationGroupsResponse, GetDomainReplicationMessagesRequest,
+    GetDomainReplicationMessagesResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
     MaintainCorruptWorkflowResponse, MembershipInfo, PersistenceFeature, PersistenceInfo,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
-    ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
+    ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
     UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
     UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
@@ -1208,7 +1207,8 @@ impl ToThrift for ReplicationMessages {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         f.olist(10, &self.replication_tasks);
-        f.fields.push((20, Value::I64(self.last_retrieved_message_id)));
+        f.fields
+            .push((20, Value::I64(self.last_retrieved_message_id)));
         if self.has_more {
             f.fields.push((30, Value::Bool(true)));
         }

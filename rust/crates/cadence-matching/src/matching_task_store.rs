@@ -52,7 +52,8 @@ pub struct ConfiguredMatchingStores {
     pub domain_persistence:
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence>>,
     /// Frontend transactional mutation boundary, implemented by SQL and Cassandra stores.
-    pub domain_metadata_persistence: Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
+    pub domain_metadata_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
     pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
 }

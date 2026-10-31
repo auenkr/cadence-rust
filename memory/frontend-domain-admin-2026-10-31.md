@@ -112,6 +112,15 @@
   handler is synchronous, but the merged dispatch called it with `.await`.
   Removed the `.await`; dispatch a fresh package run before considering this
   merge compile repair validated.
+- Package run
+  [41207963370](https://github.com/auenkr/cadence-rust/actions/runs/41207963370)
+  reached Frontend Clippy at `2b3a720ad14a6801916564c9491f41b4070ae188`, then
+  failed because the merge had duplicated the entire domain validation and
+  archival helper/test section in `handler_domain.rs`. Removed the second
+  copy while retaining the handler implementation and first helper/test copy.
+  Downloaded and applied that run's formatter patch to the seven selected Rust
+  source files it formatted, so the next package run checks a formatting-clean
+  merge as well as the duplicate removal.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.

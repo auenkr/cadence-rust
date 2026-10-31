@@ -129,9 +129,8 @@ impl AppError {
     }
 
     fn workflow_already_completed(message: String) -> Self {
-        let error = cadence_api::errors::WorkflowExecutionAlreadyCompletedError::new(
-            message.clone(),
-        );
+        let error =
+            cadence_api::errors::WorkflowExecutionAlreadyCompletedError::new(message.clone());
         Self {
             exc_name: "WorkflowExecutionAlreadyCompletedError",
             value: error.to_thrift(),
@@ -247,27 +246,40 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
                 .to_string(),
         ));
     }
-    if state.domains.describe(&DescribeDomainRequest {
-        name: Some(req.name.clone()),
-        uuid: None,
-    }).is_ok() {
+    if state
+        .domains
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .is_ok()
+    {
         return Err(AppError {
             exc_name: "DomainAlreadyExistsError",
             value: cadence_api::errors::DomainAlreadyExistsError {
                 message: "Domain already exists.".to_string(),
-            }.to_thrift(),
+            }
+            .to_thrift(),
             message: "Domain already exists.".to_string(),
         });
     }
-    if !req.name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+    if !req
+        .name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
         return Err(AppError::bad_request(
             "Domain name can only include alphanumeric and dash characters.".to_string(),
         ));
     }
     if req.name.len() > state.limits.ids.domain_max {
-        return Err(AppError::bad_request("Domain length exceeds limit.".to_string()));
+        return Err(AppError::bad_request(
+            "Domain length exceeds limit.".to_string(),
+        ));
     }
-    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
         return Err(AppError::bad_request(
             "A valid retention period is not set on request.".to_string(),
         ));
@@ -499,10 +511,13 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
             "Domain not set on request.".to_string(),
         ));
     }
-    let current = state.domains.describe(&DescribeDomainRequest {
-        name: Some(req.name.clone()),
-        uuid: None,
-    }).map_err(|e| AppError::entity_not_exists(e.message))?;
+    let current = state
+        .domains
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
     if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
         return Err(AppError::bad_request(
             "Cluster is not primary cluster, cannot do domain registration or domain update."
@@ -523,19 +538,29 @@ fn handle_get_dynamic_config(state: &AppState, body: &Struct, operational: bool)
             "ConfigName is not set on request.".to_string(),
         ));
     }
-    let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
-    let value = overlay.get(operational, &req.config_name, &req.filters).ok_or_else(|| {
-        AppError::internal(format!(
-            "Failed to get dynamic config {:?} for the given filters.",
-            req.config_name
-        ))
-    })?;
-    Ok(wrap_success(&cadence_api::admin::GetDynamicConfigResponse {
-        value: value.value,
-    }))
+    let overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
+    let value = overlay
+        .get(operational, &req.config_name, &req.filters)
+        .ok_or_else(|| {
+            AppError::internal(format!(
+                "Failed to get dynamic config {:?} for the given filters.",
+                req.config_name
+            ))
+        })?;
+    Ok(wrap_success(
+        &cadence_api::admin::GetDynamicConfigResponse { value: value.value },
+    ))
 }
 
-fn handle_update_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
+fn handle_update_dynamic_config(
+    state: &AppState,
+    body: &Struct,
+    operational: bool,
+) -> HandlerResult {
     let req: cadence_api::admin::UpdateDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.config_name.is_empty() {
@@ -549,10 +574,16 @@ fn handle_update_dynamic_config(state: &AppState, body: &Struct, operational: bo
         .lock()
         .expect("admin config lock")
         .update(operational, &req.config_name, req.config_values);
-    Ok(wrap_success(&cadence_api::admin::UpdateDynamicConfigResponse {}))
+    Ok(wrap_success(
+        &cadence_api::admin::UpdateDynamicConfigResponse {},
+    ))
 }
 
-fn handle_restore_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
+fn handle_restore_dynamic_config(
+    state: &AppState,
+    body: &Struct,
+    operational: bool,
+) -> HandlerResult {
     let req: cadence_api::admin::RestoreDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.config_name.is_empty() {
@@ -566,7 +597,9 @@ fn handle_restore_dynamic_config(state: &AppState, body: &Struct, operational: b
         .lock()
         .expect("admin config lock")
         .restore(operational, &req.config_name, &req.filters);
-    Ok(wrap_success(&cadence_api::admin::RestoreDynamicConfigResponse {}))
+    Ok(wrap_success(
+        &cadence_api::admin::RestoreDynamicConfigResponse {},
+    ))
 }
 
 fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
@@ -578,15 +611,19 @@ fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool
         .lock()
         .expect("admin config lock")
         .list(operational, &req.config_name);
-    Ok(wrap_success(&cadence_api::admin::ListDynamicConfigResponse {
-        entries,
-    }))
+    Ok(wrap_success(
+        &cadence_api::admin::ListDynamicConfigResponse { entries },
+    ))
 }
 
 fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::AddSearchAttributeRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    let mut overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let mut overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
     if cadence_persistence::dynamic_config::boolean(
         overlay.property_values("history.enableAdminProtection"),
         None,
@@ -605,9 +642,7 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
     let attrs = req
         .search_attribute
         .filter(|attrs| !attrs.is_empty())
-        .ok_or_else(|| {
-            AppError::bad_request("SearchAttributes are not provided".to_string())
-        })?;
+        .ok_or_else(|| AppError::bad_request("SearchAttributes are not provided".to_string()))?;
     const CONFIG_NAME: &str = "frontend.validSearchAttributes";
     let mut valid = match overlay
         .get(false, CONFIG_NAME, &[])
@@ -638,8 +673,9 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
         }
         valid.insert(name.clone(), value_type.value());
     }
-    let data = serde_json::to_vec(&valid)
-        .map_err(|error| AppError::internal(format!("Failed to encode dynamic config, err: {error}")))?;
+    let data = serde_json::to_vec(&valid).map_err(|error| {
+        AppError::internal(format!("Failed to encode dynamic config, err: {error}"))
+    })?;
     overlay.update(
         false,
         CONFIG_NAME,
@@ -663,7 +699,9 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
 
 fn handle_describe_cluster() -> HandlerResult {
     let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
-    Ok(wrap_success(&crate::admin::describe_cluster_response(&hostname)))
+    Ok(wrap_success(&crate::admin::describe_cluster_response(
+        &hostname,
+    )))
 }
 
 fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
@@ -713,13 +751,13 @@ fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     }
     let executions = require_domain_thrift(state, &req.domain)?;
     match executions.delete_run(&req.domain, &execution) {
-        Ok((history_deleted, executions_deleted, visibility_deleted)) => Ok(wrap_success(
-            &cadence_api::admin::DeleteWorkflowResponse {
+        Ok((history_deleted, executions_deleted, visibility_deleted)) => {
+            Ok(wrap_success(&cadence_api::admin::DeleteWorkflowResponse {
                 history_deleted,
                 executions_deleted,
                 visibility_deleted,
-            },
-        )),
+            }))
+        }
         Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
             Err(AppError::entity_not_exists(error.message))
         }
@@ -747,7 +785,9 @@ fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResu
         req.domain
     };
     if domain.is_empty() {
-        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
     }
     let execution = req.workflow_execution.unwrap_or_default();
     cadence_api::validation::check_execution(Some(&execution))
@@ -1371,8 +1411,7 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
         ));
     }
     validate_schedule_cron_thrift(&spec.cron_expression)?;
-    validation::validate_schedule_spec(Some(spec))
-        .map_err(|e| AppError::bad_request(e.message))?;
+    validation::validate_schedule_spec(Some(spec)).map_err(|e| AppError::bad_request(e.message))?;
     if req.action.is_none() {
         return Err(AppError::bad_request(
             "Action is not set on request.".to_string(),

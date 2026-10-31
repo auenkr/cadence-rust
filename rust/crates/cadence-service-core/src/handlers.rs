@@ -20,8 +20,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use cadence_api::enums::DomainStatus;
 use cadence_api::errors::{
-    BadRequestError, EntityNotExistsError,
-    WorkflowExecutionAlreadyCompletedError, WorkflowExecutionAlreadyStartedError,
+    BadRequestError, EntityNotExistsError, WorkflowExecutionAlreadyCompletedError,
+    WorkflowExecutionAlreadyStartedError,
 };
 use cadence_api::service_types::{
     DeleteDomainRequest, DeprecateDomainRequest, DescribeDomainRequest,
@@ -111,7 +111,8 @@ pub struct AppState {
     pub domain_manager: Arc<dyn cadence_persistence::FrontendDomainManager>,
     /// Configured SQL writer shared with the metadata reader. The durable
     /// manager uses this for domain mutations.
-    pub domain_metadata_persistence: Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
+    pub domain_metadata_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
@@ -212,11 +213,18 @@ impl AppState {
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
-    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
-        let metadata = self.domain_manager.describe(&cadence_api::service_types::DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
-        })?;
-        let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
+    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError>
+    {
+        let metadata =
+            self.domain_manager
+                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                    name: Some(domain.to_string()),
+                    uuid: None,
+                })?;
+        let domain_id = metadata
+            .domain_info
+            .map(|info| info.uuid)
+            .unwrap_or_default();
         if let Some(store) = &self.semaphore_persistence {
             // Preserve the frontend metadata lookup before calling persistence.
             self.execution_store(domain)?;
@@ -269,7 +277,8 @@ impl AppState {
         domain: &str,
     ) -> Result<InMemoryExecutionStore, EntityNotExistsError> {
         let metadata = self.domain_manager.describe(&DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
+            name: Some(domain.to_string()),
+            uuid: None,
         })?;
         let id = metadata.domain_info.unwrap_or_default().uuid;
         let version = if metadata.is_global_domain {
@@ -560,11 +569,16 @@ async fn register_domain(
             Ok(version) => version,
             Err(e) => return bad_request(BadRequestError::new(e)),
         }
-    } else { cadence_persistence::version_history::EMPTY_VERSION };
-    match state
-        .domain_manager
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    } else {
+        cadence_persistence::version_history::EMPTY_VERSION
+    };
+    match state.domain_manager.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(resp) => {
             state.executions.register_domain(
                 &req.name,
@@ -703,10 +717,12 @@ async fn failover_domain(
     if let Err(e) = validation::validate_failover_domain_request(Some(&req)) {
         return bad_request(e);
     }
-    match state
-        .domain_manager
-        .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
-    {
+    match state.domain_manager.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
@@ -774,7 +790,11 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
@@ -834,7 +854,11 @@ pub async fn require_domain(state: &AppState, domain: &str) -> Option<Response> 
     if domain.is_empty() {
         return Some(bad_request(validation::err_domain_not_set()));
     }
-    state.domain_manager.domain_id(domain).err().map(entity_not_exists)
+    state
+        .domain_manager
+        .domain_id(domain)
+        .err()
+        .map(entity_not_exists)
 }
 
 fn require_task_domain(state: &AppState, bytes: &[u8]) -> Option<Response> {
