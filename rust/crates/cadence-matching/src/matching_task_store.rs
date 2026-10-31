@@ -193,7 +193,7 @@ pub fn open_configured_default_store(
         );
         let domain_metadata =
             cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
-                driver,
+                driver.clone(),
                 active_cluster_name,
             );
         let domain_persistence: Arc<

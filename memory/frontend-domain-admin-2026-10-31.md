@@ -898,3 +898,11 @@ migration forward.
   history/cooldown behavior; Admin DLQ and complete raw-history RPC behavior;
   scheduler workflow integration; live membership; and mixed-cluster
   Go/Rust failure/restart/recovery validation. These are still open.
+- Follow-up CI found the rebase ownership issue missed by source inspection:
+  run [41199029247](https://github.com/auenkr/cadence-rust/actions/runs/41199029247)
+  failed Clippy/type-check at `matching_task_store.rs` because the Cassandra
+  driver `Arc` was moved into the metadata store before constructing the new
+  domain persistence adapter. The constructor argument itself was present.
+  Changed the first use to `driver.clone()`; dispatch fresh CI at the resulting
+  commit, because run [41199231977](https://github.com/auenkr/cadence-rust/actions/runs/41199231977)
+  was already running against the pre-fix head `6e64bc87014f012d9dcdd06032600913b8739c4a`.
