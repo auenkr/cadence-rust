@@ -708,6 +708,12 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   PostgreSQL connection and transaction behavior, while Cassandra must follow
   `go/common/persistence/nosql/nosql_domain_store.go` and
   `go/common/persistence/nosql/nosqlplugin/cassandra/domain.go`.
+- Package CI run https://github.com/auenkr/cadence-rust/actions/runs/41190773742
+  checked head `5b97a257884c6f544ba11a6bc31eb18c00c8c534` and concluded
+  `success` (Go oracles, formatting, Clippy, tests and Frontend runtime smoke).
+  The follow-up path correction in `bd0b585f6` changes documentation only;
+  run exact-head CI for that current branch revision before using it as the
+  latest green evidence.
 
 ## Persistence manager contract inventory — continuation
 
