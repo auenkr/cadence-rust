@@ -1539,3 +1539,43 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   https://github.com/auenkr/cadence-rust/actions/runs/41219259467
   (conclusion `success`; formatting, Clippy, tests, and Frontend smoke/oracle
   gates). No Cargo command was run locally.
+
+## Successor handoff — 2026-10-31
+
+- Branch `frontend-core2` is pushed at `ce13c6b8998b60be2c72150feca8372070d1e69e`.
+  This checkout is detached at that exact commit and clean before this handoff
+  update; the validator source change is `e124daed576ece6854d9a66153206a10778a5a8f`.
+- Latest dispatched CI at handoff:
+  https://github.com/auenkr/cadence-rust/actions/runs/41219618498
+  tests head `ce13c6b8998b60be2c72150feca8372070d1e69e`; status
+  `in_progress` at last check. The preceding exact source-head run
+  https://github.com/auenkr/cadence-rust/actions/runs/41219259467 tested
+  `e124daed576ece6854d9a66153206a10778a5a8f` and concluded `success` for
+  formatting, Clippy, tests, Frontend smoke, and configured Go oracle gates.
+- This continuation added direct Go row names and exact-result assertions for
+  all 7 `DescribeTaskList` and all 6 `ListTaskListPartitions` test rows. The
+  earlier audit records coverage for all 16 Rust validator entry points and
+  the 88 named rows across 15 Go tables; the grouped coverage for the other
+  tables remains as recorded above. Cargo was not run locally.
+- Remaining gaps are unchanged and substantial: production Frontend execution,
+  History, and Visibility managers are not wired for SQL/Cassandra. The
+  configured default store currently supplies the existing domain/metadata
+  manager; `AppState.executions` and workflow/history/visibility paths still
+  use `InMemoryExecutionStore`. A Go-compatible port needs the Go mutable-state
+  snapshot/mutation contract, SQL/Cassandra row and blob codecs, transactional
+  shard/range conditions, and call-site routing. Do not introduce JSON mirror
+  tables as a substitute.
+- Lifecycle timing/order is wired through the shared launcher, including the
+  health transition, failure-detection wait, API/Admin stop signals, limiter
+  hook, request drain, and resource teardown. Concrete global quota collection
+  owners are not constructed, and the Admin domain DLQ/failover watcher workers
+  do not exist, so full `service.go` owner parity remains open.
+- Next steps: first check run `41219618498` and record its conclusion; repair
+  any CI failure on `frontend-core2`. Then establish a real Frontend execution
+  manager interface around the current `AppState` call surface, implement and
+  wire Go-compatible SQL/Cassandra execution/History/Visibility managers via
+  `cadence-persistence` and the Matching native pool/factory code, and attach
+  concrete lifecycle owners to the existing stop hooks. Keep edits out of
+  worker-owned `handler_workflow*`, `wrappers`, and `handler_domain/admin/schedule`
+  files. Re-run package CI after each pushed checkpoint and update this file
+  with URL, tested head SHA, conclusion, and remaining gaps.
