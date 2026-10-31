@@ -251,6 +251,7 @@ pub struct Handler<B> {
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
     isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
+    async_publisher: Option<Arc<dyn AsyncWorkflowPublisher>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
@@ -268,12 +269,24 @@ pub struct CallerMetadata {
     pub feature_version: String,
     /// Isolation group carried by Cadence's request context.
     pub isolation_group: String,
+    /// Original transport headers copied into Go's async queue message.
+    pub original_headers: HashMap<String, String>,
 }
 
 /// Go checks task-list isolation health for selected workflow operations.
 /// The implementation owns both the dynamic enable flag and the state lookup.
 pub trait IsolationGroupState: Send + Sync {
     fn is_drained(&self, domain: &str, isolation_group: &str) -> Result<bool, String>;
+}
+
+/// Runtime queue integration for the two Go asynchronous workflow methods.
+/// It selects the producer by domain and publishes the already encoded
+/// ThriftRW envelope and original request headers.
+pub trait AsyncWorkflowPublisher: Send + Sync {
+    fn publish<'a>(
+        &'a self,
+        message: crate::handler_workflow_async::AsyncWorkflowMessage,
+    ) -> WorkflowFuture<'a>;
 }
 
 pub trait RequestAuthorization: Send + Sync {
@@ -345,6 +358,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            async_publisher: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -370,6 +384,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            async_publisher: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -400,6 +415,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_filter_policy: None,
             workflow_query_policy: None,
             isolation_group_state: None,
+            async_publisher: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -485,6 +501,11 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_isolation_group_state(mut self, state: Arc<dyn IsolationGroupState>) -> Self {
         self.isolation_group_state = Some(state);
+        self
+    }
+
+    pub fn with_async_publisher(mut self, publisher: Arc<dyn AsyncWorkflowPublisher>) -> Self {
+        self.async_publisher = Some(publisher);
         self
     }
 
@@ -659,7 +680,10 @@ impl<B: WorkflowBackend> Handler<B> {
         ) {
             if let (Some(state), Some(domain)) = (
                 &self.isolation_group_state,
-                request.get("domain").and_then(Value::as_str),
+                request
+                    .get("domain")
+                    .or_else(|| request.get("request").and_then(|nested| nested.get("domain")))
+                    .and_then(Value::as_str),
             ) {
                 // Go logs lookup errors and treats the group as healthy.
                 if state
@@ -671,6 +695,26 @@ impl<B: WorkflowBackend> Handler<B> {
                         caller.isolation_group
                     ))));
                 }
+            }
+        }
+        if matches!(
+            operation,
+            WorkflowOperation::StartWorkflowExecutionAsync
+                | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+        ) {
+            if let Some(publisher) = &self.async_publisher {
+                let message = crate::handler_workflow_async::encode_async_workflow_request(
+                    operation.name(),
+                    &request,
+                    &caller.original_headers,
+                )
+                .map_err(|error| {
+                    CadenceError::Internal(cadence_api::errors::InternalServiceError::new(
+                        format!("failed to encode {}Request: {error}", operation.name()),
+                    ))
+                })?;
+                publisher.publish(message).await?;
+                return Ok(serde_json::json!({}));
             }
         }
         let request = self.prepare_backend_request(operation, request)?;
@@ -1528,6 +1572,19 @@ mod tests {
     #[derive(Default)]
     struct RestartBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
 
+    #[derive(Default)]
+    struct RecordingAsyncPublisher(Mutex<Vec<crate::handler_workflow_async::AsyncWorkflowMessage>>);
+
+    impl AsyncWorkflowPublisher for RecordingAsyncPublisher {
+        fn publish<'a>(
+            &'a self,
+            message: crate::handler_workflow_async::AsyncWorkflowMessage,
+        ) -> WorkflowFuture<'a> {
+            self.0.lock().unwrap().push(message);
+            Box::pin(async { Ok(Value::Null) })
+        }
+    }
+
     impl WorkflowBackend for CapturingBackend {
         fn invoke<'a>(
             &'a self,
@@ -1954,6 +2011,7 @@ mod tests {
                     client_impl: "go-sdk".to_owned(),
                     feature_version: "1.2".to_owned(),
                     isolation_group: String::new(),
+                    original_headers: HashMap::new(),
                 },
             )
             .await
@@ -2464,6 +2522,38 @@ mod tests {
             error.to_string(),
             "Domain shop is drained from isolation group dca1."
         );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn async_start_publishes_go_thriftrw_message_and_skips_history_backend() {
+        let publisher = Arc::new(RecordingAsyncPublisher::default());
+        let handler = Handler::new(FakeBackend::default()).with_async_publisher(publisher.clone());
+        handler
+            .dispatch_with_metadata(
+                "StartWorkflowExecutionAsync",
+                serde_json::json!({
+                    "request": {
+                        "domain": "shop",
+                        "workflowId": "order-19",
+                        "workflowType": {"name": "Order"},
+                        "taskList": {"name": "orders"},
+                        "input": "AQI="
+                    }
+                }),
+                &CallerMetadata {
+                    original_headers: HashMap::from([("x-cadence-trace".into(), "abc".into())]),
+                    ..CallerMetadata::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let messages = publisher.0.lock().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].domain, "shop");
+        assert_eq!(messages[0].partition_key, "order-19");
+        assert_eq!(messages[0].headers["x-cadence-trace"], b"abc");
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 

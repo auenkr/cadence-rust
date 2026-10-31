@@ -598,3 +598,16 @@ a domain cache/config and isolation-state provider, an async ThriftRW producer,
 archival reader/config, and task-token/poll-ID services. No mixed Go/Rust SDK
 compatibility or recovery gate has been run for this branch. Do not report
 Frontend parity until these are implemented and validated.
+
+## Isolation-group policy checkpoint — 2026-10-31
+
+- Added Go's fail-closed-on-drained / fail-open-on-lookup-error behavior for
+  Start, async Start, Signal, SignalWithStart, async SignalWithStart, and
+  Restart. Request metadata now carries the isolation group, and the runtime
+  must inject the dynamic enable/state provider. Poll isolation waiting remains
+  open.
+- Formatting/package CI run
+  [41184510610](https://github.com/auenkr/cadence-rust/actions/runs/41184510610)
+  tested exact HEAD `f7e74a256cf1e2e349f3f8cda93668355c45909e` and concluded
+  `success` (Clippy, format, tests). A later async ThriftRW implementation is
+  not included in that run.
