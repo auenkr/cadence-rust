@@ -175,3 +175,10 @@ migration forward.
   at the last check; it does not cover these edits. Remaining Admin and
   Schedule RPC dispatch, real persistence/client behavior, RPC lifecycle,
   mixed-cluster validation, and full Go method coverage remain open.
+- Run [41175622384](https://github.com/auenkr/cadence-rust/actions/runs/41175622384)
+  ultimately failed at `508ae8ce8` before Frontend checks: Clippy hit an
+  existing lifetime error in `cadence-persistence::dynamic_config::string_domain`,
+  which returned a borrowed `&str` from an owned selected value. Fixed it by
+  owning the string inside `and_then`; this is required to restore the rebased
+  branch build. Run [41175834322](https://github.com/auenkr/cadence-rust/actions/runs/41175834322)
+  was dispatched at `e4731c654` before this fix and will not validate it.
