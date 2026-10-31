@@ -1139,5 +1139,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - Lifecycle's ordered health/failure-detection/handler/limiter/drain/resource
   calls remain wired, but no production global quota collection instances or
   AdminHandler worker owners are constructed. Lifecycle parity is still open.
-- No Cargo command was run locally. Dispatch exact-head Frontend CI for this
-  source change and append its URL, head SHA, and conclusion here.
+- Exact-head Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41203159629 validated
+  head `f94256cc23ec2da40eee4e47d35f638efffe442b` and concluded `success`:
+  formatting, Clippy, and Frontend tests passed. Runtime smoke was skipped.
+  Superseded run `41203024330` was cancelled before this run completed. No
+  Cargo command was run locally.

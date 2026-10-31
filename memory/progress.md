@@ -1873,3 +1873,15 @@ predates the subsequent dynamic-config and failover corrections. No local Cargo
 command was run. Remaining Frontend work is listed in
 `frontend-core2-20261031.md`; this slice is not a service parity claim.
 - Frontend continuation: ported Go `frontend.warmupDuration` readiness transition and shutdown suppression; fresh exact-head Frontend CI passed at `3682a3f69d0c1abd47b20b0db0191b0f6010de91` (run 41187035454). Durable Frontend managers and actual quota/admin worker owners remain open; see `frontend-core2-20261031.md`.
+# 2026-10-31 — Frontend core2 continuation
+
+- Added and CI-validated centralized Go-compatible `defaultStore` and optional
+  `visibilityStore` selection helpers, keeping advanced visibility separate.
+  This is config groundwork only; it does not add the missing visibility,
+  history, or execution persistence managers.
+- Exact-head Frontend CI passed at
+  https://github.com/auenkr/cadence-rust/actions/runs/41203159629 for head
+  `f94256cc23ec2da40eee4e47d35f638efffe442b` (formatting, Clippy, tests).
+  Runtime smoke was skipped. Full scope and remaining gaps are in
+  `frontend-core2-20261031.md`.
+
