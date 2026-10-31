@@ -532,18 +532,22 @@ impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
         let id = uuid::Uuid::parse_str(domain_id)
             .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
         let executor = self.executor();
-        executor
-            .exec(
-                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
-                vec![bound(id)],
-            )
-            .map_err(Self::cql_error)?;
+        // Match Cassandra's Go DomainStore.DeleteDomain ordering: remove the
+        // name index first, then the UUID lookup row. If the second write
+        // fails, Go leaves an unindexed UUID row; deleting the UUID first
+        // would instead leave an index entry pointing at a missing domain.
         executor
             .exec(
                 &CqlStatement::new(
                     "DELETE FROM domains_by_name_v2 WHERE domains_partition = ? AND name = ?",
                 ),
                 vec![bound(0_i32), bound(metadata.info.name)],
+            )
+            .map_err(Self::cql_error)?;
+        executor
+            .exec(
+                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+                vec![bound(id)],
             )
             .map_err(Self::cql_error)
     }
