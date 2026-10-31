@@ -528,4 +528,10 @@ these fixes; no green CI evidence covers the current changes.
   policy. The fixtures now use the Go JSON field spelling. The same follow-up
   adds an injectable per-domain `HistoryPageSizePolicy`, matching Go's dynamic
   `HistoryMaxPageSize(domain)` lookup, with a regression test; these corrections
-  have not yet been tested by CI.
+  were included in the next CI checkpoint.
+- Formatting/package CI run
+  [41183050866](https://github.com/auenkr/cadence-rust/actions/runs/41183050866)
+  tested `7ded9c1ebeaad2175091e6bc9e8f666e4427e0b2` and concluded `success`.
+  Clippy, format check and all Frontend unit tests passed. The runner patch only
+  made rustfmt changes; it was applied locally and is being pushed as a separate
+  formatting checkpoint, followed by normal exact-head package CI.

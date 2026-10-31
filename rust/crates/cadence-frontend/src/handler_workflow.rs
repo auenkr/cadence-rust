@@ -435,10 +435,7 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
-    pub fn with_history_page_size_policy(
-        mut self,
-        policy: Arc<dyn HistoryPageSizePolicy>,
-    ) -> Self {
+    pub fn with_history_page_size_policy(mut self, policy: Arc<dyn HistoryPageSizePolicy>) -> Self {
         self.history_page_size_policy = Some(policy);
         self
     }
@@ -1500,7 +1497,11 @@ mod tests {
 
     impl HistoryPageSizePolicy for DomainHistoryPageSize {
         fn maximum_page_size(&self, domain: &str) -> i32 {
-            if domain == "shop" { 350 } else { 125 }
+            if domain == "shop" {
+                350
+            } else {
+                125
+            }
         }
     }
 
