@@ -530,3 +530,23 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   checked the previous branch head `074c274ef904b67e1af48183f94a76c407b6433e`
   and failed only the changed-Matching formatting gate. Applied its emitted
   rustfmt hunk to `launcher.rs`; this run did not reach Clippy or tests.
+
+## Continuation after user review — 2026-10-31
+
+- Reconfirmed that the Go request-validator matrix is closed: fresh-target run
+  `41181338783` passed all 91 named cases, and no validator source changed
+  after that tested head.
+- The listener-shutdown format check on run `41186056305` found one
+  rustfmt-only hunk in `cadence-matching/src/launcher.rs`; applied that exact
+  runner change. Run `41186256081` is currently validating the prior head
+  `4266be1297cc6379e017a264093ee6f41b90c0fa`; it is not evidence for this
+  formatting correction.
+- This checkpoint does not close lifecycle parity: Frontend has no constructed
+  global quota collection owners, so the seven Go `OnStop` calls still have no
+  Rust resources to stop. It also does not close persistence: `AppState`
+  continues to use in-memory domain/execution stores, and there are no durable
+  Go-compatible Frontend metadata, visibility, History or execution managers.
+  The configured Matching SQL/Cassandra persistence remains task storage plus
+  read-only domain metadata.
+- No Cargo command was run locally. Dispatch exact-head CI after committing the
+  formatting correction; record its URL, SHA and conclusion below.
