@@ -721,8 +721,11 @@ fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
         .map_err(|error| AppError::bad_request(error.message))?;
     if req.task_type.is_none() {
         return Err(AppError::bad_request(
-            "TaskType is not set on request.".to_string(),
+            "Queue type is not set.".to_string(),
         ));
+    }
+    if req.cluster_name.is_empty() {
+        return Err(AppError::bad_request("Cluster name is not set.".to_string()));
     }
     Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
 }
@@ -734,8 +737,11 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
         .map_err(|error| AppError::bad_request(error.message))?;
     if req.task_type.is_none() {
         return Err(AppError::bad_request(
-            "TaskType is not set on request.".to_string(),
+            "Queue type is not set.".to_string(),
         ));
+    }
+    if req.cluster_name.is_empty() {
+        return Err(AppError::bad_request("Cluster name is not set.".to_string()));
     }
     let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
     let processing_queue_states = vec![

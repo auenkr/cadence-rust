@@ -467,6 +467,26 @@ migration forward.
 
 ## Rebase and Domain route parity continuation
 
+## Rebase onto current frontend-core2 and Admin queue validation — 2026-10-31
+
+- Rebased the complete implementation history onto `origin/frontend-core2`
+  (`6eae53c5610a05143f7552b78c7e7c4feb8185b5`) and force-pushed it to
+  `origin/frontend-domain-admin` at `a9f8a169c2f9f90617c7a5cc2d80b7582500d6a4`.
+- Exact-head package run
+  [41180994551](https://github.com/auenkr/cadence-rust/actions/runs/41180994551)
+  failed in Clippy due to two `needless_update` warnings in the new core2
+  request-validator tests, before Frontend formatting/tests. Removed those
+  no-op struct updates; this follow-up needs fresh exact-head CI.
+- Cross-checked `ResetQueue` and `DescribeQueue` against Go's Admin handler and
+  `validate/errors.go`. Corrected the request-type error to `Queue type is not
+  set.` and added the required non-empty cluster-name check (`Cluster name is
+  not set.`) after the request-type check. `git diff --check` passed. No Cargo
+  command was run locally.
+- Remaining parity gaps listed above still stand: especially History-client
+  Admin RPCs and real DLQ/queue behavior, full membership resolution, durable
+  domain persistence/replication, schedule workflow integration and mixed
+  Go/Rust restart/recovery evidence. This is not Frontend completion.
+
 - Rebased the implementation branch onto the then-current
   `origin/frontend-core2` at `3bc2dcca8`; conflict resolution kept the newer
   validator request fields and core2 History/Matching persistence clients.
