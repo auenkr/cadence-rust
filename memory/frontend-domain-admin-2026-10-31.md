@@ -842,3 +842,17 @@ migration forward.
   Expanded the SQLite transaction test to exercise the new adapter boundary.
 - `git diff --check` passes. No local Cargo commands were run. Commit and push
   this adapter slice next, then run package CI at that pushed exact head.
+
+## SQLite expected-version transaction tightening — 2026-10-31
+
+- While package CI [41198020996](https://github.com/auenkr/cadence-rust/actions/runs/41198020996)
+  was running for `0d6ee8c68c1940058cf8592d6cb59ffde622cce9`, reviewed the new
+  SQLite trait adapter's create path. Calling the older `GoSqlDomainPersistence`
+  method would read its own metadata version and could commit a row before the
+  adapter noticed that the Frontend manager's supplied expected version was
+  stale.
+- Factored the SQLite create transaction to accept the expected version and
+  check/update the singleton metadata row inside the same transaction. Both
+  existing Go SQL calls and the Frontend mutation trait now use that method.
+  This preserves rollback on stale writes. `git diff --check` passes; no local
+  Cargo command was run. This fix needs its own exact-head package CI run.

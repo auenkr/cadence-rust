@@ -1167,6 +1167,46 @@ impl MatchingDomainMetadataStore {
         })
     }
 
+    fn create_domain_at_version(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let mut metadata = metadata.clone();
+        metadata.notification_version = expected_version;
+        let blob = encode_go_sql_domain_metadata(&metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice(), metadata.info.name, metadata.is_global_domain, blob, ENCODING_THRIFT_RW],
+        )?;
+        let current: i64 = transaction.query_row(
+            "SELECT notification_version FROM domain_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        if current != expected_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_version}, found {current}"
+            )));
+        }
+        let changed = transaction.execute(
+            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
+            params![expected_version + 1, expected_version],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(expected_version)
+    }
+
     fn read_one(
         &self,
         selector: &str,
@@ -1209,39 +1249,7 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
         metadata: &MatchingDomainMetadata,
     ) -> Result<i64, MatchingDomainMetadataError> {
         let expected_version = self.get_metadata_version()?;
-        let mut metadata = metadata.clone();
-        metadata.notification_version = expected_version;
-        let blob = encode_go_sql_domain_metadata(&metadata)?;
-        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
-            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
-        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
-        connection.busy_timeout(self.busy_timeout)?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice(), metadata.info.name, metadata.is_global_domain, blob, ENCODING_THRIFT_RW],
-        )?;
-        let current: i64 = transaction.query_row(
-            "SELECT notification_version FROM domain_metadata",
-            [],
-            |row| row.get(0),
-        )?;
-        if current != expected_version {
-            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
-                "domain metadata notification version changed: expected {expected_version}, found {current}"
-            )));
-        }
-        let changed = transaction.execute(
-            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
-            params![expected_version + 1, expected_version],
-        )?;
-        if changed != 1 {
-            return Err(MatchingDomainMetadataError::InvalidBlob(
-                "Failed to update domain metadata. <>1 rows affected.".into(),
-            ));
-        }
-        transaction.commit()?;
-        Ok(expected_version)
+        self.create_domain_at_version(metadata, expected_version)
     }
 
     fn update_domain(
@@ -1335,14 +1343,9 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
         metadata: &MatchingDomainMetadata,
         expected_version: i64,
     ) -> Result<(), String> {
-        let actual = GoSqlDomainPersistence::create_domain(self, metadata)
-            .map_err(|error| error.to_string())?;
-        if actual != expected_version {
-            return Err(format!(
-                "domain metadata notification version changed: expected {expected_version}, found {actual}"
-            ));
-        }
-        Ok(())
+        self.create_domain_at_version(metadata, expected_version)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     fn update_domain(
