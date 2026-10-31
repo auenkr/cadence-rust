@@ -1316,7 +1316,7 @@ async fn handle_list_failover_history(state: &AppState, body: &Struct) -> Handle
 }
 
 fn schedule_gate(state: &AppState, domain: &str) -> Result<(), AppError> {
-    if state.scheduler_enabled {
+    if state.scheduler_enabled_for_domain(domain) {
         return Ok(());
     }
     Err(AppError::bad_request(format!(

@@ -356,3 +356,9 @@ migration forward.
   exact-head `cadence-frontend` CI, then implement missing runtime-backed
   methods and queue/scheduler integrations incrementally. Record each exact
   head and CI result here; mixed Go/Rust validation is still outstanding.
+- Implemented a live per-domain `worker.enableScheduler` read in shared
+  `AppState` and switched both JSON and YARPC schedule gates from the startup
+  boolean to the Admin/runtime dynamic-config overlay. Added a focused test
+  that sets the property for one domain and confirms another remains disabled.
+  Source `git diff --check` passed; Cargo was not run locally. This is a
+  targeted behavior correction, not scheduler-workflow integration.
