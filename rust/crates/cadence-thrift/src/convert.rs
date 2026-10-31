@@ -448,6 +448,40 @@ impl ToThrift for DescribeClusterResponse {
     }
 }
 
+impl FromThrift for ResetQueueRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            cluster_name: s.req_string(20, "")?,
+            task_type: s.opt_i32(30)?,
+        })
+    }
+}
+
+impl ToThrift for ResetQueueResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for DescribeQueueRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            cluster_name: s.req_string(20, "")?,
+            task_type: s.opt_i32(30)?,
+        })
+    }
+}
+
+impl ToThrift for DescribeQueueResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.processing_queue_states);
+        f.finish()
+    }
+}
+
 impl FromThrift for RetryPolicy {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {

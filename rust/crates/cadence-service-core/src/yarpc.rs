@@ -633,6 +633,42 @@ fn handle_describe_cluster() -> HandlerResult {
     Ok(wrap_success(&crate::admin::describe_cluster_response(&hostname)))
 }
 
+fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::ResetQueueRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
+    if req.task_type.is_none() {
+        return Err(AppError::bad_request(
+            "TaskType is not set on request.".to_string(),
+        ));
+    }
+    Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
+}
+
+fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::DescribeQueueRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
+    if req.task_type.is_none() {
+        return Err(AppError::bad_request(
+            "TaskType is not set on request.".to_string(),
+        ));
+    }
+    let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
+    let processing_queue_states = vec![
+        format!("{{\"queue\":\"decision\",\"pending\":{decisions}}}"),
+        format!("{{\"queue\":\"activity\",\"pending\":{activities}}}"),
+        format!("{{\"queue\":\"timer\",\"pending\":{timers}}}"),
+        format!("{{\"queue\":\"backoff\",\"pending\":{backoffs}}}"),
+        format!("{{\"queue\":\"schedule\",\"registered\":{schedules}}}"),
+    ];
+    Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
+        processing_queue_states,
+    }))
+}
+
 async fn handle_signal(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::types::SignalWorkflowExecutionRequest;
     use cadence_api::validation;
@@ -1810,6 +1846,8 @@ pub async fn dispatch(
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
+        "ResetQueue" => handle_reset_queue(state, body),
+        "DescribeQueue" => handle_describe_queue(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
