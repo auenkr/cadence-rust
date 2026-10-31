@@ -100,9 +100,13 @@ pub fn verify_history_is_complete(
     let expected_last = if is_last_page {
         expected_last_event_id
     } else {
-        expected_first.saturating_add(page_size as i64).saturating_sub(1)
+        expected_first
+            .saturating_add(page_size as i64)
+            .saturating_sub(1)
     };
-    let expected_count = expected_last.saturating_sub(expected_first).saturating_add(1);
+    let expected_count = expected_last
+        .saturating_sub(expected_first)
+        .saturating_add(1);
     let count = event_count as i64;
     if first == expected_first
         && ((is_last_page && last == expected_last && count == expected_count)

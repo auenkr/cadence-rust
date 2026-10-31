@@ -2964,7 +2964,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response, serde_json::json!({}));
+        assert_eq!(response, Value::Null);
         assert_eq!(reader.0.lock().unwrap().len(), 1);
     }
 

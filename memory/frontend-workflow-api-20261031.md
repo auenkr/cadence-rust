@@ -1067,3 +1067,10 @@ Frontend parity until these are implemented and validated.
   two history verifier tests: their assertions compared the now-typed error
   directly with `&str`. Updated both to compare `InternalServiceError` display
   text. No tests ran; next package CI must compile and run them.
+- Run [41198943299](https://github.com/auenkr/cadence-rust/actions/runs/41198943299)
+  checked `05c37ad156a0e76b8ecb85be38d906712671ccb7`. Clippy and the explicit
+  formatting checks passed; tests were 114/115 because an earlier broad
+  assertion edit had changed the archived-history `skipArchival` fixture from
+  backend `null` to `{}`. Restored its expected `null`, kept the separate
+  fail-open poll expectation as `{}`, and applied the CI rustfmt patch for
+  `handler_workflow_history.rs`. A fresh-target exact-head run is pending.
