@@ -1264,3 +1264,43 @@ Frontend parity until these are implemented and validated.
   record the final URL/head/conclusion and binary hash, then push.
 - Continue respecting repo rules: do not run Cargo locally; use GitHub Actions
   for Rust validation; push code and memory updates at least every 30 minutes.
+
+## Successor audit — typed adapter blockers — 2026-10-31 (no code change)
+
+- Worktree was on `t3/frontend-workflow-api-1` (stale, unrelated). Detached at
+  `origin/t3/frontend-workflow-api` `04e5fcf98` and pushed back to
+  `t3/frontend-workflow-api`. The branch is also checked out in
+  `t3-3cf506f9`; that worktree was not touched.
+- No Cargo or rustfmt ran locally. No source change. Last green source run
+  remains [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
+  at `db22d15a3`; later commits are documentation only.
+- Confirmed: `cadence-frontend/src/history_client.rs` and
+  `matching_client.rs` typed clients have no callers besides
+  `MatchingPollCanceller`. `handler_workflow::WorkflowBackend` is still
+  JSON-only (`invoke(operation, Value)`), so no production typed backend exists.
+- Confirmed blocker 1: converters live in
+  `cadence-matching/src/grpc_convert.rs`, declared `mod grpc_convert;`
+  (private). The Frontend crate cannot reuse them without making that module
+  public or moving it.
+- Confirmed blocker 2: most converters run api→proto (responses, e.g.
+  `decision_task`, `history`). Proto→api request conversion exists only for a
+  few types such as `start`. Poll requests (`PollForDecisionTaskRequest`,
+  `PollForActivityTaskRequest`) and Describe/ListPartitions/GetTaskListsByDomain
+  need new proto→api converters. Poll responses and `History`/events need the
+  reverse direction for every event attribute, which is not implemented. This
+  is the main size driver for the adapter.
+- Confirmed blocker 3: `cadence-api` has no proto dependency. The
+  `cadence-proto` crate holds only generated code and native helpers.
+- Confirmed blocker 4: the registered public WorkflowService
+  (`cadence-matching/src/grpc.rs` `impl WorkflowApi for Frontend`, around line
+  686) calls the local persistence and engine directly. It does not call
+  `handler_workflow::Handler`.
+- Next decision needed: the converters are in a file owned by the Matching
+  branch. Making them shared (move to `cadence-proto`/`cadence-service-core`, or
+  make `grpc_convert` pub) touches other branches, so it needs an explicit
+  go-ahead. Recommended order: (1) shared converter module with proto↔api for
+  the poll request and response family; (2) typed Matching backend for
+  Poll/Describe/ListPartitions/GetTaskListsByDomain/CancelPoll; (3) typed History
+  backend starting from the simplest RPCs; (4) History events proto→api
+  conversion; (5) register the composed Handler on gRPC and Thrift; (6) the mixed
+  Go History + Rust Matching/Frontend gate with binary SHA256.
