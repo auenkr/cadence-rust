@@ -1969,6 +1969,18 @@ async fn delete_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
+    let current = match state.domain_manager.describe(&DescribeDomainRequest {
+        name: Some(req.name.clone()),
+        uuid: None,
+    }) {
+        Ok(domain) => domain,
+        Err(error) => return entity_not_exists(error),
+    };
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return bad_request(BadRequestError::new(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.",
+        ));
+    }
     match state.domain_manager.delete(&req.name) {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);
