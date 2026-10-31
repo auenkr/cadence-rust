@@ -684,7 +684,10 @@ mod tests {
         bad(
             validator.validate_describe_task_list_request(Some(&DescribeTaskListRequest {
                 domain: String::new(),
-                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                task_list: Some(TaskList {
+                    name: "tl".into(),
+                    ..Default::default()
+                }),
                 task_list_type: Some(cadence_api::TaskListType::Decision),
                 ..Default::default()
             })),
@@ -701,57 +704,106 @@ mod tests {
         );
         bad(
             validator.validate_get_task_lists_by_domain_request(Some(
-                &GetTaskListsByDomainRequest { domain: String::new() },
+                &GetTaskListsByDomainRequest {
+                    domain: String::new(),
+                },
             )),
             "Domain not set on request.",
         );
         bad(
             validator.validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
                 domain: "d".into(),
-                execution: Some(WorkflowExecution { workflow_id: "wid".into(), run_id: "bad".into() }),
+                execution: Some(WorkflowExecution {
+                    workflow_id: "wid".into(),
+                    run_id: "bad".into(),
+                }),
             })),
             "Invalid RunId.",
         );
         bad(
             validator.validate_count_workflow_executions_request(Some(
-                &CountWorkflowExecutionsRequest { domain: String::new(), ..Default::default() },
+                &CountWorkflowExecutionsRequest {
+                    domain: String::new(),
+                    ..Default::default()
+                },
             )),
             "Domain not set on request.",
         );
 
-        let mut list = ListWorkflowExecutionsRequest { domain: "d".into(), page_size: 0, ..Default::default() };
-        validator.validate_list_workflow_executions_request(Some(&mut list)).unwrap();
+        let mut list = ListWorkflowExecutionsRequest {
+            domain: "d".into(),
+            page_size: 0,
+            ..Default::default()
+        };
+        validator
+            .validate_list_workflow_executions_request(Some(&mut list))
+            .unwrap();
         assert_eq!(list.page_size, 1000);
-        let mut open = ListOpenWorkflowExecutionsRequest { domain: "d".into(), ..Default::default() };
-        bad(validator.validate_list_open_workflow_executions_request(Some(&mut open)), "StartTimeFilter is required");
-        let mut closed = ListClosedWorkflowExecutionsRequest { domain: "d".into(), ..Default::default() };
-        bad(validator.validate_list_closed_workflow_executions_request(Some(&mut closed)), "StartTimeFilter is required");
-        let mut archived = ListArchivedWorkflowExecutionsRequest { domain: "d".into(), page_size: 0, ..Default::default() };
-        validator.validate_list_archived_workflow_executions_request(Some(&mut archived)).unwrap();
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "d".into(),
+            ..Default::default()
+        };
+        bad(
+            validator.validate_list_open_workflow_executions_request(Some(&mut open)),
+            "StartTimeFilter is required",
+        );
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "d".into(),
+            ..Default::default()
+        };
+        bad(
+            validator.validate_list_closed_workflow_executions_request(Some(&mut closed)),
+            "StartTimeFilter is required",
+        );
+        let mut archived = ListArchivedWorkflowExecutionsRequest {
+            domain: "d".into(),
+            page_size: 0,
+            ..Default::default()
+        };
+        validator
+            .validate_list_archived_workflow_executions_request(Some(&mut archived))
+            .unwrap();
         assert_eq!(archived.page_size, 1000);
 
         let mut protected = validator.clone();
         protected.config.admin_protection = true;
         protected.config.admin_operation_token = "secret".into();
         bad(
-            protected.validate_register_domain_request(Some(&RegisterDomainRequest { name: "d".into(), ..Default::default() })),
+            protected.validate_register_domain_request(Some(&RegisterDomainRequest {
+                name: "d".into(),
+                ..Default::default()
+            })),
             "No permission to do this operation.",
         );
-        assert!(validator.validate_describe_domain_request(Some(&DescribeDomainRequest::default())).is_err());
+        assert!(validator
+            .validate_describe_domain_request(Some(&DescribeDomainRequest::default()))
+            .is_err());
         bad(
-            validator.validate_update_domain_request(Some(&UpdateDomainRequest { name: String::new(), ..Default::default() })),
+            validator.validate_update_domain_request(Some(&UpdateDomainRequest {
+                name: String::new(),
+                ..Default::default()
+            })),
             "Domain not set on request.",
         );
         bad(
-            protected.validate_delete_domain_request(Some(&DeleteDomainRequest { name: "d".into(), ..Default::default() })),
+            protected.validate_delete_domain_request(Some(&DeleteDomainRequest {
+                name: "d".into(),
+                ..Default::default()
+            })),
             "No permission to do this operation.",
         );
         bad(
-            protected.validate_deprecate_domain_request(Some(&DeprecateDomainRequest { name: "d".into(), ..Default::default() })),
+            protected.validate_deprecate_domain_request(Some(&DeprecateDomainRequest {
+                name: "d".into(),
+                ..Default::default()
+            })),
             "No permission to do this operation.",
         );
         bad(
-            validator.validate_failover_domain_request(Some(&FailoverDomainRequest { domain_name: "d".into(), ..Default::default() })),
+            validator.validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "d".into(),
+                ..Default::default()
+            })),
             "DomainActiveClusterName or ActiveClusters must be provided",
         );
     }
@@ -768,7 +820,10 @@ mod tests {
             validator
                 .validate_describe_task_list_request(Some(&DescribeTaskListRequest {
                     domain: "d".into(),
-                    task_list: Some(TaskList { name: "long".into(), ..Default::default() }),
+                    task_list: Some(TaskList {
+                        name: "long".into(),
+                        ..Default::default()
+                    }),
                     task_list_type: Some(cadence_api::TaskListType::Decision),
                     ..Default::default()
                 }))
@@ -776,7 +831,10 @@ mod tests {
                 .message,
             "TaskList length exceeds limit."
         );
-        let time_filter = StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) };
+        let time_filter = StartTimeFilter {
+            earliest_time: Some(1),
+            latest_time: Some(2),
+        };
         let mut open = ListOpenWorkflowExecutionsRequest {
             domain: "d".into(),
             start_time_filter: Some(time_filter.clone()),
@@ -949,18 +1007,16 @@ mod tests {
         assert_eq!(closed.maximum_page_size, 10);
         let mut closed_conflict = valid_closed();
         closed_conflict.execution_filter = Some(WorkflowExecutionFilter::default());
-        closed_conflict.status_filter = Some(
-            cadence_api::enums::WorkflowExecutionCloseStatus::Failed,
-        );
+        closed_conflict.status_filter =
+            Some(cadence_api::enums::WorkflowExecutionCloseStatus::Failed);
         bad(
             validator.validate_list_closed_workflow_executions_request(Some(&mut closed_conflict)),
             "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed",
         );
         let mut closed_conflict = valid_closed();
         closed_conflict.type_filter = Some(WorkflowTypeFilter::default());
-        closed_conflict.status_filter = Some(
-            cadence_api::enums::WorkflowExecutionCloseStatus::Failed,
-        );
+        closed_conflict.status_filter =
+            Some(cadence_api::enums::WorkflowExecutionCloseStatus::Failed);
         assert!(validator
             .validate_list_closed_workflow_executions_request(Some(&mut closed_conflict))
             .is_err());
@@ -979,7 +1035,8 @@ mod tests {
             ..Default::default()
         };
         bad(
-            validator.validate_list_archived_workflow_executions_request(Some(&mut archived_too_large)),
+            validator
+                .validate_list_archived_workflow_executions_request(Some(&mut archived_too_large)),
             "Pagesize is larger than allowed 100",
         );
 
@@ -1001,7 +1058,10 @@ mod tests {
             .validate_register_domain_request(Some(&RegisterDomainRequest {
                 name: "domain".into(),
                 security_token: "token".into(),
-                data: Some(std::collections::HashMap::from([("tier".into(), "3".into())])),
+                data: Some(std::collections::HashMap::from([(
+                    "tier".into(),
+                    "3".into(),
+                )])),
                 ..Default::default()
             }))
             .unwrap();
@@ -1143,7 +1203,10 @@ mod tests {
         validator
             .validate_describe_task_list_request(Some(&DescribeTaskListRequest {
                 domain: "domain".into(),
-                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                task_list: Some(TaskList {
+                    name: "tl".into(),
+                    ..Default::default()
+                }),
                 task_list_type: Some(cadence_api::TaskListType::Activity),
                 ..Default::default()
             }))
@@ -1151,7 +1214,10 @@ mod tests {
         validator
             .validate_list_task_list_partitions_request(Some(&ListTaskListPartitionsRequest {
                 domain: "domain".into(),
-                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                task_list: Some(TaskList {
+                    name: "tl".into(),
+                    ..Default::default()
+                }),
             }))
             .unwrap();
         validator
@@ -1175,24 +1241,38 @@ mod tests {
             domain: "domain".into(),
             ..Default::default()
         };
-        validator.validate_list_workflow_executions_request(Some(&mut list)).unwrap();
+        validator
+            .validate_list_workflow_executions_request(Some(&mut list))
+            .unwrap();
         let mut open = ListOpenWorkflowExecutionsRequest {
             domain: "domain".into(),
-            start_time_filter: Some(StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) }),
+            start_time_filter: Some(StartTimeFilter {
+                earliest_time: Some(1),
+                latest_time: Some(2),
+            }),
             ..Default::default()
         };
-        validator.validate_list_open_workflow_executions_request(Some(&mut open)).unwrap();
+        validator
+            .validate_list_open_workflow_executions_request(Some(&mut open))
+            .unwrap();
         let mut closed = ListClosedWorkflowExecutionsRequest {
             domain: "domain".into(),
-            start_time_filter: Some(StartTimeFilter { earliest_time: Some(1), latest_time: Some(2) }),
+            start_time_filter: Some(StartTimeFilter {
+                earliest_time: Some(1),
+                latest_time: Some(2),
+            }),
             ..Default::default()
         };
-        validator.validate_list_closed_workflow_executions_request(Some(&mut closed)).unwrap();
+        validator
+            .validate_list_closed_workflow_executions_request(Some(&mut closed))
+            .unwrap();
         let mut archived = ListArchivedWorkflowExecutionsRequest {
             domain: "domain".into(),
             ..Default::default()
         };
-        validator.validate_list_archived_workflow_executions_request(Some(&mut archived)).unwrap();
+        validator
+            .validate_list_archived_workflow_executions_request(Some(&mut archived))
+            .unwrap();
         validator
             .validate_register_domain_request(Some(&RegisterDomainRequest {
                 name: "domain".into(),
@@ -1236,7 +1316,10 @@ mod tests {
     fn go_visibility_matrix_checks_exact_time_filter_and_filter_conflict_errors() {
         let validator = RequestValidator::default();
         let expected = [
-            (StartTimeFilter::default(), "EarliestTime in StartTimeFilter is required"),
+            (
+                StartTimeFilter::default(),
+                "EarliestTime in StartTimeFilter is required",
+            ),
             (
                 StartTimeFilter {
                     earliest_time: Some(1),

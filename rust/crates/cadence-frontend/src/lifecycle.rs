@@ -142,31 +142,37 @@ mod tests {
             let events = events.clone();
             move || {
                 let events = events.clone();
-                async move { events.lock().unwrap().push(event); }
+                async move {
+                    events.lock().unwrap().push(event);
+                }
             }
         };
-        assert!(lifecycle
-            .shutdown(
-                Duration::ZERO,
-                push("health"),
-                push("handlers"),
-                push("limiters"),
-                push("resource"),
-            )
-            .await);
+        assert!(
+            lifecycle
+                .shutdown(
+                    Duration::ZERO,
+                    push("health"),
+                    push("handlers"),
+                    push("limiters"),
+                    push("resource"),
+                )
+                .await
+        );
         assert_eq!(
             *events.lock().unwrap(),
             ["health", "handlers", "limiters", "resource"]
         );
         assert_eq!(lifecycle.state(), State::Stopped);
-        assert!(!lifecycle
-            .shutdown(
-                Duration::ZERO,
-                || async {},
-                || async {},
-                || async {},
-                || async {},
-            )
-            .await);
+        assert!(
+            !lifecycle
+                .shutdown(
+                    Duration::ZERO,
+                    || async {},
+                    || async {},
+                    || async {},
+                    || async {},
+                )
+                .await
+        );
     }
 }
