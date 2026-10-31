@@ -381,6 +381,73 @@ impl ToThrift for AddSearchAttributeResponse {
     }
 }
 
+impl ToThrift for SupportedClientVersions {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.go_sdk);
+        f.sstr(20, &self.java_sdk);
+        f.finish()
+    }
+}
+
+impl ToThrift for HostInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.identity);
+        f.finish()
+    }
+}
+
+impl ToThrift for RingInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.role);
+        f.oi32(20, Some(self.member_count));
+        f.olist(30, &self.members);
+        f.finish()
+    }
+}
+
+impl ToThrift for MembershipInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.current_host.as_ref());
+        f.olist(20, &self.reachable_members);
+        f.olist(30, &self.rings);
+        f.finish()
+    }
+}
+
+impl ToThrift for PersistenceFeature {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.key);
+        if self.enabled {
+            f.fields.push((20, crate::value::Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl ToThrift for PersistenceInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.backend);
+        f.olist(30, &self.features);
+        f.finish()
+    }
+}
+
+impl ToThrift for DescribeClusterResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.supported_client_versions.as_ref());
+        f.ostruct(20, self.membership_info.as_ref());
+        f.omap_str_struct(30, &self.persistence_info);
+        f.finish()
+    }
+}
+
 impl FromThrift for RetryPolicy {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {

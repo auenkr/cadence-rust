@@ -628,6 +628,11 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
     Ok(Struct { fields: vec![] })
 }
 
+fn handle_describe_cluster() -> HandlerResult {
+    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+    Ok(wrap_success(&crate::admin::describe_cluster_response(&hostname)))
+}
+
 async fn handle_signal(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::types::SignalWorkflowExecutionRequest;
     use cadence_api::validation;
@@ -1804,6 +1809,7 @@ pub async fn dispatch(
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
+        "DescribeCluster" => handle_describe_cluster(),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body),
