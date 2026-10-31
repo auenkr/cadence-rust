@@ -874,3 +874,27 @@ migration forward.
   passed exact-head Frontend package CI:
   [41198466298](https://github.com/auenkr/cadence-rust/actions/runs/41198466298)
   completed **success** (Clippy, Formatting and Test jobs).
+
+## Persisted domain manager CRUD routing — 2026-10-31
+
+- Confirmed the rebased source already passes `serialization_encoding` to
+  `CassandraDomainMetadataPersistence::new`; the checkpoint's suspected missing
+  argument was stale and required no code repair.
+- Pushed rebased head `b2db05612ae902cb6b0e44d0be63e7a98895c27c` over the old
+  remote branch with an explicit lease. Exact-head Frontend package CI run
+  [41199029247](https://github.com/auenkr/cadence-rust/actions/runs/41199029247)
+  was dispatched; it was in progress when checked and does not validate any
+  later source changes.
+- Routed `cadence-frontend::handler_domain` register, describe, list, update,
+  and deprecate operations through `AppState.domain_manager`. The persisted
+  manager now owns these calls and can commit writes through its configured SQL
+  or Cassandra adapter; errors map back to the handler's typed error surface.
+  This helper still uses the default in-memory implementation in its unit test;
+  production transport dispatch was separately confirmed to use `domain_manager`
+  in `cadence-service-core`.
+- `git diff --check` passed for this uncommitted CRUD routing slice. No local
+  Cargo command ran. Next: commit/push this slice and dispatch exact-head package
+  CI. Remaining blockers: durable domain replication queue and durable failover
+  history/cooldown behavior; Admin DLQ and complete raw-history RPC behavior;
+  scheduler workflow integration; live membership; and mixed-cluster
+  Go/Rust failure/restart/recovery validation. These are still open.

@@ -35,7 +35,7 @@ impl Handler {
             )));
         }
         if state
-            .domains
+            .domain_manager
             .describe(&DescribeDomainRequest {
                 name: Some(request.name.clone()),
                 uuid: None,
@@ -114,7 +114,7 @@ impl Handler {
             uuid: uuid::Uuid::now_v7().to_string(),
         };
         let response = state
-            .domains
+            .domain_manager
             .create_with_version(
                 info.clone(),
                 configuration,
@@ -122,7 +122,7 @@ impl Handler {
                 request.is_global_domain,
                 failover_version,
             )
-            .map_err(DomainHandlerError::AlreadyExists)?;
+            .map_err(DomainHandlerError::from)?;
         state.executions.register_domain(&request.name, &info.uuid);
         Ok(response)
     }
@@ -140,7 +140,7 @@ impl Handler {
             ));
         }
         state
-            .domains
+            .domain_manager
             .describe(request)
             .map_err(DomainHandlerError::NotFound)
     }
@@ -153,7 +153,7 @@ impl Handler {
             DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
         })?;
         state
-            .domains
+            .domain_manager
             .list_page(request)
             .map_err(DomainHandlerError::BadRequest)
     }
@@ -171,7 +171,7 @@ impl Handler {
             ));
         }
         state
-            .domains
+            .domain_manager
             .update(
                 request,
                 &state.cluster_metadata,
@@ -193,7 +193,7 @@ impl Handler {
             ));
         }
         let current = state
-            .domains
+            .domain_manager
             .describe(&DescribeDomainRequest {
                 name: Some(request.name.clone()),
                 uuid: None,
@@ -205,9 +205,9 @@ impl Handler {
             )));
         }
         state
-            .domains
+            .domain_manager
             .deprecate(request)
-            .map_err(DomainHandlerError::NotFound)
+            .map_err(DomainHandlerError::from)
     }
 }
 
@@ -229,6 +229,26 @@ impl From<cadence_persistence::FailoverError> for DomainHandlerError {
                 Self::Busy(ServiceBusyError::new(message))
             }
             cadence_persistence::FailoverError::Persistence(message) => Self::Internal(message),
+        }
+    }
+}
+
+impl From<cadence_persistence::FrontendDomainError> for DomainHandlerError {
+    fn from(error: cadence_persistence::FrontendDomainError) -> Self {
+        match error {
+            cadence_persistence::FrontendDomainError::AlreadyExists(error) => {
+                Self::AlreadyExists(error)
+            }
+            cadence_persistence::FrontendDomainError::NotFound(error) => Self::NotFound(error),
+            cadence_persistence::FrontendDomainError::Invalid(message) => {
+                Self::BadRequest(bad(message))
+            }
+            cadence_persistence::FrontendDomainError::Busy(message) => {
+                Self::Busy(ServiceBusyError::new(message))
+            }
+            cadence_persistence::FrontendDomainError::Persistence(message) => {
+                Self::Internal(message)
+            }
         }
     }
 }
