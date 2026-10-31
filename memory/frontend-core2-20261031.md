@@ -1019,4 +1019,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   live `system.enableCassandraAllConsistencyLevelDelete` property. Deletes
   now issue `ALL` consistency when enabled and retry at `LOCAL_QUORUM` when
   Cassandra reports unavailable, following Go `executeWithConsistencyAll`.
-  This is the next unvalidated change; dispatch exact-head CI after push.
+  The first CI run for this adapter is recorded below and failed in Clippy on
+  one stale `CqlExecutor` import in `delete_domain`; it is removed in the
+  follow-up commit.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41199185412 checked
+  `dd0f27fc4141b20b5d6c3539121c3ac20daed346` and concluded `failure` at
+  Clippy (unused import); formatting passed and tests were skipped. The import
+  is fixed in the current working change; exact-head CI is pending.
