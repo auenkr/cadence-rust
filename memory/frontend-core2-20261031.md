@@ -322,8 +322,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   corrected. Do not use its result as validation of the corrected code.
 - Exact-head package CI for the corrected lifecycle path is running at
   https://github.com/auenkr/cadence-rust/actions/runs/41185646557, head
-  `fd34f333bd5dfe90a06f6be23833be7675718686`. Record its terminal conclusion
-  here. Cargo remains prohibited locally.
+  `fd34f333bd5dfe90a06f6be23833be7675718686`, and concluded `success`.
+  Format check, Clippy, Frontend formatting and tests passed. The configured
+  Go-development runtime smoke step was skipped by workflow conditions. The
+  branch tip after this run only has documentation updates. Cargo remains
+  prohibited locally.
 
 ## Exact-head follow-up — 2026-10-31
 
