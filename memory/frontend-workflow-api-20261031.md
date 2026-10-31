@@ -1149,3 +1149,9 @@ Frontend parity until these are implemented and validated.
   this does not add workflow execution, history, or visibility persistence.
   Run 41200219212 remains in progress (last observed in its Go owner-ordering
   oracle stage); no CI conclusion yet.
+- Run [41200219212](https://github.com/auenkr/cadence-rust/actions/runs/41200219212)
+  concluded `success` for Frontend Clippy, formatting, tests and runtime smoke on
+  source SHA `974a6efc7db54ca8600bc3799457e7721041751f`. This validates the
+  Cassandra domain persistence import corrections and typed History client
+  methods. The current branch includes later memory-only commits, so dispatch
+  a final exact-head package run before treating the current tree as validated.
