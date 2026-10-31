@@ -1171,6 +1171,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   https://github.com/auenkr/cadence-rust/actions/runs/41204756658 checked the
   same head `fb0cd95b40f1c6d11d6156f37d279c40733af671` and succeeded,
   including the new factory-level default/visibility selection regression.
+- After the evidence-only commit, exact-head Frontend CI
+  https://github.com/auenkr/cadence-rust/actions/runs/41205154195 checked
+  `b48503c82adec46b89cdd4091d051d134df33beb` and succeeded (formatting,
+  Clippy, and Frontend tests). Exact-head Matching CI
+  https://github.com/auenkr/cadence-rust/actions/runs/41205392224 checked the
+  same commit and succeeded, including the selector regression test.
 - Lifecycle stop order is present in the shared runtime, but production still
   constructs no seven global quota collection owners and the AdminHandler is
   still a stub, so its Go DLQ/failover worker owners are absent. The validator
