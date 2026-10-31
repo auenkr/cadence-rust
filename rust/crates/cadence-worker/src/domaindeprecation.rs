@@ -1,4 +1,9 @@
-//! Domain deprecation workflow names; source port follows in this module.
+//! Domain deprecation workflow names and Go-mirrored modules.
+
+pub mod entities;
+pub mod helpers;
+pub mod workflow;
+
 pub const TASK_LIST: &str = "domain-deprecation-tasklist";
 pub const WORKFLOW_TYPE: &str = "domain-deprecation-workflow";
 pub const BATCH_WORKFLOW_ID_PREFIX: &str = "domain-deprecation-batch";
