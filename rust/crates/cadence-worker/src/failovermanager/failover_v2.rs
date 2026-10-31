@@ -140,14 +140,16 @@ mod tests {
         }
     }
 
-    fn domain_with_attributes(active: &str) -> DomainView {
+    /// The domain-level active cluster is `x`, which is not a source, so only
+    /// the attribute `cluster:c0` (active on `attribute_active`) can move.
+    fn domain_with_attributes(attribute_active: &str) -> DomainView {
         DomainView {
             name: "d".into(),
             is_global: true,
-            active_cluster_name: active.into(),
+            active_cluster_name: "x".into(),
             active_clusters: Some(BTreeMap::from([(
                 "cluster".to_owned(),
-                BTreeMap::from([("c0".to_owned(), active.to_owned())]),
+                BTreeMap::from([("c0".to_owned(), attribute_active.to_owned())]),
             )])),
             ..Default::default()
         }
@@ -225,6 +227,7 @@ mod tests {
             }]
         );
         assert_eq!(snapshot.previous_cluster_attributes[0].preferred_cluster, "a");
+        assert!(snapshot.previous_active_cluster.is_empty());
 
         // An attribute outside the filter is left alone.
         assert!(failover_preferences_for_domain(
