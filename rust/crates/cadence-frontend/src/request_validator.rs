@@ -701,7 +701,7 @@ mod tests {
         );
         bad(
             validator.validate_get_task_lists_by_domain_request(Some(
-                &GetTaskListsByDomainRequest { domain: String::new(), ..Default::default() },
+                &GetTaskListsByDomainRequest { domain: String::new() },
             )),
             "Domain not set on request.",
         );
@@ -1024,7 +1024,6 @@ mod tests {
             validator.validate_delete_domain_request(Some(&DeleteDomainRequest {
                 name: "domain".into(),
                 security_token: "wrong".into(),
-                ..Default::default()
             })),
             "No permission to do this operation.",
         );
@@ -1032,7 +1031,6 @@ mod tests {
             validator.validate_deprecate_domain_request(Some(&DeprecateDomainRequest {
                 name: "domain".into(),
                 security_token: "wrong".into(),
-                ..Default::default()
             })),
             "No permission to do this operation.",
         );
@@ -1154,20 +1152,17 @@ mod tests {
             .validate_list_task_list_partitions_request(Some(&ListTaskListPartitionsRequest {
                 domain: "domain".into(),
                 task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
-                ..Default::default()
             }))
             .unwrap();
         validator
             .validate_get_task_lists_by_domain_request(Some(&GetTaskListsByDomainRequest {
                 domain: "domain".into(),
-                ..Default::default()
             }))
             .unwrap();
         validator
             .validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
                 domain: "domain".into(),
                 execution: Some(execution),
-                ..Default::default()
             }))
             .unwrap();
         validator

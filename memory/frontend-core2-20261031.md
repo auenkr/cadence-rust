@@ -249,3 +249,26 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
 - The branch still has no write-capable durable Frontend domain/metadata,
   visibility, History, or execution manager and no full Go handler/quota stop
   owners. Read-only domain bootstrap and listener drain are not full parity.
+
+## Continued implementation — 2026-10-31
+
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41179407283 at
+  `642538a2720d28e7ff5611e690e1fe3208033d95` concluded `failure` in Frontend
+  Clippy/test compilation. It identified six `needless_update` warnings in the
+  validator test fixtures; removed all six on the next working head. This run
+  did not reach unit tests.
+- Exact-head validation of that cleanup is pending; dispatch a fresh
+  `cadence-frontend` workflow after committing the continued changes.
+- Re-audit confirms persistence is still not production-complete: the shared
+  Matching configured adapters offer read-only Go domain metadata, Frontend
+  domain mutations and execution state remain in-memory, and visibility and
+  History have no durable manager. Go SQL/Cassandra selector parity is only
+  present for the Matching task store/domain metadata reader, not the five
+  requested Frontend managers.
+- Re-audit of `go/service/frontend/service.go:319-376` confirms Rust has the
+  readiness/failure-detection/request-drain timing but no distinct Frontend
+  workflow/admin handler stop hooks, seven global quota collection owners, or
+  Go resource stop owner wired to the lifecycle. Those remain required for
+  shutdown parity.
+- The six Clippy fixture corrections are unvalidated until the exact-head CI
+  result is recorded below. Cargo remains prohibited on the development host.
