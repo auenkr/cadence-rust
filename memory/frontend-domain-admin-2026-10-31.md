@@ -121,6 +121,12 @@
   Downloaded and applied that run's formatter patch to the seven selected Rust
   source files it formatted, so the next package run checks a formatting-clean
   merge as well as the duplicate removal.
+- Fresh package run
+  [41208347503](https://github.com/auenkr/cadence-rust/actions/runs/41208347503)
+  passed Clippy, formatting, and tests at exact pushed head
+  `e3edd612518ce36a3d2b06593cf67346b24ffe9b`. This verifies the integration
+  and current package source only; runtime mixed-cluster compatibility and
+  the remaining parity blockers below are still open.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.
