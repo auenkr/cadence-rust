@@ -1513,7 +1513,7 @@ mod tests {
                 .dispatch("GetSearchAttributes", Value::Null)
                 .await
                 .unwrap(),
-            serde_json::json!({"keys": {"CustomKeywordField": "KEYWORD"}})
+            serde_json::json!({"keys": {"CustomKeywordField": 1}})
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
@@ -1907,7 +1907,10 @@ mod tests {
                 "DescribeWorkflowExecution",
                 serde_json::json!({
                     "domain": "shop",
-                    "execution": {"workflowId": "wf", "runId": "run"}
+                    "execution": {
+                        "workflowId": "wf",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    }
                 }),
             )
             .await
@@ -1920,7 +1923,10 @@ mod tests {
                 "domainUUID": "uuid:shop",
                 "request": {
                     "domain": "shop",
-                    "execution": {"workflowId": "wf", "runId": "run"}
+                    "execution": {
+                        "workflowId": "wf",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    }
                 }
             })
         );

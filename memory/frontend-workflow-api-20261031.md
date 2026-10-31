@@ -477,6 +477,12 @@ these fixes; no green CI evidence covers the current changes.
   [41181996079](https://github.com/auenkr/cadence-rust/actions/runs/41181996079)
   is in progress against that exact source SHA; no conclusion is available
   yet. It includes formatting patch mode.
+- Run 41181996079 finished `failure`: Clippy and formatting passed; tests
+  reported 66 passed and two test-fixture assertions failed. The Describe
+  fixture's run ID was not a UUID accepted by the Go-equivalent validator, and
+  the search-attribute enum's Rust JSON encoding is numeric (`1` for Keyword),
+  not its Thrift text name. Both assertions were corrected locally; they still
+  need a pushed exact-head CI rerun.
 - Superseded run [41181861730](https://github.com/auenkr/cadence-rust/actions/runs/41181861730)
   for `c0fd8529700a44c5f8eafb690325ea89a8f65c7f` was cancelled after the next
   code checkpoint was pushed, so it is not validation evidence.
