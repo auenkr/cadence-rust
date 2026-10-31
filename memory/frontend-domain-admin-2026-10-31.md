@@ -272,3 +272,23 @@ migration forward.
   DLQ operations, replication methods and raw-history YARPC paging are still
   not routed. Domain replication queue transmission and scheduler workflow
   interactions remain gaps.
+
+## Raw-history YARPC path
+
+- Added Thrift converters for `GetWorkflowExecutionRawHistoryV2` and
+  `VersionHistory`, plus YARPC dispatch using the existing persistence raw
+  history token and version-history selection logic. Each call returns one
+  persistence page, encodes event batches as ThriftRW, validates continuation
+  tokens against the request, and returns empty batches on persistence-level
+  missing history as the existing JSON handler does.
+- Commit `6b67253f7` is pushed. Package CI with formatting enabled is run
+  [41178167224](https://github.com/auenkr/cadence-rust/actions/runs/41178167224),
+  targeting `6b67253f7`; pending at dispatch. Earlier run
+  [41178056604](https://github.com/auenkr/cadence-rust/actions/runs/41178056604)
+  targeted pre-raw-history queue code `260de4e0c`; inspect it for errors, but
+  it is superseded for current-source validation. No local Cargo command ran.
+- This raw-history route still relies on the current single-branch execution
+  persistence and is not multi-branch Go parity. Remaining Admin dispatch
+  includes DLQ/replication operations and task maintenance; Domain durability
+  and replication queue, scheduler workflow integration, and mixed-cluster
+  validation remain open.
