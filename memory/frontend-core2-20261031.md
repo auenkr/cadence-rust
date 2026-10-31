@@ -698,6 +698,15 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   (head `8dc83ffed0db23faacb3a15329fedfc3b25399d4`, conclusion `success`).
   This run covers the baseline source and docs only; it does not close either
   outstanding implementation gap.
+- Backend selection finding for the next persistence slice: Go's SQLite SQL
+  plugin exposes `LockDomainMetadata` but has no `UpdateDomainMetadata`
+  implementation (`go/common/persistence/sql/sqlplugin/sqlite/domain.go`).
+  Go SQL domain CRUD/version transactions are implemented in the MySQL and
+  PostgreSQL plugins (`.../mysql/domain.go`, `.../postgres/domain.go`); do not
+  treat the SQLite Matching metadata reader as a production DomainManager.
+  The write-capable production SQL adapter must share the existing MySQL/
+  PostgreSQL connection and transaction behavior, while Cassandra must follow
+  `go/common/persistence/cassandra/cassandra_domain_store.go`.
 
 ## Persistence manager contract inventory — continuation
 
