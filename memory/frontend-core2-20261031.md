@@ -1495,6 +1495,10 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   https://github.com/auenkr/cadence-rust/actions/runs/41217415528 passed at
   `a998f52602ad296417381c586802dcc4ebb7d8b7` (formatting, Frontend Clippy,
   Frontend tests and configured Go oracle checks). No Cargo command ran locally.
+- The evidence checkpoint commit `3e35973d3ade3515ab0a2fadd10cc2a65c22aed8`
+  passed the same package workflow at
+  https://github.com/auenkr/cadence-rust/actions/runs/41218095091 (conclusion
+  `success`). This was a memory-only change; it does not alter source parity.
 - The validator coverage audit is complete for the 88 named rows across the
   15 Go test tables in `request_validator_test.go`; Rust tests exercise all 16
   public validator methods. The exact-head run above is the latest CI evidence
