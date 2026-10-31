@@ -1138,6 +1138,9 @@ pub async fn get_workflow_execution_raw_history(
         match RawHistoryToken::from_bytes(&req.next_page_token) {
             Ok(token) => {
                 persistence_token = token.persistence_token.clone().unwrap_or_default();
+                if let Err(error) = raw_history::validate_persistence_token(&persistence_token) {
+                    return bad_request(error);
+                }
                 let histories = token.version_histories.clone().unwrap_or_default();
                 continuation = Some(token);
                 histories
