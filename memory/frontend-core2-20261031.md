@@ -285,14 +285,27 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   listener/resource teardown remains after that window. This applies to the
   Frontend lifecycle path in the shared launcher.
 - Audited Go's 15 table-driven `request_validator_test.go` groups (88 named
-  case rows) against the Rust tests. Coverage is organized in the Rust tests
-  by behavior rather than duplicating Go's row labels: nil and domain checks,
-  task-list and reset-sticky boundaries, all visibility time-filter and
-  conflict combinations, page mutation/limits, domain identifier alternatives,
-  admin tokens, required data, retention, active/passive and active/active
-  failover, timeout boundaries, lockdown, and dynamic updates. This audit still
-  needs exact-head CI after the launcher change; keep the row-level checklist
-  reviewable before claiming matrix closure.
+  case rows) against Rust tests. All Go rows map to semantic cases in the Rust
+  suite; the test case names are grouped by behavior rather than copied
+  verbatim. The per-Go-group row counts are: RefreshWorkflowTasks 3,
+  DescribeTaskList 7, ListTaskListPartitions 6, GetTaskListsByDomain 3,
+  ResetStickyTaskList 6, CountWorkflowExecutions 3,
+  ListWorkflowExecutions 4, ListOpenWorkflowExecutions 9,
+  ListClosedWorkflowExecutions 11, ListArchivedWorkflowExecutions 4,
+  DeprecateDomain 4, DescribeDomain 4, UpdateDomain 7, RegisterDomain 7,
+  FailoverDomain 10. Rust coverage is in `go_request_validator_success_cases_cover_all_entry_points`,
+  `go_request_validator_error_and_mutation_matrix`,
+  `go_domain_presence_matrix_covers_every_domain_scoped_validator`,
+  `go_request_validator_limit_filter_and_lockdown_matrix`,
+  `go_request_validator_remaining_table_cases`,
+  `go_visibility_matrix_checks_exact_time_filter_and_filter_conflict_errors`,
+  `go_validator_matrix_covers_task_list_reset_and_failover_boundaries`,
+  `go_table_covers_visibility_limits_and_update_failover_lockdown`, and
+  `go_failover_timeout_table_case_600_exceeds_maximum_300`. Exact messages,
+  validation ordering, page-size mutation, both closed-filter conflict pairs,
+  name/retention limits, admin tokens, failover modes and timeout boundaries
+  are asserted. This closes the source case audit; exact-head CI after the
+  launcher change remains pending.
 - Persistence remains unclosed. `AppState` and the handlers still directly
   depend on `InMemoryDomainStore` / `InMemoryExecutionStore`; Matching's native
   SQL/Cassandra adapters only provide Matching task storage and read-only
