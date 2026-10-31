@@ -1145,3 +1145,19 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   formatting, Clippy, and Frontend tests passed. Runtime smoke was skipped.
   Superseded run `41203024330` was cancelled before this run completed. No
   Cargo command was run locally.
+
+## Frontend core2 continuation — configured store selector wiring
+
+- Routed the configured default-store factories used by Frontend startup
+  through `PersistenceConfig::store_name_for` and `datastore_for`, including
+  the SQLite option resolver and the Cassandra semaphore-store factory. The
+  selector is now exercised by production construction instead of existing
+  only as config groundwork. The existing default-store domain/metadata
+  persistence remains SQL MySQL/PostgreSQL and Cassandra; this change does not
+  add the missing Visibility, History, or Execution managers.
+- Lifecycle stop order is present in the shared runtime, but production still
+  constructs no seven global quota collection owners and the AdminHandler is
+  still a stub, so its Go DLQ/failover worker owners are absent. The validator
+  audit remains closed at 15 Go groups / 88 named rows.
+- No Cargo command was run locally. Exact-head package CI is required for this
+  source change; record the run URL, tested head and conclusion after it ends.

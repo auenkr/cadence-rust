@@ -129,10 +129,12 @@ pub async fn open_configured_semaphore_store(
 pub async fn open_configured_semaphore_stores(
     persistence: &crate::config::PersistenceConfig,
 ) -> anyhow::Result<ConfiguredSemaphoreStores> {
-    let name = persistence.default_store.as_str();
-    let datastore = persistence.datastores.get(name).ok_or_else(|| {
-        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
-    })?;
+    let name = persistence
+        .store_name_for(crate::config::PersistenceStoreRole::Default)?
+        .expect("the default persistence role is required");
+    let datastore = persistence
+        .datastore_for(crate::config::PersistenceStoreRole::Default)?
+        .expect("a configured default store has a datastore");
     if let Some(nosql) = datastore.nosql.as_ref() {
         if datastore.sql.is_some() {
             anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
@@ -165,13 +167,12 @@ pub fn open_configured_default_store(
     all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
     serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
-    let name = persistence.default_store.as_str();
-    if name.is_empty() {
-        anyhow::bail!("Matching task persistence requires persistence.defaultStore");
-    }
-    let datastore = persistence.datastores.get(name).ok_or_else(|| {
-        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
-    })?;
+    let name = persistence
+        .store_name_for(crate::config::PersistenceStoreRole::Default)?
+        .expect("the default persistence role is required");
+    let datastore = persistence
+        .datastore_for(crate::config::PersistenceStoreRole::Default)?
+        .expect("a configured default store has a datastore");
     if let Some(nosql) = datastore.nosql.as_ref() {
         if datastore.sql.is_some() {
             anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
@@ -381,15 +382,12 @@ impl SqliteTaskStoreConfig {
     ) -> anyhow::Result<Self> {
         // Go indexes persistence.datastores with the configured name exactly;
         // whitespace is part of the key and must not be normalized here.
-        let name = persistence.default_store.as_str();
-        if name.is_empty() {
-            anyhow::bail!("Matching task persistence requires persistence.defaultStore");
-        }
-        let datastore = persistence.datastores.get(name).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Matching defaultStore {name:?} is not present in persistence.datastores"
-            )
-        })?;
+        let name = persistence
+            .store_name_for(crate::config::PersistenceStoreRole::Default)?
+            .expect("the default persistence role is required");
+        let datastore = persistence
+            .datastore_for(crate::config::PersistenceStoreRole::Default)?
+            .expect("a configured default store has a datastore");
         let sql = datastore.sql.as_ref().ok_or_else(|| {
             if datastore.nosql.is_some() {
                 anyhow::anyhow!("Matching task persistence does not support NoSQL defaultStore {name:?}; supported backend is SQL sqlite")
