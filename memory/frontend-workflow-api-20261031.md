@@ -892,3 +892,10 @@ Frontend parity until these are implemented and validated.
   implementation. Workflow operations are not registered through this
   `Handler` in the service's actual Thrift/gRPC runtime, and the package run is
   not mixed Go History + Rust Matching/SDK evidence.
+- Formatting run
+  [41193810933](https://github.com/auenkr/cadence-rust/actions/runs/41193810933)
+  succeeded at `dfcdf15bc4689c8fb4bbc18cf487b5fdca29956c`. Its
+  `frontend-format-patch` artifact was applied from the runner; it includes
+  rustfmt for the workflow/client edits and already-changed shared core files.
+  This run passed Clippy and tests in the runner workspace after formatting,
+  but the artifact itself has not yet been validated at a committed head.

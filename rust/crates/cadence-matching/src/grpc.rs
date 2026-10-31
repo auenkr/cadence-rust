@@ -225,7 +225,14 @@ impl Frontend {
                     p::DomainAlreadyExistsError {},
                 ),
                 "WorkflowExecutionAlreadyStartedError" => Status::already_exists(message),
-                "ServiceBusyError" => detailed_status(tonic::Code::ResourceExhausted, message, "ServiceBusyError", p::ServiceBusyError { reason: String::new() }),
+                "ServiceBusyError" => detailed_status(
+                    tonic::Code::ResourceExhausted,
+                    message,
+                    "ServiceBusyError",
+                    p::ServiceBusyError {
+                        reason: String::new(),
+                    },
+                ),
                 "QueryFailedError" => detailed_status(
                     tonic::Code::InvalidArgument,
                     message,
@@ -610,11 +617,11 @@ impl p::domain_api_server::DomainApi for Frontend {
     ) -> Result<Response<p::ListFailoverHistoryResponse>, Status> {
         let r = request.into_inner();
         let input = cadence_api::types::ListFailoverHistoryRequest {
-            filters: r.filters.map(|f| {
-                cadence_api::types::ListFailoverHistoryRequestFilters {
+            filters: r
+                .filters
+                .map(|f| cadence_api::types::ListFailoverHistoryRequestFilters {
                     domain_id: f.domain_id,
-                }
-            }),
+                }),
             pagination: r.pagination.map(|p| cadence_api::types::PaginationOptions {
                 page_size: Some(p.page_size),
                 next_page_token: p.next_page_token,
@@ -631,7 +638,11 @@ impl p::domain_api_server::DomainApi for Frontend {
             .call(Method::POST, "/api/v1/domains/failover-history", &input)
             .await?;
         Ok(Response::new(p::ListFailoverHistoryResponse {
-            failover_events: v.failover_events.into_iter().map(cv::failover_event_out).collect(),
+            failover_events: v
+                .failover_events
+                .into_iter()
+                .map(cv::failover_event_out)
+                .collect(),
             next_page_token: v.next_page_token,
         }))
     }
@@ -747,7 +758,9 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         let r = request.into_inner();
         // Rebuild the Thrift signal-with-start shape from the proto wrapper,
         // mirroring the sync adapter below.
-        let inner_proto = r.request.ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        let inner_proto = r
+            .request
+            .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
         let start = cv::start(
             inner_proto
                 .start_request
@@ -910,9 +923,11 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             reason: r.reason,
             identity: r.identity,
         };
-        if input.workflow_execution.as_ref().is_none_or(|e| {
-            e.workflow_id.is_empty() || e.run_id.is_empty()
-        }) {
+        if input
+            .workflow_execution
+            .as_ref()
+            .is_none_or(|e| e.workflow_id.is_empty() || e.run_id.is_empty())
+        {
             return Err(Status::invalid_argument("Execution is not set on request."));
         }
         let v: cadence_api::types::RestartWorkflowExecutionResponse = self
@@ -938,9 +953,11 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             request_id: r.request_id,
             skip_signal_reapply: r.skip_signal_reapply,
         };
-        if input.workflow_execution.as_ref().is_none_or(|e| {
-            e.workflow_id.is_empty() || e.run_id.is_empty()
-        }) {
+        if input
+            .workflow_execution
+            .as_ref()
+            .is_none_or(|e| e.workflow_id.is_empty() || e.run_id.is_empty())
+        {
             return Err(Status::invalid_argument("Execution is not set on request."));
         }
         let v: cadence_api::types::ResetWorkflowExecutionResponse = self
@@ -987,9 +1004,11 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             workflow_execution: r.workflow_execution.map(cv::execution),
             identity: r.identity,
         };
-        if input.workflow_execution.as_ref().is_none_or(|e| {
-            e.workflow_id.is_empty() || e.run_id.is_empty()
-        }) {
+        if input
+            .workflow_execution
+            .as_ref()
+            .is_none_or(|e| e.workflow_id.is_empty() || e.run_id.is_empty())
+        {
             return Err(Status::invalid_argument("Execution is not set on request."));
         }
         let v: cadence_api::types::DiagnoseWorkflowExecutionResponse = self
@@ -997,9 +1016,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             .await?;
         Ok(Response::new(p::DiagnoseWorkflowExecutionResponse {
             domain: v.domain,
-            diagnostic_workflow_execution: v
-                .diagnostic_workflow_execution
-                .map(cv::execution_out),
+            diagnostic_workflow_execution: v.diagnostic_workflow_execution.map(cv::execution_out),
         }))
     }
     async fn request_cancel_workflow_execution(
@@ -1126,9 +1143,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         if r.domain.is_empty() {
             return Err(Status::invalid_argument("Domain is not set."));
         }
-        let input = cadence_api::tasks::GetTaskListsByDomainRequest {
-            domain: r.domain,
-        };
+        let input = cadence_api::tasks::GetTaskListsByDomainRequest { domain: r.domain };
         let v: cadence_api::tasks::GetTaskListsByDomainResponse = self
             .call(Method::POST, "/api/v1/tasklists/by-domain", &input)
             .await?;
@@ -1247,7 +1262,12 @@ impl p::schedule_api_server::ScheduleApi for Frontend {
             state: v.state.map(cv::schedule_state_out),
             info: v.info.map(cv::schedule_info_out),
             memo: v.memo.map(|m| p::Memo {
-                fields: m.fields.unwrap_or_default().into_iter().map(|(k, v)| (k, p::Payload { data: v })).collect(),
+                fields: m
+                    .fields
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(k, v)| (k, p::Payload { data: v }))
+                    .collect(),
             }),
             search_attributes: v.search_attributes.map(|m| p::SearchAttributes {
                 indexed_fields: m
@@ -1274,7 +1294,11 @@ impl p::schedule_api_server::ScheduleApi for Frontend {
             .call(Method::POST, "/api/v1/schedules/list", &input)
             .await?;
         Ok(Response::new(p::ListSchedulesResponse {
-            schedules: v.schedules.into_iter().map(cv::schedule_entry_out).collect(),
+            schedules: v
+                .schedules
+                .into_iter()
+                .map(cv::schedule_entry_out)
+                .collect(),
             next_page_token: v.next_page_token,
         }))
     }
@@ -1341,10 +1365,7 @@ impl p::schedule_api_server::ScheduleApi for Frontend {
             schedule_id: r.schedule_id,
             start_time_nano: cv::nanos(r.start_time),
             end_time_nano: cv::nanos(r.end_time),
-            overlap_policy: cv::enum_in(
-                r.overlap_policy,
-                enums::ScheduleOverlapPolicy::from_i32,
-            )?,
+            overlap_policy: cv::enum_in(r.overlap_policy, enums::ScheduleOverlapPolicy::from_i32)?,
             backfill_id: r.backfill_id,
         };
         let _: serde_json::Value = self
@@ -1722,7 +1743,10 @@ impl p::worker_api_server::WorkerApi for Frontend {
                 Method::POST,
                 "/api/v1/tasks/poll-decision",
                 &input,
-                &[(crate::handlers::ISOLATION_GROUP_HEADER, isolation_group.as_str())],
+                &[(
+                    crate::handlers::ISOLATION_GROUP_HEADER,
+                    isolation_group.as_str(),
+                )],
             )
             .await?;
         Ok(Response::new(
@@ -1748,7 +1772,10 @@ impl p::worker_api_server::WorkerApi for Frontend {
                 Method::POST,
                 "/api/v1/tasks/poll-activity",
                 &input,
-                &[(crate::handlers::ISOLATION_GROUP_HEADER, isolation_group.as_str())],
+                &[(
+                    crate::handlers::ISOLATION_GROUP_HEADER,
+                    isolation_group.as_str(),
+                )],
             )
             .await?;
         Ok(Response::new(v.map(cv::activity_task).unwrap_or_default()))

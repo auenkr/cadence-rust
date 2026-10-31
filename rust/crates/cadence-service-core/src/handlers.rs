@@ -13,8 +13,8 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::middleware::{self, Next};
 use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -42,9 +42,7 @@ use std::pin::Pin;
 /// seven collections before opening the request drain window.
 pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
-    fn on_stop(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
+    fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
 }
 
 /// Recently seen pollers: (task-list, identity, kind) -> poll record.
@@ -117,8 +115,7 @@ pub struct AppState {
     pub pollers: Arc<std::sync::Mutex<PollerMap>>,
     /// Shard-distributor namespaces and ownership. Memory-only like Go's
     /// cached coordination state; namespaces appear on first heartbeat.
-    pub shard_distributor:
-        Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
+    pub shard_distributor: Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
 }
 
 impl Default for AppState {
@@ -208,11 +205,18 @@ impl AppState {
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
-    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
-        let metadata = self.domain_manager.describe(&cadence_api::service_types::DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
-        })?;
-        let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
+    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError>
+    {
+        let metadata =
+            self.domain_manager
+                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                    name: Some(domain.to_string()),
+                    uuid: None,
+                })?;
+        let domain_id = metadata
+            .domain_info
+            .map(|info| info.uuid)
+            .unwrap_or_default();
         if let Some(store) = &self.semaphore_persistence {
             // Preserve the frontend metadata lookup before calling persistence.
             self.execution_store(domain)?;
@@ -226,10 +230,26 @@ impl AppState {
         let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
         let defaults = DomainPolicy::default();
         DomainPolicy {
-            cooldown_nanos: dynamic_config::duration(overlay.property_values("frontend.failoverCoolDown"), Some(domain), defaults.cooldown_nanos),
-            min_retention_days: dynamic_config::integer(overlay.property_values("system.minRetentionDays"), None, i64::from(defaults.min_retention_days)) as i32,
-            max_bad_binaries: dynamic_config::integer(overlay.property_values("frontend.maxBadBinaries"), Some(domain), defaults.max_bad_binaries),
-            history_limit: dynamic_config::integer(overlay.property_values("frontend.failoverHistoryMaxSize"), Some(domain), defaults.history_limit),
+            cooldown_nanos: dynamic_config::duration(
+                overlay.property_values("frontend.failoverCoolDown"),
+                Some(domain),
+                defaults.cooldown_nanos,
+            ),
+            min_retention_days: dynamic_config::integer(
+                overlay.property_values("system.minRetentionDays"),
+                None,
+                i64::from(defaults.min_retention_days),
+            ) as i32,
+            max_bad_binaries: dynamic_config::integer(
+                overlay.property_values("frontend.maxBadBinaries"),
+                Some(domain),
+                defaults.max_bad_binaries,
+            ),
+            history_limit: dynamic_config::integer(
+                overlay.property_values("frontend.failoverHistoryMaxSize"),
+                Some(domain),
+                defaults.history_limit,
+            ),
         }
     }
 
@@ -238,11 +258,15 @@ impl AppState {
         domain: &str,
     ) -> Result<InMemoryExecutionStore, EntityNotExistsError> {
         let metadata = self.domain_manager.describe(&DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
+            name: Some(domain.to_string()),
+            uuid: None,
         })?;
         let id = metadata.domain_info.unwrap_or_default().uuid;
-        let version = if metadata.is_global_domain { metadata.failover_version }
-            else { cadence_persistence::version_history::EMPTY_VERSION };
+        let version = if metadata.is_global_domain {
+            metadata.failover_version
+        } else {
+            cadence_persistence::version_history::EMPTY_VERSION
+        };
         self.executions.set_domain_version(&id, version);
         Ok(self.executions.with_domain_id(&id))
     }
@@ -267,17 +291,27 @@ pub fn domain_replication(
         req.clusters.clone()
     };
     let active_clusters = cadence_persistence::domain_replication::registration_attributes(
-        &state.cluster_metadata, req.is_global_domain, req.active_clusters.as_ref())?;
+        &state.cluster_metadata,
+        req.is_global_domain,
+        req.active_clusters.as_ref(),
+    )?;
     let replication = cadence_api::types::DomainReplicationConfiguration {
-        active_cluster_name, clusters, active_clusters,
+        active_cluster_name,
+        clusters,
+        active_clusters,
     };
     if req.is_global_domain {
-        cadence_persistence::domain_replication::validate_global(&state.cluster_metadata, &replication)?;
+        cadence_persistence::domain_replication::validate_global(
+            &state.cluster_metadata,
+            &replication,
+        )?;
     } else {
         if replication.active_cluster_name != state.current_cluster_name {
             return Err(BadRequestError::new("Invalid local domain active cluster"));
         }
-        if replication.clusters.len() != 1 || replication.clusters[0].cluster_name != replication.active_cluster_name {
+        if replication.clusters.len() != 1
+            || replication.clusters[0].cluster_name != replication.active_cluster_name
+        {
             return Err(BadRequestError::new("Invalid local domain clusters"));
         }
     }
@@ -302,7 +336,11 @@ pub fn poller_rate(
     worker_rate: Option<f64>,
 ) -> f64 {
     let override_rate = {
-        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        let overlay = state
+            .admin
+            .dynamic_config
+            .lock()
+            .expect("admin config lock");
         cadence_persistence::dynamic_config::task_list_float(
             overlay.property_values("matching.overrideTaskListRps"),
             Some(domain),
@@ -316,7 +354,8 @@ pub fn poller_rate(
     } else {
         worker_rate
     };
-    rate.filter(|rate| *rate >= 0.0).unwrap_or(TASK_DISPATCH_RPS)
+    rate.filter(|rate| *rate >= 0.0)
+        .unwrap_or(TASK_DISPATCH_RPS)
 }
 
 /// Go `StartPoll`: records the identity's poll as outstanding. Dropping the
@@ -421,8 +460,14 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn frontend_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let ok = state.frontend_ready.load(std::sync::atomic::Ordering::Acquire);
-    let status = if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let ok = state
+        .frontend_ready
+        .load(std::sync::atomic::Ordering::Acquire);
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
     (status, Json(serde_json::json!({"ok": ok})))
 }
 
@@ -432,7 +477,9 @@ async fn reject_frontend_during_shutdown(
     next: Next,
 ) -> Response {
     if request.uri().path() != "/health"
-        && !state.frontend_accepting.load(std::sync::atomic::Ordering::Acquire)
+        && !state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire)
     {
         return error_response(
             "InternalServiceError",
@@ -458,8 +505,12 @@ async fn register_domain(
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
-    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
-        return bad_request(BadRequestError::new("A valid retention period is not set on request."));
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
+        return bad_request(BadRequestError::new(
+            "A valid retention period is not set on request.",
+        ));
     }
     let info = cadence_api::types::DomainInfo {
         name: req.name.clone(),
@@ -484,15 +535,24 @@ async fn register_domain(
         Err(e) => return bad_request(e),
     };
     let failover_version = if req.is_global_domain {
-        match state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false) {
+        match state.cluster_metadata.next_failover_version(
+            &replication.active_cluster_name,
+            0,
+            false,
+        ) {
             Ok(version) => version,
             Err(e) => return bad_request(BadRequestError::new(e)),
         }
-    } else { cadence_persistence::version_history::EMPTY_VERSION };
-    match state
-        .domain_manager
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    } else {
+        cadence_persistence::version_history::EMPTY_VERSION
+    };
+    match state.domain_manager.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(resp) => {
             state.executions.register_domain(
                 &req.name,
@@ -563,12 +623,15 @@ async fn create_semaphore(
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
-    match semaphores.create_semaphore(
-        &domain_id,
-        &req.semaphore_name,
-        req.capacity,
-        req.bucket_capacity,
-    ).await {
+    match semaphores
+        .create_semaphore(
+            &domain_id,
+            &req.semaphore_name,
+            req.capacity,
+            req.bucket_capacity,
+        )
+        .await
+    {
         Ok(meta) => (
             StatusCode::OK,
             Json(cadence_api::types::CreateSemaphoreResponse {
@@ -598,11 +661,13 @@ async fn create_semaphore(
         ),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(
-            "InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message,
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
         ),
-        Err(cadence_persistence::SemaphoreError::Throttled(message)) => error_response(
-            "ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message,
-        ),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
     }
 }
 
@@ -615,13 +680,17 @@ async fn failover_domain(
     if let Err(e) = validation::validate_failover_domain_request(Some(&req)) {
         return bad_request(e);
     }
-    match state
-        .domain_manager
-        .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
-    {
+    match state.domain_manager.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
+        Err(cadence_persistence::FailoverError::Busy(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
         Err(cadence_persistence::FailoverError::Invalid(message)) => {
             error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
         }
@@ -674,11 +743,19 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domain_manager.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => bad_request(BadRequestError::new(message)),
+        Err(cadence_persistence::FailoverError::Busy(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
+        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
     }
 }
 
@@ -703,7 +780,11 @@ pub async fn require_domain(state: &AppState, domain: &str) -> Option<Response> 
     if domain.is_empty() {
         return Some(bad_request(validation::err_domain_not_set()));
     }
-    state.domain_manager.domain_id(domain).err().map(entity_not_exists)
+    state
+        .domain_manager
+        .domain_id(domain)
+        .err()
+        .map(entity_not_exists)
 }
 
 fn require_task_domain(state: &AppState, bytes: &[u8]) -> Option<Response> {
@@ -1026,7 +1107,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/domains/list", get(list_domains))
         .route("/api/v1/domains/update", put(update_domain))
         .route("/api/v1/domains/failover", post(failover_domain))
-        .route("/api/v1/domains/failover-history", post(list_failover_history))
+        .route(
+            "/api/v1/domains/failover-history",
+            post(list_failover_history),
+        )
         .route("/api/v1/semaphores/create", post(create_semaphore))
         .route("/api/v1/domains/deprecate", post(deprecate_domain))
         .route("/api/v1/workflows/start", post(start_workflow))
@@ -1039,7 +1123,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/workflows/terminate", post(terminate_workflow))
         .route("/api/v1/workflows/restart", post(restart_workflow))
         .route("/api/v1/workflows/reset", post(reset_workflow))
-        .route("/api/v1/workflows/refresh-tasks", post(refresh_workflow_tasks))
+        .route(
+            "/api/v1/workflows/refresh-tasks",
+            post(refresh_workflow_tasks),
+        )
         .route("/api/v1/workflows/diagnose", post(diagnose_workflow))
         .route("/api/v1/workflows/start-async", post(start_workflow_async))
         .route(
@@ -1103,8 +1190,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/schedules/update", post(update_schedule))
         .route("/api/v1/search-attributes", get(get_search_attributes))
         .route("/api/v1/workflows/count", get(count_workflows))
-        .route("/api/v1/admin/cluster/describe", get(crate::admin::describe_cluster))
-        .route("/api/v1/admin/workflows/delete", post(crate::admin::delete_workflow))
+        .route(
+            "/api/v1/admin/cluster/describe",
+            get(crate::admin::describe_cluster),
+        )
+        .route(
+            "/api/v1/admin/workflows/delete",
+            post(crate::admin::delete_workflow),
+        )
         .route(
             "/api/v1/admin/workflows/refresh-tasks",
             post(crate::admin::refresh_workflow_tasks),
@@ -1177,9 +1270,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/admin/shards/describe-distribution",
             get(crate::admin::describe_shard_distribution),
         )
-        .route("/api/v1/admin/shards/close", post(crate::admin::close_shard))
-        .route("/api/v1/admin/tasks/remove", post(crate::admin::remove_task))
-        .route("/api/v1/admin/queues/reset", post(crate::admin::reset_queue))
+        .route(
+            "/api/v1/admin/shards/close",
+            post(crate::admin::close_shard),
+        )
+        .route(
+            "/api/v1/admin/tasks/remove",
+            post(crate::admin::remove_task),
+        )
+        .route(
+            "/api/v1/admin/queues/reset",
+            post(crate::admin::reset_queue),
+        )
         .route(
             "/api/v1/admin/queues/describe",
             post(crate::admin::describe_queue),
@@ -1385,7 +1487,13 @@ async fn poll_activity_task(
         .task_list_metadata
         .as_ref()
         .and_then(|metadata| metadata.max_tasks_per_second);
-    let rate = poller_rate(&state, &req.domain, &task_list, ACTIVITY_TASK_TYPE, worker_rate);
+    let rate = poller_rate(
+        &state,
+        &req.domain,
+        &task_list,
+        ACTIVITY_TASK_TYPE,
+        worker_rate,
+    );
     let _poller = note_poller(
         &state,
         executions.namespace_id().expect("scoped domain"),
@@ -1635,9 +1743,10 @@ async fn diagnose_workflow(
             StatusCode::OK,
             Json(cadence_api::types::DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, resp.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    resp.run_id,
+                )),
             }),
         )
             .into_response(),
@@ -1645,9 +1754,10 @@ async fn diagnose_workflow(
             StatusCode::OK,
             Json(cadence_api::types::DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, e.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    e.run_id,
+                )),
             }),
         )
             .into_response(),
@@ -1838,9 +1948,9 @@ async fn respond_query_task_completed(
             .into_response(),
         Err(cadence_persistence::QueryError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::QueryError::Invalid(e)) => bad_request(e),
-        Err(cadence_persistence::QueryError::Rejected(_)) => bad_request(BadRequestError::new(
-            "Query task was rejected.",
-        )),
+        Err(cadence_persistence::QueryError::Rejected(_)) => {
+            bad_request(BadRequestError::new("Query task was rejected."))
+        }
     }
 }
 
@@ -2020,7 +2130,11 @@ async fn list_schedules(
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
-    let page_size = if req.page_size <= 0 { 10 } else { req.page_size as usize };
+    let page_size = if req.page_size <= 0 {
+        10
+    } else {
+        req.page_size as usize
+    };
     let (schedules, next_page_token) =
         executions.list_schedules(&req.domain, page_size, &req.next_page_token);
     (
@@ -2297,7 +2411,11 @@ pub fn describe_task_list_response(
     // Go `DescribeTaskList` counts pollers per configured isolation group,
     // over outstanding polls and polls seen within the poller window.
     let (groups, window) = if req.include_task_list_status {
-        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        let overlay = state
+            .admin
+            .dynamic_config
+            .lock()
+            .expect("admin config lock");
         (
             cadence_persistence::dynamic_config::string_list(
                 overlay.property_values("system.allIsolationGroups"),
@@ -2342,7 +2460,9 @@ pub fn describe_task_list_response(
                 && !record.isolation_group.is_empty()
                 && (record.outstanding || record.seen_millis > window_start)
             {
-                *poller_counts.entry(record.isolation_group.clone()).or_default() += 1;
+                *poller_counts
+                    .entry(record.isolation_group.clone())
+                    .or_default() += 1;
             }
         }
         let isolation_group_metrics = groups
@@ -2526,9 +2646,7 @@ mod frontend_drain_tests {
             "test"
         }
 
-        fn on_stop(
-            &self,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+        fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(()) })
         }
@@ -2611,7 +2729,12 @@ mod frontend_drain_tests {
 
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -2619,7 +2742,12 @@ mod frontend_drain_tests {
         ready.store(false, std::sync::atomic::Ordering::Release);
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);

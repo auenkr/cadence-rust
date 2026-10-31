@@ -850,7 +850,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 &self.blob_size_policy,
                 request
                     .get("domain")
-                    .or_else(|| request.get("request").and_then(|nested| nested.get("domain")))
+                    .or_else(|| {
+                        request
+                            .get("request")
+                            .and_then(|nested| nested.get("domain"))
+                    })
                     .and_then(Value::as_str),
             ) {
                 if let Some(domains) = &self.domain_lookup {
@@ -901,7 +905,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 &self.isolation_group_state,
                 request
                     .get("domain")
-                    .or_else(|| request.get("request").and_then(|nested| nested.get("domain")))
+                    .or_else(|| {
+                        request
+                            .get("request")
+                            .and_then(|nested| nested.get("domain"))
+                    })
                     .and_then(Value::as_str),
             ) {
                 // Go logs lookup errors and treats the group as healthy.
@@ -933,9 +941,10 @@ impl<B: WorkflowBackend> Handler<B> {
                     &caller.original_headers,
                 )
                 .map_err(|error| {
-                    CadenceError::Internal(cadence_api::errors::InternalServiceError::new(
-                        format!("failed to encode {}Request: {error}", operation.name()),
-                    ))
+                    CadenceError::Internal(cadence_api::errors::InternalServiceError::new(format!(
+                        "failed to encode {}Request: {error}",
+                        operation.name()
+                    )))
                 })?;
                 publisher.publish(message).await?;
                 return Ok(serde_json::json!({}));
@@ -945,7 +954,10 @@ impl<B: WorkflowBackend> Handler<B> {
             operation,
             WorkflowOperation::PollForActivityTask | WorkflowOperation::PollForDecisionTask
         ) {
-            request.get("domain").and_then(Value::as_str).map(str::to_owned)
+            request
+                .get("domain")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
         } else {
             None
         };
@@ -1164,10 +1176,8 @@ impl<B: WorkflowBackend> Handler<B> {
             "identity": identity,
             "workflowIdReusePolicy": 1
         });
-        let start_request = self.validate_request(
-            WorkflowOperation::StartWorkflowExecution,
-            start_request,
-        )?;
+        let start_request =
+            self.validate_request(WorkflowOperation::StartWorkflowExecution, start_request)?;
         if let Some(state) = &self.isolation_group_state {
             if state
                 .is_drained(diagnostic_domain, &caller.isolation_group)
@@ -1194,9 +1204,7 @@ impl<B: WorkflowBackend> Handler<B> {
             .await
         {
             Ok(response) => response.get("runID").cloned().unwrap_or(Value::Null),
-            Err(CadenceError::WorkflowAlreadyStarted(error)) => {
-                Value::String(error.run_id)
-            }
+            Err(CadenceError::WorkflowAlreadyStarted(error)) => Value::String(error.run_id),
             Err(error) => return Err(error),
         };
         Ok(serde_json::json!({
@@ -1947,7 +1955,10 @@ fn workflow_payload_sizes(
         WorkflowOperation::QueryWorkflow => {
             let request: tasks::QueryWorkflowRequest =
                 serde_json::from_value(request.clone()).map_err(invalid)?;
-            vec![request.query.as_ref().map_or(0, |query| query.query_args.len())]
+            vec![request
+                .query
+                .as_ref()
+                .map_or(0, |query| query.query_args.len())]
         }
         WorkflowOperation::SignalWorkflowExecution => {
             let request: cadence_api::types::SignalWorkflowExecutionRequest =
@@ -1975,7 +1986,11 @@ fn workflow_payload_sizes(
 fn memo_payload_size(memo: Option<&cadence_api::types::Memo>) -> usize {
     memo.and_then(|memo| memo.fields.as_ref())
         .map_or(0, |fields| {
-            fields.iter().map(|(key, value)| key.len() + value.len()).sum::<usize>() + 48
+            fields
+                .iter()
+                .map(|(key, value)| key.len() + value.len())
+                .sum::<usize>()
+                + 48
         })
 }
 
@@ -2194,7 +2209,11 @@ mod tests {
     }
 
     impl WorkflowBackend for RestartBackend {
-        fn invoke<'a>(&'a self, operation: WorkflowOperation, request: Value) -> WorkflowFuture<'a> {
+        fn invoke<'a>(
+            &'a self,
+            operation: WorkflowOperation,
+            request: Value,
+        ) -> WorkflowFuture<'a> {
             Box::pin(async move {
                 self.0.lock().unwrap().push((operation, request));
                 match operation {
@@ -2529,8 +2548,14 @@ mod tests {
             )
             .unwrap();
         let lookup = PersistenceWorkflowDomainLookup::new(manager);
-        assert_eq!(lookup.domain_id("cached-domain").unwrap(), "cached-domain-uuid");
-        assert!(matches!(lookup.domain_id("missing"), Err(CadenceError::EntityNotExists(_))));
+        assert_eq!(
+            lookup.domain_id("cached-domain").unwrap(),
+            "cached-domain-uuid"
+        );
+        assert!(matches!(
+            lookup.domain_id("missing"),
+            Err(CadenceError::EntityNotExists(_))
+        ));
     }
 
     #[tokio::test]
@@ -3277,7 +3302,10 @@ mod tests {
         assert_eq!(calls[0].1["domainUUID"], "uuid:cadence-system");
         let start: cadence_api::types::StartWorkflowExecutionRequest =
             serde_json::from_value(calls[0].1["startRequest"].clone()).unwrap();
-        assert_eq!(start.workflow_id, "shop-550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(
+            start.workflow_id,
+            "shop-550e8400-e29b-41d4-a716-446655440000"
+        );
         assert_eq!(
             start.workflow_id_reuse_policy,
             Some(cadence_api::enums::WorkflowIDReusePolicy::AllowDuplicate)
@@ -3657,10 +3685,7 @@ mod tests {
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls.len(), 2);
         for (operation, request) in calls.iter() {
-            assert_eq!(
-                request["domainUUID"],
-                serde_json::json!("uuid:shop")
-            );
+            assert_eq!(request["domainUUID"], serde_json::json!("uuid:shop"));
             assert_eq!(request["isolationGroup"], "blue-workers");
             assert_eq!(request["pollRequest"]["taskList"]["name"], "orders");
             let poller_id = request["pollerID"].as_str().unwrap();
@@ -3697,9 +3722,12 @@ mod tests {
             cancel,
             Some("cluster-b".into()),
         ));
-        tokio::time::timeout(std::time::Duration::from_secs(1), canceller.called.notified())
-            .await
-            .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            canceller.called.notified(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             canceller.calls.lock().unwrap().as_slice(),
             &[(

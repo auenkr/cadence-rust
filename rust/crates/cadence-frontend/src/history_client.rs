@@ -116,7 +116,8 @@ impl HistoryClient {
     pub async fn signal_with_start_workflow_execution(
         &self,
         request: cadence_proto::history::SignalWithStartWorkflowExecutionRequest,
-    ) -> Result<cadence_proto::history::SignalWithStartWorkflowExecutionResponse, tonic::Status> {
+    ) -> Result<cadence_proto::history::SignalWithStartWorkflowExecutionResponse, tonic::Status>
+    {
         self.client
             .clone()
             .signal_with_start_workflow_execution(self.request(request))
@@ -301,12 +302,18 @@ mod tests {
 
     #[tokio::test]
     async fn generated_history_calls_attach_go_caller_metadata_and_timeout() {
-        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:7233")
-            .connect_lazy();
+        let channel =
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:7233").connect_lazy();
         let client = HistoryClient::from_channel(channel, 1024);
         let request = client.request(());
-        assert_eq!(request.metadata().get("rpc-service").unwrap(), "cadence-history");
-        assert_eq!(request.metadata().get("rpc-caller").unwrap(), "cadence-frontend");
+        assert_eq!(
+            request.metadata().get("rpc-service").unwrap(),
+            "cadence-history"
+        );
+        assert_eq!(
+            request.metadata().get("rpc-caller").unwrap(),
+            "cadence-frontend"
+        );
         assert_eq!(request.metadata().get("rpc-encoding").unwrap(), "proto");
         assert_eq!(client.rpc_timeout, DEFAULT_HISTORY_RPC_TIMEOUT);
     }

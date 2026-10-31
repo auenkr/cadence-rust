@@ -84,8 +84,10 @@ pub fn cancel_outstanding_poll_request(
         .and_then(serde_json::Value::as_i64)
         .ok_or_else(|| "TaskListType not set on poll cancellation.".to_owned())?
         as i32;
-    let task_list = request.get("taskList").filter(|value| !value.is_null()).map(|value| {
-        cadence_proto::api::TaskList {
+    let task_list = request
+        .get("taskList")
+        .filter(|value| !value.is_null())
+        .map(|value| cadence_proto::api::TaskList {
             name: value
                 .get("name")
                 .and_then(serde_json::Value::as_str)
@@ -100,8 +102,7 @@ pub fn cancel_outstanding_poll_request(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
-        }
-    });
+        });
     Ok(cadence_proto::matching::CancelOutstandingPollRequest {
         domain_id: domain_id.to_owned(),
         poller_id: poller_id.to_owned(),
