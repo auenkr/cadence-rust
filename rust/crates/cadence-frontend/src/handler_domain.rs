@@ -1,6 +1,22 @@
-//! Domain API handler boundary shared by Workflow and Admin APIs.
+//! Domain API handler behavior ported from Go's `common/domain` package.
 
-use cadence_api::errors::InternalServiceError;
+use std::collections::{BTreeMap, BTreeSet};
+
+use cadence_api::{
+    enums::DomainStatus,
+    errors::{
+        BadRequestError, DomainAlreadyExistsError, EntityNotExistsError, InternalServiceError,
+        ServiceBusyError,
+    },
+    service_types::{
+        DeprecateDomainRequest, DescribeDomainRequest, DescribeDomainResponse, ListDomainsRequest,
+        ListDomainsResponse, UpdateDomainRequest, UpdateDomainResponse,
+    },
+    types::{
+        ClusterReplicationConfiguration, DomainConfiguration, DomainInfo,
+        DomainReplicationConfiguration, RegisterDomainRequest,
+    },
+};
 
 #[derive(Debug, Default)]
 pub struct Handler;
@@ -9,17 +25,220 @@ impl Handler {
     pub fn dispatch(&self, operation: &str) -> Result<(), InternalServiceError> {
         Err(crate::handler_workflow::unimplemented_operation(operation))
     }
+
+    /// Create a domain in the shared persistence state. The Go handler checks
+    /// for an existing name before validating the name, defaults replication
+    /// to the active cluster, then validates attributes before persistence.
+    pub fn register_domain(
+        state: &cadence_service_core::handlers::AppState,
+        request: Option<&RegisterDomainRequest>,
+    ) -> Result<DescribeDomainResponse, DomainHandlerError> {
+        let request = request.ok_or_else(|| {
+            DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
+        })?;
+        if !state.cluster_metadata.is_primary_cluster() && request.is_global_domain {
+            return Err(DomainHandlerError::BadRequest(bad(
+                "Cluster is not primary cluster, cannot do domain registration or domain update.",
+            )));
+        }
+        if state
+            .domains
+            .describe(&DescribeDomainRequest {
+                name: Some(request.name.clone()),
+                uuid: None,
+            })
+            .is_ok()
+        {
+            return Err(DomainHandlerError::AlreadyExists(DomainAlreadyExistsError::new(
+                "Domain already exists.",
+            )));
+        }
+        validate_domain_name(&request.name).map_err(DomainHandlerError::BadRequest)?;
+        if request.name.len() > state.limits.ids.domain_max {
+            return Err(DomainHandlerError::BadRequest(bad(
+                "Domain length exceeds limit.",
+            )));
+        }
+
+        let active_cluster_name = if request.active_cluster_name.is_empty() {
+            state.current_cluster_name.clone()
+        } else {
+            request.active_cluster_name.clone()
+        };
+        let clusters = if request.clusters.is_empty() {
+            vec![ClusterReplicationConfiguration {
+                cluster_name: active_cluster_name.clone(),
+            }]
+        } else {
+            request.clusters.clone()
+        };
+        let replication = DomainReplicationConfiguration {
+            active_cluster_name: active_cluster_name.clone(),
+            clusters,
+            active_clusters: request.active_clusters.clone(),
+        };
+        let enabled_clusters = state
+            .cluster_metadata
+            .enabled_clusters()
+            .map(|(name, _)| (name.clone(), ()))
+            .collect::<BTreeMap<_, _>>();
+        validate_replication_config(
+            &replication,
+            request.is_global_domain,
+            &state.current_cluster_name,
+            &enabled_clusters,
+        )
+        .map_err(DomainHandlerError::BadRequest)?;
+
+        let configuration = DomainConfiguration {
+            workflow_execution_retention_period_in_days: request
+                .workflow_execution_retention_period_in_days,
+            emit_metric: request.emit_metric.unwrap_or(true),
+            history_archival_status: request.history_archival_status,
+            history_archival_uri: request.history_archival_uri.clone(),
+            visibility_archival_status: request.visibility_archival_status,
+            visibility_archival_uri: request.visibility_archival_uri.clone(),
+            ..Default::default()
+        };
+        let policy = state.domain_policy(&request.name);
+        validate_domain_config(&configuration, policy.min_retention_days)
+            .map_err(DomainHandlerError::BadRequest)?;
+
+        let failover_version = if request.is_global_domain {
+            state
+                .cluster_metadata
+                .next_failover_version(&active_cluster_name, 0, false)
+                .map_err(|message| DomainHandlerError::BadRequest(bad(message)))?
+        } else {
+            cadence_persistence::version_history::EMPTY_VERSION
+        };
+        let info = DomainInfo {
+            name: request.name.clone(),
+            status: Some(DomainStatus::Registered),
+            description: request.description.clone(),
+            owner_email: request.owner_email.clone(),
+            data: request.data.clone(),
+            uuid: uuid::Uuid::now_v7().to_string(),
+        };
+        let response = state
+            .domains
+            .create_with_version(
+                info.clone(),
+                configuration,
+                replication,
+                request.is_global_domain,
+                failover_version,
+            )
+            .map_err(DomainHandlerError::AlreadyExists)?;
+        state.executions.register_domain(&request.name, &info.uuid);
+        Ok(response)
+    }
+
+    pub fn describe_domain(
+        state: &cadence_service_core::handlers::AppState,
+        request: Option<&DescribeDomainRequest>,
+    ) -> Result<DescribeDomainResponse, DomainHandlerError> {
+        let request = request.ok_or_else(|| {
+            DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
+        })?;
+        if request.name.is_none() && request.uuid.is_none() {
+            return Err(DomainHandlerError::BadRequest(
+                cadence_api::validation::err_domain_not_set(),
+            ));
+        }
+        state
+            .domains
+            .describe(request)
+            .map_err(DomainHandlerError::NotFound)
+    }
+
+    pub fn list_domains(
+        state: &cadence_service_core::handlers::AppState,
+        request: Option<&ListDomainsRequest>,
+    ) -> Result<ListDomainsResponse, DomainHandlerError> {
+        let request = request.ok_or_else(|| {
+            DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
+        })?;
+        state
+            .domains
+            .list_page(request)
+            .map_err(DomainHandlerError::BadRequest)
+    }
+
+    pub fn update_domain(
+        state: &cadence_service_core::handlers::AppState,
+        request: Option<&UpdateDomainRequest>,
+    ) -> Result<UpdateDomainResponse, DomainHandlerError> {
+        let request = request.ok_or_else(|| {
+            DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
+        })?;
+        if request.name.is_empty() {
+            return Err(DomainHandlerError::BadRequest(
+                cadence_api::validation::err_domain_not_set(),
+            ));
+        }
+        state
+            .domains
+            .update(request, &state.cluster_metadata, &state.domain_policy(&request.name))
+            .map_err(DomainHandlerError::from)
+    }
+
+    pub fn deprecate_domain(
+        state: &cadence_service_core::handlers::AppState,
+        request: Option<&DeprecateDomainRequest>,
+    ) -> Result<(), DomainHandlerError> {
+        let request = request.ok_or_else(|| {
+            DomainHandlerError::BadRequest(cadence_api::validation::err_request_not_set())
+        })?;
+        if request.name.is_empty() {
+            return Err(DomainHandlerError::BadRequest(
+                cadence_api::validation::err_domain_not_set(),
+            ));
+        }
+        let current = state
+            .domains
+            .describe(&DescribeDomainRequest {
+                name: Some(request.name.clone()),
+                uuid: None,
+            })
+            .map_err(DomainHandlerError::NotFound)?;
+        if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+            return Err(DomainHandlerError::BadRequest(bad(
+                "Cluster is not primary cluster, cannot do domain registration or domain update.",
+            )));
+        }
+        state
+            .domains
+            .deprecate(request)
+            .map_err(DomainHandlerError::NotFound)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DomainHandlerError {
+    BadRequest(BadRequestError),
+    AlreadyExists(DomainAlreadyExistsError),
+    NotFound(EntityNotExistsError),
+    Busy(ServiceBusyError),
+}
+
+impl From<cadence_persistence::FailoverError> for DomainHandlerError {
+    fn from(error: cadence_persistence::FailoverError) -> Self {
+        match error {
+            cadence_persistence::FailoverError::NotFound(error) => Self::NotFound(error),
+            cadence_persistence::FailoverError::Invalid(message) => Self::BadRequest(bad(message)),
+            cadence_persistence::FailoverError::Busy(message) => {
+                Self::Busy(ServiceBusyError::new(message))
+            }
+        }
+    }
 }
 
 // Domain validation and archival transitions from Go's common/domain package.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use cadence_api::{
     enums::ArchivalStatus,
-    errors::BadRequestError,
-    service_types::UpdateDomainRequest,
-    types::{ActiveClusters, DomainConfiguration, DomainReplicationConfiguration},
+    types::ActiveClusters,
 };
 
 fn bad(message: impl Into<String>) -> BadRequestError {
@@ -338,6 +557,73 @@ mod tests {
             uri: uri.into(),
             status,
         }
+    }
+
+    #[test]
+    fn domain_crud_methods_use_shared_store_and_preserve_go_error_order() {
+        let state = cadence_service_core::handlers::AppState::default();
+        let request = RegisterDomainRequest {
+            name: "payments-prod".into(),
+            workflow_execution_retention_period_in_days: 1,
+            ..Default::default()
+        };
+        let created = Handler::register_domain(&state, Some(&request)).unwrap();
+        assert_eq!(
+            created.domain_info.as_ref().unwrap().status,
+            Some(DomainStatus::Registered)
+        );
+        assert_eq!(
+            Handler::describe_domain(
+                &state,
+                Some(&DescribeDomainRequest {
+                    name: Some(request.name.clone()),
+                    uuid: None,
+                }),
+            )
+            .unwrap(),
+            created
+        );
+        assert_eq!(
+            Handler::register_domain(&state, Some(&request))
+                .unwrap_err(),
+            DomainHandlerError::AlreadyExists(DomainAlreadyExistsError::new(
+                "Domain already exists."
+            ))
+        );
+        assert_eq!(
+            Handler::list_domains(&state, Some(&ListDomainsRequest::default()))
+                .unwrap()
+                .domains
+                .len(),
+            1
+        );
+        Handler::deprecate_domain(
+            &state,
+            Some(&DeprecateDomainRequest {
+                name: request.name,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn global_domain_registration_requires_primary_cluster_before_name_validation() {
+        let mut state = cadence_service_core::handlers::AppState::default();
+        state.current_cluster_name = "cluster1".into();
+        state.cluster_metadata.current_cluster_name = "cluster1".into();
+        let request = RegisterDomainRequest {
+            is_global_domain: true,
+            name: "bad_name".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            Handler::register_domain(&state, Some(&request))
+                .unwrap_err(),
+            DomainHandlerError::BadRequest(bad(
+                "Cluster is not primary cluster, cannot do domain registration or domain update.",
+            ))
+        );
     }
 
     #[test]
