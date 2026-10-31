@@ -218,3 +218,29 @@ migration forward.
   domain durable persistence and replication queue; full multi-branch raw
   history; schedule workflow RPC/lifecycle wiring; and complete method parity.
   Do not claim Frontend parity on this checkpoint.
+
+## Admin YARPC search-attribute and cluster methods
+
+- Added Thrift converters for normal dynamic-config and Admin search-attribute
+  messages in `cadence-thrift/src/convert.rs`, then connected YARPC
+  `AddSearchAttribute`, `GetDynamicConfig`, `UpdateDynamicConfig`,
+  `RestoreDynamicConfig`, and `ListDynamicConfig` to the shared AppState.
+  Search-attribute registration enforces the dynamic-config token gate, rejects
+  reserved and type-conflicting keys without a partial update, and updates the
+  shared `frontend.validSearchAttributes` overlay and registry.
+- Added response converters and YARPC dispatch for `DescribeCluster`. It uses
+  the existing single-host snapshot builder. Live resolver membership and
+  configured persistence backend discovery are still unimplemented.
+- Code commits pushed: `81bc89c81` (config/search converters and handlers) and
+  `846b1b257` (cluster description dispatch). The earlier run
+  [41177742133](https://github.com/auenkr/cadence-rust/actions/runs/41177742133)
+  at `428dacef9` was cancelled when follow-up changes were dispatched.
+  Run [41177839469](https://github.com/auenkr/cadence-rust/actions/runs/41177839469)
+  at `81bc89c81` was in progress when superseded; run
+  [41177900129](https://github.com/auenkr/cadence-rust/actions/runs/41177900129)
+  targets exact current code `846b1b25767a7496b66c535819bae982df9f963b` and
+  was pending at last check. No local Cargo command was run.
+- Method parity remains incomplete. Operational dynamic config, live membership,
+  Admin DLQ/replication/queue paths, raw-history version-branch paging, Domain
+  replication transmission/durable metadata, scheduler workflow interactions,
+  lifecycle/retry/metrics and mixed Go/Rust validation remain open.
