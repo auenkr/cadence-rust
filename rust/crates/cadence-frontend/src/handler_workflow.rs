@@ -250,6 +250,7 @@ pub struct Handler<B> {
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
     visibility_filter_policy: Option<Arc<dyn VisibilityFilterPolicy>>,
     workflow_query_policy: Option<Arc<dyn WorkflowQueryPolicy>>,
+    isolation_group_state: Option<Arc<dyn IsolationGroupState>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
@@ -265,6 +266,14 @@ pub struct CallerMetadata {
     pub actor: String,
     pub client_impl: String,
     pub feature_version: String,
+    /// Isolation group carried by Cadence's request context.
+    pub isolation_group: String,
+}
+
+/// Go checks task-list isolation health for selected workflow operations.
+/// The implementation owns both the dynamic enable flag and the state lookup.
+pub trait IsolationGroupState: Send + Sync {
+    fn is_drained(&self, domain: &str, isolation_group: &str) -> Result<bool, String>;
 }
 
 pub trait RequestAuthorization: Send + Sync {
@@ -335,6 +344,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_query_validator: None,
             visibility_filter_policy: None,
             workflow_query_policy: None,
+            isolation_group_state: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -359,6 +369,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_query_validator: None,
             visibility_filter_policy: None,
             workflow_query_policy: None,
+            isolation_group_state: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -388,6 +399,7 @@ impl<B: WorkflowBackend> Handler<B> {
             visibility_query_validator: None,
             visibility_filter_policy: None,
             workflow_query_policy: None,
+            isolation_group_state: None,
             domain_lookup: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -468,6 +480,11 @@ impl<B: WorkflowBackend> Handler<B> {
 
     pub fn with_workflow_query_policy(mut self, policy: Arc<dyn WorkflowQueryPolicy>) -> Self {
         self.workflow_query_policy = Some(policy);
+        self
+    }
+
+    pub fn with_isolation_group_state(mut self, state: Arc<dyn IsolationGroupState>) -> Self {
+        self.isolation_group_state = Some(state);
         self
     }
 
@@ -631,6 +648,31 @@ impl<B: WorkflowBackend> Handler<B> {
             }
         }
         let request = self.validate_request(operation, request)?;
+        if matches!(
+            operation,
+            WorkflowOperation::StartWorkflowExecution
+                | WorkflowOperation::StartWorkflowExecutionAsync
+                | WorkflowOperation::SignalWorkflowExecution
+                | WorkflowOperation::SignalWithStartWorkflowExecution
+                | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
+                | WorkflowOperation::RestartWorkflowExecution
+        ) {
+            if let (Some(state), Some(domain)) = (
+                &self.isolation_group_state,
+                request.get("domain").and_then(Value::as_str),
+            ) {
+                // Go logs lookup errors and treats the group as healthy.
+                if state
+                    .is_drained(domain, &caller.isolation_group)
+                    .unwrap_or(false)
+                {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(format!(
+                        "Domain {domain} is drained from isolation group {}.",
+                        caller.isolation_group
+                    ))));
+                }
+            }
+        }
         let request = self.prepare_backend_request(operation, request)?;
         if operation == WorkflowOperation::RestartWorkflowExecution {
             return self.restart_workflow_execution(request, target_cluster).await;
@@ -1534,6 +1576,14 @@ mod tests {
 
     struct StaticDomainLookup;
 
+    struct DrainedIsolationGroup;
+
+    impl IsolationGroupState for DrainedIsolationGroup {
+        fn is_drained(&self, _: &str, _: &str) -> Result<bool, String> {
+            Ok(true)
+        }
+    }
+
     impl WorkflowDomainLookup for StaticDomainLookup {
         fn domain_id(&self, domain: &str) -> Result<String, CadenceError> {
             Ok(format!("uuid:{domain}"))
@@ -1903,6 +1953,7 @@ mod tests {
                     actor: "sdk-worker".to_owned(),
                     client_impl: "go-sdk".to_owned(),
                     feature_version: "1.2".to_owned(),
+                    isolation_group: String::new(),
                 },
             )
             .await
@@ -2383,6 +2434,37 @@ mod tests {
         assert_eq!(start["cronSchedule"], "0 * * * *");
         assert_eq!(start["jitterStartSeconds"], 7);
         assert!(uuid::Uuid::parse_str(start["requestId"].as_str().unwrap()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn restart_rejects_a_drained_isolation_group_before_history_lookup() {
+        let backend = RestartBackend::default();
+        let handler = Handler::new(backend)
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_isolation_group_state(Arc::new(DrainedIsolationGroup));
+        let error = handler
+            .dispatch_with_metadata(
+                "RestartWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-1",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    }
+                }),
+                &CallerMetadata {
+                    isolation_group: "dca1".into(),
+                    ..CallerMetadata::default()
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Domain shop is drained from isolation group dca1."
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

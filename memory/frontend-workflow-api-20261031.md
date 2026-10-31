@@ -562,3 +562,39 @@ these fixes; no green CI evidence covers the current changes.
   drain and configured persistence bootstrap. They were not merged into this
   workflow slice to avoid overlapping the worker-owned lifecycle/persistence
   work; re-audit its final public interfaces before integration.
+
+## Restart workflow and isolation continuation — 2026-10-31
+
+- Reconfirmed `origin/frontend-core` is an ancestor of
+  `t3/frontend-workflow-api`; `git rebase origin/frontend-core` completed as
+  an up-to-date no-op after temporarily stashing the restart edit.
+- Committed the initial `RestartWorkflowExecution` history/start mapping at
+  `8928642d7e8bccd2de245348413be9546c4f08bc` and pushed it. CI run
+  [41184196087](https://github.com/auenkr/cadence-rust/actions/runs/41184196087)
+  tested that exact head and concluded `success` (Clippy, formatting, tests).
+  This run does not cover the following uncommitted isolation-group change.
+- Added an `IsolationGroupState` injection point and Go's drained-group
+  `BadRequestError` for Start, async Start, Signal, SignalWithStart, async
+  SignalWithStart, and Restart operations, with a Go-mirroring Restart test.
+  State lookup errors fail open, as Go does. The implementation still needs
+  the runtime config/state provider and request-context isolation group value.
+  Go's poll methods use `waitUntilIsolationGroupHealthy`; that timeout/wait
+  behavior is not implemented here.
+- Current remote `origin/frontend-core2` has advanced with lifecycle work and
+  overlapping edits to the handler source; it was inspected but not merged.
+  Its owner remains responsible for persistence/client/lifecycle wiring.
+
+### Remaining parity and interfaces
+
+The workflow handler still routes most operation bodies through the generic
+`WorkflowBackend::invoke` seam. That seam is useful for operation-specific
+request mapping tests but is not a production History/Matching/visibility
+adapter. Missing behavior includes History pagination/raw/archive retrieval,
+archived visibility, Diagnose, poll response shaping and isolation waits,
+respond-task reconstruction, async ThriftRW encoding/publishing with caller
+headers, and complete response/error normalization. Runtime wiring must provide
+an outbound backend (or typed clients for History, Matching and visibility),
+a domain cache/config and isolation-state provider, an async ThriftRW producer,
+archival reader/config, and task-token/poll-ID services. No mixed Go/Rust SDK
+compatibility or recovery gate has been run for this branch. Do not report
+Frontend parity until these are implemented and validated.
