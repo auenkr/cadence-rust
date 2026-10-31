@@ -252,6 +252,7 @@ jobs:
           files=(
             crates/cadence-service-core/src/admin.rs
             crates/cadence-service-core/src/yarpc.rs
+            crates/cadence-thrift/src/convert.rs
             crates/cadence-frontend/src/lib.rs
             crates/cadence-frontend/src/main.rs
             crates/cadence-frontend/src/config.rs
