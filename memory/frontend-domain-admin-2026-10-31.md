@@ -464,3 +464,28 @@ migration forward.
   execution store. CI run [41179991180](https://github.com/auenkr/cadence-rust/actions/runs/41179991180)
   targets the previous head and must be inspected for cancellation/result;
   dispatch a fresh exact-head package run after this commit.
+
+## Rebase and Domain route parity continuation
+
+- Rebased the implementation branch onto the then-current
+  `origin/frontend-core2` at `3bc2dcca8`; conflict resolution kept the newer
+  validator request fields and core2 History/Matching persistence clients.
+  Force-pushed the rebased history to `origin/frontend-domain-admin` at
+  `91a75125220f6ace1f214e5289b177932c0ce588`.
+- Package run [41180174300](https://github.com/auenkr/cadence-rust/actions/runs/41180174300)
+  targets that exact head. It is still in progress; its Clippy/Formatting/Test
+  conclusions must be recorded after completion. No Cargo command was run
+  locally.
+- Source audit confirmed the persistence update transition already enforces
+  configured domain update cooldowns, global failover version changes, and
+  graceful failover state validation. Found and fixed a transport inconsistency:
+  JSON `DeprecateDomain` now resolves the domain and rejects global-domain
+  mutation from a non-primary cluster, matching the Go handler and the existing
+  YARPC path. This correction needs a fresh exact-head package CI run.
+- Remaining parity is substantial and remains open: the domain store is still
+  in-memory rather than backed by configured persistence; domain changes do
+  not publish/consume the Go replication queue; Admin methods still use
+  single-host placeholder behavior for DLQ, reset/remove queue, membership, and
+  cross-cluster History client calls; raw history remains single branch; and
+  schedule persistence does not invoke scheduler workflows. This checkpoint
+  does not claim service parity.
