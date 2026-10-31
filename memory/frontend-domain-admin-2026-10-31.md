@@ -1059,3 +1059,25 @@ migration forward.
   and failed Clippy on a now-redundant `..Default::default()` in the domain
   replication task fixture. Removed that struct update; rerun the focused
   package on the new head.
+
+## Rebased durable domain DLQ slice — 2026-10-31
+
+- Rebased the Frontend implementation onto `origin/frontend-core2` at
+  `b48503c82adec46b89cdd4091d051d134df33beb`. The rebase completed; where
+  early Frontend commits duplicated newer core2 handlers, clients, converters,
+  and lifecycle code, retained core2's more complete versions and kept the
+  later RPC wiring changes. Existing domain, Admin and schedule handlers remain
+  in the merged tree.
+- Added domain DLQ persistence operations for MySQL, PostgreSQL and Cassandra,
+  with Admin JSON count/read/purge handlers using the configured persistence
+  backend. Rebased implementation commit is
+  `051f216181e2216288fb622d39f9e8c8e639ca69`.
+- `git diff --check` passes. No local Cargo command was run. Fresh exact-head
+  Frontend CI is required after push; previous CI results do not validate this
+  rebased head.
+- Active blockers remain: Go-compatible DLQ ack-level and retry/move semantics,
+  task execution for DLQ merge, History Admin client-backed operations, complete
+  raw-history branch pagination, schedule workflow orchestration, live
+  membership, domain update cooldown and failover audit, Admin backing stores,
+  and mixed Go/Rust failure/restart/recovery acceptance. This slice does not
+  claim Frontend parity.
