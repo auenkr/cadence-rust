@@ -482,6 +482,67 @@ impl ToThrift for DescribeQueueResponse {
     }
 }
 
+impl FromThrift for VersionHistoryItem {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            event_id: s.opt_i64(10)?.unwrap_or_default(),
+            version: s.opt_i64(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for VersionHistoryItem {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, Some(self.event_id));
+        f.oi64(20, Some(self.version));
+        f.finish()
+    }
+}
+
+impl FromThrift for VersionHistory {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            branch_token: s.bytes_or_empty(10)?,
+            items: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for VersionHistory {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.branch_token);
+        f.olist(20, &self.items);
+        f.finish()
+    }
+}
+
+impl FromThrift for GetWorkflowExecutionRawHistoryV2Request {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+            start_event_id: s.opt_i64(30)?,
+            start_event_version: s.opt_i64(40)?,
+            end_event_id: s.opt_i64(50)?,
+            end_event_version: s.opt_i64(60)?,
+            maximum_page_size: s.opt_i32(70)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(80)?,
+        })
+    }
+}
+
+impl ToThrift for GetWorkflowExecutionRawHistoryV2Response {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.next_page_token);
+        f.olist(20, &self.history_batches);
+        f.ostruct(30, self.version_history.as_ref());
+        f.finish()
+    }
+}
+
 impl FromThrift for RetryPolicy {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {

@@ -669,6 +669,95 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     }))
 }
 
+fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
+    use cadence_api::admin::{
+        GetWorkflowExecutionRawHistoryV2Request as Request,
+        GetWorkflowExecutionRawHistoryV2Response as Response,
+    };
+    use cadence_persistence::raw_history::{self, RawHistoryToken};
+
+    let mut req: Request = decode_args(body).map_err(AppError::bad_request)?;
+    raw_history::validate_request(&req).map_err(|error| AppError::bad_request(error.message))?;
+    let execution = req.execution.clone().unwrap_or_default();
+    let executions = require_domain_thrift(state, &req.domain)?;
+    let mut persistence_token = Vec::new();
+    let mut continuation = None;
+    let histories = if req.next_page_token.is_empty() {
+        let view = executions
+            .mutable_state_view(&req.domain, &execution)
+            .map_err(|error| AppError::entity_not_exists(error.message))?;
+        view.version_histories
+            .ok_or_else(|| AppError::bad_request("Invalid version histories.".to_string()))?
+    } else {
+        let token = RawHistoryToken::from_bytes(&req.next_page_token)
+            .map_err(|error| AppError::bad_request(error.message))?;
+        persistence_token = token.persistence_token.clone().unwrap_or_default();
+        continuation = Some(token.clone());
+        token.version_histories.unwrap_or_default()
+    };
+    if histories.histories.is_empty() {
+        return Err(AppError::bad_request(
+            "Invalid version histories.".to_string(),
+        ));
+    }
+    let target_history = raw_history::select_history(&mut req, &histories)
+        .map_err(|error| AppError::bad_request(error.message))?
+        .clone();
+    if let Some(token) = continuation {
+        token
+            .validate(&req)
+            .map_err(|error| AppError::bad_request(error.message))?;
+    }
+    if req.start_event_id.unwrap_or(0) + 1 == req.end_event_id.unwrap_or(0) {
+        return Ok(wrap_success(&Response {
+            next_page_token: Vec::new(),
+            history_batches: Vec::new(),
+            version_history: Some(target_history),
+        }));
+    }
+    match executions.raw_history(
+        &req.domain,
+        &execution,
+        req.start_event_id,
+        req.end_event_id,
+        req.maximum_page_size as usize,
+        &persistence_token,
+    ) {
+        Ok((events, next)) => {
+            let next_page_token = if next.is_empty() {
+                Vec::new()
+            } else {
+                RawHistoryToken {
+                    domain_name: req.domain.clone(),
+                    workflow_id: execution.workflow_id.clone(),
+                    run_id: execution.run_id.clone(),
+                    start_event_id: req.start_event_id.unwrap_or(0),
+                    start_event_version: req.start_event_version.unwrap_or(0),
+                    end_event_id: req.end_event_id.unwrap_or(0),
+                    end_event_version: req.end_event_version.unwrap_or(0),
+                    persistence_token: Some(next),
+                    version_histories: Some(histories),
+                }
+                .to_bytes()
+                .unwrap_or_default()
+            };
+            Ok(wrap_success(&Response {
+                next_page_token,
+                history_batches: vec![cadence_api::types::DataBlob {
+                    encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
+                    data: cadence_thrift::history_blob::encode(events),
+                }],
+                version_history: Some(target_history),
+            }))
+        }
+        Err(_) => Ok(wrap_success(&Response {
+            next_page_token: Vec::new(),
+            history_batches: Vec::new(),
+            version_history: Some(target_history),
+        })),
+    }
+}
+
 async fn handle_signal(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::types::SignalWorkflowExecutionRequest;
     use cadence_api::validation;
@@ -1830,6 +1919,7 @@ pub async fn dispatch(
         "DescribeCluster" => handle_describe_cluster(),
         "ResetQueue" => handle_reset_queue(state, body),
         "DescribeQueue" => handle_describe_queue(state, body),
+        "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
         "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
