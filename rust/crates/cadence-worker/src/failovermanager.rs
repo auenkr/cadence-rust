@@ -37,10 +37,7 @@ pub fn registrations() -> [crate::runtime::WorkflowRegistration; 4] {
         WorkflowRegistration {
             workflow_type: REBALANCE_V2_WORKFLOW_TYPE,
             task_list: TASK_LIST,
-            activities: &[
-                FAILOVER_V2_ACTIVITY,
-                GET_DOMAINS_FOR_REBALANCE_V2_ACTIVITY,
-            ],
+            activities: &[FAILOVER_V2_ACTIVITY, GET_DOMAINS_FOR_REBALANCE_V2_ACTIVITY],
         },
     ]
 }
@@ -57,12 +54,21 @@ mod tests {
             registrations[0].activities,
             &[super::FAILOVER_ACTIVITY, super::GET_DOMAINS_ACTIVITY]
         );
-        assert_eq!(registrations[1].workflow_type, super::REBALANCE_WORKFLOW_TYPE);
+        assert_eq!(
+            registrations[1].workflow_type,
+            super::REBALANCE_WORKFLOW_TYPE
+        );
         assert_eq!(
             registrations[1].activities,
-            &[super::GET_REBALANCE_DOMAINS_ACTIVITY, super::FAILOVER_ACTIVITY]
+            &[
+                super::GET_REBALANCE_DOMAINS_ACTIVITY,
+                super::FAILOVER_ACTIVITY
+            ]
         );
-        assert_eq!(registrations[2].workflow_type, super::FAILOVER_V2_WORKFLOW_TYPE);
+        assert_eq!(
+            registrations[2].workflow_type,
+            super::FAILOVER_V2_WORKFLOW_TYPE
+        );
         assert_eq!(
             registrations[2].activities,
             &[
@@ -70,7 +76,10 @@ mod tests {
                 super::GET_DOMAINS_FOR_FAILOVER_V2_ACTIVITY
             ]
         );
-        assert_eq!(registrations[3].workflow_type, super::REBALANCE_V2_WORKFLOW_TYPE);
+        assert_eq!(
+            registrations[3].workflow_type,
+            super::REBALANCE_V2_WORKFLOW_TYPE
+        );
         assert_eq!(
             registrations[3].activities,
             &[
@@ -82,9 +91,21 @@ mod tests {
 
     #[test]
     fn preserves_legacy_casing_and_v2_names() {
-        assert_eq!(super::LEGACY_WORKFLOW_TYPE, "cadence-sys-failoverManager-workflow");
-        assert_eq!(super::FAILOVER_V2_WORKFLOW_TYPE, "cadence-sys-failover-v2-workflow");
-        assert_eq!(super::REBALANCE_WORKFLOW_TYPE, "cadence-sys-rebalance-workflow");
-        assert_eq!(super::REBALANCE_V2_WORKFLOW_TYPE, "cadence-sys-rebalance-v2-workflow");
+        assert_eq!(
+            super::LEGACY_WORKFLOW_TYPE,
+            "cadence-sys-failoverManager-workflow"
+        );
+        assert_eq!(
+            super::FAILOVER_V2_WORKFLOW_TYPE,
+            "cadence-sys-failover-v2-workflow"
+        );
+        assert_eq!(
+            super::REBALANCE_WORKFLOW_TYPE,
+            "cadence-sys-rebalance-workflow"
+        );
+        assert_eq!(
+            super::REBALANCE_V2_WORKFLOW_TYPE,
+            "cadence-sys-rebalance-v2-workflow"
+        );
     }
 }

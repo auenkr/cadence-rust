@@ -213,7 +213,11 @@ pub fn failover_timeout_seconds(raw: &str) -> i32 {
 mod tests {
     use super::*;
 
-    fn pref(domain: &str, target: &str, updates: &[(&str, &str, &str)]) -> DomainFailoverPreferences {
+    fn pref(
+        domain: &str,
+        target: &str,
+        updates: &[(&str, &str, &str)],
+    ) -> DomainFailoverPreferences {
         DomainFailoverPreferences {
             domain_name: domain.into(),
             target_cluster: target.into(),
@@ -240,13 +244,18 @@ mod tests {
     #[test]
     fn preserves_go_domain_data_keys() {
         assert_eq!(DOMAIN_DATA_KEY_FOR_MANAGED_FAILOVER, "IsManagedByCadence");
-        assert_eq!(DOMAIN_DATA_KEY_FOR_FAILOVER_TIMEOUT_SECONDS, "FailoverTimeoutInSeconds");
+        assert_eq!(
+            DOMAIN_DATA_KEY_FOR_FAILOVER_TIMEOUT_SECONDS,
+            "FailoverTimeoutInSeconds"
+        );
     }
 
     #[test]
     fn eligibility_matches_go_table() {
         assert!(!is_eligible_for_failover(None));
-        assert!(!is_eligible_for_failover(Some(&DomainFailoverView::default())));
+        assert!(!is_eligible_for_failover(Some(
+            &DomainFailoverView::default()
+        )));
         assert!(is_eligible_for_failover(Some(&view("true", true, false))));
         assert!(is_eligible_for_failover(Some(&view(" TRUE ", true, false))));
         assert!(!is_eligible_for_failover(Some(&view("false", true, false))));
@@ -264,7 +273,10 @@ mod tests {
             clusters_touched_by_preferences(&pref(
                 "d",
                 "",
-                &[("cluster", "cluster0", "cluster1"), ("region", "us-west", "cluster2")]
+                &[
+                    ("cluster", "cluster0", "cluster1"),
+                    ("region", "us-west", "cluster2")
+                ]
             )),
             vec!["cluster1", "cluster2"]
         );
@@ -272,11 +284,16 @@ mod tests {
             clusters_touched_by_preferences(&pref(
                 "d",
                 "cluster1",
-                &[("cluster", "cluster0", "cluster1"), ("cluster", "cluster2", "cluster2")]
+                &[
+                    ("cluster", "cluster0", "cluster1"),
+                    ("cluster", "cluster2", "cluster2")
+                ]
             )),
             vec!["cluster1", "cluster2"]
         );
-        assert!(clusters_touched_by_preferences(&pref("d", "", &[("cluster", "c0", "")])).is_empty());
+        assert!(
+            clusters_touched_by_preferences(&pref("d", "", &[("cluster", "c0", "")])).is_empty()
+        );
     }
 
     #[test]
@@ -346,15 +363,25 @@ mod tests {
     fn non_positive_batch_size_is_one_batch_and_empty_input_runs_nothing() {
         let prefs = vec![pref("a", "", &[]), pref("b", "", &[])];
         let mut calls = 0;
-        process_in_batches::<_, (), ()>(&prefs, 0, || {}, |_| {
-            calls += 1;
-            (Vec::new(), Vec::new())
-        }, || panic!("no wait for a single batch"));
+        process_in_batches::<_, (), ()>(
+            &prefs,
+            0,
+            || {},
+            |_| {
+                calls += 1;
+                (Vec::new(), Vec::new())
+            },
+            || panic!("no wait for a single batch"),
+        );
         assert_eq!(calls, 1);
 
-        process_in_batches::<DomainFailoverPreferences, (), ()>(&[], 2, || panic!("no batch"), |_| {
-            panic!("no batch")
-        }, || {});
+        process_in_batches::<DomainFailoverPreferences, (), ()>(
+            &[],
+            2,
+            || panic!("no batch"),
+            |_| panic!("no batch"),
+            || {},
+        );
     }
 
     #[test]
