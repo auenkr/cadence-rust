@@ -550,6 +550,18 @@ impl<B: WorkflowBackend> Handler<B> {
         operation: WorkflowOperation,
         request: Value,
     ) -> Result<Value, CadenceError> {
+        if matches!(
+            operation,
+            WorkflowOperation::RecordActivityTaskHeartbeat
+                | WorkflowOperation::RespondActivityTaskCompleted
+                | WorkflowOperation::RespondActivityTaskFailed
+                | WorkflowOperation::RespondActivityTaskCanceled
+                | WorkflowOperation::RespondDecisionTaskCompleted
+                | WorkflowOperation::RespondDecisionTaskFailed
+                | WorkflowOperation::RespondQueryTaskCompleted
+        ) {
+            return prepare_task_token_request(operation, request);
+        }
         let Some(domains) = &self.domain_lookup else {
             // The bootstrap and test backends can still exercise validation
             // before the production domain-cache adapter is installed.
@@ -561,6 +573,15 @@ impl<B: WorkflowBackend> Handler<B> {
             .unwrap_or_default()
             .to_owned();
         let domain_id = || domains.domain_id(&domain);
+        if matches!(
+            operation,
+            WorkflowOperation::RecordActivityTaskHeartbeatByID
+                | WorkflowOperation::RespondActivityTaskCompletedByID
+                | WorkflowOperation::RespondActivityTaskFailedByID
+                | WorkflowOperation::RespondActivityTaskCanceledByID
+        ) {
+            return prepare_by_id_task_request(operation, request, domain_id()?);
+        }
         let prepared = match operation {
             WorkflowOperation::DescribeTaskList => serde_json::json!({
                 "domainUUID": domain_id()?,
@@ -576,6 +597,30 @@ impl<B: WorkflowBackend> Handler<B> {
             WorkflowOperation::ResetStickyTaskList => serde_json::json!({
                 "domainUUID": domain_id()?,
                 "execution": request.get("execution").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::SignalWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "signalRequest": request,
+            }),
+            WorkflowOperation::TerminateWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "terminateRequest": request,
+            }),
+            WorkflowOperation::ResetWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "resetRequest": request,
+            }),
+            WorkflowOperation::RequestCancelWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "cancelRequest": request,
+            }),
+            WorkflowOperation::QueryWorkflow => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "request": request,
+            }),
+            WorkflowOperation::DescribeWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "request": request,
             }),
             WorkflowOperation::CountWorkflowExecutions => serde_json::json!({
                 "domainUUID": domain_id()?,
@@ -721,6 +766,8 @@ impl<B: WorkflowBackend> Handler<B> {
         ) {
             validate_domain(&value)?;
             let field = if operation == WorkflowOperation::QueryWorkflow {
+                "execution"
+            } else if operation == WorkflowOperation::DescribeWorkflowExecution {
                 "execution"
             } else {
                 "workflowExecution"
@@ -899,6 +946,121 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         Ok(value)
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EncodedTaskToken {
+    #[serde(default, deserialize_with = "cadence_api::b64::deserialize_bytes")]
+    task_token: Vec<u8>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EncodedTaskTokenRequest<'a> {
+    #[serde(serialize_with = "cadence_api::b64::serialize_bytes")]
+    task_token: &'a Vec<u8>,
+}
+
+fn encoded_task_token(request: &Value) -> Result<Vec<u8>, CadenceError> {
+    serde_json::from_value::<EncodedTaskToken>(request.clone())
+        .map(|token| token.task_token)
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
+}
+
+fn decode_workflow_task_token(request: &Value) -> Result<cadence_api::tasktoken::TaskToken, CadenceError> {
+    let encoded = encoded_task_token(request)?;
+    cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&encoded)
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
+}
+
+fn decode_query_task_token(request: &Value) -> Result<cadence_api::tasktoken::QueryTaskToken, CadenceError> {
+    let encoded = encoded_task_token(request)?;
+    cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(&encoded)
+        .map_err(|error| CadenceError::BadRequest(BadRequestError::new(error.to_string())))
+}
+
+fn prepare_task_token_request(
+    operation: WorkflowOperation,
+    request: Value,
+) -> Result<Value, CadenceError> {
+    if operation == WorkflowOperation::RespondQueryTaskCompleted {
+        let token = decode_query_task_token(&request)?;
+        if token.domain_id.is_empty() || token.task_list.is_empty() || token.task_id.is_empty() {
+            return Err(CadenceError::BadRequest(BadRequestError::new(
+                "Invalid TaskToken.",
+            )));
+        }
+        return Ok(serde_json::json!({
+            "domainUUID": token.domain_id,
+            "taskList": {"name": token.task_list},
+            "taskID": token.task_id,
+            "completedRequest": request,
+        }));
+    }
+    let token = decode_workflow_task_token(&request)?;
+    if token.domain_id.is_empty() {
+        return Err(cadence_api::validation::err_domain_not_set().into());
+    }
+    let mut internal = serde_json::json!({"domainUUID": token.domain_id});
+    let field = match operation {
+        WorkflowOperation::RecordActivityTaskHeartbeat
+        | WorkflowOperation::RecordActivityTaskHeartbeatByID => "heartbeatRequest",
+        WorkflowOperation::RespondActivityTaskCompleted
+        | WorkflowOperation::RespondActivityTaskCompletedByID
+        | WorkflowOperation::RespondDecisionTaskCompleted => "completeRequest",
+        WorkflowOperation::RespondActivityTaskFailed
+        | WorkflowOperation::RespondActivityTaskFailedByID
+        | WorkflowOperation::RespondDecisionTaskFailed => "failedRequest",
+        WorkflowOperation::RespondActivityTaskCanceled
+        | WorkflowOperation::RespondActivityTaskCanceledByID => "cancelRequest",
+        _ => unreachable!("matched task-token operation"),
+    };
+    internal[field] = request;
+    Ok(internal)
+}
+
+fn prepare_by_id_task_request(
+    operation: WorkflowOperation,
+    request: Value,
+    domain_id: String,
+) -> Result<Value, CadenceError> {
+    let token = cadence_api::tasktoken::TaskToken {
+        domain_id,
+        workflow_id: request_string(&request, "workflowId"),
+        run_id: request_string(&request, "runId"),
+        activity_id: request_string(&request, "activityId"),
+        ..Default::default()
+    };
+    let token_bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token)
+        .map_err(|error| CadenceError::Unknown(error.to_string()))?;
+    let mut token_request = serde_json::to_value(EncodedTaskTokenRequest {
+        task_token: &token_bytes,
+    })
+    .map_err(|error| CadenceError::Unknown(error.to_string()))?;
+    let fields: &[&str] = match operation {
+        WorkflowOperation::RecordActivityTaskHeartbeatByID => &["details", "identity"],
+        WorkflowOperation::RespondActivityTaskCompletedByID => &["result", "identity"],
+        WorkflowOperation::RespondActivityTaskFailedByID => {
+            &["reason", "details", "identity", "failureOptions", "heartbeatDetails"]
+        }
+        WorkflowOperation::RespondActivityTaskCanceledByID => &["details", "identity"],
+        _ => unreachable!("matched activity-by-ID operation"),
+    };
+    for field in fields {
+        if let Some(value) = request.get(field) {
+            token_request[field] = value.clone();
+        }
+    }
+    prepare_task_token_request(operation, token_request)
+}
+
+fn request_string(request: &Value, field: &str) -> String {
+    request
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn parse_request<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, CadenceError> {
@@ -1633,6 +1795,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn describe_workflow_uses_public_execution_field_and_history_envelope() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
+        handler
+            .dispatch(
+                "DescribeWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf", "runId": "run"}
+                }),
+            )
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "request": {
+                    "domain": "shop",
+                    "execution": {"workflowId": "wf", "runId": "run"}
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn count_visibility_builds_go_persistence_request_with_validated_query() {
         let backend = CapturingBackend::default();
         let handler = Handler::new(backend)
@@ -1654,6 +1844,81 @@ mod tests {
                 "domainUUID": "uuid:shop",
                 "domain": "shop",
                 "query": "validated:WorkflowType='order'"
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_heartbeat_decodes_token_and_builds_go_history_envelope() {
+        let token = cadence_api::tasktoken::TaskToken {
+            domain_id: "domain-uuid".into(),
+            workflow_id: "wf".into(),
+            run_id: "run".into(),
+            schedule_id: 7,
+            activity_id: "activity".into(),
+            ..Default::default()
+        };
+        let api_request = tasks::RecordActivityTaskHeartbeatRequest {
+            task_token: cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token).unwrap(),
+            details: vec![1, 2, 3],
+            identity: "worker".into(),
+        };
+        let expected_request = serde_json::to_value(&api_request).unwrap();
+        let handler = Handler::new(CapturingBackend::default());
+        handler
+            .dispatch("RecordActivityTaskHeartbeat", expected_request.clone())
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::RecordActivityTaskHeartbeat);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "domain-uuid",
+                "heartbeatRequest": expected_request
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn activity_heartbeat_by_id_builds_go_task_token_and_history_envelope() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        let request = serde_json::json!({
+            "domain": "shop",
+            "workflowId": "wf",
+            "runId": "run",
+            "activityId": "activity",
+            "details": "AQID",
+            "identity": "worker"
+        });
+        handler
+            .dispatch("RecordActivityTaskHeartbeatByID", request)
+            .await
+            .unwrap();
+        let token = cadence_api::tasktoken::TaskToken {
+            domain_id: "uuid:shop".into(),
+            workflow_id: "wf".into(),
+            run_id: "run".into(),
+            schedule_id: 0,
+            activity_id: "activity".into(),
+            ..Default::default()
+        };
+        let synthesized_request = serde_json::to_value(EncodedTaskTokenRequest {
+            task_token: &cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token).unwrap(),
+        })
+        .unwrap();
+        let mut heartbeat_request = synthesized_request;
+        heartbeat_request["details"] = serde_json::json!("AQID");
+        heartbeat_request["identity"] = serde_json::json!("worker");
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "heartbeatRequest": heartbeat_request
             })
         );
     }

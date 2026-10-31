@@ -416,3 +416,12 @@ these fixes; no green CI evidence covers the current changes.
   the time this change was prepared. It predates the new request mapping and
   is not validation evidence for this source. Dispatch formatting and package
   CI on the next pushed head and record its final conclusion.
+- Added History envelopes for workflow signal, terminate, reset, cancel,
+  query, and describe calls, plus task-token decoding/envelopes for heartbeat,
+  activity/decision completion/failure/cancel, and query-task completion.
+  Added a Go-mirroring heartbeat token envelope test and corrected Describe's
+  public execution field to `execution`. These follow-up edits are not yet
+  committed or covered by CI at this save. Activity-by-ID token construction,
+  detailed task completion behavior (limits/version normalization/decision
+  response reconstruction), polling retry/isolation logic and workflow start
+  request construction remain open.
