@@ -26,3 +26,10 @@ Remaining: 9 lanes (mysql-probes, thrift, configstore, shard-distributor, two-no
 - package-unset workspace rust-ci (clippy then tests) 41159060501 success on 0d691c97.
 Binary SHA256 values are in each run's artifacts (ci-evidence/g-<id>); postgres: cd367d0b...d8a1.
 Remaining before closing Matching: parity audit/requirement-to-evidence matrix review, then History.
+
+## FINAL: Matching acceptance on immutable source c508c66d (tag validation/matching-final-c508c66d)
+Changes after 0d691c97: all overlay-lock-held-across-domain-lookup sites hoisted (matching_engine_context_native.rs dynamic_*/override_rate, matching_runtime_native.rs integer/duration/boolean providers and standby); `describe_task_list_out` now carries `new_tasks_per_second` and `empty`. The other `admin lock` sites resolve names via `InMemoryDomainStore` (no overlay access), so are not reentrant.
+- Clean-target workspace rust-ci (clean_target=true, clippy then tests): https://github.com/auenkr/cadence-rust/actions/runs/41159754679 success
+- postgres 41160539811, mysql-probes 41161229127, thrift 41161879720, configstore 41162498593, shard-distributor 41163161342, adaptive 41163847728
+- two-node MySQL 41160530877, Cassandra 41160533019, active offer 41160535040, production TLS 41160537246 — all success.
+Matching service accepted: 10/10 mixed lanes + clean workspace CI on one source. Next service: History.
