@@ -7,6 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 // ---------------------------------------------------------------------------
 // Cluster
 // ---------------------------------------------------------------------------
@@ -706,6 +710,22 @@ pub struct GetDomainReplicationMessagesRequest {
         skip_serializing_if = "String::is_empty"
     )]
     pub cluster_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicationMessages {
+    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Vec::is_empty")]
+    pub replication_tasks: Vec<crate::types::ReplicationTask>,
+    #[serde(rename = "lastRetrievedMessageId", default)]
+    pub last_retrieved_message_id: i64,
+    #[serde(rename = "hasMore", default, skip_serializing_if = "is_false")]
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetDomainReplicationMessagesResponse {
+    #[serde(rename = "messages", default, skip_serializing_if = "Option::is_none")]
+    pub messages: Option<ReplicationMessages>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

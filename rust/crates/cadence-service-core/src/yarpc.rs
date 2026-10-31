@@ -1699,6 +1699,14 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
         .map_err(schedule_error)
 }
 
+async fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::GetDomainReplicationMessagesRequest =
+        decode_args(body).map_err(|error| AppError::bad_request(format!("invalid args: {error}")))?;
+    crate::admin::domain_replication_messages_response(state, request)
+        .map(|response| wrap_success(&response))
+        .map_err(AppError::internal)
+}
+
 fn validate_schedule_cron_thrift(expr: &str) -> Result<(), AppError> {
     let now = cadence_common::cron::naive_from_nanos(
         std::time::SystemTime::now()
@@ -2382,6 +2390,9 @@ pub async fn dispatch(
         "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body).await,
         "DiagnoseWorkflowExecution" => handle_diagnose(state, body).await,
         "CreateSemaphore" => handle_create_semaphore(state, body).await,
+        "GetDomainReplicationMessages" => {
+            handle_get_domain_replication_messages(state, body).await
+        }
         "CreateSchedule" => handle_create_schedule(state, body).await,
         "DescribeSchedule" => handle_describe_schedule(state, body).await,
         "ListSchedules" => handle_list_schedules(state, body).await,

@@ -705,15 +705,70 @@ pub async fn get_dlq_replication_messages(
 /// Domain replication requires the domain replication queue, which does not
 /// exist on a single host. Mirrors Go's exact error.
 pub async fn get_domain_replication_messages(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetDomainReplicationMessagesRequest>,
 ) -> Response {
-    let _ = req;
-    error_response(
-        "InternalServiceError",
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "domain replication queue not enabled for cluster".to_string(),
-    )
+    match domain_replication_messages_response(&state, req) {
+        Ok(response) => ok_json(response),
+        Err(error) if error == "domain replication queue not enabled for cluster" => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
+        Err(error) => error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+pub fn domain_replication_messages_response(
+    state: &AppState,
+    req: cadence_api::admin::GetDomainReplicationMessagesRequest,
+) -> Result<cadence_api::admin::GetDomainReplicationMessagesResponse, String> {
+    use cadence_thrift::{
+        protocol::Reader,
+        value::{read_struct, FromThrift},
+    };
+
+    let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
+        return Err("domain replication queue not enabled for cluster".into());
+    };
+    let mut cursor = req.last_retrieved_message_id.unwrap_or(-1);
+    if cursor == -1 {
+        if let Ok(ack_levels) = persistence.get_domain_replication_ack_levels() {
+            cursor = ack_levels.get(&req.cluster_name).copied().unwrap_or(cursor);
+        }
+    }
+    let rows = match persistence.read_domain_replication_messages(cursor, 100) {
+        Ok(rows) => rows,
+        Err(error) => return Err(error),
+    };
+    let mut tasks = Vec::with_capacity(rows.len());
+    for row in rows {
+        let decoded = read_struct(&mut Reader::new(&row.payload))
+            .map_err(|error| error.to_string())
+            .and_then(|value| {
+                cadence_api::types::ReplicationTask::from_thrift(&value)
+                    .map_err(|error| error.to_string())
+            });
+        match decoded {
+            Ok(task) => {
+                cursor = row.id;
+                tasks.push(task);
+            }
+            Err(error) => return Err(format!("failed to decode domain replication task: {error}")),
+        }
+    }
+    if let Some(last_processed) = req.last_processed_message_id {
+        // Go deliberately treats ack update failures as warning-only.
+        let _ = persistence
+            .update_domain_replication_ack_level(req.cluster_name, last_processed);
+    }
+    Ok(cadence_api::admin::GetDomainReplicationMessagesResponse {
+        messages: Some(cadence_api::admin::ReplicationMessages {
+            replication_tasks: tasks,
+            last_retrieved_message_id: cursor,
+            has_more: false,
+        }),
+    })
 }
 
 /// Single-host DLQ counts: no dead letters exist.
