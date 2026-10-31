@@ -841,3 +841,20 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   ExecutionManager implementations on Go schemas; real Frontend quota owner
   construction; mixed Go/Rust workflow failure/restart/recovery gates. Frontend
   core2 is still incomplete and must not be marked done.
+
+## SQL domain transaction groundwork — continuation
+
+- Added SQL domain-row create/update/delete operations to the existing MySQL
+  and PostgreSQL Go-schema readers. Create writes the serialized Go domain row
+  and advances `domain_metadata.notification_version` in one transaction;
+  update uses the notification version as a compare-and-set and rolls back the
+  row update on conflict; delete preserves Go's behavior of not incrementing
+  the notification version. PostgreSQL create reads the expected version before
+  beginning the transaction, matching Go's concurrent-create behavior.
+- This is groundwork only: the modified stores still have their
+  Matching-oriented type/API, no `FrontendDomainManager` adapter uses these
+  writes, Cassandra CRUD/metadata writes are absent, and domain selection is
+  not wired from Frontend's `defaultStore`. No tests or local Cargo commands
+  have run for these changes yet. Dispatch persistence CI after committing this
+  checkpoint, then continue with transaction interoperability and manager
+  wiring; visibility, history, and execution managers remain open.

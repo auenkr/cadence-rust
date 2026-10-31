@@ -45,6 +45,16 @@ impl PostgresDomainMetadataStore {
         &self,
         metadata: &MatchingDomainMetadata,
     ) -> Result<i64, MatchingDomainMetadataError> {
+        // Go reads metadata before starting the domain transaction. Keeping
+        // this read outside the transaction preserves its concurrent-create
+        // conflict behavior: the later compare-and-set may reject a stale
+        // metadata version and roll back the inserted domain row.
+        let notification_version = self.get_metadata_version()?;
+        let mut domain = metadata.clone();
+        domain.notification_version = notification_version;
+        let blob = crate::matching_domain_metadata::encode_go_sql_domain_metadata(&domain)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
         let started = Instant::now();
         let mut client = self
             .pool
@@ -52,17 +62,6 @@ impl PostgresDomainMetadataStore {
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
         set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
-        let row = transaction
-            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
-            .map_err(domain_error)?;
-        let notification_version: i64 = row.try_get(0).map_err(domain_error)?;
-        let mut domain = metadata.clone();
-        // Go serializes the current metadata version into the new domain row,
-        // then increments the singleton version before committing.
-        domain.notification_version = notification_version;
-        let blob = crate::matching_domain_metadata::encode_go_sql_domain_metadata(&domain)?;
-        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
-            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
         transaction
             .execute(
                 "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -75,6 +74,9 @@ impl PostgresDomainMetadataStore {
                     &"thriftrw",
                 ],
             )
+            .map_err(domain_error)?;
+        transaction
+            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
             .map_err(domain_error)?;
         let changed = transaction
             .execute(
