@@ -781,6 +781,22 @@ pub struct ReadDLQMessagesRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadDLQMessagesResponse {
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub dlq_type: Option<crate::enums::DLQType>,
+    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Vec::is_empty")]
+    pub replication_tasks: Vec<crate::types::ReplicationTask>,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PurgeDLQMessagesRequest {
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub dlq_type: Option<crate::enums::DLQType>,

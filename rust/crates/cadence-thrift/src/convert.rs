@@ -15,6 +15,7 @@ use cadence_api::admin::{
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
     MaintainCorruptWorkflowResponse, MembershipInfo, MergeDLQMessagesRequest,
     MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo,
+    ReadDLQMessagesRequest, ReadDLQMessagesResponse, PurgeDLQMessagesRequest, PurgeDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
     ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
@@ -430,6 +431,109 @@ impl FromThrift for AddSearchAttributeRequest {
 impl ToThrift for AddSearchAttributeResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
+    }
+}
+
+impl FromThrift for ReadDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_i32(10)?.map(|value| match value {
+                0 => DLQType::Replication,
+                1 => DLQType::Domain,
+                _ => DLQType::Invalid,
+            }),
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+            maximum_page_size: s.opt_i32(50)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(60)?,
+        })
+    }
+}
+
+impl ToThrift for ReadDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, self.dlq_type.map(|value| match value {
+            DLQType::Replication => 0,
+            DLQType::Domain => 1,
+            DLQType::Invalid => -1,
+            _ => -1,
+        }));
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.oi32(50, Some(self.maximum_page_size));
+        f.sbytes(60, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl ToThrift for ReadDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, self.dlq_type.map(|value| match value {
+            DLQType::Replication => 0,
+            DLQType::Domain => 1,
+            DLQType::Invalid => -1,
+            _ => -1,
+        }));
+        f.olist(20, &self.replication_tasks);
+        f.sbytes(30, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ReadDLQMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_enum(10)?,
+            replication_tasks: s.opt_list(20)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(30)?,
+        })
+    }
+}
+
+impl FromThrift for PurgeDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_i32(10)?.map(|value| match value {
+                0 => DLQType::Replication,
+                1 => DLQType::Domain,
+                _ => DLQType::Invalid,
+            }),
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+        })
+    }
+}
+
+impl ToThrift for PurgeDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, self.dlq_type.map(|value| match value {
+            DLQType::Replication => 0,
+            DLQType::Domain => 1,
+            DLQType::Invalid => -1,
+            _ => -1,
+        }));
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.finish()
+    }
+}
+
+impl ToThrift for PurgeDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for PurgeDLQMessagesResponse {
+    fn from_thrift(_: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -6629,6 +6733,51 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 #[cfg(test)]
 mod timeout_wire_tests {
     use super::*;
+
+    #[test]
+    fn dlq_read_and_purge_use_replicator_idl_field_ids() {
+        let request = ReadDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 4,
+            source_cluster: "cluster-a".into(),
+            inclusive_end_message_id: Some(123),
+            maximum_page_size: 8,
+            next_page_token: vec![5, 6],
+        };
+        let encoded = request.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(4));
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
+        assert_eq!(encoded.opt_i32(50).unwrap(), Some(8));
+        assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![5, 6]);
+        assert_eq!(ReadDLQMessagesRequest::from_thrift(&encoded).unwrap(), request);
+
+        let response = ReadDLQMessagesResponse {
+            dlq_type: Some(DLQType::Domain),
+            replication_tasks: vec![ReplicationTask {
+                task_type: Some(ReplicationTaskType::Domain),
+                source_task_id: Some(11),
+                ..Default::default()
+            }],
+            next_page_token: vec![8, 9],
+        };
+        let encoded = response.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.bytes_or_empty(30).unwrap(), vec![8, 9]);
+        assert_eq!(ReadDLQMessagesResponse::from_thrift(&encoded).unwrap(), response);
+
+        let purge = PurgeDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 4,
+            source_cluster: "cluster-a".into(),
+            inclusive_end_message_id: Some(123),
+        };
+        let encoded = purge.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(4));
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
+        assert_eq!(PurgeDLQMessagesRequest::from_thrift(&encoded).unwrap(), purge);
+    }
 
     #[test]
     fn merge_dlq_uses_replicator_idl_field_ids_and_enum_values() {

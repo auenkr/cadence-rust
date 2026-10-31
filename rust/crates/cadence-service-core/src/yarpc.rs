@@ -715,24 +715,84 @@ fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> Ha
         .map_err(AppError::internal)
 }
 
-fn handle_count_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
-    let _request: cadence_api::admin::CountDLQMessagesRequest =
+fn require_domain_dlq_type(dlq_type: Option<cadence_api::enums::DLQType>) -> Result<(), AppError> {
+    match dlq_type {
+        None => Err(AppError::bad_request("Queue type is not set.".to_string())),
+        Some(cadence_api::enums::DLQType::Invalid) => Err(AppError::bad_request(
+            "The DLQ type is not supported.".to_string(),
+        )),
+        Some(cadence_api::enums::DLQType::Domain) => Ok(()),
+        Some(_) => Err(AppError::internal(
+            "History Admin client is not configured.".to_string(),
+        )),
+    }
+}
+
+fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::ReadDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
+    require_domain_dlq_type(request.dlq_type)?;
     let persistence = state
         .domain_metadata_persistence
         .as_ref()
-        .ok_or_else(|| {
-            AppError::internal(
-                "domain replication DLQ is unavailable for this persistence backend".to_string(),
-            )
-        })?;
-    let domain = persistence
-        .domain_replication_dlq_size()
+        .ok_or_else(|| AppError::internal("domain replication DLQ is unavailable for this persistence backend".to_string()))?;
+    let ack_levels = persistence
+        .get_domain_replication_dlq_ack_levels()
         .map_err(AppError::internal)?;
-    Ok(wrap_success(&cadence_api::admin::CountDLQMessagesResponse {
-        history: Vec::new(),
-        domain,
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    let first_message_id = crate::admin::decode_domain_dlq_page_token(&request.next_page_token)
+        .map_err(AppError::internal)?
+        .unwrap_or(ack_level);
+    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let page_size = crate::admin::read_dlq_page_size(request.maximum_page_size);
+    let rows = persistence
+        .read_domain_replication_dlq(first_message_id, end_message_id, page_size)
+        .map_err(AppError::internal)?;
+    let mut tasks = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let thrift = cadence_thrift::value::read_struct(
+            &mut cadence_thrift::protocol::Reader::new(&row.payload),
+        )
+        .map_err(|error| AppError::internal(error.to_string()))?;
+        let mut task = <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(&thrift)
+            .map_err(|error| AppError::internal(error.to_string()))?;
+        task.source_task_id = Some(row.id);
+        tasks.push(task);
+    }
+    let next_page_token = if rows.len() >= page_size {
+        crate::admin::encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
+    } else {
+        Vec::new()
+    };
+    Ok(wrap_success(&cadence_api::admin::ReadDLQMessagesResponse {
+        dlq_type: None,
+        replication_tasks: tasks,
+        next_page_token,
     }))
+}
+
+fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::PurgeDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    require_domain_dlq_type(request.dlq_type)?;
+    let persistence = state
+        .domain_metadata_persistence
+        .as_ref()
+        .ok_or_else(|| AppError::internal("domain replication DLQ is unavailable for this persistence backend".to_string()))?;
+    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let ack_levels = persistence
+        .get_domain_replication_dlq_ack_levels()
+        .map_err(AppError::internal)?;
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    persistence
+        .delete_domain_replication_dlq_range(ack_level, end_message_id)
+        .map_err(AppError::internal)?;
+    // Go logs and ignores an ack metadata update failure after the delete.
+    let _ = persistence.update_domain_replication_dlq_ack_level(
+        "domainReplication".to_string(),
+        end_message_id,
+    );
+    Ok(wrap_success(&cadence_api::admin::PurgeDLQMessagesResponse {}))
 }
 
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
@@ -2140,7 +2200,8 @@ pub async fn dispatch(
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
         "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
-        "CountDLQMessages" => handle_count_dlq_messages(state, body),
+        "ReadDLQMessages" => handle_read_dlq_messages(state, body),
+        "PurgeDLQMessages" => handle_purge_dlq_messages(state, body),
         "ResetQueue" => handle_reset_queue(state, body).await,
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body),

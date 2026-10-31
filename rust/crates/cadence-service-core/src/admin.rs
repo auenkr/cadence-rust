@@ -950,7 +950,7 @@ pub async fn purge_dlq_messages(
     }
 }
 
-fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
+pub(crate) fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
     if token.is_empty() {
         return Ok(None);
     }
@@ -962,11 +962,11 @@ fn decode_domain_dlq_page_token(token: &[u8]) -> Result<Option<i64>, String> {
     )))
 }
 
-fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
+pub(crate) fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
     message_id.to_le_bytes().to_vec()
 }
 
-fn read_dlq_page_size(requested: i32) -> usize {
+pub(crate) fn read_dlq_page_size(requested: i32) -> usize {
     if requested > 0 {
         requested as usize
     } else {

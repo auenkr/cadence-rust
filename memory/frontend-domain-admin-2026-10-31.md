@@ -1289,8 +1289,16 @@ migration forward.
   `935564139b5e1f6c67b760558a35f2ce80e31475` is pushed. Its exact-head package
   run [41217250761](https://github.com/auenkr/cadence-rust/actions/runs/41217250761)
   was pending at last observation.
-- Added YARPC `CountDLQMessages` dispatch for the durable domain DLQ count.
-  Go also calls History for history-DLQ counts; no corresponding History client
-  RPC exists in the current Rust client, so this route still returns an empty
-  history count list. Cross-service count parity remains open. This source
-  change requires a fresh exact-head package run; no Cargo ran locally.
+- A temporary `CountDLQMessages` YARPC dispatch was rejected by exact-head
+  package run [41217349144](https://github.com/auenkr/cadence-rust/actions/runs/41217349144)
+  at `2e88deeb98ff5703b186dd9783c00f577967bc58`: Clippy correctly found the
+  missing Thrift converters. The IDL audit then showed CountDLQMessages is
+  gRPC-only (not a method in `admin.thrift`), so the extra Thrift route and its
+  converters were removed to preserve Go's transport surface.
+- Added the actual Thrift `ReadDLQMessages` and `PurgeDLQMessages` handlers for
+  domain DLQ persistence, plus `ReadDLQMessagesResponse` and replicator IDL
+  converters for read/purge models. Domain reads retain the little-endian page
+  token, Go's 1000-entry default, task source IDs and omitted response type;
+  purge deletes through the persisted ack level and treats ack update failure
+  as warning-only. The History replication DLQ path still needs a History
+  Admin client. Fresh exact-head package CI is pending; no Cargo ran locally.
