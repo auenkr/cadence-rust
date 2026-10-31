@@ -440,3 +440,12 @@ migration forward.
   the current in-memory domain store, and durability is still open. `git diff
   --check` passes; CI formatting/build/tests are pending and Cargo was not run
   locally.
+- CI run [41179614145](https://github.com/auenkr/cadence-rust/actions/runs/41179614145)
+  failed at exact head `d39036c477249d4eeeb9762424b3d30071e0d995` in
+  `cadence-service-core` before Frontend checks. It exposed a duplicate
+  `RefreshWorkflowTasks` dispatcher/helper (admin and workflow signatures
+  collided in the shared dispatcher) and raw-history code assigning a
+  `DataBlob` where bytes were expected. Removed the conflicting second
+  dispatcher registration/helper, keeping the common Thrift request handler,
+  and now select the encoded batch bytes explicitly. These fixes and the new
+  isolation/async config routes are pending exact-head CI.
