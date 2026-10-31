@@ -809,10 +809,8 @@ async fn run_with_lifecycle(
                 };
                 let peer = format!("http://{host}:{port}");
                 let tls = crate::grpc_tls::client_tls(&history.rpc.tls)?;
-                state.history_admin_channel = Some(crate::grpc_tls::endpoint_channel(
-                    &peer,
-                    tls.as_ref(),
-                )?);
+                state.history_admin_channel =
+                    Some(crate::grpc_tls::endpoint_channel(&peer, tls.as_ref())?);
             }
             // Keep the registration alive through listener and Matching
             // shutdown. Drop runs on every normal/error return from this

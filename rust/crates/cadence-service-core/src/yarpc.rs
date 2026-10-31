@@ -738,10 +738,12 @@ async fn handle_remove_task(state: &AppState, body: &Struct) -> HandlerResult {
     let task_type = req
         .task_type
         .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".into()))?;
-    let visibility_time = req.visibility_timestamp.map(|nanos| prost_types::Timestamp {
-        seconds: nanos.div_euclid(1_000_000_000),
-        nanos: nanos.rem_euclid(1_000_000_000) as i32,
-    });
+    let visibility_time = req
+        .visibility_timestamp
+        .map(|nanos| prost_types::Timestamp {
+            seconds: nanos.div_euclid(1_000_000_000),
+            nanos: nanos.rem_euclid(1_000_000_000) as i32,
+        });
     let channel = state
         .history_admin_channel
         .clone()
@@ -767,12 +769,12 @@ async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     crate::admin::check_shard_id(state, req.shard_id)
         .map_err(|error| AppError::bad_request(error.message))?;
     if req.task_type.is_none() {
-        return Err(AppError::bad_request(
-            "Queue type is not set.".to_string(),
-        ));
+        return Err(AppError::bad_request("Queue type is not set.".to_string()));
     }
     if req.cluster_name.is_empty() {
-        return Err(AppError::bad_request("Cluster name is not set.".to_string()));
+        return Err(AppError::bad_request(
+            "Cluster name is not set.".to_string(),
+        ));
     }
     let channel = state
         .history_admin_channel
@@ -798,12 +800,12 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
     crate::admin::check_shard_id(state, req.shard_id)
         .map_err(|error| AppError::bad_request(error.message))?;
     if req.task_type.is_none() {
-        return Err(AppError::bad_request(
-            "Queue type is not set.".to_string(),
-        ));
+        return Err(AppError::bad_request("Queue type is not set.".to_string()));
     }
     if req.cluster_name.is_empty() {
-        return Err(AppError::bad_request("Cluster name is not set.".to_string()));
+        return Err(AppError::bad_request(
+            "Cluster name is not set.".to_string(),
+        ));
     }
     let channel = state
         .history_admin_channel
@@ -816,14 +818,13 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
     };
     let mut rpc = tonic::Request::new(request);
     set_history_admin_metadata(&mut rpc);
-    let processing_queue_states = cadence_proto::history::history_api_client::HistoryApiClient::new(
-        channel,
-    )
-    .describe_queue(rpc)
-    .await
-    .map_err(|error| AppError::internal(error.message().to_string()))?
-    .into_inner()
-    .processing_queue_states;
+    let processing_queue_states =
+        cadence_proto::history::history_api_client::HistoryApiClient::new(channel)
+            .describe_queue(rpc)
+            .await
+            .map_err(|error| AppError::internal(error.message().to_string()))?
+            .into_inner()
+            .processing_queue_states;
     Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
         processing_queue_states,
     }))
@@ -870,7 +871,9 @@ fn handle_get_domain_isolation_groups(state: &AppState, body: &Struct) -> Handle
     let req: cadence_api::admin::GetDomainIsolationGroupsRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request.".into()));
+        return Err(AppError::bad_request(
+            "Domain is not set on request.".into(),
+        ));
     }
     let groups = state
         .domains
@@ -887,7 +890,9 @@ fn handle_update_domain_isolation_groups(state: &AppState, body: &Struct) -> Han
     let req: cadence_api::admin::UpdateDomainIsolationGroupsRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request.".into()));
+        return Err(AppError::bad_request(
+            "Domain is not set on request.".into(),
+        ));
     }
     state
         .domains
@@ -898,11 +903,16 @@ fn handle_update_domain_isolation_groups(state: &AppState, body: &Struct) -> Han
     ))
 }
 
-fn handle_get_domain_async_workflow_configuration(state: &AppState, body: &Struct) -> HandlerResult {
+fn handle_get_domain_async_workflow_configuration(
+    state: &AppState,
+    body: &Struct,
+) -> HandlerResult {
     let req: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request.".into()));
+        return Err(AppError::bad_request(
+            "Domain is not set on request.".into(),
+        ));
     }
     let configuration = state
         .domains
@@ -920,7 +930,9 @@ fn handle_update_domain_async_workflow_configuration(
     let req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     if req.domain.is_empty() {
-        return Err(AppError::bad_request("Domain is not set on request.".into()));
+        return Err(AppError::bad_request(
+            "Domain is not set on request.".into(),
+        ));
     }
     state
         .domains
@@ -942,7 +954,9 @@ fn handle_reapply_events(state: &AppState, body: &Struct) -> HandlerResult {
         .as_ref()
         .ok_or_else(|| AppError::bad_request("Execution is not set on request.".into()))?;
     if execution.workflow_id.is_empty() {
-        return Err(AppError::bad_request("WorkflowID is not set on request.".into()));
+        return Err(AppError::bad_request(
+            "WorkflowID is not set on request.".into(),
+        ));
     }
     let blob = req
         .events
@@ -1005,13 +1019,13 @@ fn handle_maintain_corrupt_workflow(state: &AppState, body: &Struct) -> HandlerR
         .ok_or_else(|| AppError::bad_request("Execution is missing".into()))?;
     let executions = require_domain_thrift(state, &req.domain)?;
     match executions.maintain_corrupt_workflow(&req.domain, execution) {
-        Ok((history_deleted, executions_deleted, visibility_deleted)) => {
-            Ok(wrap_success(&cadence_api::admin::MaintainCorruptWorkflowResponse {
+        Ok((history_deleted, executions_deleted, visibility_deleted)) => Ok(wrap_success(
+            &cadence_api::admin::MaintainCorruptWorkflowResponse {
                 history_deleted,
                 executions_deleted,
                 visibility_deleted,
-            }))
-        }
+            },
+        )),
         Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
             Err(AppError::entity_not_exists(error.message))
         }
@@ -1034,8 +1048,7 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     // The request/token retain the caller's spelling, while persistence uses
     // Go's parsed canonical UUID key for compact, braced and URN spellings.
     let mut persistence_execution = execution.clone();
-    persistence_execution.run_id =
-        raw_history::canonical_run_id(&persistence_execution.run_id);
+    persistence_execution.run_id = raw_history::canonical_run_id(&persistence_execution.run_id);
     let executions = require_domain_thrift(state, &req.domain)?;
     let mut persistence_token = Vec::new();
     let mut continuation = None;

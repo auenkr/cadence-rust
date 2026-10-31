@@ -4,23 +4,21 @@
 //! between the Rust struct and the generic value model; see `value.rs`.
 
 use cadence_api::admin::{
-    AddSearchAttributeRequest, AddSearchAttributeResponse, DescribeClusterResponse,
-    DynamicConfigEntry, DynamicConfigFilter, DynamicConfigValue, GetDynamicConfigRequest,
-    GetDynamicConfigResponse, GetWorkflowExecutionRawHistoryV2Request,
-    GetWorkflowExecutionRawHistoryV2Response, HostInfo, ListDynamicConfigRequest,
-    ListDynamicConfigResponse,
-    MembershipInfo, PersistenceFeature, PersistenceInfo, RestoreDynamicConfigRequest,
-    RestoreDynamicConfigResponse, ResetQueueRequest, ResetQueueResponse, DescribeQueueRequest,
-    DescribeQueueResponse, RingInfo, UpdateDynamicConfigRequest,
-    UpdateDynamicConfigResponse, GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
+    AddSearchAttributeRequest, AddSearchAttributeResponse, CloseShardRequest, CloseShardResponse,
+    DescribeClusterResponse, DescribeQueueRequest, DescribeQueueResponse, DynamicConfigEntry,
+    DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
+    GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
+    GetDomainIsolationGroupsResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
+    GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
+    GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
+    ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
+    MaintainCorruptWorkflowResponse, MembershipInfo, PersistenceFeature, PersistenceInfo,
+    ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
+    ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
+    RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
+    UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
+    UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
     UpdateGlobalIsolationGroupsRequest, UpdateGlobalIsolationGroupsResponse,
-    GetDomainIsolationGroupsRequest, GetDomainIsolationGroupsResponse,
-    UpdateDomainIsolationGroupsRequest, UpdateDomainIsolationGroupsResponse,
-    GetDomainAsyncWorkflowConfiguratonRequest, GetDomainAsyncWorkflowConfiguratonResponse,
-    UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
-    ReapplyEventsRequest, ReapplyEventsResponse,
-    MaintainCorruptWorkflowRequest, MaintainCorruptWorkflowResponse,
-    CloseShardRequest, CloseShardResponse, RemoveTaskRequest, RemoveTaskResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -972,17 +970,23 @@ impl ToThrift for GetGlobalIsolationGroupsResponse {
 
 impl FromThrift for UpdateGlobalIsolationGroupsRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self { isolation_groups: s.opt_struct(10)? })
+        Ok(Self {
+            isolation_groups: s.opt_struct(10)?,
+        })
     }
 }
 
 impl ToThrift for UpdateGlobalIsolationGroupsResponse {
-    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
 }
 
 impl FromThrift for GetDomainIsolationGroupsRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self { domain: s.req_string(10, "")? })
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+        })
     }
 }
 
@@ -996,17 +1000,24 @@ impl ToThrift for GetDomainIsolationGroupsResponse {
 
 impl FromThrift for UpdateDomainIsolationGroupsRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self { domain: s.req_string(10, "")?, isolation_groups: s.opt_struct(20)? })
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            isolation_groups: s.opt_struct(20)?,
+        })
     }
 }
 
 impl ToThrift for UpdateDomainIsolationGroupsResponse {
-    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
 }
 
 impl FromThrift for GetDomainAsyncWorkflowConfiguratonRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self { domain: s.req_string(10, "")? })
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+        })
     }
 }
 
@@ -1020,12 +1031,17 @@ impl ToThrift for GetDomainAsyncWorkflowConfiguratonResponse {
 
 impl FromThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self { domain: s.req_string(10, "")?, configuration: s.opt_struct(20)? })
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            configuration: s.opt_struct(20)?,
+        })
     }
 }
 
 impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonResponse {
-    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
 }
 
 impl FromThrift for ReapplyEventsRequest {
@@ -1039,7 +1055,9 @@ impl FromThrift for ReapplyEventsRequest {
 }
 
 impl ToThrift for ReapplyEventsResponse {
-    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
 }
 
 impl FromThrift for MaintainCorruptWorkflowRequest {

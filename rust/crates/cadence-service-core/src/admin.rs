@@ -697,9 +697,7 @@ pub async fn get_dlq_replication_messages(
     Json(req): Json<cadence_api::admin::GetDLQReplicationMessagesRequest>,
 ) -> Response {
     if req.task_infos.is_empty() {
-        return bad_request(BadRequestError::new(
-            "Replication task info is not set.",
-        ));
+        return bad_request(BadRequestError::new("Replication task info is not set."));
     }
     ok_json(serde_json::json!({ "replicationTasks": [] }))
 }
@@ -888,9 +886,11 @@ pub async fn close_shard(
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
     match client
-        .close_shard(history_admin_request(cadence_proto::history::CloseShardRequest {
-            shard_id: req.shard_id,
-        }))
+        .close_shard(history_admin_request(
+            cadence_proto::history::CloseShardRequest {
+                shard_id: req.shard_id,
+            },
+        ))
         .await
     {
         Ok(_) => ok_json(cadence_api::admin::CloseShardResponse {}),
@@ -921,12 +921,12 @@ pub async fn remove_task(
             "History client is not configured.".to_string(),
         );
     };
-    let visibility_time = req.visibility_timestamp.map(|nanos| {
-        prost_types::Timestamp {
+    let visibility_time = req
+        .visibility_timestamp
+        .map(|nanos| prost_types::Timestamp {
             seconds: nanos.div_euclid(1_000_000_000),
             nanos: nanos.rem_euclid(1_000_000_000) as i32,
-        }
-    });
+        });
     let request = cadence_proto::history::RemoveTaskRequest {
         shard_id: req.shard_id,
         task_type: req.task_type.unwrap_or_default(),
