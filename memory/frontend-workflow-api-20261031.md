@@ -391,3 +391,28 @@ these fixes; no green CI evidence covers the current changes.
   assuming Health called the backend or returned the unmetered shutdown error,
   plus an invalid run UUID in the redirect test fixture. Those expectations
   are corrected in the current worktree; normal package CI is still required.
+
+## Workflow backend request mapping continuation
+
+- Added an injectable synchronous `WorkflowDomainLookup` seam and applied Go's
+  internal request mapping for `DescribeTaskList`, `ListTaskListPartitions`,
+  `GetTaskListsByDomain`, `ResetStickyTaskList`, `CountWorkflowExecutions`,
+  `ScanWorkflowExecutions`, `ListWorkflowExecutions`, and the open/closed
+  visibility list APIs. Visibility requests now carry the resolved UUID,
+  normalized page size/token and the validated query or selected filter fields
+  expected by the downstream persistence adapter.
+- Added Go-mirroring tests for task-list describe and visibility count mapping.
+  `git diff --check` passes. No Cargo command was run locally.
+- Production must install `WorkflowDomainLookup`; until the Frontend runtime
+  graph does so, the bootstrap handler intentionally preserves the public
+  request shape. The backend must route these operation names to Matching or
+  visibility persistence and decode the Go internal request shapes. The
+  archive reader, workflow History request transformations (including task
+  tokens, raw/archive history, restart, async ThriftRW publishing), and actual
+  service transport registration/runtime remain unimplemented in this slice.
+- Package CI run
+  [41180945218](https://github.com/auenkr/cadence-rust/actions/runs/41180945218)
+  validates `40a3e084f25c1e315569d876db58a3d55ebeb834`; it was still running at
+  the time this change was prepared. It predates the new request mapping and
+  is not validation evidence for this source. Dispatch formatting and package
+  CI on the next pushed head and record its final conclusion.

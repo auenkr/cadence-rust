@@ -204,6 +204,13 @@ pub trait WorkflowBackend: Send + Sync {
     }
 }
 
+/// Synchronous name-to-UUID lookup supplied by Frontend's domain cache. Go's
+/// cache is local and synchronous from the handler's point of view; keeping
+/// this seam separate lets the RPC and persistence adapters share it.
+pub trait WorkflowDomainLookup: Send + Sync {
+    fn domain_id(&self, domain: &str) -> Result<String, CadenceError>;
+}
+
 pub type WorkflowFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
 pub type WorkflowNext<'a> = Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
@@ -239,6 +246,7 @@ pub struct Handler<B> {
     version_check: Option<VersionCheck>,
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
+    domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     shutting_down: Arc<AtomicBool>,
     health_status: Arc<AtomicU8>,
 }
@@ -293,6 +301,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            domain_lookup: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -312,6 +321,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            domain_lookup: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -336,6 +346,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            domain_lookup: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
         }
@@ -396,6 +407,14 @@ impl<B: WorkflowBackend> Handler<B> {
         validator: Arc<dyn VisibilityQueryValidator>,
     ) -> Self {
         self.visibility_query_validator = Some(validator);
+        self
+    }
+
+    /// Install the domain-cache lookup used to build Go's internal History,
+    /// Matching and visibility requests. Public requests continue to carry
+    /// domain names; only the outbound service request receives the UUID.
+    pub fn with_domain_lookup(mut self, lookup: Arc<dyn WorkflowDomainLookup>) -> Self {
+        self.domain_lookup = Some(lookup);
         self
     }
 
@@ -520,9 +539,91 @@ impl<B: WorkflowBackend> Handler<B> {
             }));
         }
         let request = self.validate_request(operation, request)?;
+        let request = self.prepare_backend_request(operation, request)?;
         self.backend
             .invoke_on_cluster(operation, request, target_cluster)
             .await
+    }
+
+    fn prepare_backend_request(
+        &self,
+        operation: WorkflowOperation,
+        request: Value,
+    ) -> Result<Value, CadenceError> {
+        let Some(domains) = &self.domain_lookup else {
+            // The bootstrap and test backends can still exercise validation
+            // before the production domain-cache adapter is installed.
+            return Ok(request);
+        };
+        let domain = request
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let domain_id = || domains.domain_id(&domain);
+        let prepared = match operation {
+            WorkflowOperation::DescribeTaskList => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "descRequest": request,
+            }),
+            WorkflowOperation::ListTaskListPartitions => serde_json::json!({
+                "domain": request.get("domain").cloned().unwrap_or(Value::Null),
+                "taskList": request.get("taskList").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::GetTaskListsByDomain => serde_json::json!({
+                "domain": request.get("domain").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::ResetStickyTaskList => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "execution": request.get("execution").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::CountWorkflowExecutions => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "domain": domain.clone(),
+                "query": request.get("query").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::ScanWorkflowExecutions
+            | WorkflowOperation::ListWorkflowExecutions => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "domain": domain.clone(),
+                "pageSize": request.get("pageSize").cloned().unwrap_or(Value::Null),
+                "nextPageToken": request.get("nextPageToken").cloned().unwrap_or(Value::Null),
+                "query": request.get("query").cloned().unwrap_or(Value::Null),
+            }),
+            WorkflowOperation::ListOpenWorkflowExecutions
+            | WorkflowOperation::ListClosedWorkflowExecutions => {
+                let time_filter = request
+                    .get("StartTimeFilter")
+                    .or_else(|| request.get("startTimeFilter"));
+                let mut internal = serde_json::json!({
+                    "domainUUID": domain_id()?,
+                    "domain": domain.clone(),
+                    "pageSize": request.get("maximumPageSize").cloned().unwrap_or(Value::Null),
+                    "nextPageToken": request.get("nextPageToken").cloned().unwrap_or(Value::Null),
+                    "earliestTime": time_filter.and_then(|v| v.get("earliestTime")).cloned().unwrap_or(Value::Null),
+                    "latestTime": time_filter.and_then(|v| v.get("latestTime")).cloned().unwrap_or(Value::Null),
+                });
+                if let Some(filter) = request.get("executionFilter") {
+                    internal["workflowId"] = filter
+                        .get("workflowId")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                } else if let Some(filter) = request.get("typeFilter") {
+                    internal["workflowTypeName"] = filter
+                        .get("name")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                }
+                if operation == WorkflowOperation::ListClosedWorkflowExecutions {
+                    if let Some(status) = request.get("statusFilter") {
+                        internal["status"] = status.clone();
+                    }
+                }
+                internal
+            }
+            _ => request,
+        };
+        Ok(prepared)
     }
 
     fn validate_request(
@@ -941,6 +1042,26 @@ mod tests {
 
     #[derive(Default)]
     struct FakeBackend(Mutex<Vec<WorkflowOperation>>);
+
+    #[derive(Default)]
+    struct CapturingBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
+
+    impl WorkflowBackend for CapturingBackend {
+        fn invoke<'a>(&'a self, operation: WorkflowOperation, request: Value) -> WorkflowFuture<'a> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push((operation, request));
+                Ok(Value::Null)
+            })
+        }
+    }
+
+    struct StaticDomainLookup;
+
+    impl WorkflowDomainLookup for StaticDomainLookup {
+        fn domain_id(&self, domain: &str) -> Result<String, CadenceError> {
+            Ok(format!("uuid:{domain}"))
+        }
+    }
 
     struct FailingBackend(&'static str);
 
@@ -1475,6 +1596,66 @@ mod tests {
             "TaskList is not set on request."
         );
         assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn describe_task_list_builds_go_matching_request_after_domain_lookup() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend)
+            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        handler
+            .dispatch(
+                "DescribeTaskList",
+                serde_json::json!({
+                    "domain": "shop",
+                    "taskList": {"name": "orders"},
+                    "taskListType": 0,
+                    "includeTaskListStatus": true
+                }),
+            )
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::DescribeTaskList);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "descRequest": {
+                    "domain": "shop",
+                    "taskList": {"name": "orders"},
+                    "taskListType": 0,
+                    "includeTaskListStatus": true
+                }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn count_visibility_builds_go_persistence_request_with_validated_query() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend)
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_visibility_query_validator(Arc::new(RecordingVisibilityQuery::default()));
+        handler
+            .dispatch(
+                "CountWorkflowExecutions",
+                serde_json::json!({"domain": "shop", "query": "WorkflowType='order'"}),
+            )
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, WorkflowOperation::CountWorkflowExecutions);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "domain": "shop",
+                "query": "validated:WorkflowType='order'"
+            })
+        );
     }
 
     #[tokio::test]
