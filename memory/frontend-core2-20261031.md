@@ -618,3 +618,8 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   quota-collection owners to stop; admin and workflow handler stop calls are
   represented by the shared admission gate rather than independently owned
   handler lifecycle objects.
+- Added distinct Frontend stop ownership signals to `AppState`: the API handler
+  admission stop and an AdminHandler watcher-stop broadcast are now invoked in
+  Go's pre-drain handler-stop phase. Added a focused ordering/independence test.
+  Admin watcher implementations can subscribe to the signal as those handlers
+  are ported. Exact-head package CI is pending; no local Cargo command was run.

@@ -1999,9 +1999,8 @@ async fn run_with_lifecycle(
                             .store(false, std::sync::atomic::Ordering::Release);
                     },
                     move || async move {
-                        handler_state
-                            .frontend_accepting
-                            .store(false, std::sync::atomic::Ordering::Release);
+                        handler_state.stop_frontend_handler();
+                        handler_state.stop_frontend_admin_handler();
                     },
                     // Global quota collections are not constructed by the
                     // current Rust Frontend runtime. Keep the Go hook slot

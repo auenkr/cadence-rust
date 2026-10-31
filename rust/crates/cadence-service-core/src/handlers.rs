@@ -82,6 +82,10 @@ pub struct AppState {
     /// Frontend healthy while shutdown is waiting for discovery/drain.
     pub frontend_shutting_down: Arc<std::sync::atomic::AtomicBool>,
     pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
+    /// Stop signal for AdminHandler-owned background workers (for example,
+    /// the Go domain DLQ and failover watchers). This is separate from the
+    /// API admission gate stopped by WorkflowHandler.Stop.
+    pub frontend_admin_shutdown: tokio::sync::watch::Sender<bool>,
     /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
     /// The launcher signals this only after request draining has completed.
     pub background_shutdown: tokio::sync::watch::Sender<bool>,
@@ -113,6 +117,7 @@ impl Default for AppState {
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
             background_shutdown: tokio::sync::watch::channel(false).0,
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
@@ -127,6 +132,18 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Stop accepting API requests, matching Go's WorkflowHandler.Stop.
+    pub fn stop_frontend_handler(&self) {
+        self.frontend_accepting
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Stop AdminHandler-owned background workers before request draining.
+    /// Admin modules subscribe when they own a long-lived task.
+    pub fn stop_frontend_admin_handler(&self) {
+        self.frontend_admin_shutdown.send_replace(true);
+    }
+
     /// Stop service-owned background loops, matching Go Frontend's `close(s.stopC)`.
     pub fn stop_background_workers(&self) {
         self.background_shutdown.send_replace(true);
@@ -2454,6 +2471,25 @@ mod frontend_drain_tests {
         shutdown.changed().await.unwrap();
 
         assert!(*shutdown.borrow());
+    }
+
+    #[tokio::test]
+    async fn frontend_handler_stop_hooks_are_independent() {
+        let state = AppState::default();
+        let mut admin_shutdown = state.frontend_admin_shutdown.subscribe();
+        assert!(state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+
+        state.stop_frontend_handler();
+        assert!(!state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(!*admin_shutdown.borrow());
+
+        state.stop_frontend_admin_handler();
+        admin_shutdown.changed().await.unwrap();
+        assert!(*admin_shutdown.borrow());
     }
 
     #[tokio::test]
