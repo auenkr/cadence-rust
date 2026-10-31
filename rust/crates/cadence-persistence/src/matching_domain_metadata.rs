@@ -787,6 +787,94 @@ pub(crate) fn decode_go_sql_domain_metadata(
     )
 }
 
+/// Encode the SQL `domains.data` payload written by Go's `sqlDomainStore`.
+/// This is the flattened `sqlblobs.DomainInfo` ThriftRW struct; unlike nested
+/// persistence DataBlobs, it has no `0x59` version prefix.
+pub fn encode_go_sql_domain_metadata(
+    metadata: &MatchingDomainMetadata,
+) -> Result<Vec<u8>, MatchingDomainMetadataError> {
+    use cadence_thrift::protocol::Writer;
+    use cadence_thrift::value::write_struct;
+
+    let mut thrift = Struct::default();
+    let mut put = |id, value| thrift.fields.push((id, value));
+    let text = |value: &str| Value::Bytes(value.as_bytes().to_vec());
+    put(10, text(&metadata.info.name));
+    put(12, text(&metadata.info.description));
+    put(14, text(&metadata.info.owner_email));
+    put(16, Value::I32(metadata.status_raw));
+    put(
+        18,
+        Value::I16(metadata.configuration.workflow_execution_retention_period_in_days as i16),
+    );
+    put(20, Value::Bool(metadata.configuration.emit_metric));
+    put(22, text(&metadata.archival_bucket));
+    put(24, Value::I16(metadata.archival_status_raw));
+    put(26, Value::I64(metadata.config_version));
+    put(28, Value::I64(metadata.notification_version));
+    put(30, Value::I64(metadata.failover_notification_version));
+    put(32, Value::I64(metadata.failover_version));
+    put(34, text(&metadata.replication.active_cluster_name));
+    put(
+        36,
+        Value::List(
+            metadata
+                .replication
+                .clusters
+                .iter()
+                .map(|cluster| text(&cluster.cluster_name))
+                .collect(),
+        ),
+    );
+    put(
+        38,
+        Value::Map(
+            metadata
+                .info
+                .data
+                .as_ref()
+                .into_iter()
+                .flat_map(|data| data.iter())
+                .map(|(key, value)| (text(key), text(value)))
+                .collect(),
+        ),
+    );
+    put(44, text(&metadata.configuration.history_archival_uri));
+    put(42, Value::I16(metadata.history_archival_status_raw));
+    put(48, text(&metadata.configuration.visibility_archival_uri));
+    put(46, Value::I16(metadata.visibility_archival_status_raw));
+    put(
+        50,
+        Value::I64(
+            metadata
+                .failover_end_time_nanos
+                .unwrap_or(GO_ZERO_TIME_NANOS),
+        ),
+    );
+    put(52, Value::I64(metadata.previous_failover_version));
+    put(54, Value::I64(metadata.last_updated_time_nanos));
+    if let Some(blob) = &metadata.bad_binaries {
+        put(39, Value::Bytes(blob.data.clone()));
+        put(40, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.isolation_groups {
+        put(56, Value::Bytes(blob.data.clone()));
+        put(58, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.async_workflow_config {
+        put(60, Value::Bytes(blob.data.clone()));
+        put(62, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.active_clusters_config {
+        put(64, Value::Bytes(blob.data.clone()));
+        put(66, text(&blob.encoding));
+    }
+
+    let mut writer = Writer::new();
+    write_struct(&mut writer, &thrift);
+    Ok(writer.into_bytes())
+}
+
 struct SqlDomainRow {
     id: Vec<u8>,
     name: String,
@@ -1162,6 +1250,78 @@ mod tests {
     use super::*;
     use cadence_thrift::protocol::Writer;
     use cadence_thrift::value::write_struct;
+
+    #[test]
+    fn go_sql_domain_metadata_encoder_round_trips_the_domain_row() {
+        let uuid = uuid::Uuid::from_u128(17);
+        let metadata = MatchingDomainMetadata {
+            info: DomainInfo {
+                name: "sql-domain".into(),
+                status: Some(DomainStatus::Registered),
+                description: "description".into(),
+                owner_email: "owner@example.test".into(),
+                data: Some([("key".into(), "value".into())].into()),
+                uuid: uuid.to_string(),
+            },
+            configuration: DomainConfiguration {
+                workflow_execution_retention_period_in_days: 11,
+                emit_metric: true,
+                history_archival_status: Some(ArchivalStatus::Enabled),
+                history_archival_uri: "history://archive".into(),
+                visibility_archival_status: Some(ArchivalStatus::Disabled),
+                visibility_archival_uri: "visibility://archive".into(),
+                bad_binaries: None,
+            },
+            replication: DomainReplicationConfiguration {
+                active_cluster_name: "cluster-a".into(),
+                clusters: vec![cadence_api::types::ClusterReplicationConfiguration {
+                    cluster_name: "cluster-a".into(),
+                }],
+                active_clusters: None,
+            },
+            is_global_domain: true,
+            archival_bucket: "bucket".into(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 1,
+            visibility_archival_status_raw: 0,
+            config_version: 2,
+            notification_version: 3,
+            failover_notification_version: 4,
+            failover_version: 5,
+            previous_failover_version: 4,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 6,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+        let data = encode_go_sql_domain_metadata(&metadata).unwrap();
+        let decoded = decode_go_sql_domain_metadata(
+            uuid.as_bytes().to_vec(),
+            metadata.info.name.clone(),
+            metadata.is_global_domain,
+            data,
+            ENCODING_THRIFT_RW.into(),
+            "cluster-a",
+        )
+        .unwrap();
+        assert_eq!(decoded.info, metadata.info);
+        assert_eq!(decoded.configuration, metadata.configuration);
+        assert_eq!(decoded.replication, metadata.replication);
+        assert_eq!(decoded.archival_bucket, metadata.archival_bucket);
+        assert_eq!(decoded.config_version, metadata.config_version);
+        assert_eq!(decoded.notification_version, metadata.notification_version);
+        assert_eq!(decoded.failover_notification_version, metadata.failover_notification_version);
+        assert_eq!(decoded.failover_version, metadata.failover_version);
+        assert_eq!(decoded.previous_failover_version, metadata.previous_failover_version);
+        assert_eq!(decoded.last_updated_time_nanos, metadata.last_updated_time_nanos);
+    }
 
     #[test]
     fn cassandra_domain_udts_follow_go_domain_metadata_conversion() {

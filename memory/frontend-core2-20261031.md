@@ -582,3 +582,14 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   `success` on `3682a3f69d0c1abd47b20b0db0191b0f6010de91`; Go source oracles,
   Formatting, Clippy, Frontend tests, and Frontend development-config smoke all
   passed. This validates the startup warmup and shutdown suppression change.
+
+## Domain persistence port groundwork — continuation
+
+- Added a shared encoder for the existing Go SQL `domains.data` ThriftRW
+  payload in `cadence-persistence::matching_domain_metadata`, including the
+  persisted Go field IDs and raw nested DataBlob encodings. Added a decode
+  round-trip test against the existing SQL metadata decoder. This is a source
+  format prerequisite for a write-capable Go domain manager; SQL/Cassandra
+  mutation operations and Frontend wiring remain outstanding.
+- Exact-head `cadence-persistence` CI is required for this encoder/test before
+  proceeding. No Cargo or rustfmt command was run locally.
