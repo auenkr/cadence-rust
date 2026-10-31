@@ -127,6 +127,17 @@
   `e3edd612518ce36a3d2b06593cf67346b24ffe9b`. This verifies the integration
   and current package source only; runtime mixed-cluster compatibility and
   the remaining parity blockers below are still open.
+- Started the next Admin gap: `MergeDLQMessages` now reads domain DLQ entries,
+  decodes the Thrift replication envelope, executes each domain task through
+  the shared persisted domain manager, updates the execution-store domain
+  index, and deletes/advances acknowledgement only through the last successful
+  task (ack update remains best-effort, matching Go). Incoming create/update/
+  delete operations validate task fields and identity, apply config and
+  failover versions, merge active-active attributes, persist updates, and
+  notify Matching on newer failover versions. Added unit cases for idempotent
+  create/delete and stale versus newer update versions. This slice is not yet
+  CI-validated; live replication consumption, audit events, and YARPC DLQ
+  dispatch are still open.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.

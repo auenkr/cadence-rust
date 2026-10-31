@@ -291,6 +291,13 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
 
     fn delete(&self, name: &str) -> Result<(), FrontendDomainError>;
 
+    /// Apply one incoming global-domain replication task. DLQ merge and the
+    /// live replication consumer share the same version-aware mutation path.
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError>;
+
     fn list_page(
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
@@ -351,6 +358,61 @@ fn now_nanos() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|v| v.as_nanos() as i64)
         .unwrap_or(0)
+}
+
+fn is_active_active(replication: &DomainReplicationConfiguration) -> bool {
+    replication
+        .active_clusters
+        .as_ref()
+        .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+        .is_some_and(|scopes| !scopes.is_empty())
+}
+
+fn merge_active_clusters(
+    current: Option<cadence_api::types::ActiveClusters>,
+    incoming: Option<cadence_api::types::ActiveClusters>,
+) -> cadence_api::types::ActiveClusters {
+    use cadence_api::types::ActiveClusters;
+
+    fn merge_values(
+        target: &mut std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
+        incoming: std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
+    ) {
+        for (key, value) in incoming {
+            if target
+                .get(&key)
+                .is_none_or(|current| current.failover_version < value.failover_version)
+            {
+                target.insert(key, value);
+            }
+        }
+    }
+
+    let mut merged = current.unwrap_or_default();
+    let Some(incoming) = incoming else {
+        return merged;
+    };
+    let regions = merged
+        .active_clusters_by_region
+        .get_or_insert_with(Default::default);
+    if let Some(incoming_regions) = incoming.active_clusters_by_region {
+        merge_values(regions, incoming_regions);
+    }
+    let scopes = merged
+        .active_clusters_by_cluster_attribute
+        .get_or_insert_with(Default::default);
+    if let Some(incoming_scopes) = incoming.active_clusters_by_cluster_attribute {
+        for (scope_name, incoming_scope) in incoming_scopes {
+            let scope = scopes.entry(scope_name).or_default();
+            let attributes = scope
+                .cluster_attributes
+                .get_or_insert_with(Default::default);
+            if let Some(incoming_attributes) = incoming_scope.cluster_attributes {
+                merge_values(attributes, incoming_attributes);
+            }
+        }
+    }
+    merged
 }
 
 impl InMemoryDomainStore {
@@ -1087,6 +1149,131 @@ impl InMemoryDomainStore {
         Ok(())
     }
 
+    /// Apply a validated Go domain replication task, dropping stale config
+    /// and failover versions while preserving unrelated local metadata.
+    pub fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        use cadence_api::enums::{DomainOperation, DomainStatus};
+
+        let invalid = |message: &str| FrontendDomainError::Invalid(message.to_string());
+        let operation = task
+            .domain_operation
+            .ok_or_else(|| invalid("invalid domain operation attribute"))?;
+        if task.id.is_empty() {
+            return Err(invalid("invalid domain ID attribute"));
+        }
+        let info = task
+            .info
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain info attribute"))?;
+        let configuration = task
+            .config
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain config attribute"))?;
+        let replication = task
+            .replication_config
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain replication config attribute"))?;
+        let status = match info.status {
+            Some(DomainStatus::Registered) => DomainStatus::Registered,
+            Some(DomainStatus::Deprecated) => DomainStatus::Deprecated,
+            _ => return Err(invalid("invalid domain status attribute")),
+        };
+        if info.name.is_empty() {
+            return Err(invalid("invalid domain info attribute"));
+        }
+
+        match operation {
+            DomainOperation::Create => {
+                if let Ok(existing) = self.record_by_name(&info.name) {
+                    if existing.info.uuid != task.id {
+                        return Err(invalid("domain replication encounter name / UUID collision"));
+                    }
+                    return Ok(());
+                }
+                if let Ok(existing) = self.record_by_id(&task.id) {
+                    if existing.info.name != info.name {
+                        return Err(invalid("domain replication encounter name / UUID collision"));
+                    }
+                    return Ok(());
+                }
+                let mut replicated_info = info.clone();
+                replicated_info.uuid = task.id.clone();
+                replicated_info.status = Some(status);
+                self.create_with_version(
+                    replicated_info,
+                    configuration.clone(),
+                    replication.clone(),
+                    true,
+                    task.failover_version,
+                )?;
+                let mut record = self.record_by_id(&task.id).map_err(FrontendDomainError::NotFound)?;
+                record.config_version = task.config_version;
+                record.previous_failover_version = task.previous_failover_version;
+                record.isolation_groups = configuration.isolation_groups.clone();
+                record.async_workflow_config = configuration.async_workflow_config.clone();
+                self.restore_record(record);
+            }
+            DomainOperation::Update => {
+                let mut current = match self.record_by_id(&task.id) {
+                    Ok(record) => record,
+                    Err(_) => {
+                        return self.apply_replication_task(&cadence_api::types::DomainTaskAttributes {
+                            domain_operation: Some(DomainOperation::Create),
+                            ..task.clone()
+                        });
+                    }
+                };
+                if current.info.name != info.name {
+                    return Err(invalid("domain replication encounter name / UUID collision"));
+                }
+                let old_failover_version = current.failover_version;
+                if current.config_version < task.config_version {
+                    current.info.name = info.name.clone();
+                    current.info.status = Some(status);
+                    current.info.description = info.description.clone();
+                    current.info.owner_email = info.owner_email.clone();
+                    current.info.data = info.data.clone();
+                    current.configuration = configuration.clone();
+                    current.replication.clusters = replication.clusters.clone();
+                    current.config_version = task.config_version;
+                    current.isolation_groups = configuration.isolation_groups.clone();
+                    current.async_workflow_config = configuration.async_workflow_config.clone();
+                }
+                if current.failover_version < task.failover_version {
+                    current.replication.active_cluster_name = replication.active_cluster_name.clone();
+                    current.replication.active_clusters = replication.active_clusters.clone();
+                    current.failover_version = task.failover_version;
+                    current.previous_failover_version = task.previous_failover_version;
+                    current.failover_end_time = None;
+                } else if is_active_active(&current.replication) || is_active_active(replication) {
+                    current.replication.active_clusters = Some(merge_active_clusters(
+                        current.replication.active_clusters.take(),
+                        replication.active_clusters.clone(),
+                    ));
+                }
+                current.last_updated_time_nanos = now_nanos();
+                self.restore_record(current.clone());
+                if current.failover_version > old_failover_version {
+                    self.notify_failover(&current);
+                }
+            }
+            DomainOperation::Delete => {
+                if let Ok(existing) = self.record_by_name(&info.name) {
+                    if existing.info.uuid != task.id {
+                        return Err(invalid("domain replication encounter name / UUID collision"));
+                    }
+                    self.delete(&info.name)
+                        .map_err(FrontendDomainError::NotFound)?;
+                }
+            }
+            _ => return Err(invalid("invalid domain operation attribute")),
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn list(&self) -> ListDomainsResponse {
         let inner = self.inner.read().expect("domain store lock");
@@ -1269,6 +1456,13 @@ impl FrontendDomainManager for InMemoryDomainStore {
 
     fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
         InMemoryDomainStore::delete(self, name).map_err(Into::into)
+    }
+
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        InMemoryDomainStore::apply_replication_task(self, task)
     }
 
     fn list_page(
@@ -1485,6 +1679,53 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Delete)
     }
 
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_id(&task.id).ok();
+        let version = self.current_metadata_version()?;
+        if task.domain_operation == Some(cadence_api::enums::DomainOperation::Delete) {
+            if let Some(record) = old {
+                self.persistence
+                    .delete_domain(&record.info.uuid)
+                    .map_err(FrontendDomainError::Persistence)?;
+                self.cache
+                    .apply_replication_task(task)
+                    .map_err(FrontendDomainError::from)?;
+            } else {
+                self.cache
+                    .apply_replication_task(task)
+                    .map_err(FrontendDomainError::from)?;
+            }
+            return Ok(());
+        }
+
+        self.cache
+            .apply_replication_task(task)
+            .map_err(FrontendDomainError::from)?;
+        let updated = self
+            .cache
+            .record_by_id(&task.id)
+            .map_err(FrontendDomainError::NotFound)?;
+        if let Err(error) = self.persist_record(&updated, version, old.is_none()) {
+            if let Some(record) = old {
+                self.cache.restore_record(record);
+            } else {
+                let _ = self.cache.delete(&updated.info.name);
+            }
+            return Err(error);
+        }
+        if old
+            .as_ref()
+            .is_some_and(|record| updated.failover_version > record.failover_version)
+        {
+            self.cache.notify_failover(&updated);
+        }
+        Ok(())
+    }
+
     fn list_page(
         &self,
         request: &cadence_api::service_types::ListDomainsRequest,
@@ -1531,6 +1772,59 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    fn replication_task(operation: cadence_api::enums::DomainOperation) -> cadence_api::types::DomainTaskAttributes {
+        let (info, config, replication_config) = sample("replicated", "domain-uuid");
+        cadence_api::types::DomainTaskAttributes {
+            domain_operation: Some(operation),
+            id: info.uuid.clone(),
+            info: Some(info),
+            config: Some(config),
+            replication_config: Some(replication_config),
+            config_version: 1,
+            failover_version: 10,
+            previous_failover_version: 9,
+        }
+    }
+
+    #[test]
+    fn incoming_domain_replication_is_idempotent_and_versioned() {
+        let store = InMemoryDomainStore::new();
+        let create = replication_task(cadence_api::enums::DomainOperation::Create);
+        store.apply_replication_task(&create).unwrap();
+        store.apply_replication_task(&create).unwrap();
+        let mut update = replication_task(cadence_api::enums::DomainOperation::Update);
+        update.config_version = 2;
+        update.failover_version = 9;
+        update.info.as_mut().unwrap().description = "replicated update".into();
+        update.config.as_mut().unwrap().workflow_execution_retention_period_in_days = 14;
+        update.replication_config.as_mut().unwrap().active_cluster_name = "stale".into();
+        store.apply_replication_task(&update).unwrap();
+        let record = store.record_by_id("domain-uuid").unwrap();
+        assert_eq!(record.config_version, 2);
+        assert_eq!(record.info.description, "replicated update");
+        assert_eq!(record.configuration.workflow_execution_retention_period_in_days, 14);
+        assert_eq!(record.replication.active_cluster_name, "active");
+
+        update.failover_version = 11;
+        update.replication_config.as_mut().unwrap().active_cluster_name = "standby".into();
+        store.apply_replication_task(&update).unwrap();
+        assert_eq!(store.record_by_id("domain-uuid").unwrap().replication.active_cluster_name, "standby");
+    }
+
+    #[test]
+    fn incoming_domain_delete_checks_identity_and_is_idempotent() {
+        let store = InMemoryDomainStore::new();
+        let create = replication_task(cadence_api::enums::DomainOperation::Create);
+        store.apply_replication_task(&create).unwrap();
+        let mut delete = replication_task(cadence_api::enums::DomainOperation::Delete);
+        delete.id = "different-uuid".into();
+        assert!(store.apply_replication_task(&delete).is_err());
+        delete.id = create.id;
+        store.apply_replication_task(&delete).unwrap();
+        store.apply_replication_task(&delete).unwrap();
+        assert!(store.record_by_name("replicated").is_err());
     }
 
     #[test]

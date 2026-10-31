@@ -967,9 +967,10 @@ fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
     message_id.to_le_bytes().to_vec()
 }
 
-/// Single-host DLQ merge: nothing to merge.
+/// Merge domain replication DLQ tasks through the shared Frontend domain
+/// manager. A task is deleted and acknowledged only after its mutation commits.
 pub async fn merge_dlq_messages(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::MergeDLQMessagesRequest>,
 ) -> Response {
     if req.dlq_type.is_none() {
@@ -978,9 +979,102 @@ pub async fn merge_dlq_messages(
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
     }
-    ok_json(cadence_api::admin::MergeDLQMessagesResponse {
-        next_page_token: vec![],
-    })
+    if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
+        return crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History Admin client is not configured.".into(),
+        );
+    }
+    match merge_domain_dlq_messages(&state, req) {
+        Ok(response) => ok_json(response),
+        Err(error) => crate::handlers::error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
+    }
+}
+
+pub fn merge_domain_dlq_messages(
+    state: &AppState,
+    req: cadence_api::admin::MergeDLQMessagesRequest,
+) -> Result<cadence_api::admin::MergeDLQMessagesResponse, String> {
+    use cadence_thrift::{
+        protocol::Reader,
+        value::{read_struct, FromThrift},
+    };
+
+    let persistence = state
+        .domain_metadata_persistence
+        .as_ref()
+        .ok_or_else(|| "domain replication DLQ is unavailable for this persistence backend".to_string())?;
+    let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    let first_message_id = decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
+    let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let page_size = if req.maximum_page_size > 0 {
+        req.maximum_page_size as usize
+    } else {
+        100
+    };
+    let rows = persistence.read_domain_replication_dlq(
+        first_message_id,
+        end_message_id,
+        page_size,
+    )?;
+    let mut last_processed = ack_level;
+    for row in &rows {
+        let thrift = read_struct(&mut Reader::new(&row.payload))
+            .map_err(|error| error.to_string())?;
+        let task = cadence_api::types::ReplicationTask::from_thrift(&thrift)
+            .map_err(|error| error.to_string())?;
+        if task.task_type != Some(cadence_api::enums::ReplicationTaskType::Domain) {
+            return Err(
+                "Encounter non domain replication task in domain replication queue.".into(),
+            );
+        }
+        let attributes = task
+            .domain_task_attributes
+            .as_ref()
+            .ok_or_else(|| "empty domain replication task".to_string())?;
+        let info = attributes
+            .info
+            .as_ref()
+            .ok_or_else(|| "invalid domain info attribute".to_string())?;
+        state
+            .domain_manager
+            .apply_replication_task(attributes)
+            .map_err(|error| error.to_string())?;
+        match attributes.domain_operation {
+            Some(cadence_api::enums::DomainOperation::Delete) => {
+                state.executions.unregister_domain(&info.name);
+            }
+            _ => {
+                let domain_id = state
+                    .domain_manager
+                    .domain_id(&info.name)
+                    .map_err(|error| error.message)?;
+                state.executions.register_domain(&info.name, &domain_id);
+            }
+        }
+        last_processed = row.id;
+    }
+
+    if last_processed > ack_level {
+        persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
+        // Go treats acknowledgement metadata as best-effort after delete.
+        let _ = persistence.update_domain_replication_dlq_ack_level(
+            "domainReplication".into(),
+            last_processed,
+        );
+    }
+    let next_page_token = if rows.len() >= page_size {
+        encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
+    } else {
+        Vec::new()
+    };
+    Ok(cadence_api::admin::MergeDLQMessagesResponse { next_page_token })
 }
 
 /// Resend history to a remote cluster. Single host has no remotes: unknown
