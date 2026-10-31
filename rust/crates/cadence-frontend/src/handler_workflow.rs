@@ -3008,7 +3008,7 @@ mod tests {
                         "runId": "550e8400-e29b-41d4-a716-446655440000"
                     },
                     "signalName": "refresh",
-                    "input": "AwQ="
+                    "input": "AwQF"
                 }),
             )
             .await
@@ -3021,11 +3021,11 @@ mod tests {
                 domain: "shop".into(),
                 workflow_id: "order-25".into(),
                 run_id: "550e8400-e29b-41d4-a716-446655440000".into(),
-                actual_size: 2,
+                actual_size: 3,
                 warning_limit: 2,
                 error_limit: 5,
                 configured_warning_above_error: false,
-                outcome: BlobSizeOutcome::WithinWarningLimit,
+                outcome: BlobSizeOutcome::Warning,
             }]
         );
     }

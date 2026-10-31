@@ -774,8 +774,13 @@ Frontend parity until these are implemented and validated.
 - Added typed Matching client calls for `RespondQueryTaskCompleted`,
   `DescribeTaskList`, `ListTaskListPartitions`, and `GetTaskListsByDomain` to
   cover the remaining generated Matching operations named in the Go Workflow
-  handlers. Those calls and the Tokio test correction are uncommitted and not
-  yet validated.
+  handlers. The Tokio test correction and these typed calls are committed in
+  `bb7608bf08f094be8830ba50cbfab68733edaf06`.
+- Exact-head CI run
+  [41190540641](https://github.com/auenkr/cadence-rust/actions/runs/41190540641)
+  tested SHA `bb7608bf08f094be8830ba50cbfab68733edaf06` and concluded
+  `success`: Frontend Clippy/formatting passed and all 98 Frontend unit tests
+  passed. The run does not cover the uncommitted blob-warning threshold test.
 - Remaining critical gaps are unchanged: generated History/Matching client
   shells are not operation adapters; the production launcher does not register
   `Handler` or compose its wrappers; poll cancellation/health-wait and response
