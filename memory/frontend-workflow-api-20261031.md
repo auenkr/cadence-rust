@@ -1005,3 +1005,12 @@ Frontend parity until these are implemented and validated.
   checked `d4beeea26e7a9e3aba877ff14904df1f92dd9672` and was still in progress
   at this save; it predates the activity payload changes. Dispatch another
   package run after pushing them.
+- Run [41197224918](https://github.com/auenkr/cadence-rust/actions/runs/41197224918)
+  checked `f2695f359b600d83ec96cdc4d0b64744e54a78e2`, passed formatting, then
+  failed Clippy compilation in the newly integrated SQL manager: its `DomainConfiguration`
+  references nonexistent `archival_status` fields. Corrected the manager to
+  initialize the legacy raw archival status to zero for new rows and preserve
+  the prior raw value on updates. This also includes the blob `domain_id`
+  metric dimension and by-ID cancellation test added after that run. New exact
+  head package CI is required; the workflow run did not reach Frontend Clippy or
+  tests.

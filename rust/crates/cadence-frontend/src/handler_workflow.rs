@@ -402,6 +402,7 @@ pub enum BlobSizeOutcome {
 pub struct WorkflowBlobSizeMeasurement {
     pub operation: &'static str,
     pub domain: String,
+    pub domain_id: String,
     pub workflow_id: String,
     pub run_id: String,
     pub actual_size: usize,
@@ -937,10 +938,12 @@ impl<B: WorkflowBackend> Handler<B> {
                     })
                     .and_then(Value::as_str),
             ) {
-                if let Some(domains) = &self.domain_lookup {
+                let domain_id = if let Some(domains) = &self.domain_lookup {
                     // Go resolves the domain before checking the input size.
-                    domains.domain_id(domain)?;
-                }
+                    domains.domain_id(domain)?
+                } else {
+                    String::new()
+                };
                 let error_limit = policy.error_limit(domain);
                 let configured_warning_limit = policy.warning_limit(domain);
                 let warning_limit = configured_warning_limit.min(error_limit);
@@ -956,6 +959,7 @@ impl<B: WorkflowBackend> Handler<B> {
                     policy.observe(WorkflowBlobSizeMeasurement {
                         operation: operation.name(),
                         domain: domain.to_owned(),
+                        domain_id: domain_id.clone(),
                         workflow_id: workflow_id.clone(),
                         run_id: run_id.clone(),
                         actual_size: size,
@@ -1151,6 +1155,7 @@ impl<B: WorkflowBackend> Handler<B> {
         policy.observe(WorkflowBlobSizeMeasurement {
             operation: operation.name(),
             domain,
+            domain_id: token.domain_id.clone(),
             workflow_id: token.workflow_id.clone(),
             run_id: token.run_id.clone(),
             actual_size: bytes.len(),
@@ -3770,6 +3775,7 @@ mod tests {
             &[WorkflowBlobSizeMeasurement {
                 operation: "SignalWorkflowExecution",
                 domain: "shop".into(),
+                domain_id: "uuid:shop".into(),
                 workflow_id: "order-25".into(),
                 run_id: "550e8400-e29b-41d4-a716-446655440000".into(),
                 actual_size: 3,
@@ -3882,6 +3888,38 @@ mod tests {
         assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
         assert_eq!(calls[0].1["failedRequest"]["reason"], "FAILURE_DETAILS_EXCEEDS_LIMIT");
         assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
+    }
+
+    #[tokio::test]
+    async fn oversized_cancel_by_id_is_converted_to_a_failed_activity() {
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_blob_size_policy(Arc::new(SmallQueryBlobLimit));
+
+        handler
+            .dispatch(
+                "RespondActivityTaskCanceledByID",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowId": "order-1",
+                    "activityId": "activity-1",
+                    "details": "AQID",
+                    "identity": "worker"
+                }),
+            )
+            .await
+            .unwrap();
+
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls[0].0, WorkflowOperation::RespondActivityTaskFailed);
+        assert_eq!(calls[0].1["failedRequest"]["reason"], "CANCEL_DETAILS_EXCEEDS_LIMIT");
+        assert_eq!(calls[0].1["failedRequest"]["details"], "AQI=");
+        let synthesized_token = decode_workflow_task_token(&serde_json::json!({
+            "taskToken": calls[0].1["failedRequest"]["taskToken"]
+        }))
+        .unwrap();
+        assert_eq!(synthesized_token.workflow_id, "order-1");
+        assert_eq!(synthesized_token.activity_id, "activity-1");
     }
 
     #[test]
