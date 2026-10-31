@@ -862,3 +862,11 @@ migration forward.
   completed **success** at
   `17ece2f9f55711d94a430adb635eec1f4a036d1c` (Frontend package Clippy,
   formatting, tests and smoke checks).
+
+## SQLite stale-create rollback regression — 2026-10-31
+
+- Added a SQLite regression case that passes a stale expected metadata version
+  to the new Frontend mutation trait and asserts that the transaction leaves no
+  inserted domain row. This directly guards the rollback behavior reviewed in
+  the preceding adapter fix. `git diff --check` passes; no Cargo command was run
+  locally. The change is pending exact-head package CI.
