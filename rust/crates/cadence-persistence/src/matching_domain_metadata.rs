@@ -306,7 +306,7 @@ impl CassandraFrontendDomainPersistence {
             name: metadata.info.name.clone(),
             status: metadata.status_raw,
             description: Some(metadata.info.description.clone()),
-            data: Some(metadata.info.data.clone()),
+            data: metadata.info.data.clone(),
             owner_email: Some(metadata.info.owner_email.clone()),
         };
         let config = CassandraDomainConfigUdt {
