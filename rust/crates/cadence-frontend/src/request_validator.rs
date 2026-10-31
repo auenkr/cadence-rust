@@ -715,6 +715,7 @@ mod tests {
             validator.validate_get_task_lists_by_domain_request(Some(
                 &GetTaskListsByDomainRequest {
                     domain: String::new(),
+                    ..Default::default()
                 },
             )),
             "Domain not set on request.",
@@ -1335,6 +1336,7 @@ mod tests {
                     name: "tl".into(),
                     ..Default::default()
                 }),
+                ..Default::default()
             }))
             .unwrap();
         validator

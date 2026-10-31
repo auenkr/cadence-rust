@@ -399,7 +399,11 @@ pub async fn add_search_attribute(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
 ) -> Response {
-    let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
     let protection_enabled = cadence_persistence::dynamic_config::boolean(
         overlay.property_values("history.enableAdminProtection"),
         None,
@@ -422,21 +426,27 @@ pub async fn add_search_attribute(
         }
     };
     const VALID_ATTRIBUTES: &str = "frontend.validSearchAttributes";
-    let mut overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+    let mut overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
     let mut valid_attributes = match overlay
         .get(false, VALID_ATTRIBUTES, &[])
         .and_then(|value| value.value)
     {
-        Some(value) => match serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data) {
-            Ok(attributes) => attributes,
-            Err(error) => {
-                return error_response(
-                    "InternalServiceError",
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get dynamic config, err: {error}"),
-                );
+        Some(value) => {
+            match serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data) {
+                Ok(attributes) => attributes,
+                Err(error) => {
+                    return error_response(
+                        "InternalServiceError",
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to get dynamic config, err: {error}"),
+                    );
+                }
             }
-        },
+        }
         None => cadence_api::search_attributes::default_indexed_keys()
             .into_iter()
             .map(|(key, value)| (key, value.value()))
@@ -452,9 +462,9 @@ pub async fn add_search_attribute(
             .get(key)
             .is_some_and(|existing| *existing != value_type.value())
         {
-                return bad_request(BadRequestError::new(format!(
-                    "Key [{key}] is already whitelisted as a different type"
-                )));
+            return bad_request(BadRequestError::new(format!(
+                "Key [{key}] is already whitelisted as a different type"
+            )));
         }
         valid_attributes.insert(key.clone(), value_type.value());
     }
@@ -480,7 +490,11 @@ pub async fn add_search_attribute(
         }],
     );
     drop(overlay);
-    let mut custom = state.admin.custom_search_attributes.lock().expect("admin lock");
+    let mut custom = state
+        .admin
+        .custom_search_attributes
+        .lock()
+        .expect("admin lock");
     for (key, value_type) in attrs {
         custom.insert(key, value_type);
     }

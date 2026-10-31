@@ -833,13 +833,16 @@ impl InMemoryDomainStore {
         Ok(())
     }
 
-    /// Mirrors Go `DeprecateDomain`: flips status to deprecated.
+    /// Mirrors Go `DeprecateDomain`: increments the domain config version,
+    /// updates its write timestamp, and flips status to deprecated.
     pub fn deprecate(&self, req: &DeprecateDomainRequest) -> Result<(), EntityNotExistsError> {
         let mut inner = self.inner.write().expect("domain store lock");
         let record = inner.by_name.get_mut(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
         })?;
         record.info.status = Some(DomainStatus::Deprecated);
+        record.config_version += 1;
+        record.last_updated_time_nanos = now_nanos();
         Ok(())
     }
 
@@ -1859,6 +1862,12 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("d1", "uuid-1");
         store.create(info, cfg, rep, false).unwrap();
+        let before = store
+            .describe(&DescribeDomainRequest {
+                name: Some("d1".into()),
+                uuid: None,
+            })
+            .unwrap();
         store
             .deprecate(&DeprecateDomainRequest {
                 name: "d1".into(),
@@ -1875,6 +1884,7 @@ mod tests {
             got.domain_info.unwrap().status,
             Some(DomainStatus::Deprecated)
         );
+        assert_eq!(got.config_version, before.config_version + 1);
     }
 }
 

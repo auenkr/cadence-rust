@@ -49,9 +49,9 @@ impl Handler {
             })
             .is_ok()
         {
-            return Err(DomainHandlerError::AlreadyExists(DomainAlreadyExistsError::new(
-                "Domain already exists.",
-            )));
+            return Err(DomainHandlerError::AlreadyExists(
+                DomainAlreadyExistsError::new("Domain already exists."),
+            ));
         }
         validate_domain_name(&request.name).map_err(DomainHandlerError::BadRequest)?;
         if request.name.len() > state.limits.ids.domain_max {
@@ -179,7 +179,11 @@ impl Handler {
         }
         state
             .domains
-            .update(request, &state.cluster_metadata, &state.domain_policy(&request.name))
+            .update(
+                request,
+                &state.cluster_metadata,
+                &state.domain_policy(&request.name),
+            )
             .map_err(DomainHandlerError::from)
     }
 
@@ -236,10 +240,7 @@ impl From<cadence_persistence::FailoverError> for DomainHandlerError {
 
 // Domain validation and archival transitions from Go's common/domain package.
 
-use cadence_api::{
-    enums::ArchivalStatus,
-    types::ActiveClusters,
-};
+use cadence_api::{enums::ArchivalStatus, types::ActiveClusters};
 
 fn bad(message: impl Into<String>) -> BadRequestError {
     BadRequestError::new(message)
@@ -584,8 +585,7 @@ mod tests {
             created
         );
         assert_eq!(
-            Handler::register_domain(&state, Some(&request))
-                .unwrap_err(),
+            Handler::register_domain(&state, Some(&request)).unwrap_err(),
             DomainHandlerError::AlreadyExists(DomainAlreadyExistsError::new(
                 "Domain already exists."
             ))
@@ -623,8 +623,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            Handler::register_domain(&state, Some(&request))
-                .unwrap_err(),
+            Handler::register_domain(&state, Some(&request)).unwrap_err(),
             DomainHandlerError::BadRequest(bad(
                 "Cluster is not primary cluster, cannot do domain registration or domain update.",
             ))
