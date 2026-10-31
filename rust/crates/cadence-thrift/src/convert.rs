@@ -12,7 +12,12 @@ use cadence_api::admin::{
     MembershipInfo, PersistenceFeature, PersistenceInfo, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, ResetQueueRequest, ResetQueueResponse, DescribeQueueRequest,
     DescribeQueueResponse, RingInfo, UpdateDynamicConfigRequest,
-    UpdateDynamicConfigResponse,
+    UpdateDynamicConfigResponse, GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
+    UpdateGlobalIsolationGroupsRequest, UpdateGlobalIsolationGroupsResponse,
+    GetDomainIsolationGroupsRequest, GetDomainIsolationGroupsResponse,
+    UpdateDomainIsolationGroupsRequest, UpdateDomainIsolationGroupsResponse,
+    GetDomainAsyncWorkflowConfiguratonRequest, GetDomainAsyncWorkflowConfiguratonResponse,
+    UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -869,11 +874,28 @@ impl FromThrift for cadence_api::types::IsolationGroupPartition {
     }
 }
 
+impl ToThrift for cadence_api::types::IsolationGroupPartition {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.oenum(20, self.state);
+        f.finish()
+    }
+}
+
 impl FromThrift for IsolationGroupConfiguration {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             isolation_groups: s.opt_list(10)?.unwrap_or_default(),
         })
+    }
+}
+
+impl ToThrift for IsolationGroupConfiguration {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.isolation_groups);
+        f.finish()
     }
 }
 
@@ -886,6 +908,89 @@ impl FromThrift for AsyncWorkflowConfiguration {
             queue_config: s.opt_struct(40)?,
         })
     }
+}
+
+impl ToThrift for AsyncWorkflowConfiguration {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.bool(10, self.enabled);
+        f.sstr(20, &self.predefined_queue_name);
+        f.sstr(30, &self.queue_type);
+        f.ostruct(40, self.queue_config.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for GetGlobalIsolationGroupsRequest {
+    fn from_thrift(_: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for GetGlobalIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateGlobalIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { isolation_groups: s.opt_struct(10)? })
+    }
+}
+
+impl ToThrift for UpdateGlobalIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+}
+
+impl FromThrift for GetDomainIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { domain: s.req_string(10, "")? })
+    }
+}
+
+impl ToThrift for GetDomainIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDomainIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { domain: s.req_string(10, "")?, isolation_groups: s.opt_struct(20)? })
+    }
+}
+
+impl ToThrift for UpdateDomainIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+}
+
+impl FromThrift for GetDomainAsyncWorkflowConfiguratonRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { domain: s.req_string(10, "")? })
+    }
+}
+
+impl ToThrift for GetDomainAsyncWorkflowConfiguratonResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.configuration.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self { domain: s.req_string(10, "")?, configuration: s.opt_struct(20)? })
+    }
+}
+
+impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonResponse {
+    fn to_thrift(&self) -> Struct { Fields::new().finish() }
 }
 
 impl FromThrift for DomainReplicationConfiguration {
@@ -5515,6 +5620,40 @@ mod tests {
             maximum_attempts: 3,
             non_retriable_error_reasons: vec!["x".to_string()],
             ..Default::default()
+        });
+    }
+
+    #[test]
+    fn admin_isolation_and_async_configuration_requests_round_trip() {
+        let groups = IsolationGroupConfiguration {
+            isolation_groups: vec![IsolationGroupPartition {
+                name: "maintenance".into(),
+                state: Some(IsolationGroupState::Drained),
+            }],
+        };
+        round_trip(&groups);
+        round_trip(&cadence_api::admin::GetGlobalIsolationGroupsRequest {});
+        round_trip(&UpdateGlobalIsolationGroupsRequest {
+            isolation_groups: Some(groups.clone()),
+        });
+        round_trip(&GetDomainIsolationGroupsRequest {
+            domain: "payments".into(),
+        });
+        round_trip(&UpdateDomainIsolationGroupsRequest {
+            domain: "payments".into(),
+            isolation_groups: Some(groups),
+        });
+        round_trip(&GetDomainAsyncWorkflowConfiguratonRequest {
+            domain: "payments".into(),
+        });
+        round_trip(&UpdateDomainAsyncWorkflowConfiguratonRequest {
+            domain: "payments".into(),
+            configuration: Some(AsyncWorkflowConfiguration {
+                enabled: true,
+                predefined_queue_name: "async-payments".into(),
+                queue_type: "FIFO".into(),
+                queue_config: Some(DataBlob::new(EncodingType::JSON, b"{}".to_vec())),
+            }),
         });
     }
 

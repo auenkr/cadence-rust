@@ -431,3 +431,12 @@ migration forward.
 - Exact-head CI run [41179462360](https://github.com/auenkr/cadence-rust/actions/runs/41179462360) at `85eda7222fc63e579a8399f2e7a5cdf73fe3dfe6` was cancelled after later source changes. Run [41179565921](https://github.com/auenkr/cadence-rust/actions/runs/41179565921) at `f02bf9fb0c066f385679fd6b430342eb015e1010` was cancelled when shared-state changes were pushed. Run [41179614145](https://github.com/auenkr/cadence-rust/actions/runs/41179614145) targets exact current source `d39036c477249d4eeeb9762424b3d30071e0d995`; it remains in progress. Cargo has not been run locally.
 - Source inventory compared against Go methods shows the Thrift dispatch still lacks Admin lifecycle/History-client methods: `RemoveTask`, `CloseShard`, shard/history-host description, replication and DLQ methods, `ReapplyEvents`, `ResendReplicationTasks`, cross-cluster task methods, domain isolation/async configuration and task-list partition mutation. Existing `ResetQueue` is currently validation plus empty success, and `DescribeQueue` reports local in-memory queue depths rather than calling History. Domain dispatch lacks `UpdateIsolationGroups` and `UpdateAsyncWorkflowConfiguraton`. Schedule method names are routed, but the storage path remains in-memory and does not start/update scheduler workflows. This is a source inventory, not parity evidence.
 - No mixed Go/Rust Frontend validation has been run. Keep all of these gaps open until real History/Matching client wiring, durable persistence and SDK failure/restart/recovery lanes are complete.
+- Ported the six Admin isolation-group and async-workflow-configuration Thrift
+  routes into the live YARPC dispatcher. They now decode Go field IDs, validate
+  empty domain names, read/mutate the shared domain state, and return typed
+  Thrift responses. Added matching request/nested response converters and
+  converter round-trip coverage. This closes two domain internal APIs and six
+  Admin RPCs from the prior inventory; global/domain metadata remains backed by
+  the current in-memory domain store, and durability is still open. `git diff
+  --check` passes; CI formatting/build/tests are pending and Cargo was not run
+  locally.

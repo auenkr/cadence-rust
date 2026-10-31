@@ -263,6 +263,9 @@ pub type ListOperationalDynamicConfigResponse = ListDynamicConfigResponse;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetGlobalIsolationGroupsRequest {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetGlobalIsolationGroupsResponse {
     #[serde(
         rename = "isolationGroups",
