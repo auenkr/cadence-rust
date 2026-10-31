@@ -11,7 +11,7 @@ impl Handler {
     }
 }
 
-//! Domain validation and archival transitions from Go's common/domain package.
+// Domain validation and archival transitions from Go's common/domain package.
 
 use std::collections::{BTreeMap, BTreeSet};
 
