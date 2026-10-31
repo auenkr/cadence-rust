@@ -2068,9 +2068,8 @@ async fn run_with_lifecycle(
                 serving.abort_all();
                 while let Some(result) = serving.join_next().await {
                     match result {
-                        Ok((name, Ok(()))) => serving_shutdown_errors.push(format!(
-                            "{name} listener stopped unexpectedly during drain"
-                        )),
+                        Ok((name, Ok(()))) => serving_shutdown_errors
+                            .push(format!("{name} listener stopped unexpectedly during drain")),
                         Ok((name, Err(error))) => {
                             serving_shutdown_errors
                                 .push(format!("{name} listener failed during drain: {error:#}"));

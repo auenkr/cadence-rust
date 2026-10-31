@@ -550,3 +550,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   read-only domain metadata.
 - No Cargo command was run locally. Dispatch exact-head CI after committing the
   formatting correction; record its URL, SHA and conclusion below.
+- Exact-head run https://github.com/auenkr/cadence-rust/actions/runs/41186493570
+  checked `65ee80d0ccc70c0b8abdc457d7be82b69326fe03` and failed the changed
+  Matching runtime rustfmt gate. I had applied the hunk in the wrong direction;
+  the runner expects the chained `.push(format!(...))` layout. Reverted to the
+  exact runner output. No Clippy/tests were reached; a fresh exact-head run is
+  required.
