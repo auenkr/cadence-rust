@@ -26,3 +26,4 @@ and validation of the running binary distinct from validation of source changes.
 
 - `matching-storage-next.md` — durable Matching storage port, validation and queue/History RPC continuation.
 - `frontend-core-20261031.md` — Frontend bootstrap skeleton, shared-runtime boundary, and pending CI/parity work.
+- `frontend-workflow-api-20261031.md` — Workflow handler parity work, poll/history helpers, CI evidence, and remaining integration gaps.
