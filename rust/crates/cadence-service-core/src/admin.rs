@@ -781,7 +781,6 @@ pub async fn count_dlq_messages(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::CountDLQMessagesRequest>,
 ) -> Response {
-    let _ = req.force_fetch;
     let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
         return crate::handlers::error_response(
             "InternalServiceError",
@@ -789,17 +788,52 @@ pub async fn count_dlq_messages(
             "domain replication DLQ is unavailable for this persistence backend".into(),
         );
     };
-    match persistence.domain_replication_dlq_size() {
-        Ok(domain) => ok_json(cadence_api::admin::CountDLQMessagesResponse {
-            history: vec![],
-            domain,
-        }),
-        Err(error) => crate::handlers::error_response(
+    let domain = match persistence.domain_replication_dlq_size() {
+        Ok(count) => count,
+        Err(error) => {
+            return crate::handlers::error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let Some(channel) = state.history_admin_channel.clone() else {
+        return crate::handlers::error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
-            error,
-        ),
-    }
+            "History client is not configured.".to_string(),
+        );
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    let response = match client
+        .count_dlq_messages(history_admin_request(
+            cadence_proto::history::CountDlqMessagesRequest {
+                force_fetch: req.force_fetch,
+            },
+        ))
+        .await
+    {
+        Ok(response) => response.into_inner(),
+        Err(error) => {
+            return crate::handlers::error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.message().to_string(),
+            )
+        }
+    };
+    ok_json(cadence_api::admin::CountDLQMessagesResponse {
+        history: response
+            .entries
+            .into_iter()
+            .map(|entry| cadence_api::admin::HistoryDLQCountEntry {
+                source_cluster: entry.source_cluster,
+                message_count: entry.message_count,
+            })
+            .collect(),
+        domain,
+    })
 }
 
 /// Single-host DLQ reads: callers must name the queue type, like Go.

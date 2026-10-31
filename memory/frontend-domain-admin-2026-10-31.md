@@ -1302,3 +1302,23 @@ migration forward.
   purge deletes through the persisted ack level and treats ack update failure
   as warning-only. The History replication DLQ path still needs a History
   Admin client. Fresh exact-head package CI is pending; no Cargo ran locally.
+
+## Frontend integration merge and Admin DLQ continuation — 2026-10-31
+
+- Merged the updated `origin/frontend-core2` head `a998f52602ad296417381c586802dcc4ebb7d8b7`
+  into the integration branch as `6f080794d007249a99cdbecf2fd10586f11a7e08`.
+  `origin/t3/frontend-workflow-api` and `origin/master` are ancestors. The
+  earlier integration merge already resolved the named source conflicts in
+  `cadence-persistence/src/domains.rs`, `cadence-service-core/src/handlers.rs`,
+  `cadence-matching/src/matching_task_store.rs`, and the memory logs; the latest
+  core2 commit only added memory documentation, so this merge had no new source
+  conflict. Pushed to `origin/frontend-domain-admin`.
+- Frontend package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41217883183 is running
+  against exact merge head `6f080794d007249a99cdbecf2fd10586f11a7e08`.
+- Admin parity follow-up: `CountDLQMessages` now obtains the durable domain
+  DLQ count and also calls History's `CountDLQMessages` with Go's `forceFetch`
+  input, mapping History's source-cluster counts into the Frontend response.
+  This source change is pending commit and exact-head Frontend CI; no Cargo
+  command was run locally. History read, purge, merge and DLQ replication
+  methods remain open.
