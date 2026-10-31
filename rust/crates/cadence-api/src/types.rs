@@ -373,7 +373,7 @@ pub struct IsolationGroupConfiguration {
     pub isolation_groups: Vec<IsolationGroupPartition>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsyncWorkflowConfiguration {
     #[serde(rename = "enabled", default)]
     pub enabled: bool,
