@@ -272,6 +272,12 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   shutdown parity.
 - The six Clippy fixture corrections are unvalidated until the exact-head CI
   result is recorded below. Cargo remains prohibited on the development host.
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41180118508
+  validated `b4fda09b4e53622aa385ffccf57118d07771d578`. Formatting, Clippy,
+  and test compilation passed; 11 of 12 Frontend tests passed. The remaining
+  required-domain-data expectation used JSON-array spelling while the Go map
+  formatter correctly produced `map[tier:true]`; corrected the assertion for
+  the next exact-head run.
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41179758023 at
   `3bc2dcca870ea3875d0915f6769d9b09ae9dcbe4` passed Frontend Clippy but failed
   the crate formatting step. The runner emitted 22 rustfmt hunks in

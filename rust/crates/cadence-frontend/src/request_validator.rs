@@ -1071,7 +1071,7 @@ mod tests {
                 security_token: "token".into(),
                 ..Default::default()
             })),
-            "domain data error, missing required key tier . All required keys: [\"tier\"]",
+            "domain data error, missing required key tier . All required keys: map[tier:true]",
         );
         validator
             .validate_update_domain_request(Some(&UpdateDomainRequest {
@@ -1528,5 +1528,103 @@ mod tests {
                 .message,
             "Domain is not accepting fail overs at this time due to lockdown."
         );
+    }
+
+    #[test]
+    fn go_table_covers_visibility_limits_and_update_failover_lockdown() {
+        let overlay = Arc::new(Mutex::new(
+            cadence_service_core::admin::DynamicConfigOverlay::default(),
+        ));
+        overlay.lock().unwrap().update(
+            false,
+            "system.readVisibilityStoreName",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(
+                    EncodingType::JSON,
+                    serde_json::to_vec(&serde_json::json!("es")).unwrap(),
+                )),
+                filters: vec![DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(DataBlob::new(
+                        EncodingType::JSON,
+                        serde_json::to_vec(&serde_json::json!("domain")).unwrap(),
+                    )),
+                }],
+            }],
+        );
+        let mut validator = RequestValidator::default().with_dynamic_config(overlay);
+        validator.config.advanced_visibility_store = true;
+        validator.config.es_index_max_result_window = 100;
+
+        let expected = "Pagesize is larger than allow 100";
+        let mut list = ListWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            page_size: 101,
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_workflow_executions_request(Some(&mut list))
+                .unwrap_err()
+                .message,
+            expected
+        );
+        let time_filter = StartTimeFilter {
+            earliest_time: Some(1),
+            latest_time: Some(2),
+        };
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(time_filter.clone()),
+            maximum_page_size: 101,
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut open))
+                .unwrap_err()
+                .message,
+            expected
+        );
+        let mut closed = ListClosedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(time_filter),
+            maximum_page_size: 101,
+            ..Default::default()
+        };
+        assert_eq!(
+            validator
+                .validate_list_closed_workflow_executions_request(Some(&mut closed))
+                .unwrap_err()
+                .message,
+            expected
+        );
+
+        validator.config.admin_protection = true;
+        validator.config.lockdown = true;
+        let expected_lockdown =
+            "Domain is not accepting fail overs at this time due to lockdown.";
+        for replication in [
+            cadence_api::service_types::DomainReplicationConfigurationUpdate {
+                active_cluster_name: Some("cluster1".into()),
+                ..Default::default()
+            },
+            cadence_api::service_types::DomainReplicationConfigurationUpdate {
+                active_clusters: Some(cadence_api::types::ActiveClusters::default()),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(
+                validator
+                    .validate_update_domain_request(Some(&UpdateDomainRequest {
+                        name: "domain".into(),
+                        replication_configuration: Some(replication),
+                        ..Default::default()
+                    }))
+                    .unwrap_err()
+                    .message,
+                expected_lockdown
+            );
+        }
     }
 }
