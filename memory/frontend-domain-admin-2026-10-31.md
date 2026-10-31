@@ -305,3 +305,5 @@ migration forward.
   targets `ea87244aa`; pending at dispatch with CI formatting enabled. The
   latest source is still unverified until this run passes Clippy, Formatting,
   and Test.
+
+- The second CI dispatch ([41178360466](https://github.com/auenkr/cadence-rust/actions/runs/41178360466), exact code head `ea87244aa`) was still in preflight when checked. Extended the workflow's CI rustfmt patch list to include `cadence-thrift/src/convert.rs`, since `cargo fmt --all --check` also validates the new converter code. Workflow commit `08eb6a783` is pushed. The newest formatting-enabled package run is [41178407221](https://github.com/auenkr/cadence-rust/actions/runs/41178407221), which targets `08eb6a783`; no current-source CI result yet.
