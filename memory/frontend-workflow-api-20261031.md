@@ -985,3 +985,9 @@ Frontend parity until these are implemented and validated.
   was dispatched at `88a9e48945cd078630203ae022e3f9de2fabd5a3` and is in
   progress; this latest formatting correction still needs a new exact-head
   run.
+- Run `41196876683` was cancelled by the next branch dispatch before validation.
+  The current exact-head package workflow is
+  [41196928743](https://github.com/auenkr/cadence-rust/actions/runs/41196928743)
+  at `5bd5458fd6dc1c2277c571ff2572fb3dba49cb06`; it was in progress at this
+  update. It includes the core2 SQL manager and the rustfmt correction; wait for
+  its terminal result before recording CI acceptance.
