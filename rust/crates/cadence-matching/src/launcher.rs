@@ -549,12 +549,18 @@ pub async fn run(
             let config = match config {
                 Some(path) if std::path::Path::new(&path).is_relative() => {
                     let joined = process_root.join(&path);
-                    Some(if joined.exists() { joined.to_string_lossy().into_owned() } else { path })
+                    Some(if joined.exists() {
+                        joined.to_string_lossy().into_owned()
+                    } else {
+                        path
+                    })
                 }
                 Some(path) => Some(path),
                 None => {
                     let default_dir = process_root.join("config");
-                    default_dir.is_dir().then(|| default_dir.to_string_lossy().into_owned())
+                    default_dir
+                        .is_dir()
+                        .then(|| default_dir.to_string_lossy().into_owned())
                 }
             };
             let embedded_development = config.is_none();
