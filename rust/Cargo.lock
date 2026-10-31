@@ -405,7 +405,13 @@ name = "cadence-frontend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cadence-proto",
  "cadence-service-core",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tonic",
 ]
 
 [[package]]
