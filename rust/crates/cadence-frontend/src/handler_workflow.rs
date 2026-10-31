@@ -212,6 +212,7 @@ pub struct Handler<B> {
     redirector: Option<Arc<dyn RequestRedirector>>,
     version_check: Option<VersionCheck>,
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
+    visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
 }
 
 /// Caller metadata carried by the transport into the same wrapper layers that
@@ -232,6 +233,12 @@ pub trait RequestAuthorization: Send + Sync {
 
 pub trait RequestRateLimit: Send + Sync {
     fn allow(&self, operation: &str, request: &Value) -> Result<(), CadenceError>;
+}
+
+/// Go's visibility query validator is independent of request validation: it
+/// needs the configured visibility dialect and registered search attributes.
+pub trait VisibilityQueryValidator: Send + Sync {
+    fn validate_query(&self, query: &str) -> Result<String, CadenceError>;
 }
 
 #[derive(Clone)]
@@ -258,6 +265,7 @@ impl<B: WorkflowBackend> Handler<B> {
             redirector: None,
             version_check: None,
             rate_limit: None,
+            visibility_query_validator: None,
         }
     }
 
@@ -274,6 +282,7 @@ impl<B: WorkflowBackend> Handler<B> {
             redirector: None,
             version_check: None,
             rate_limit: None,
+            visibility_query_validator: None,
         }
     }
 
@@ -295,6 +304,7 @@ impl<B: WorkflowBackend> Handler<B> {
             redirector: None,
             version_check: None,
             rate_limit: None,
+            visibility_query_validator: None,
         }
     }
 
@@ -345,6 +355,14 @@ impl<B: WorkflowBackend> Handler<B> {
     /// when GetWorkflowExecutionHistory omits a positive page size.
     pub fn with_history_max_page_size(mut self, maximum: i32) -> Self {
         self.history_max_page_size = maximum;
+        self
+    }
+
+    pub fn with_visibility_query_validator(
+        mut self,
+        validator: Arc<dyn VisibilityQueryValidator>,
+    ) -> Self {
+        self.visibility_query_validator = Some(validator);
         self
     }
 
@@ -693,6 +711,23 @@ impl<B: WorkflowBackend> Handler<B> {
             }
             _ => {}
         }
+        if matches!(
+            operation,
+            WorkflowOperation::CountWorkflowExecutions
+                | WorkflowOperation::ScanWorkflowExecutions
+                | WorkflowOperation::ListWorkflowExecutions
+        ) {
+            if let Some(validator) = &self.visibility_query_validator {
+                let query = value
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let validated_query = validator.validate_query(query)?;
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("query".to_owned(), Value::String(validated_query));
+                }
+            }
+        }
         Ok(value)
     }
 }
@@ -957,6 +992,16 @@ mod tests {
                 feature_version.to_owned(),
             ));
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingVisibilityQuery(Mutex<Vec<String>>);
+
+    impl VisibilityQueryValidator for RecordingVisibilityQuery {
+        fn validate_query(&self, query: &str) -> Result<String, CadenceError> {
+            self.0.lock().unwrap().push(query.to_owned());
+            Ok(format!("validated:{query}"))
         }
     }
 
@@ -1456,5 +1501,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response["maximumPageSize"], 1000);
+    }
+
+    #[tokio::test]
+    async fn count_visibility_query_uses_injected_go_validator() {
+        let query_validator = Arc::new(RecordingVisibilityQuery::default());
+        let handler = Handler::new(FakeBackend::default())
+            .with_visibility_query_validator(query_validator.clone());
+        let response = handler
+            .dispatch(
+                "CountWorkflowExecutions",
+                serde_json::json!({
+                    "domain": "shop",
+                    "query": "WorkflowType = 'checkout'",
+                    "futureSdkField": "kept"
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *query_validator.0.lock().unwrap(),
+            ["WorkflowType = 'checkout'"]
+        );
+        assert_eq!(response["query"], "validated:WorkflowType = 'checkout'");
+        assert_eq!(response["futureSdkField"], "kept");
     }
 }
