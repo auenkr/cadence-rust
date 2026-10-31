@@ -1961,3 +1961,7 @@ mapping and MergeDLQ Thrift conversions. Both were repaired; fresh package CI is
 pending. Domain audit durability, History-backed Admin operations, scheduler
 workflow routing, and real membership remain open. See
 `memory/frontend-domain-admin-2026-10-31.md`.
+
+Frontend admin YARPC follow-up CI 41215148796 passed format/oracle stages and
+found one non-exhaustive enum match in MergeDLQ's outbound Thrift converter.
+Added the wildcard invalid-value mapping; exact-head package CI is pending.

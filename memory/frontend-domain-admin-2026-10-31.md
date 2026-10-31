@@ -1211,3 +1211,9 @@ migration forward.
   persistence errors are internal) and added the MergeDLQ request/response
   converters with the replicator IDL field IDs and enum values. Added wire
   field and round-trip coverage. This source has not been CI validated yet.
+- Follow-up exact-head run
+  [41215148796](https://github.com/auenkr/cadence-rust/actions/runs/41215148796)
+  reached Clippy on `12ce43890eea28f53582d058db8a5dc80075bf1e`; it failed because
+  the non-exhaustive API `DLQType` requires a wildcard arm in the outbound
+  Thrift enum mapping. Formatting and source-oracle stages passed. Added the
+  wildcard mapping to the invalid wire value; fresh exact-head CI is pending.

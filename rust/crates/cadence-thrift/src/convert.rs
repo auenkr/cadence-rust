@@ -460,6 +460,7 @@ impl ToThrift for MergeDLQMessagesRequest {
                 DLQType::Replication => 0,
                 DLQType::Domain => 1,
                 DLQType::Invalid => -1,
+                _ => -1,
             }),
         );
         f.oi32(20, Some(self.shard_id));
