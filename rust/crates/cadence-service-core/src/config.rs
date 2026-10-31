@@ -562,48 +562,44 @@ pub struct ShardedNosqlConfig {
 impl PersistenceConfig {
     /// Resolve the datastore name used by Go's persistence client for a
     /// manager role. Workflow execution, history, domains, and metadata use
-    /// `defaultStore`; visibility uses `visibilityStore`, falling back to
-    /// `advancedVisibilityStore` only when the regular store is unset.
+    /// `defaultStore`; the database visibility manager exists only when
+    /// `visibilityStore` is configured. Advanced visibility is a distinct
+    /// manager and is not a SQL/Cassandra visibility store.
     ///
     /// Keeping this selection in one place prevents a service from silently
     /// routing visibility writes to the default store when the deployment
     /// configured a separate visibility database.
-    pub fn store_name_for(&self, role: PersistenceStoreRole) -> Result<&str, String> {
+    pub fn store_name_for(&self, role: PersistenceStoreRole) -> Result<Option<&str>, String> {
         let configured = match role {
-            PersistenceStoreRole::Default => &self.default_store,
-            PersistenceStoreRole::Visibility => {
-                if !self.visibility_store.is_empty() {
-                    &self.visibility_store
-                } else {
-                    &self.advanced_visibility_store
-                }
-            }
+            PersistenceStoreRole::Default => self.default_store.as_str(),
+            PersistenceStoreRole::Visibility => self.visibility_store.as_str(),
         };
         if configured.is_empty() {
-            return Err(match role {
+            return match role {
                 PersistenceStoreRole::Default => {
-                    "Frontend persistence requires persistence.defaultStore".into()
+                    Err("Frontend persistence requires persistence.defaultStore".into())
                 }
-                PersistenceStoreRole::Visibility => {
-                    "Frontend persistence requires visibilityStore or advancedVisibilityStore".into()
-                }
-            });
+                PersistenceStoreRole::Visibility => Ok(None),
+            };
         }
         if !self.datastores.contains_key(configured) {
             return Err(format!(
                 "Frontend persistence store {configured:?} is not present in persistence.datastores"
             ));
         }
-        Ok(configured)
+        Ok(Some(configured))
     }
 
     /// Resolve the backend selected for a manager role using Go's literal
     /// datastore key lookup semantics.
-    pub fn datastore_for(&self, role: PersistenceStoreRole) -> Result<&DatastoreConfig, String> {
-        let name = self.store_name_for(role)?;
-        self.datastores.get(name).ok_or_else(|| {
-            format!("Frontend persistence store {name:?} is not present in persistence.datastores")
-        })
+    pub fn datastore_for(
+        &self,
+        role: PersistenceStoreRole,
+    ) -> Result<Option<&DatastoreConfig>, String> {
+        let Some(name) = self.store_name_for(role)? else {
+            return Ok(None);
+        };
+        Ok(self.datastores.get(name))
     }
 
     /// Go `Persistence.FillDefaults` (`common/config/persistence.go:46-72`)
@@ -1725,15 +1721,16 @@ shard-distributor-matching:
         .unwrap();
         assert_eq!(
             persistence.store_name_for(PersistenceStoreRole::Default),
-            Ok("primary")
+            Ok(Some("primary"))
         );
         assert_eq!(
             persistence.store_name_for(PersistenceStoreRole::Visibility),
-            Ok("visibility")
+            Ok(Some("visibility"))
         );
         assert_eq!(
             persistence
                 .datastore_for(PersistenceStoreRole::Visibility)
+                .unwrap()
                 .unwrap()
                 .sql
                 .as_ref()
@@ -1743,10 +1740,10 @@ shard-distributor-matching:
         );
 
         persistence.visibility_store.clear();
-        persistence.advanced_visibility_store = "visibility".into();
+        persistence.advanced_visibility_store = "other".into();
         assert_eq!(
             persistence.store_name_for(PersistenceStoreRole::Visibility),
-            Ok("visibility")
+            Ok(None)
         );
     }
 
@@ -1765,9 +1762,9 @@ shard-distributor-matching:
             .store_name_for(PersistenceStoreRole::Default)
             .unwrap_err()
             .contains("defaultStore"));
-        assert!(persistence
-            .store_name_for(PersistenceStoreRole::Visibility)
-            .unwrap_err()
-            .contains("visibilityStore"));
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(None)
+        );
     }
 }

@@ -1124,10 +1124,11 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 ## Store-role selection continuation — 2026-10-31
 
 - Added `PersistenceConfig::store_name_for` and `datastore_for` to centralize
-  Go's `defaultStore` versus `visibilityStore`/`advancedVisibilityStore`
-  selection and literal datastore-key behavior. Added config tests for a
-  separate SQL visibility backend, advanced-visibility fallback, missing names,
-  and whitespace-preserving key lookup.
+  Go's `defaultStore` versus optional `visibilityStore` selection and literal
+  datastore-key behavior. Advanced visibility remains a separate manager and
+  is not used as a SQL/Cassandra visibility fallback. Added config tests for a
+  separate SQL visibility backend, omitted DB visibility, missing default, and
+  whitespace-preserving key lookup.
 - This is selection groundwork only. No production Visibility, History, or
   Execution manager was added or wired, and the configured visibility store is
   still not opened by Frontend. SQL/Cassandra domain and metadata behavior
