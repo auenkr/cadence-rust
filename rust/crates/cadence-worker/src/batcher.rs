@@ -38,6 +38,37 @@ pub enum BatchOperationError<E> {
     Other(E),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TaskRetryDecision {
+    CompleteSuccess,
+    Requeue { next_attempt: i32 },
+    ReportFailure { attempt: i32, reason: String },
+}
+
+/// Match Go `startTaskProcessor`: errors named in NonRetryableErrors are
+/// reported immediately; retryable errors are put back on the shared task
+/// channel until the current attempt reaches AttemptsOnRetryableError.
+pub fn task_retry_decision(
+    attempt: i32,
+    attempts_on_retryable_error: i32,
+    non_retryable_errors: &[String],
+    result: Result<(), impl Into<String>>,
+) -> TaskRetryDecision {
+    let Err(error) = result else {
+        return TaskRetryDecision::CompleteSuccess;
+    };
+    let reason = error.into();
+    if non_retryable_errors.iter().any(|non_retryable| non_retryable == &reason)
+        || attempt >= attempts_on_retryable_error
+    {
+        TaskRetryDecision::ReportFailure { attempt, reason }
+    } else {
+        TaskRetryDecision::Requeue {
+            next_attempt: attempt.saturating_add(1),
+        }
+    }
+}
+
 /// Walk one execution and, when requested, all children returned by Describe.
 /// Go uses a FIFO slice, waits on its limiter/records a heartbeat before each
 /// operation, applies before Describe, skips EntityNotExists from either RPC,
@@ -339,5 +370,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(visited, vec!["root", "first", "gone", "grandchild"]);
+    }
+
+    #[test]
+    fn task_retry_limit_and_non_retryable_errors_match_go_worker() {
+        let non_retryable = vec!["fatal".to_owned()];
+        assert_eq!(
+            super::task_retry_decision(0, 2, &non_retryable, Ok::<_, &str>(())),
+            super::TaskRetryDecision::CompleteSuccess
+        );
+        assert_eq!(
+            super::task_retry_decision(0, 2, &non_retryable, Err("transient")),
+            super::TaskRetryDecision::Requeue { next_attempt: 1 }
+        );
+        assert_eq!(
+            super::task_retry_decision(2, 2, &non_retryable, Err("transient")),
+            super::TaskRetryDecision::ReportFailure {
+                attempt: 2,
+                reason: "transient".into(),
+            }
+        );
+        assert_eq!(
+            super::task_retry_decision(0, 2, &non_retryable, Err("fatal")),
+            super::TaskRetryDecision::ReportFailure {
+                attempt: 0,
+                reason: "fatal".into(),
+            }
+        );
     }
 }

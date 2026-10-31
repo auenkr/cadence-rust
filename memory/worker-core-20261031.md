@@ -203,10 +203,16 @@ Implemented in this slice:
   `success` at exact head `5b65c811dfe9de37c9ca63075bd2b3cf688385b0`.
   Worker Clippy, formatting and tests passed for the corrected scanner
   registration test and the archiver/domain-deprecation/failover/scheduler
-  registration descriptors. The checked-out `worker-core` branch is at this
-  head and clean. This validates module contract tests only; Worker runtime,
+  registration descriptors. The branch has since advanced past this validated
+  head. This validates module contract tests only; Worker runtime,
   mixed-service SDK compatibility, restart/recovery and full parity remain
   outstanding.
+
+Batcher now also exposes the Go task-processor error disposition: successful
+tasks finish, configured non-retryable messages report immediately, and other
+failures requeue until the current attempt reaches the configured ceiling.
+Go-mirroring tests cover the retry boundary; validation by a subsequent package
+CI run is pending.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
