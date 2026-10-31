@@ -82,12 +82,10 @@ pub fn attributes_for_request(
             | "StartWorkflowExecution"
             | "StartWorkflowExecutionAsync"
     ) {
-        if let Some(body) = request_body.as_object_mut() {
-            // Go's request structs mark these byte fields json:"-" to keep
-            // workflow/query payloads out of authorization audit logs.
-            body.remove("input");
-            body.remove("signalInput");
-        }
+        // Go's request structs mark these byte fields json:"-" to keep
+        // workflow/query payloads out of authorization audit logs. The async
+        // request types wrap the regular request in a nested `request` field.
+        strip_hidden_payloads(&mut request_body);
     }
     Some(Attributes {
         operation: operation.to_owned(),
@@ -99,6 +97,20 @@ pub fn attributes_for_request(
         // Go's NewFilteredRequestBody JSON-serializes the full API request.
         request_body: Some(request_body),
     })
+}
+
+fn strip_hidden_payloads(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            fields.remove("input");
+            fields.remove("signalInput");
+            for child in fields.values_mut() {
+                strip_hidden_payloads(child);
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(strip_hidden_payloads),
+        _ => {}
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -231,6 +243,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filtered.request_body, Some(serde_json::json!({"domain": "shop"})));
+        let async_request = serde_json::json!({
+            "request": {"domain": "shop", "input": "secret", "signalInput": "secret"}
+        });
+        assert_eq!(
+            attributes_for_request(
+                "SignalWithStartWorkflowExecutionAsync",
+                &async_request,
+                "worker"
+            )
+            .unwrap()
+            .request_body,
+            Some(serde_json::json!({"request": {"domain": "shop"}}))
+        );
 
         assert_eq!(
             attributes_for_request("PollForActivityTask", &request, "worker")

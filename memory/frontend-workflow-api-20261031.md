@@ -101,3 +101,56 @@ compatibility `unimplemented_operation` helper and a test backend used
 `RefCell` despite the `Sync` contract. Both compile errors were fixed in the
 current working tree. A fresh `rust-ci.yml` dispatch is required after pushing
 these fixes; no green CI evidence covers the current changes.
+
+## Follow-up implementation checkpoint
+
+- `origin/frontend-core` was fetched and confirmed as an ancestor of this
+  branch (`git rev-list --left-right --count origin/frontend-core...HEAD` was
+  `0 6`). `git rebase origin/frontend-core` completed as an up-to-date no-op;
+  no frontend-core commits were dropped.
+- Checkpoint `a26cf95b4` (wrapper semantics/history-token helpers) and
+  `563282d4f` (handler validation) were pushed to
+  `origin/t3/frontend-workflow-api`.
+- Handler validation now preserves Go ordering for history requests, requires
+  query/query type after execution validation, checks diagnose's required run
+  ID, validates heartbeat token presence, and checks heartbeat by ID
+  workflow/activity fields before calling the backend. Tests cover query and
+  diagnose validation order.
+- The authorization request filter strips hidden payload fields from nested
+  async requests as Go's `json:"-"` fields do. Metering normalizes errors
+  outside Go's typed error switch to the generic internal error and increments
+  failures.
+- CI run
+  [41175955180](https://github.com/auenkr/cadence-rust/actions/runs/41175955180)
+  at `a26cf95b4e110bb4a2ec5902771d4e2a7552e0b4` was cancelled when a newer
+  branch run superseded it. Run
+  [41176066100](https://github.com/auenkr/cadence-rust/actions/runs/41176066100)
+  at `563282d4fa10e1c4cc29659722cfd9d99e6b337c` was in progress at this save;
+  it does not include later handler changes. No green CI conclusion exists for
+  the current head yet. Local `git diff --check` passes; Cargo remains unrun
+  locally.
+
+## Remaining parity blockers
+
+- `Handler::dispatch` still relies on the generic `WorkflowBackend::invoke`
+  seam. No concrete production implementation translates all workflow
+  operations into History, Matching, visibility and domain-cache calls, so the
+  operation catalogue is not functional service behavior.
+- The backend interface needed by this handler must support domain-name/ID
+  lookups; typed History operations (poll mutable state, history pages/raw
+  history, start/signal/cancel/terminate/reset/query/describe,
+  heartbeat/respond, sticky reset); Matching poll/respond/task-list operations;
+  visibility list/scan/count/filter APIs; plus archival, dynamic config,
+  token serialization, shutdown state and metrics. Coordinate these with the
+  frontend-core2 owner rather than duplicate client or persistence code.
+- List/scan/count and task-list Go endpoints are catalogued but their handler
+  transformations are not ported: visibility query validation, domain
+  resolution, filter feature gates, archival configuration/URI checks,
+  execution-time normalization, and Matching request wrapping remain gaps.
+- Wrapper modules hold policy helpers but are not composed into the live
+  transport handler/decorator order. The gRPC status helper is not wired into a
+  registered Workflow API gRPC service, and Thrift declared-exception
+  selection still needs a real dispatch path.
+- Full Go method body behavior, broad Go-mirroring tests, mixed Go/Rust SDK
+  compatibility, failure/restart/recovery validation, and a green CI result
+  for the current source remain outstanding. Do not mark Frontend complete.

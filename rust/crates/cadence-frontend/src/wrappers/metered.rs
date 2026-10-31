@@ -207,7 +207,12 @@ pub fn normalize_error(error: CadenceError) -> (CadenceError, Counter) {
             ))),
             Counter::Failures,
         ),
-        other => (other, Counter::Failures),
+        other => (
+            CadenceError::Internal(InternalServiceError::new(format!(
+                "cadence internal uncategorized error, msg: {other}"
+            ))),
+            Counter::Failures,
+        ),
     }
 }
 
@@ -271,6 +276,20 @@ mod tests {
         let (error, counter) = normalize_error(CadenceError::Unknown("oops".into()));
         assert_eq!(error.to_string(), "cadence internal uncategorized error, msg: oops");
         assert_eq!(counter, Counter::Failures);
+    }
+
+    #[test]
+    fn errors_outside_go_typed_error_switch_are_normalized() {
+        use cadence_api::errors::{CadenceError, ShardOwnershipLostError};
+        let (normalized, counter) = normalize_error(CadenceError::ShardOwnershipLost(
+            ShardOwnershipLostError::new("ownership lost"),
+        ));
+        assert_eq!(counter, Counter::Failures);
+        assert!(matches!(normalized, CadenceError::Internal(_)));
+        assert_eq!(
+            normalized.to_string(),
+            "cadence internal uncategorized error, msg: ownership lost"
+        );
     }
 
     #[test]
