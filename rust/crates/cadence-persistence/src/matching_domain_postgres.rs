@@ -139,6 +139,101 @@ impl PostgresDomainMetadataStore {
         Ok(messages)
     }
 
+    /// Store a consumer's monotonically increasing acknowledgement level in
+    /// Go's JSON `queue_metadata` row. Delayed acknowledgements are ignored.
+    pub fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let current = transaction
+            .query_opt(
+                "SELECT data FROM queue_metadata WHERE queue_type=$1 FOR UPDATE",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+            )
+            .map_err(domain_error)?
+            .map(|row| row.try_get::<_, Vec<u8>>(0))
+            .transpose()
+            .map_err(domain_error)?;
+        let has_current = current.is_some();
+        let mut levels: std::collections::HashMap<String, i64> = current
+            .map(|data| serde_json::from_slice(&data))
+            .transpose()
+            .map_err(|error| {
+                MatchingDomainMetadataError::InvalidBlob(format!(
+                    "invalid domain replication queue ack levels: {error}"
+                ))
+            })?
+            .unwrap_or_default();
+        if levels.get(&cluster_name).is_some_and(|old| *old >= message_id) {
+            transaction.commit().map_err(domain_error)?;
+            return Ok(());
+        }
+        levels.insert(cluster_name, message_id);
+        let data = serde_json::to_vec(&levels).map_err(|error| {
+            MatchingDomainMetadataError::InvalidBlob(format!(
+                "failed to encode domain replication queue ack levels: {error}"
+            ))
+        })?;
+        if has_current {
+            transaction
+                .execute(
+                    "UPDATE queue_metadata SET data=$1 WHERE queue_type=$2",
+                    &[&data, &GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+                )
+                .map_err(domain_error)?;
+        } else {
+            transaction
+                .execute(
+                    "INSERT INTO queue_metadata (queue_type, data) VALUES ($1, $2)",
+                    &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE, &data],
+                )
+                .map_err(domain_error)?;
+        }
+        transaction.commit().map_err(domain_error)
+    }
+
+    pub fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let data = transaction
+            .query_opt(
+                "SELECT data FROM queue_metadata WHERE queue_type=$1",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+            )
+            .map_err(domain_error)?
+            .map(|row| row.try_get::<_, Vec<u8>>(0))
+            .transpose()
+            .map_err(domain_error)?;
+        let levels = data
+            .map(|data| serde_json::from_slice(&data))
+            .transpose()
+            .map_err(|error| {
+                MatchingDomainMetadataError::InvalidBlob(format!(
+                    "invalid domain replication queue ack levels: {error}"
+                ))
+            })?
+            .unwrap_or_default();
+        transaction.commit().map_err(domain_error)?;
+        Ok(levels)
+    }
+
     /// Create a Go SQL domain row and advance `domain_metadata` in the same
     /// transaction, matching `sqlDomainStore.CreateDomain`. The flattened
     /// ThriftRW blob is the existing Go schema payload; this never migrates or
