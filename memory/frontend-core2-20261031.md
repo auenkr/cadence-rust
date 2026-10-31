@@ -854,7 +854,14 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - This is groundwork only: the modified stores still have their
   Matching-oriented type/API, no `FrontendDomainManager` adapter uses these
   writes, Cassandra CRUD/metadata writes are absent, and domain selection is
-  not wired from Frontend's `defaultStore`. No tests or local Cargo commands
-  have run for these changes yet. Dispatch persistence CI after committing this
-  checkpoint, then continue with transaction interoperability and manager
-  wiring; visibility, history, and execution managers remain open.
+  not wired from Frontend's `defaultStore`. The persistence crate unit suite
+  passes, but no live SQL transaction or Go datastore interoperability test
+  exercises these writes. A follow-up now wraps MySQL domain deletion in an
+  explicit transaction like Go's `txExecute`; exact-head CI is pending for that
+  follow-up. Continue with transaction interoperability and manager wiring;
+  visibility, history, and execution managers remain open.
+- Persistence-package CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41194438379 validated
+  exact head `f93c0eb4bc4372fcf8766a3460e5061a7a04341f` and concluded
+  `success` (formatting, Clippy, and tests). This compiles the SQL changes but
+  does not exercise live SQL transactions or close the manager-wiring gaps.
