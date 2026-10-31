@@ -666,6 +666,16 @@ impl InMemoryDomainStore {
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
+        self.update_with_notification(req, metadata, policy, true)
+    }
+
+    fn update_with_notification(
+        &self,
+        req: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+        notify: bool,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
         let mut inner = self.inner.write().expect("domain store lock");
         let current = inner.by_name.get(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
@@ -696,7 +706,7 @@ impl InMemoryDomainStore {
             is_global_domain: candidate.is_global_domain,
         };
         if prepared.write {
-            if prepared.failover {
+            if prepared.failover && notify {
                 self.notify_failover(&candidate);
             }
             inner.by_name.insert(req.name.clone(), candidate);
@@ -713,6 +723,17 @@ impl InMemoryDomainStore {
         current_cluster: &str,
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
+        self.failover_with_notification(req, current_cluster, metadata, policy, true)
+    }
+
+    fn failover_with_notification(
+        &self,
+        req: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+        notify: bool,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
         use cadence_api::enums::FailoverType;
         let mut inner = self.inner.write().expect("domain store lock");
@@ -807,7 +828,9 @@ impl InMemoryDomainStore {
             after_version: candidate.failover_version,
         });
         *record = candidate;
-        self.notify_failover(record);
+        if notify {
+            self.notify_failover(record);
+        }
         Ok(cadence_api::types::FailoverDomainResponse {
             domain_info: Some(record.info.clone()),
             configuration: Some(record.configuration.clone()),
@@ -1364,12 +1387,15 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let version = self.current_metadata_version()?;
         let response = self
             .cache
-            .update(request, metadata, policy)
+            .update_with_notification(request, metadata, policy, false)
             .map_err(FrontendDomainError::from)?;
         let updated = self.cache.record_by_name(&request.name)?;
         if let Err(error) = self.persist_record(&updated, version, false) {
             self.cache.restore_record(old);
             return Err(error);
+        }
+        if updated.failover_version != old.failover_version {
+            self.cache.notify_failover(&updated);
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
@@ -1387,13 +1413,14 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         let version = self.current_metadata_version()?;
         let response = self
             .cache
-            .failover(request, current_cluster, metadata, policy)
+            .failover_with_notification(request, current_cluster, metadata, policy, false)
             .map_err(FrontendDomainError::from)?;
         let updated = self.cache.record_by_name(&request.domain_name)?;
         if let Err(error) = self.persist_record(&updated, version, false) {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.cache.notify_failover(&updated);
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
     }
@@ -1859,6 +1886,30 @@ mod tests {
         let local = store.subscribe_failover("local-id");
         store.notify_failover(store.inner.read().unwrap().by_name.get("local").unwrap());
         assert!(!local.has_changed().unwrap());
+    }
+
+    #[test]
+    fn persisted_failover_notification_can_be_deferred_until_commit() {
+        let store = InMemoryDomainStore::new();
+        let (info, cfg, rep) = global_sample("g", "uuid-g");
+        store.create(info, cfg, rep, true).unwrap();
+        let mut watch = store.subscribe_failover("uuid-g");
+        let response = store
+            .failover_with_notification(
+                &failover_req("g", "standby"),
+                "standby",
+                &cluster_metadata(),
+                &test_policy(),
+                false,
+            )
+            .unwrap();
+        assert!(!watch.has_changed().unwrap());
+        let persisted = store.record_by_name("g").unwrap();
+        assert_eq!(response.failover_version, persisted.failover_version);
+
+        store.notify_failover(&persisted);
+        assert!(watch.has_changed().unwrap());
+        assert_eq!(*watch.borrow_and_update(), 1);
     }
 
     #[test]
