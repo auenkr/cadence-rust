@@ -1,5 +1,7 @@
 //! Client version checking decorator (Go: wrappers/versioncheck).
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::errors::{CadenceError, ClientVersionNotSupportedError};
 
 /// Go intentionally exempts these metadata/health calls from version

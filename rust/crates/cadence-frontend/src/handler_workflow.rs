@@ -5,8 +5,12 @@
 //! seam represents those outbound calls; its production implementation is
 //! supplied by the frontend client/persistence integration.
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::errors::{BadRequestError, CadenceError};
 use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum WorkflowOperation {
@@ -149,11 +153,11 @@ impl WorkflowOperation {
 /// The client layer must implement Go's existing service boundaries, including
 /// mapping History/Matching errors without changing their Cadence error types.
 pub trait WorkflowBackend: Send + Sync {
-    fn invoke(
-        &self,
+    fn invoke<'a>(
+        &'a self,
         operation: WorkflowOperation,
         request: Value,
-    ) -> Result<Value, CadenceError>;
+    ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
 }
 
 /// Temporary compatibility constructor retained for the independent domain,
@@ -167,20 +171,64 @@ pub fn unimplemented_operation(operation: &str) -> cadence_api::errors::Internal
 
 pub struct Handler<B> {
     backend: B,
+    validator: crate::request_validator::RequestValidator,
 }
 
 impl<B: WorkflowBackend> Handler<B> {
     pub fn new(backend: B) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            validator: crate::request_validator::RequestValidator::default(),
+        }
     }
 
-    pub fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
+    pub fn with_validator(
+        backend: B,
+        validator: crate::request_validator::RequestValidator,
+    ) -> Self {
+        Self { backend, validator }
+    }
+
+    pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
         let operation = WorkflowOperation::from_name(operation).ok_or_else(|| {
             CadenceError::BadRequest(BadRequestError::new(format!(
                 "unknown workflow operation: {operation}"
             )))
         })?;
-        self.backend.invoke(operation, request)
+        let request = self.validate_request(operation, request)?;
+        self.backend.invoke(operation, request).await
+    }
+
+    fn validate_request(
+        &self,
+        operation: WorkflowOperation,
+        value: Value,
+    ) -> Result<Value, CadenceError> {
+        if operation == WorkflowOperation::StartWorkflowExecution {
+            let request: cadence_api::types::StartWorkflowExecutionRequest =
+                serde_json::from_value(value).map_err(|error| {
+                    CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+                })?;
+            self.validator.validate_start(Some(&request))?;
+            return serde_json::to_value(request)
+                .map_err(|error| CadenceError::Unknown(error.to_string()));
+        }
+        if operation == WorkflowOperation::GetWorkflowExecutionHistory {
+            let request: cadence_api::service_types::GetWorkflowExecutionHistoryRequest =
+                serde_json::from_value(value).map_err(|error| {
+                    CadenceError::BadRequest(BadRequestError::new(error.to_string()))
+                })?;
+            if request.domain.is_empty() {
+                return Err(CadenceError::BadRequest(BadRequestError::new(
+                    "Domain not set on request.",
+                )));
+            }
+            self.validator
+                .validate_execution(request.execution.as_ref())?;
+            return serde_json::to_value(request)
+                .map_err(|error| CadenceError::Unknown(error.to_string()));
+        }
+        Ok(value)
     }
 }
 
@@ -192,13 +240,15 @@ mod tests {
     #[derive(Default)]
     struct FakeBackend(Mutex<Vec<WorkflowOperation>>);
     impl WorkflowBackend for FakeBackend {
-        fn invoke(
-            &self,
+        fn invoke<'a>(
+            &'a self,
             operation: WorkflowOperation,
             request: Value,
-        ) -> Result<Value, CadenceError> {
-            self.0.lock().unwrap().push(operation);
-            Ok(request)
+        ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(operation);
+                Ok(request)
+            })
         }
     }
 
@@ -213,19 +263,39 @@ mod tests {
         assert!(WorkflowOperation::from_name("GetTaskListsByDomain").is_some());
     }
 
-    #[test]
-    fn dispatch_preserves_request_and_backend_errors() {
+    #[tokio::test]
+    async fn dispatch_preserves_request_and_backend_errors() {
         let backend = FakeBackend::default();
         let handler = Handler::new(backend);
-        let request = serde_json::json!({"domain": "sample"});
+        let request = serde_json::json!({
+            "domain": "sample",
+            "workflowId": "wf",
+            "workflowType": {"name": "type"},
+            "taskList": {"name": "tasks"},
+            "requestId": "550e8400-e29b-41d4-a716-446655440000",
+            "executionStartToCloseTimeoutSeconds": 60,
+            "taskStartToCloseTimeoutSeconds": 10
+        });
         assert_eq!(
-            handler.dispatch("StartWorkflowExecution", request.clone()).unwrap(),
+            handler.dispatch("StartWorkflowExecution", request.clone()).await.unwrap(),
             request
         );
         assert_eq!(
             handler.backend.0.lock().unwrap().as_slice(),
             &[WorkflowOperation::StartWorkflowExecution]
         );
-        assert!(handler.dispatch("NotAnApi", Value::Null).is_err());
+        assert!(handler.dispatch("NotAnApi", Value::Null).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn workflow_start_validates_before_calling_backend() {
+        let backend = FakeBackend::default();
+        let handler = Handler::new(backend);
+        let error = handler
+            .dispatch("StartWorkflowExecution", serde_json::json!({"domain": "d"}))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, CadenceError::BadRequest(_)));
+        assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }

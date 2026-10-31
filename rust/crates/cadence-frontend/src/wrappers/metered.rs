@@ -1,5 +1,7 @@
 //! Frontend error metering and normalization (Go: wrappers/metered).
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::errors::{CadenceError, InternalServiceError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,22 +28,22 @@ impl Counter {
     /// Metric identifier names used by the Go Frontend metered wrapper.
     pub const fn metric_name(self) -> &'static str {
         match self {
-            Self::Failures => "cadence-failures",
-            Self::BadRequest => "cadence-err-bad-request",
-            Self::ServiceBusy => "cadence-err-service-busy",
-            Self::EntityNotExists => "cadence-err-entity-not-exists",
-            Self::ExecutionAlreadyStarted => "cadence-err-execution-already-started",
-            Self::WorkflowAlreadyCompleted => "cadence-err-workflow-execution-already-completed",
-            Self::DomainAlreadyExists => "cadence-err-domain-already-exists",
-            Self::CancellationAlreadyRequested => "cadence-err-cancellation-already-requested",
-            Self::QueryFailed => "cadence-err-query-failed",
-            Self::LimitExceeded => "cadence-err-limit-exceeded",
-            Self::ClientVersionNotSupported => "cadence-err-client-version-not-supported",
-            Self::ContextTimeout => "cadence-err-context-timeout",
-            Self::ConnectionClosing => "cadence-err-grpc-connection-closing",
-            Self::ServiceUnavailable => "cadence-err-service-unavailable",
-            Self::AuthorizationFailed => "cadence-err-authorize-failed",
-            Self::Unauthorized => "cadence-err-unauthorized",
+            Self::Failures => "cadence_errors",
+            Self::BadRequest => "cadence_errors_bad_request",
+            Self::ServiceBusy => "cadence_errors_service_busy",
+            Self::EntityNotExists => "cadence_errors_entity_not_exists",
+            Self::ExecutionAlreadyStarted => "cadence_errors_execution_already_started",
+            Self::WorkflowAlreadyCompleted => "cadence_errors_workflow_execution_already_completed",
+            Self::DomainAlreadyExists => "cadence_errors_domain_already_exists",
+            Self::CancellationAlreadyRequested => "cadence_errors_cancellation_already_requested",
+            Self::QueryFailed => "cadence_errors_query_failed",
+            Self::LimitExceeded => "cadence_errors_limit_exceeded",
+            Self::ClientVersionNotSupported => "cadence_errors_client_version_not_supported",
+            Self::ContextTimeout => "cadence_errors_context_timeout",
+            Self::ConnectionClosing => "cadence_errors_grpc_connection_closing",
+            Self::ServiceUnavailable => "cadence_errors_service_unavailable",
+            Self::AuthorizationFailed => "cadence_errors_authorize_failed",
+            Self::Unauthorized => "cadence_errors_unauthorized",
         }
     }
 }
@@ -249,7 +251,7 @@ mod tests {
         );
         assert_eq!(error.to_string(), "busy");
         assert_eq!(&*metrics.0.borrow(), &[Counter::ServiceBusy]);
-        assert_eq!(Counter::ServiceBusy.metric_name(), "cadence-err-service-busy");
+        assert_eq!(Counter::ServiceBusy.metric_name(), "cadence_errors_service_busy");
     }
 
     #[test]

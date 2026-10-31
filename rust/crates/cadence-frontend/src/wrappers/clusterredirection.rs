@@ -1,4 +1,6 @@
-//! Cluster redirection policy constants and pure routing decisions.
+//! Cluster redirection policy constants and routing decisions.
+
+#![allow(clippy::result_large_err)]
 //!
 //! The Go frontend has three selected API allowlists. Keep the versions
 //! separate: they are configuration contracts and have evolved independently.
@@ -214,6 +216,7 @@ pub struct ForwardRecord {
 
 /// Stateful policy counterpart to Go `selectedOrAllAPIsForwarding...Redirect`.
 /// Lookup failures intentionally route to the current cluster, as Go does.
+#[allow(clippy::too_many_arguments)]
 pub fn redirect<C, M, F>(
     policy: ForwardingPolicy,
     current_cluster: &str,
@@ -266,15 +269,11 @@ where
             );
         }
 
-        if policy.is_all_domain()
-            && (configured_target.is_empty() || configured_target == active_cluster)
+        if (policy.is_all_domain()
+            && (configured_target.is_empty() || configured_target == active_cluster))
+            || consistency == Consistency::Strong
+            || policy.allows_api(operation)
         {
-            target = active_cluster;
-            should_forward_after_inactive = true;
-        } else if consistency == Consistency::Strong {
-            target = active_cluster;
-            should_forward_after_inactive = true;
-        } else if policy.allows_api(operation) {
             target = active_cluster;
             should_forward_after_inactive = true;
         }
@@ -385,7 +384,7 @@ mod tests {
             Ok("cluster-b".into())
         }
         fn active_cluster_for_cluster_attribute(&self, _: &str, attr: &str) -> Result<String, String> {
-            if attr == "" {
+            if attr.is_empty() {
                 Ok("cluster-a".into())
             } else {
                 Ok("cluster-b".into())

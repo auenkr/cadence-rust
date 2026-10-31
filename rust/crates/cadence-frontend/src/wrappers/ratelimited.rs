@@ -1,5 +1,7 @@
 //! Frontend request throttling policy (Go: wrappers/ratelimited).
 
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
+
 use std::time::Duration;
 
 use cadence_api::errors::{CadenceError, ServiceBusyError};

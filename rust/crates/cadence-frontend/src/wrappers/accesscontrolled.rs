@@ -1,5 +1,7 @@
 //! Authorization wrapper (Go: wrappers/accesscontrolled).
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::errors::{AccessDeniedError, CadenceError};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
