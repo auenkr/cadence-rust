@@ -212,6 +212,11 @@ these fixes; no green CI evidence covers the current changes.
   Clippy found `validate_request` needed a mutable JSON value for the existing
   Go-compatible page-size default mutation. The parameter is now mutable; the
   latest source still needs an exact-head package run.
+- CI run
+  [41177546268](https://github.com/auenkr/cadence-rust/actions/runs/41177546268)
+  tested `e29a3c2ada2a66d2960d15a3fdddd0abca522073` and concluded `failure`.
+  Clippy then reported three needless borrows in Thrift wrapper unit tests;
+  those test references were simplified, with another exact-head run required.
 - Next exact-head CI must be dispatched after pushing the validator API fix and
   metering integration. No green CI result covers the current source.
 - Handler bodies still do not execute Go's workflow-engine transformations:

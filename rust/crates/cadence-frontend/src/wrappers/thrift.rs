@@ -72,17 +72,17 @@ mod tests {
         use cadence_api::errors::{BadRequestError, CadenceError, ServiceBusyError};
         let start = method("StartWorkflowExecution").unwrap();
         assert_eq!(
-            declared_exception(&start, &CadenceError::BadRequest(BadRequestError::new("bad"))),
+            declared_exception(start, &CadenceError::BadRequest(BadRequestError::new("bad"))),
             Some(("BadRequestError", 1))
         );
         assert!(declared_exception(
-            &start,
+            start,
             &CadenceError::ServiceBusy(ServiceBusyError::new("busy"))
         )
         .is_some());
         let health = method("Health").unwrap();
         assert!(declared_exception(
-            &health,
+            health,
             &CadenceError::BadRequest(BadRequestError::new("bad"))
         )
         .is_none());
