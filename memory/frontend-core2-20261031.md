@@ -663,6 +663,36 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   The preceding code head `54c2e54c45141b5499ee4d896dad9a639631ff27` is the
   exact head that validated the validator/lifecycle code in run 41188887361.
 
+## Continuation requested after review — 2026-10-31
+
+- Re-ran the Frontend package workflow on the current branch head
+  `07cfbe0ed071a28c45b0b6a1c7ce36344a14d6d6`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41189844045
+  concluded `success`. No Cargo command was run locally. This verifies the
+  current source baseline; it does not validate new persistence behavior.
+- Re-audited the remaining requested work. The Go validator matrix is already
+  closed by uncached CI run `41181338783` (success, head
+  `97ee38218fbf77970269d3937eb8e82199787285`, all 91 Go table cases). The
+  later failover/lockdown rows passed on `54c2e54` in run `41188887361`.
+- Go lifecycle order is represented in the launcher (health failure, discovery
+  delay, reject requests/stop Admin signal, limiter hook, one-second drain,
+  then stop background workers/resources). The limiter hook is still empty:
+  the Rust Frontend does not construct the seven Go global quota collection
+  owners. The admin signal is available but no Go-equivalent watcher owners
+  have been wired. Lifecycle parity therefore remains open.
+- Production persistence remains open. Frontend `AppState` still holds
+  `InMemoryDomainStore` and `InMemoryExecutionStore`. Configured default-store
+  opening is currently for Matching task persistence plus read-only Go domain
+  metadata. No write-capable SQL/Cassandra DomainManager/metadata manager,
+  configured visibility manager, durable HistoryManager, or durable
+  ExecutionManager is selected and connected to Frontend state. The SQL
+  metadata encoder and Matching task adapters are not production Frontend
+  managers. No code change in this continuation closed these gaps.
+- Next implementation must add manager interfaces/adapters and wire Frontend
+  calls through the selected Go `defaultStore` and `visibilityStore`, then
+  connect real Frontend lifecycle owners and rerun exact-head CI. Do not mark
+  this task complete until both workstreams are implemented and validated.
+
 ## Persistence manager contract inventory — continuation
 
 Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.go`
