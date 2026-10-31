@@ -1047,3 +1047,15 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   formatting, Clippy, and Frontend tests. This confirms the configured-store
   launcher compiles with the Cassandra manager wiring; it does not validate a
   live Cassandra instance or close Visibility, History, or Execution managers.
+- Exact-head follow-up run
+  https://github.com/auenkr/cadence-rust/actions/runs/41200640419 validated
+  `41b67f42a7919d047f30c926b13949bcfd8b6fd3` and concluded `success` for
+  formatting, Clippy, and Frontend tests. No Cargo command ran locally.
+- Current parity status: the Go validator matrix is closed by the recorded
+  91-case exact Go table port and CI evidence. The configured Frontend domain
+  plus domain-metadata manager is selected from the native SQL/Cassandra
+  default-store adapters. Production Visibility, History, and Execution
+  managers are still absent. Shutdown preserves the Go health/delay/handler/
+  limiter/drain/resource order, but the admin stop signal has no runtime
+  subscribers and production constructs no global quota collection owners.
+  These items remain open; this checkpoint is not Frontend completion.
