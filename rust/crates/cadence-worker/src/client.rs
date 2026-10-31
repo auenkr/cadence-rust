@@ -13,19 +13,21 @@ use cadence_proto::api::{
     RespondActivityTaskFailedResponse, RespondDecisionTaskCompletedRequest,
     RespondDecisionTaskCompletedResponse, TaskList, TaskListKind,
 };
+use cadence_proto::api::workflow_api_client::WorkflowApiClient;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 
 #[derive(Clone)]
 pub struct CadenceClient {
     inner: WorkerApiClient<Channel>,
+    frontend: WorkflowApiClient<Channel>,
 }
 
 impl CadenceClient {
     /// Connect to the configured public Frontend gRPC endpoint.
     pub async fn connect(endpoint: impl AsRef<str>) -> anyhow::Result<Self> {
         let endpoint = Endpoint::from_shared(endpoint.as_ref().to_owned())?;
-        let inner = WorkerApiClient::connect(endpoint).await?;
-        Ok(Self { inner })
+        let channel = endpoint.connect().await?;
+        Ok(Self::from_channel(channel))
     }
 
     /// Connect with the same TLS settings used by generated Cadence clients.
@@ -34,13 +36,37 @@ impl CadenceClient {
         tls: ClientTlsConfig,
     ) -> anyhow::Result<Self> {
         let endpoint = Endpoint::from_shared(endpoint.as_ref().to_owned())?.tls_config(tls)?;
-        let inner = WorkerApiClient::connect(endpoint).await?;
-        Ok(Self { inner })
+        let channel = endpoint.connect().await?;
+        Ok(Self::from_channel(channel))
+    }
+
+    fn from_channel(channel: Channel) -> Self {
+        Self {
+            inner: WorkerApiClient::new(channel.clone()),
+            frontend: WorkflowApiClient::new(channel),
+        }
     }
 
     /// Obtain an owned generated client for poller calls.
     pub fn worker_api(&self) -> WorkerApiClient<Channel> {
         self.inner.clone()
+    }
+
+    pub fn workflow_api(&self) -> WorkflowApiClient<Channel> {
+        self.frontend.clone()
+    }
+
+    /// Signal a system workflow, starting it with the supplied compatible
+    /// Frontend request if it is not already running.
+    pub async fn signal_with_start(
+        &mut self,
+        request: cadence_proto::api::SignalWithStartWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::api::SignalWithStartWorkflowExecutionResponse, tonic::Status> {
+        let response = self
+            .frontend
+            .signal_with_start_workflow_execution(tonic::Request::new(request))
+            .await?;
+        Ok(response.into_inner())
     }
 
     /// Poll one decision task from the public WorkerAPI.

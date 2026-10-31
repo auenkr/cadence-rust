@@ -136,6 +136,51 @@ pub struct Request {
     pub domain_name: String,
 }
 
+/// Build Go's remote SignalWithStartWorkflowExecution envelope. The caller
+/// supplies the random request ID and shard selected by the Go client so this
+/// function remains deterministic and testable.
+pub fn remote_signal_request(
+    shard: usize,
+    request_id: impl Into<String>,
+    request: &Request,
+) -> anyhow::Result<cadence_proto::api::SignalWithStartWorkflowExecutionRequest> {
+    use cadence_proto::api::{
+        Payload, SignalWithStartWorkflowExecutionRequest, StartWorkflowExecutionRequest, TaskList,
+        TaskListKind, WorkflowType,
+    };
+
+    let input = crate::workercommon::encode_json(request)?;
+    Ok(SignalWithStartWorkflowExecutionRequest {
+        start_request: Some(StartWorkflowExecutionRequest {
+            domain: crate::workercommon::SYSTEM_DOMAIN.to_owned(),
+            workflow_id: workflow_id(shard),
+            workflow_type: Some(WorkflowType {
+                name: WORKFLOW_TYPE.to_owned(),
+            }),
+            task_list: Some(TaskList {
+                name: TASK_LIST.to_owned(),
+                kind: TaskListKind::Normal as i32,
+                base_name: String::new(),
+            }),
+            execution_start_to_close_timeout: Some(prost_types::Duration {
+                seconds: WORKFLOW_EXECUTION_TIMEOUT_SECONDS as i64,
+                nanos: 0,
+            }),
+            task_start_to_close_timeout: Some(prost_types::Duration {
+                seconds: WORKFLOW_TASK_TIMEOUT_SECONDS as i64,
+                nanos: 0,
+            }),
+            identity: REMOTE_WORKFLOW_IDENTITY.to_owned(),
+            request_id: request_id.into(),
+            workflow_id_reuse_policy: 2,
+            ..Default::default()
+        }),
+        signal_name: SIGNAL_NAME.to_owned(),
+        signal_input: Some(Payload { data: input }),
+        control: Vec::new(),
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Action {
     RequestCancel,
@@ -264,6 +309,36 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&request).unwrap(),
             r#"{"ParentExecution":{"WorkflowID":"parent","RunID":"parent-run"},"Executions":[{"DomainID":"domain-id","DomainName":"domain","WorkflowID":"child","RunID":"child-run","Policy":1}],"DomainName":""}"#
+        );
+    }
+
+    #[test]
+    fn remote_signal_with_start_envelope_matches_go_fields() {
+        let request = super::Request {
+            executions: vec![super::RequestDetail {
+                domain_id: "domain-id".to_owned(),
+                domain_name: "domain".to_owned(),
+                workflow_id: "child".to_owned(),
+                run_id: "run".to_owned(),
+                policy: super::POLICY_REQUEST_CANCEL,
+            }],
+            ..Default::default()
+        };
+        let rpc = super::remote_signal_request(3, "request-id", &request).unwrap();
+        let start = rpc.start_request.unwrap();
+        assert_eq!(start.domain, "cadence-system");
+        assert_eq!(start.workflow_id, "parent-close-policy-workflow-3");
+        assert_eq!(start.workflow_type.unwrap().name, super::WORKFLOW_TYPE);
+        assert_eq!(start.task_list.unwrap().name, super::TASK_LIST);
+        assert_eq!(start.execution_start_to_close_timeout.unwrap().seconds, 630_720_000);
+        assert_eq!(start.task_start_to_close_timeout.unwrap().seconds, 60);
+        assert_eq!(start.identity, "cadence-worker");
+        assert_eq!(start.request_id, "request-id");
+        assert_eq!(start.workflow_id_reuse_policy, 2);
+        assert_eq!(rpc.signal_name, super::SIGNAL_NAME);
+        assert_eq!(
+            rpc.signal_input.unwrap().data,
+            br#"{"ParentExecution":{"WorkflowID":"","RunID":""},"Executions":[{"DomainID":"domain-id","DomainName":"domain","WorkflowID":"child","RunID":"run","Policy":1}],"DomainName":""}"#
         );
     }
 

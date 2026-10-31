@@ -619,6 +619,7 @@ dependencies = [
  "base64 0.22.1",
  "cadence-proto",
  "cadence-service-core",
+ "prost-types",
  "serde",
  "serde_json",
  "serde_yaml",

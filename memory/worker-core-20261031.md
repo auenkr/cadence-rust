@@ -44,6 +44,14 @@ lookup-before-Abandon order and treats missing domains as successful skips;
 other lookup errors stop the batch. Remote client discovery/signal-with-start
 and History status classification remain open.
 
+The tonic client now owns both WorkerAPI and Frontend WorkflowAPI clients over
+the configured channel and exposes SignalWithStart. Parent-close adds a Go
+compatible remote signal request builder with the system domain, random shard
+workflow ID supplied by caller, signal name, workflow-ID reuse policy,
+timeouts, identity, caller-provided request ID, and compact JSON payload. A
+request-envelope fixture checks those values. Remote cluster routing and
+generation of the Go-equivalent random request ID/shard remain unimplemented.
+
 Batcher now has a FIFO child-execution traversal helper mirroring Go's
 `processTask`: it invokes an injectable rate-limit/heartbeat boundary before
 each operation, applies before Describe, skips entity-not-exists from either
