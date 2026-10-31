@@ -780,3 +780,21 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   hook. This validates the stop seam and test only; the runtime still has no
   actual registered Go quota collections, and all five production persistence
   managers remain outstanding.
+
+## Frontend domain-manager seam — continuation
+
+- Added `FrontendDomainManager` to cadence-persistence and routed Frontend
+  domain API methods through the injectable manager field on `AppState`.
+  `InMemoryDomainStore` implements the contract and remains the default; its
+  cloned handle is still shared with Matching's domain cache. This is an
+  adapter seam, not a production manager or persistence backend.
+- Added a test that the default manager writes through the shared Matching
+  cache. Exact-head package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41192829670 checked
+  `f644498bf0b383ce508e06e262329ac94a9b0e5e` and concluded `success` for the
+  manager interface change. The subsequent cache-sharing test is not covered
+  by that run and needs exact-head CI.
+- The config factory still exposes only Matching task persistence and a
+  read-only domain metadata source. SQL/Cassandra CRUD transactions and
+  Frontend domain manager selection are still unimplemented. Visibility,
+  History, and Execution manager implementations are also still absent.

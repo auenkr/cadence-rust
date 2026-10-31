@@ -2577,6 +2577,30 @@ mod frontend_drain_tests {
         assert!(state.frontend_limiters.lock().unwrap().is_empty());
     }
 
+    #[test]
+    fn default_frontend_domain_manager_keeps_matching_cache_shared() {
+        let state = AppState::default();
+        state
+            .domain_manager
+            .create_with_version(
+                cadence_api::types::DomainInfo {
+                    name: "shared-domain".into(),
+                    uuid: "shared-id".into(),
+                    ..Default::default()
+                },
+                cadence_api::types::DomainConfiguration::default(),
+                cadence_api::types::DomainReplicationConfiguration::default(),
+                false,
+                cadence_persistence::version_history::EMPTY_VERSION,
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.domains.domain_id("shared-domain").unwrap(),
+            "shared-id"
+        );
+    }
+
     #[tokio::test]
     async fn frontend_health_fails_before_admission_closes() {
         let state = AppState::default();
