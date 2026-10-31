@@ -123,7 +123,7 @@ impl CassandraDomainMetadataPersistence {
         &self,
         last_message_id: i64,
         max_count: i32,
-    ) -> Result<Vec<crate::matching_domain_mysql::DomainReplicationQueueMessage>, String> {
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, String> {
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
             DOMAIN_QUEUE_READ,
@@ -133,7 +133,7 @@ impl CassandraDomainMetadataPersistence {
         rows.rows::<(i64, Vec<u8>)>().map_err(|error| error.to_string())?
             .map(|row| {
                 let (id, payload) = row.map_err(|error| error.to_string())?;
-                Ok(crate::matching_domain_mysql::DomainReplicationQueueMessage { id, payload })
+                Ok(crate::matching_domain_metadata::DomainReplicationQueueMessage { id, payload })
             })
             .collect()
     }
@@ -366,6 +366,41 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         self.driver.run(session.query_unpaged("DELETE FROM domains_by_name_v2 WHERE domains_partition=? AND name=?", (DOMAIN_PARTITION, domain.name.clone()))).map_err(|e| e.to_string())?;
         self.driver.run(session.query_unpaged("DELETE FROM domains WHERE id=?", (id,))).map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    fn enqueue_domain_replication_message(&self, payload: Vec<u8>) -> Result<i64, String> {
+        CassandraDomainMetadataPersistence::enqueue_domain_replication_message(self, payload)
+    }
+
+    fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, String> {
+        let max_count = i32::try_from(max_count).map_err(|error| error.to_string())?;
+        CassandraDomainMetadataPersistence::read_domain_replication_messages(
+            self,
+            last_message_id,
+            max_count,
+        )
+    }
+
+    fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        CassandraDomainMetadataPersistence::get_domain_replication_ack_levels(self)
+    }
+
+    fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        CassandraDomainMetadataPersistence::update_domain_replication_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
     }
 }
 

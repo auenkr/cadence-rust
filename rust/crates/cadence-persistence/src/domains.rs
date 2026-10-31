@@ -1292,6 +1292,23 @@ impl PersistedFrontendDomainManager {
         };
         result.map_err(FrontendDomainError::Persistence)
     }
+
+    fn publish_replication_task(
+        &self,
+        record: &DomainRecord,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<(), FrontendDomainError> {
+        if !record.is_global_domain {
+            return Ok(());
+        }
+        let payload = record
+            .encode_domain_replication_task(operation)
+            .map_err(FrontendDomainError::Persistence)?;
+        self.persistence
+            .enqueue_domain_replication_message(payload)
+            .map(|_| ())
+            .map_err(FrontendDomainError::Persistence)
+    }
 }
 
 impl FrontendDomainManager for PersistedFrontendDomainManager {
@@ -1317,6 +1334,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             let _ = self.cache.delete(&name);
             return Err(error);
         }
+        self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Create)?;
         Ok(response)
     }
 
@@ -1353,6 +1371,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
     }
 
@@ -1375,6 +1394,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
     }
 
@@ -1397,6 +1417,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
     }
 
@@ -1406,7 +1427,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         self.persistence
             .delete_domain(&record.info.uuid)
             .map_err(FrontendDomainError::Persistence)?;
-        self.cache.delete(name).map_err(FrontendDomainError::from)
+        self.cache.delete(name).map_err(FrontendDomainError::from)?;
+        self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Delete)
     }
 
     fn list_page(

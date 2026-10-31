@@ -20,12 +20,6 @@ const GO_DOMAIN_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
 const GO_DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
 type DomainMetadataRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DomainReplicationQueueMessage {
-    pub id: i64,
-    pub payload: Vec<u8>,
-}
-
 #[derive(Clone)]
 pub struct MySqlDomainMetadataStore {
     pool: Arc<crate::matching_mysql::SyncConnectionPool>,
@@ -464,7 +458,7 @@ impl MySqlDomainMetadataStore {
                         .await?;
                     Ok(rows
                         .into_iter()
-                        .map(|(id, payload)| DomainReplicationQueueMessage { id, payload })
+                        .map(|(id, payload)| crate::matching_domain_metadata::DomainReplicationQueueMessage { id, payload })
                         .collect())
                 })
             })
@@ -646,6 +640,44 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
 
     fn delete_domain(&self, id: &str) -> Result<(), String> {
         MySqlDomainMetadataStore::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+
+    fn enqueue_domain_replication_message(&self, payload: Vec<u8>) -> Result<i64, String> {
+        MySqlDomainMetadataStore::enqueue_domain_replication_message(self, payload)
+            .map_err(|error| error.to_string())
+    }
+
+    fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, String> {
+        MySqlDomainMetadataStore::read_domain_replication_messages(
+            self,
+            last_message_id,
+            max_count,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        MySqlDomainMetadataStore::get_domain_replication_ack_levels(self)
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        MySqlDomainMetadataStore::update_domain_replication_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
+        .map_err(|error| error.to_string())
     }
 }
 
