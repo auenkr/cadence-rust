@@ -622,3 +622,16 @@ migration forward.
   remain primary blockers. Next work is to add transactional persistence and bind
   it at configured Frontend startup before advancing the remaining Admin DLQ/
   History, scheduler and membership gaps.
+- Added configured SQL domain write primitives to the existing metadata adapters:
+  MySQL and PostgreSQL create/update now encode the Go flattened
+  `sqlblobs.DomainInfo` payload and atomically compare-and-advance
+  `domain_metadata.notification_version`; delete uses the Go no-notification-
+  bump behavior. These are persistence primitives only: the Frontend manager and
+  configured startup do not yet call them, and Cassandra writer support is still
+  absent. Source commits: `f0d4dd6a3` (MySQL), `247c371ee` (PostgreSQL).
+- Run [41193495788](https://github.com/auenkr/cadence-rust/actions/runs/41193495788)
+  was cancelled by the next push before validation. Run
+  [41193518257](https://github.com/auenkr/cadence-rust/actions/runs/41193518257)
+  targets `247c371ee59a033acf0db1b203786c30e9452438` and is still running at
+  this save; it includes both SQL primitives. Inspect its Clippy/format/test
+  result before relying on either implementation. No Cargo command ran locally.
