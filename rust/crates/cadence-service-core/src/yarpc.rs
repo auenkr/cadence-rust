@@ -740,6 +740,27 @@ fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
     }))
 }
 
+fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::MergeDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let Some(dlq_type) = req.dlq_type else {
+        return Err(AppError::bad_request("Queue type is not set.".to_string()));
+    };
+    if dlq_type == cadence_api::enums::DLQType::Invalid {
+        return Err(AppError::bad_request(
+            "The DLQ type is not supported.".to_string(),
+        ));
+    }
+    if dlq_type != cadence_api::enums::DLQType::Domain {
+        return Err(AppError::internal(
+            "History Admin client is not configured.".to_string(),
+        ));
+    }
+    let response = crate::admin::merge_domain_dlq_messages(state, req)
+        .map_err(AppError::internal)?;
+    Ok(wrap_success(&response))
+}
+
 fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DeleteWorkflowRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2060,6 +2081,7 @@ pub async fn dispatch(
         "DescribeCluster" => handle_describe_cluster(),
         "ResetQueue" => handle_reset_queue(state, body),
         "DescribeQueue" => handle_describe_queue(state, body),
+        "MergeDLQMessages" => handle_merge_dlq_messages(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
         "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),

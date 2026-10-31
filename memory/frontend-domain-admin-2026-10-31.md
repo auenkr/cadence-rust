@@ -145,6 +145,11 @@
   [41209358527](https://github.com/auenkr/cadence-rust/actions/runs/41209358527)
   passed Clippy, Formatting, and Test at exact head
   `11fcd90df2159fc04f201b0527a5020a7f7499df`, covering this DLQ merge slice.
+- Added YARPC dispatch for `MergeDLQMessages` using the same domain executor as
+  the HTTP Admin route. The replication DLQ merge slice now reaches the shared
+  domain mutation implementation over both exposed transports; CI for this
+  dispatch addition is pending. Count/read/purge YARPC dispatch, replicated
+  audit log writes, and the background consumer remain open.
 
 - Rebased this branch onto `origin/frontend-core` at `996486568` and pushed
   the rebased branch head `e2f232449aec2a01b0c153f1e8ab2ba439da34c9`.
