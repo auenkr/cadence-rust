@@ -15,6 +15,7 @@ use cadence_api::{
     },
     types::{FailoverDomainRequest, RefreshWorkflowTasksRequest, RegisterDomainRequest},
 };
+use std::sync::{Arc, Mutex};
 
 /// Typed subset of Frontend configuration consumed by request validation.
 /// Values are populated from the canonical Go dynamic-property keys.
@@ -56,11 +57,49 @@ impl Default for ValidationConfig {
 #[derive(Debug, Clone, Default)]
 pub struct RequestValidator {
     pub config: ValidationConfig,
+    /// Shared with Frontend's dynamic-config handlers. Read on every request,
+    /// so admin updates and provider refreshes take effect without rebuilding
+    /// the validator, as Go's typed property closures do.
+    pub dynamic: Option<Arc<Mutex<cadence_service_core::admin::DynamicConfigOverlay>>>,
 }
 
 impl RequestValidator {
     fn bad(message: impl Into<String>) -> BadRequestError {
         BadRequestError::new(message)
+    }
+
+    pub fn with_dynamic_config(
+        mut self,
+        dynamic: Arc<Mutex<cadence_service_core::admin::DynamicConfigOverlay>>,
+    ) -> Self {
+        self.dynamic = Some(dynamic);
+        self
+    }
+
+    fn dynamic_integer(&self, key: &str, domain: Option<&str>, default: i64) -> i64 {
+        let Some(dynamic) = &self.dynamic else { return default };
+        let Ok(dynamic) = dynamic.lock() else { return default };
+        cadence_persistence::dynamic_config::integer(dynamic.property_values(key), domain, default)
+    }
+
+    fn dynamic_boolean(&self, key: &str, domain: Option<&str>, default: bool) -> bool {
+        let Some(dynamic) = &self.dynamic else { return default };
+        let Ok(dynamic) = dynamic.lock() else { return default };
+        cadence_persistence::dynamic_config::boolean(dynamic.property_values(key), domain, default)
+    }
+
+    fn dynamic_string(&self, key: &str, default: &str) -> String {
+        let Some(dynamic) = &self.dynamic else { return default.to_owned() };
+        let Ok(dynamic) = dynamic.lock() else { return default.to_owned() };
+        cadence_persistence::dynamic_config::string(dynamic.property_values(key), default)
+    }
+
+    fn visibility_max_page_size(&self, domain: &str) -> i32 {
+        self.dynamic_integer("frontend.visibilityMaxPageSize", Some(domain), i64::from(self.config.visibility_max_page_size)) as i32
+    }
+
+    fn es_index_max_result_window(&self) -> i32 {
+        self.dynamic_integer("frontend.esIndexMaxResultWindow", None, i64::from(self.config.es_index_max_result_window)) as i32
     }
 
     fn domain_missing(domain: &str) -> Result<(), BadRequestError> {
@@ -72,36 +111,41 @@ impl RequestValidator {
     }
 
     fn page_size_too_large(&self, size: i32) -> bool {
-        self.config.advanced_visibility_store && size > self.config.es_index_max_result_window
+        let domain_uses_advanced = self.dynamic_string("system.readVisibilityStoreName", "db") != "db";
+        self.config.advanced_visibility_store
+            && domain_uses_advanced
+            && size > self.es_index_max_result_window()
     }
 
     fn check_page_size(&self, size: i32) -> Result<(), BadRequestError> {
         if self.page_size_too_large(size) {
             return Err(Self::bad(format!(
                 "Pagesize is larger than allow {}",
-                self.config.es_index_max_result_window
+                self.es_index_max_result_window()
             )));
         }
         Ok(())
     }
 
     fn check_permission(&self, token: &str) -> Result<(), BadRequestError> {
-        if self.config.admin_protection
-            && (token.is_empty() || token != self.config.admin_operation_token)
+        let protected = self.dynamic_boolean("history.enableAdminProtection", None, self.config.admin_protection);
+        let required = self.dynamic_string("history.adminOperationToken", &self.config.admin_operation_token);
+        if protected && (token.is_empty() || token != required)
         {
             return Err(Self::bad("No permission to do this operation."));
         }
         Ok(())
     }
 
-    fn check_task_list(&self, task_list: Option<&cadence_api::types::TaskList>) -> Result<(), BadRequestError> {
+    fn check_task_list(&self, task_list: Option<&cadence_api::types::TaskList>, domain: &str) -> Result<(), BadRequestError> {
         let Some(task_list) = task_list else {
             return Err(Self::bad("TaskList is not set on request."));
         };
         if task_list.name.is_empty() {
             return Err(Self::bad("TaskList is not set on request."));
         }
-        if task_list.name.chars().count() > self.config.max_task_list_name_length {
+        let max_length = self.dynamic_integer("limit.taskListNameLength", Some(domain), self.config.max_task_list_name_length as i64) as usize;
+        if task_list.name.len() > max_length {
             return Err(Self::bad("TaskList length exceeds limit."));
         }
         Ok(())
@@ -144,7 +188,7 @@ impl RequestValidator {
         if request.task_list_type.is_none() {
             return Err(Self::bad("TaskListType is not set on request."));
         }
-        self.check_task_list(request.task_list.as_ref())
+        self.check_task_list(request.task_list.as_ref(), &request.domain)
     }
 
     pub fn validate_list_task_list_partitions_request(
@@ -153,7 +197,7 @@ impl RequestValidator {
     ) -> Result<(), BadRequestError> {
         let request = request.ok_or_else(|| Self::bad("Request is nil."))?;
         Self::domain_missing(&request.domain)?;
-        self.check_task_list(request.task_list.as_ref())
+        self.check_task_list(request.task_list.as_ref(), &request.domain)
     }
 
     pub fn validate_get_task_lists_by_domain_request(
@@ -188,7 +232,7 @@ impl RequestValidator {
         let request = request.ok_or_else(|| Self::bad("Request is nil."))?;
         Self::domain_missing(&request.domain)?;
         if request.page_size <= 0 {
-            request.page_size = self.config.visibility_max_page_size;
+            request.page_size = self.visibility_max_page_size(&request.domain);
         }
         self.check_page_size(request.page_size)
     }
@@ -204,7 +248,7 @@ impl RequestValidator {
             return Err(Self::bad("Only one of ExecutionFilter or TypeFilter is allowed"));
         }
         if request.maximum_page_size <= 0 {
-            request.maximum_page_size = self.config.visibility_max_page_size;
+            request.maximum_page_size = self.visibility_max_page_size(&request.domain);
         }
         self.check_page_size(request.maximum_page_size)
     }
@@ -216,12 +260,13 @@ impl RequestValidator {
         let request = request.ok_or_else(|| Self::bad("Request is nil."))?;
         Self::domain_missing(&request.domain)?;
         if request.page_size <= 0 {
-            request.page_size = self.config.visibility_max_page_size;
+            request.page_size = self.visibility_max_page_size(&request.domain);
         }
-        if request.page_size > self.config.visibility_archival_query_max_page_size {
+        let max_page_size = self.dynamic_integer("frontend.visibilityArchivalQueryMaxPageSize", None, i64::from(self.config.visibility_archival_query_max_page_size)) as i32;
+        if request.page_size > max_page_size {
             return Err(Self::bad(format!(
                 "Pagesize is larger than allowed {}",
-                self.config.visibility_archival_query_max_page_size
+                max_page_size
             )));
         }
         Ok(())
@@ -243,7 +288,7 @@ impl RequestValidator {
             ));
         }
         if request.maximum_page_size <= 0 {
-            request.maximum_page_size = self.config.visibility_max_page_size;
+            request.maximum_page_size = self.visibility_max_page_size(&request.domain);
         }
         self.check_page_size(request.maximum_page_size)
     }
@@ -256,17 +301,26 @@ impl RequestValidator {
         if request.name.is_empty() {
             return Err(Self::bad("Domain not set on request."));
         }
-        if request.name.chars().count() > self.config.max_domain_name_length {
+        let max_domain_length = self.dynamic_integer("limit.domainNameLength", Some(&request.name), self.config.max_domain_name_length as i64) as usize;
+        if request.name.len() > max_domain_length {
             return Err(Self::bad("Domain length exceeds limit."));
         }
-        if request.workflow_execution_retention_period_in_days > self.config.max_retention_days {
+        let max_retention = self.dynamic_integer("system.maxRetentionDays", None, i64::from(self.config.max_retention_days)) as i32;
+        if request.workflow_execution_retention_period_in_days > max_retention {
             return Err(Self::bad("RetentionDays is invalid."));
         }
-        for key in &self.config.required_domain_data_keys {
+        let required_keys = if let Some(dynamic) = &self.dynamic {
+            dynamic.lock().ok().map(|dynamic| {
+                cadence_persistence::dynamic_config::string_list(dynamic.property_values("system.requiredDomainDataKeys"))
+            }).filter(|keys| !keys.is_empty()).unwrap_or_else(|| self.config.required_domain_data_keys.clone())
+        } else {
+            self.config.required_domain_data_keys.clone()
+        };
+        for key in &required_keys {
             if !request.data.as_ref().is_some_and(|data| data.contains_key(key)) {
                 return Err(Self::bad(format!(
                     "domain data error, missing required key {key} . All required keys: {:?}",
-                    self.config.required_domain_data_keys
+                    required_keys
                 )));
             }
         }
@@ -296,12 +350,12 @@ impl RequestValidator {
             .configuration
             .as_ref()
             .and_then(|config| config.workflow_execution_retention_period_in_days)
-            .is_some_and(|days| days > self.config.max_retention_days)
+            .is_some_and(|days| days > self.dynamic_integer("system.maxRetentionDays", None, i64::from(self.config.max_retention_days)) as i32)
         {
             return Err(Self::bad("RetentionDays is invalid."));
         }
         if request.is_failover() {
-            self.check_failover_permission()
+            self.check_failover_permission(&request.name)
         } else {
             self.check_permission(&request.security_token)
         }
@@ -340,18 +394,19 @@ impl RequestValidator {
             if timeout <= 0 {
                 return Err(Self::bad("FailoverTimeoutInSeconds must be positive"));
             }
-            if timeout > self.config.max_failover_timeout_seconds {
+            let max_timeout = self.dynamic_integer("frontend.maxFailoverTimeoutInSeconds", Some(&request.domain_name), i64::from(self.config.max_failover_timeout_seconds)) as i32;
+            if timeout > max_timeout {
                 return Err(Self::bad(format!(
                     "FailoverTimeoutInSeconds {timeout} exceeds the maximum allowed {}",
-                    self.config.max_failover_timeout_seconds
+                    max_timeout
                 )));
             }
         }
-        self.check_failover_permission()
+        self.check_failover_permission(&request.domain_name)
     }
 
-    fn check_failover_permission(&self) -> Result<(), BadRequestError> {
-        if self.config.lockdown {
+    fn check_failover_permission(&self, domain: &str) -> Result<(), BadRequestError> {
+        if self.dynamic_boolean("system.Lockdown", Some(domain), self.config.lockdown) {
             Err(Self::bad(
                 "Domain is not accepting fail overs at this time due to lockdown.",
             ))

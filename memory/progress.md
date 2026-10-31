@@ -1858,3 +1858,17 @@ passed 9/10 (one pre-existing Go-database interop test is intentionally ignored)
 cache-focused tests passed 14/14, and locked strict workspace Clippy passed.
 See `memory/evidence/matching-domain-cache/`; production wiring and mixed-service
 validation remain outstanding.
+
+## 2026-10-31: Frontend core continuation
+
+Branch `frontend-core2` started from `origin/frontend-core`. Ported all 16 Go
+request-validator entry points, including default page-size mutation, filter
+validation, permission/failover checks and live reads through the shared dynamic
+overlay seam. Replaced channel-only History/Matching constructors with typed
+generated gRPC clients and TLS peer dialing. Corrected update-domain failover
+classification to match Go pointer presence. CI run
+https://github.com/auenkr/cadence-rust/actions/runs/41174450063 at head
+`e268cf3c5ed7e1160e5df74a2e663b6f6dd144fd` was still running at save time; it
+predates the subsequent dynamic-config and failover corrections. No local Cargo
+command was run. Remaining Frontend work is listed in
+`frontend-core2-20261031.md`; this slice is not a service parity claim.

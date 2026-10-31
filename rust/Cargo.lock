@@ -407,6 +407,7 @@ dependencies = [
  "anyhow",
  "cadence-api",
  "cadence-matching",
+ "cadence-persistence",
  "cadence-proto",
  "cadence-service-core",
  "cadence-thrift",

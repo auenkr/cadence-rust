@@ -14,6 +14,7 @@ cadence-api = { path = "../cadence-api" }
 cadence-matching = { path = "../cadence-matching" }
 cadence-service-core = { path = "../cadence-service-core" }
 cadence-proto = { path = "../cadence-proto" }
+cadence-persistence = { path = "../cadence-persistence" }
 cadence-thrift = { path = "../cadence-thrift" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
