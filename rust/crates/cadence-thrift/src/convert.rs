@@ -14,8 +14,8 @@ use cadence_api::admin::{
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
     MaintainCorruptWorkflowResponse, MembershipInfo, MergeDLQMessagesRequest,
-    MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo,
-    ReadDLQMessagesRequest, ReadDLQMessagesResponse, PurgeDLQMessagesRequest, PurgeDLQMessagesResponse,
+    MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo, PurgeDLQMessagesRequest,
+    PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
     ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
@@ -454,12 +454,15 @@ impl FromThrift for ReadDLQMessagesRequest {
 impl ToThrift for ReadDLQMessagesRequest {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.oi32(10, self.dlq_type.map(|value| match value {
-            DLQType::Replication => 0,
-            DLQType::Domain => 1,
-            DLQType::Invalid => -1,
-            _ => -1,
-        }));
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
         f.oi32(20, Some(self.shard_id));
         f.sstr(30, &self.source_cluster);
         f.oi64(40, self.inclusive_end_message_id);
@@ -480,12 +483,15 @@ fn dlq_type_from_go_thrift(value: i32) -> DLQType {
 impl ToThrift for ReadDLQMessagesResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.oi32(10, self.dlq_type.map(|value| match value {
-            DLQType::Replication => 0,
-            DLQType::Domain => 1,
-            DLQType::Invalid => -1,
-            _ => -1,
-        }));
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
         f.olist(20, &self.replication_tasks);
         f.sbytes(30, &self.next_page_token);
         f.finish()
@@ -516,12 +522,15 @@ impl FromThrift for PurgeDLQMessagesRequest {
 impl ToThrift for PurgeDLQMessagesRequest {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.oi32(10, self.dlq_type.map(|value| match value {
-            DLQType::Replication => 0,
-            DLQType::Domain => 1,
-            DLQType::Invalid => -1,
-            _ => -1,
-        }));
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
         f.oi32(20, Some(self.shard_id));
         f.sstr(30, &self.source_cluster);
         f.oi64(40, self.inclusive_end_message_id);
@@ -6768,7 +6777,10 @@ mod timeout_wire_tests {
         assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
         assert_eq!(encoded.opt_i32(50).unwrap(), Some(8));
         assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![5, 6]);
-        assert_eq!(ReadDLQMessagesRequest::from_thrift(&encoded).unwrap(), request);
+        assert_eq!(
+            ReadDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            request
+        );
 
         let response = ReadDLQMessagesResponse {
             dlq_type: Some(DLQType::Domain),
@@ -6782,7 +6794,10 @@ mod timeout_wire_tests {
         let encoded = response.to_thrift();
         assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
         assert_eq!(encoded.bytes_or_empty(30).unwrap(), vec![8, 9]);
-        assert_eq!(ReadDLQMessagesResponse::from_thrift(&encoded).unwrap(), response);
+        assert_eq!(
+            ReadDLQMessagesResponse::from_thrift(&encoded).unwrap(),
+            response
+        );
 
         let purge = PurgeDLQMessagesRequest {
             dlq_type: Some(DLQType::Domain),
@@ -6794,7 +6809,10 @@ mod timeout_wire_tests {
         assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
         assert_eq!(encoded.opt_i32(20).unwrap(), Some(4));
         assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
-        assert_eq!(PurgeDLQMessagesRequest::from_thrift(&encoded).unwrap(), purge);
+        assert_eq!(
+            PurgeDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            purge
+        );
     }
 
     #[test]
@@ -6810,18 +6828,27 @@ mod timeout_wire_tests {
         let encoded = request.to_thrift();
         assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
         assert_eq!(encoded.opt_i32(20).unwrap(), Some(7));
-        assert_eq!(encoded.opt_string(30).unwrap().as_deref(), Some("cluster-b"));
+        assert_eq!(
+            encoded.opt_string(30).unwrap().as_deref(),
+            Some("cluster-b")
+        );
         assert_eq!(encoded.opt_i64(40).unwrap(), Some(99));
         assert_eq!(encoded.opt_i32(50).unwrap(), Some(12));
         assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![0, 255]);
-        assert_eq!(MergeDLQMessagesRequest::from_thrift(&encoded).unwrap(), request);
+        assert_eq!(
+            MergeDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            request
+        );
 
         let response = MergeDLQMessagesResponse {
             next_page_token: vec![1, 2, 3],
         };
         let encoded = response.to_thrift();
         assert_eq!(encoded.bytes_or_empty(10).unwrap(), vec![1, 2, 3]);
-        assert_eq!(MergeDLQMessagesResponse::from_thrift(&encoded).unwrap(), response);
+        assert_eq!(
+            MergeDLQMessagesResponse::from_thrift(&encoded).unwrap(),
+            response
+        );
     }
 
     #[test]

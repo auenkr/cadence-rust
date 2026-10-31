@@ -1322,3 +1322,56 @@ migration forward.
   This source change is pending commit and exact-head Frontend CI; no Cargo
   command was run locally. History read, purge, merge and DLQ replication
   methods remain open.
+
+## Frontend integration sync and Cassandra domain reads — 2026-10-31
+
+- Merged the current `origin/frontend-core2` head
+  `3592ec58828b723c85e7b25ad2df655026a07a8a` at `62355e781`. Verified
+  `origin/t3/frontend-workflow-api` (`cbb69d675`) and `origin/master`
+  (`94e79ff98`) are already ancestors of `frontend-domain-admin`. The earlier
+  integration retained both sides of the named persistence, handler, Matching
+  task-store and memory conflicts. Pushed the integration branch as
+  `origin/frontend-domain-admin`.
+- Exact-head run
+  [41218142922](https://github.com/auenkr/cadence-rust/actions/runs/41218142922)
+  failed Clippy at `16bcc6bf78293af777110da42127aab2a745f62c`: the Thrift
+  `ReadDLQMessagesResponse` decoder used `opt_enum` without a `FromI32`
+  implementation for `DLQType`. Replaced it with an explicit Go Thrift numeric
+  mapping (0 replication, 1 domain, unknown invalid) and added value coverage.
+- Exact-head run
+  [41218696029](https://github.com/auenkr/cadence-rust/actions/runs/41218696029)
+  failed before Cargo on the Admin helper's rustfmt layout. Run
+  [41218965957](https://github.com/auenkr/cadence-rust/actions/runs/41218965957)
+  uses the CI formatter artifact against source SHA
+  `26f9cc54249f8a289f99714099be25b0afe35026`; collect its result and apply its
+  patch before final exact-head validation.
+- Cassandra `DomainMetadataPersistence` now delegates `get_domain` and
+  paginated `list_domains` to the Go-compatible `CassandraDomainMetadataStore`
+  reader, using the configured active-cluster name to decode replication
+  state. This closes a runtime hole where persisted Frontend `DescribeDomain`
+  and `ListDomains` failed after writes/restarts despite Cassandra read support
+  existing elsewhere. Commit `26f9cc542` is pushed; its package Clippy/tests
+  remain unverified pending formatting repair.
+- Remaining parity blockers include durable failover audit rows, History Admin
+  RPC coverage, dynamic-config backing writes, live cluster membership,
+  search-attribute backend mutation, scheduler workflow dispatch and mixed
+  Go/Rust failure/restart/recovery acceptance.
+
+## Integration refresh and formatting repair — 2026-10-31
+
+- Fetched current refs and verified `origin/t3/frontend-workflow-api`
+  (`cbb69d675`) and `origin/master` (`94e79ff98`) are ancestors of the branch.
+  Merged the latest `origin/frontend-core2` tip `193e7516e`, which contained
+  five additional lines of memory evidence. This adds no source changes; the
+  earlier merge `62355e781` carries the core2 code and the conflict resolutions
+  for domains, service handlers, Matching task storage, and memory.
+- Formatter-enabled run
+  [41218965957](https://github.com/auenkr/cadence-rust/actions/runs/41218965957)
+  uploaded `frontend-format.patch` for source SHA
+  `26f9cc54249f8a289f99714099be25b0afe35026`. Applied that exact CI-produced
+  patch; it formats the persistence replication manager, Admin handlers and
+  Thrift conversions. This is not a validation pass; a fresh exact-head package
+  run is required after commit and push.
+- The Cassandra domain-read source and the integration/format changes are
+  being committed together. No Cargo command ran locally. Domain failover
+  auditing and other listed parity blockers remain open.

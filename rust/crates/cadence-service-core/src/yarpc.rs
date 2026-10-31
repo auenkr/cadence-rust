@@ -194,12 +194,15 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    state.domain_manager.delete(&req.name).map_err(|error| match error {
-        cadence_persistence::FrontendDomainError::NotFound(error) => {
-            AppError::entity_not_exists(error.message)
-        }
-        other => AppError::internal(other.to_string()),
-    })?;
+    state
+        .domain_manager
+        .delete(&req.name)
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::NotFound(error) => {
+                AppError::entity_not_exists(error.message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     state.executions.unregister_domain(&req.name);
     Ok(Struct { fields: Vec::new() })
 }
@@ -323,10 +326,13 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     } else {
         cadence_persistence::version_history::EMPTY_VERSION
     };
-    match state
-        .domain_manager
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    match state.domain_manager.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(_) => {
             state.executions.register_domain(
                 &req.name,
@@ -486,12 +492,18 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domain_manager.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::FrontendDomainError::Busy(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            Err(AppError::busy(message))
+        }
         Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
@@ -732,10 +744,11 @@ fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::admin::ReadDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     require_domain_dlq_type(request.dlq_type)?;
-    let persistence = state
-        .domain_metadata_persistence
-        .as_ref()
-        .ok_or_else(|| AppError::internal("domain replication DLQ is unavailable for this persistence backend".to_string()))?;
+    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
+        AppError::internal(
+            "domain replication DLQ is unavailable for this persistence backend".to_string(),
+        )
+    })?;
     let ack_levels = persistence
         .get_domain_replication_dlq_ack_levels()
         .map_err(AppError::internal)?;
@@ -754,13 +767,18 @@ fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
             &mut cadence_thrift::protocol::Reader::new(&row.payload),
         )
         .map_err(|error| AppError::internal(error.to_string()))?;
-        let mut task = <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(&thrift)
+        let mut task =
+            <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(
+                &thrift,
+            )
             .map_err(|error| AppError::internal(error.to_string()))?;
         task.source_task_id = Some(row.id);
         tasks.push(task);
     }
     let next_page_token = if rows.len() >= page_size {
-        crate::admin::encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
+        crate::admin::encode_domain_dlq_page_token(
+            rows.last().map_or(first_message_id, |row| row.id),
+        )
     } else {
         Vec::new()
     };
@@ -775,10 +793,11 @@ fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::admin::PurgeDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
     require_domain_dlq_type(request.dlq_type)?;
-    let persistence = state
-        .domain_metadata_persistence
-        .as_ref()
-        .ok_or_else(|| AppError::internal("domain replication DLQ is unavailable for this persistence backend".to_string()))?;
+    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
+        AppError::internal(
+            "domain replication DLQ is unavailable for this persistence backend".to_string(),
+        )
+    })?;
     let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
     let ack_levels = persistence
         .get_domain_replication_dlq_ack_levels()
@@ -788,11 +807,11 @@ fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
         .delete_domain_replication_dlq_range(ack_level, end_message_id)
         .map_err(AppError::internal)?;
     // Go logs and ignores an ack metadata update failure after the delete.
-    let _ = persistence.update_domain_replication_dlq_ack_level(
-        "domainReplication".to_string(),
-        end_message_id,
-    );
-    Ok(wrap_success(&cadence_api::admin::PurgeDLQMessagesResponse {}))
+    let _ = persistence
+        .update_domain_replication_dlq_ack_level("domainReplication".to_string(), end_message_id);
+    Ok(wrap_success(
+        &cadence_api::admin::PurgeDLQMessagesResponse {},
+    ))
 }
 
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
@@ -876,8 +895,8 @@ fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
             "History Admin client is not configured.".to_string(),
         ));
     }
-    let response = crate::admin::merge_domain_dlq_messages(state, req)
-        .map_err(AppError::internal)?;
+    let response =
+        crate::admin::merge_domain_dlq_messages(state, req).map_err(AppError::internal)?;
     Ok(wrap_success(&response))
 }
 
@@ -1463,12 +1482,19 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domain_manager.failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name)) {
+    match state.domain_manager.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::FrontendDomainError::Busy(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            Err(AppError::busy(message))
+        }
         Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }

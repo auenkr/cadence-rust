@@ -839,10 +839,12 @@ fn history_dlq_count_entries(
 ) -> Vec<cadence_api::admin::HistoryDLQCountEntry> {
     entries
         .into_iter()
-        .map(|(source_cluster, message_count)| cadence_api::admin::HistoryDLQCountEntry {
-            source_cluster,
-            message_count,
-        })
+        .map(
+            |(source_cluster, message_count)| cadence_api::admin::HistoryDLQCountEntry {
+                source_cluster,
+                message_count,
+            },
+        )
         .collect()
 }
 
@@ -1721,10 +1723,9 @@ mod tests {
     #[test]
     fn history_dlq_counts_preserve_source_cluster_and_count() {
         assert_eq!(
-            history_dlq_count_entries([
-                ("cluster-a".to_string(), 4),
-                ("cluster-b".to_string(), 9),
-            ]),
+            history_dlq_count_entries(
+                [("cluster-a".to_string(), 4), ("cluster-b".to_string(), 9),]
+            ),
             vec![
                 cadence_api::admin::HistoryDLQCountEntry {
                     source_cluster: "cluster-a".into(),

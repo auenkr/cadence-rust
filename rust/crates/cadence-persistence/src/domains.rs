@@ -1187,13 +1187,17 @@ impl InMemoryDomainStore {
             DomainOperation::Create => {
                 if let Ok(existing) = self.record_by_name(&info.name) {
                     if existing.info.uuid != task.id {
-                        return Err(invalid("domain replication encounter name / UUID collision"));
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
                     }
                     return Ok(());
                 }
                 if let Ok(existing) = self.record_by_id(&task.id) {
                     if existing.info.name != info.name {
-                        return Err(invalid("domain replication encounter name / UUID collision"));
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
                     }
                     return Ok(());
                 }
@@ -1207,7 +1211,9 @@ impl InMemoryDomainStore {
                     true,
                     task.failover_version,
                 )?;
-                let mut record = self.record_by_id(&task.id).map_err(FrontendDomainError::NotFound)?;
+                let mut record = self
+                    .record_by_id(&task.id)
+                    .map_err(FrontendDomainError::NotFound)?;
                 record.config_version = task.config_version;
                 record.previous_failover_version = task.previous_failover_version;
                 record.isolation_groups = configuration.isolation_groups.clone();
@@ -1218,14 +1224,18 @@ impl InMemoryDomainStore {
                 let mut current = match self.record_by_id(&task.id) {
                     Ok(record) => record,
                     Err(_) => {
-                        return self.apply_replication_task(&cadence_api::types::DomainTaskAttributes {
-                            domain_operation: Some(DomainOperation::Create),
-                            ..task.clone()
-                        });
+                        return self.apply_replication_task(
+                            &cadence_api::types::DomainTaskAttributes {
+                                domain_operation: Some(DomainOperation::Create),
+                                ..task.clone()
+                            },
+                        );
                     }
                 };
                 if current.info.name != info.name {
-                    return Err(invalid("domain replication encounter name / UUID collision"));
+                    return Err(invalid(
+                        "domain replication encounter name / UUID collision",
+                    ));
                 }
                 let old_failover_version = current.failover_version;
                 if current.config_version < task.config_version {
@@ -1241,7 +1251,8 @@ impl InMemoryDomainStore {
                     current.async_workflow_config = configuration.async_workflow_config.clone();
                 }
                 if current.failover_version < task.failover_version {
-                    current.replication.active_cluster_name = replication.active_cluster_name.clone();
+                    current.replication.active_cluster_name =
+                        replication.active_cluster_name.clone();
                     current.replication.active_clusters = replication.active_clusters.clone();
                     current.failover_version = task.failover_version;
                     current.previous_failover_version = task.previous_failover_version;
@@ -1261,7 +1272,9 @@ impl InMemoryDomainStore {
             DomainOperation::Delete => {
                 if let Ok(existing) = self.record_by_name(&info.name) {
                     if existing.info.uuid != task.id {
-                        return Err(invalid("domain replication encounter name / UUID collision"));
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
                     }
                     self.delete(&info.name)
                         .map_err(FrontendDomainError::NotFound)?;
@@ -1689,20 +1702,14 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
                 self.persistence
                     .delete_domain(&record.info.uuid)
                     .map_err(FrontendDomainError::Persistence)?;
-                self.cache
-                    .apply_replication_task(task)
-                    ?;
+                self.cache.apply_replication_task(task)?;
             } else {
-                self.cache
-                    .apply_replication_task(task)
-                    ?;
+                self.cache.apply_replication_task(task)?;
             }
             return Ok(());
         }
 
-        self.cache
-            .apply_replication_task(task)
-            ?;
+        self.cache.apply_replication_task(task)?;
         let updated = self
             .cache
             .record_by_id(&task.id)
@@ -1772,7 +1779,9 @@ mod tests {
         )
     }
 
-    fn replication_task(operation: cadence_api::enums::DomainOperation) -> cadence_api::types::DomainTaskAttributes {
+    fn replication_task(
+        operation: cadence_api::enums::DomainOperation,
+    ) -> cadence_api::types::DomainTaskAttributes {
         let (info, config, replication_config) = sample("replicated", "domain-uuid");
         cadence_api::types::DomainTaskAttributes {
             domain_operation: Some(operation),
@@ -1796,19 +1805,43 @@ mod tests {
         update.config_version = 2;
         update.failover_version = 9;
         update.info.as_mut().unwrap().description = "replicated update".into();
-        update.config.as_mut().unwrap().workflow_execution_retention_period_in_days = 14;
-        update.replication_config.as_mut().unwrap().active_cluster_name = "stale".into();
+        update
+            .config
+            .as_mut()
+            .unwrap()
+            .workflow_execution_retention_period_in_days = 14;
+        update
+            .replication_config
+            .as_mut()
+            .unwrap()
+            .active_cluster_name = "stale".into();
         store.apply_replication_task(&update).unwrap();
         let record = store.record_by_id("domain-uuid").unwrap();
         assert_eq!(record.config_version, 2);
         assert_eq!(record.info.description, "replicated update");
-        assert_eq!(record.configuration.workflow_execution_retention_period_in_days, 14);
+        assert_eq!(
+            record
+                .configuration
+                .workflow_execution_retention_period_in_days,
+            14
+        );
         assert_eq!(record.replication.active_cluster_name, "active");
 
         update.failover_version = 11;
-        update.replication_config.as_mut().unwrap().active_cluster_name = "standby".into();
+        update
+            .replication_config
+            .as_mut()
+            .unwrap()
+            .active_cluster_name = "standby".into();
         store.apply_replication_task(&update).unwrap();
-        assert_eq!(store.record_by_id("domain-uuid").unwrap().replication.active_cluster_name, "standby");
+        assert_eq!(
+            store
+                .record_by_id("domain-uuid")
+                .unwrap()
+                .replication
+                .active_cluster_name,
+            "standby"
+        );
     }
 
     #[test]

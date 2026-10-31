@@ -2006,3 +2006,19 @@ raw-history UUID normalization and malformed persistence cursor rejection.
 Added YARPC `GetDomainReplicationMessages` by delegating to the shared durable
 domain queue helper, including its cursor and ack semantics. Package CI is
 pending for this change.
+
+Merged latest `origin/frontend-core2` (`3592ec588`) into the Frontend
+integration branch; workflow-api and master are already ancestors. Repaired
+the Thrift DLQ response enum decoder using Go wire values and wired Cassandra
+domain metadata reads through the configured Frontend persistence adapter
+(commit `26f9cc542`). CI run [41218696029](https://github.com/auenkr/cadence-rust/actions/runs/41218696029)
+failed at the existing Admin rustfmt gate before Cargo. Formatter-enabled run
+[41218965957](https://github.com/auenkr/cadence-rust/actions/runs/41218965957)
+is collecting the CI formatting patch; exact-head validation remains pending.
+See `memory/frontend-domain-admin-2026-10-31.md`.
+
+Merged current `origin/frontend-core2` documentation update and confirmed the
+workflow-api and master refs remain ancestors. Applied the CI-uploaded
+Frontend formatting patch against source SHA `26f9cc54249f8a289f99714099be25b0afe35026`;
+fresh exact-head package validation is required. See
+`memory/frontend-domain-admin-2026-10-31.md`.
