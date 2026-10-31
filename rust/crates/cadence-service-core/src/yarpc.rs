@@ -823,6 +823,43 @@ fn handle_update_domain_async_workflow_configuration(
     ))
 }
 
+fn handle_reapply_events(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::ReapplyEventsRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request."));
+    }
+    let execution = req
+        .workflow_execution
+        .as_ref()
+        .ok_or_else(|| AppError::bad_request("Execution is not set on request."))?;
+    if execution.workflow_id.is_empty() {
+        return Err(AppError::bad_request("WorkflowID is not set on request."));
+    }
+    let blob = req
+        .events
+        .as_ref()
+        .ok_or_else(|| AppError::bad_request("WorkflowID is not set on request."))?;
+    let events = cadence_thrift::history_blob::decode(blob)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    let signals = events
+        .into_iter()
+        .filter(|event| {
+            event.event_type == Some(cadence_api::enums::EventType::WorkflowExecutionSignaled)
+        })
+        .collect();
+    let executions = require_domain_thrift(state, &req.domain)?;
+    match executions.reapply_signals(&req.domain, &execution.workflow_id, signals) {
+        Ok(()) => Ok(wrap_success(&cadence_api::admin::ReapplyEventsResponse {})),
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
+}
+
 fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::DeleteWorkflowRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2146,6 +2183,7 @@ pub async fn dispatch(
         "UpdateDomainAsyncWorkflowConfiguraton" => {
             handle_update_domain_async_workflow_configuration(state, body)
         }
+        "ReapplyEvents" => handle_reapply_events(state, body),
         "ResetQueue" => handle_reset_queue(state, body),
         "DescribeQueue" => handle_describe_queue(state, body),
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
