@@ -1561,6 +1561,44 @@ impl PersistedFrontendDomainManager {
     }
 }
 
+impl PersistedFrontendDomainManager {
+    /// Append Go's `DomainAuditOperationTypeFailover` row after the domain row
+    /// commits. Backends without `domain_audit_log` keep the cache-only history.
+    fn record_failover_audit(
+        &self,
+        before: &DescribeDomainResponse,
+        updated: &DomainRecord,
+    ) -> Result<(), FrontendDomainError> {
+        use crate::domain_audit::{
+            encode_domain_state, new_event_id, DomainAuditLog,
+            DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+        };
+        if !self.persistence.supports_domain_audit_log() {
+            return Ok(());
+        }
+        let after = self.cache.describe(&DescribeDomainRequest {
+            name: Some(updated.info.name.clone()),
+            uuid: None,
+        })?;
+        let now_nanos = updated.last_updated_time_nanos;
+        let log = DomainAuditLog {
+            event_id: new_event_id(now_nanos),
+            domain_id: updated.info.uuid.clone(),
+            operation_type: DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+            created_time_nanos: now_nanos,
+            last_updated_time_nanos: now_nanos,
+            identity: String::new(),
+            identity_type: String::new(),
+            comment: "domain failover".into(),
+            state_before: encode_domain_state(before).map_err(FrontendDomainError::Persistence)?,
+            state_after: encode_domain_state(&after).map_err(FrontendDomainError::Persistence)?,
+        };
+        self.persistence
+            .create_domain_audit_log(&log)
+            .map_err(FrontendDomainError::Persistence)
+    }
+}
+
 impl FrontendDomainManager for PersistedFrontendDomainManager {
     fn create_with_version(
         &self,
@@ -1615,6 +1653,10 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let old = self.cache.record_by_name(&request.name)?;
+        let before = self.cache.describe(&DescribeDomainRequest {
+            name: Some(request.name.clone()),
+            uuid: None,
+        })?;
         let version = self.current_metadata_version()?;
         let response = self
             .cache
@@ -1626,6 +1668,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             return Err(error);
         }
         if updated.failover_version != old.failover_version {
+            self.record_failover_audit(&before, &updated)?;
             self.cache.notify_failover(&updated);
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
@@ -1641,6 +1684,10 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let old = self.cache.record_by_name(&request.domain_name)?;
+        let before = self.cache.describe(&DescribeDomainRequest {
+            name: Some(request.domain_name.clone()),
+            uuid: None,
+        })?;
         let version = self.current_metadata_version()?;
         let response = self
             .cache
@@ -1651,6 +1698,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.record_failover_audit(&before, &updated)?;
         self.cache.notify_failover(&updated);
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)

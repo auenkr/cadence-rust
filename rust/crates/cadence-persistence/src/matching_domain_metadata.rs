@@ -280,6 +280,31 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
     ) -> Result<(), String> {
         Err("domain replication DLQ is unavailable for this persistence backend".into())
     }
+
+    /// Whether this backend writes Go's `domain_audit_log`. Frontend keeps
+    /// failover history in the cache for backends that report `false`.
+    fn supports_domain_audit_log(&self) -> bool {
+        false
+    }
+
+    fn create_domain_audit_log(
+        &self,
+        _log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), String> {
+        Err("domain audit log is unavailable for this persistence backend".into())
+    }
+
+    /// Read failover-type audit rows newest first, using Go's
+    /// `created_time >= min` window and `(created_time, event_id)` cursor.
+    fn get_domain_audit_logs(
+        &self,
+        _domain_id: &str,
+        _operation_type: i32,
+        _page_size: usize,
+        _page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        Err("domain audit log is unavailable for this persistence backend".into())
+    }
 }
 
 /// Convert Cassandra's nested domain/config/replication UDTs through the same
@@ -1431,6 +1456,164 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
     }
 }
 
+impl MatchingDomainMetadataStore {
+    /// Insert one Go `domain_audit_log` row with Go's SQLite DATETIME format.
+    fn insert_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::domain_audit::format_sqlite_datetime;
+        let created = format_sqlite_datetime(log.created_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let updated = format_sqlite_datetime(log.last_updated_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let (connection, deadline) = self.lock_connection(Duration::from_secs(3))?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
+        connection
+            .execute(
+                "INSERT INTO domain_audit_log (domain_id, event_id, state_before, \
+                 state_before_encoding, state_after, state_after_encoding, operation_type, \
+                 created_time, last_updated_time, identity, identity_type, comment) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    log.domain_id,
+                    log.event_id,
+                    log.state_before.data,
+                    log.state_before.encoding,
+                    log.state_after.data,
+                    log.state_after.encoding,
+                    log.operation_type,
+                    created,
+                    updated,
+                    log.identity,
+                    log.identity_type,
+                    log.comment,
+                ],
+            )
+            .map_err(|error| sqlite_operation_error(error, deadline))?;
+        Ok(())
+    }
+
+    /// Read a Go-compatible audit page. The window and cursor follow Go's
+    /// `GetDomainAuditLogs`: first page is `created_time < now`, later pages
+    /// resume after `(created_time, event_id)` from the token.
+    fn select_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
+        use crate::domain_audit::{
+            decode_page_token, encode_page_token, format_sqlite_datetime, parse_sqlite_datetime,
+            DomainAuditLog, DomainAuditLogPage,
+        };
+        type AuditRow = (
+            String,
+            String,
+            Vec<u8>,
+            String,
+            Vec<u8>,
+            String,
+            i32,
+            String,
+            String,
+            String,
+            String,
+            String,
+        );
+        if page_size == 0 {
+            return Err(MatchingDomainMetadataError::InvalidPageSize);
+        }
+        let limit =
+            i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+        let now_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| i64::try_from(elapsed.as_nanos()).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        let (max_nanos, min_event_id) = match page_token {
+            Some(token) => decode_page_token(token).map_err(MatchingDomainMetadataError::InvalidBlob)?,
+            None => (now_nanos, "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string()),
+        };
+        let max = format_sqlite_datetime(max_nanos).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let min = format_sqlite_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let (connection, deadline) = self.lock_connection(Duration::from_secs(3))?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
+        let rows: Vec<AuditRow> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT event_id, domain_id, state_before, state_before_encoding, state_after, \
+                     state_after_encoding, operation_type, created_time, last_updated_time, \
+                     identity, identity_type, comment FROM domain_audit_log \
+                     WHERE domain_id = ?1 AND operation_type = ?2 AND created_time >= ?3 \
+                     AND (created_time < ?4 OR (created_time = ?4 AND event_id > ?5)) \
+                     ORDER BY created_time DESC, event_id ASC LIMIT ?6",
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            let mapped = statement
+                .query_map(
+                    params![domain_id, operation_type, min, max, min_event_id, limit],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                            row.get(10)?,
+                            row.get(11)?,
+                        ))
+                    },
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            let collected = mapped
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            collected
+        };
+        let mut logs = Vec::with_capacity(rows.len());
+        for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in rows {
+            logs.push(DomainAuditLog {
+                event_id,
+                domain_id,
+                operation_type: op,
+                created_time_nanos: parse_sqlite_datetime(&created)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                last_updated_time_nanos: parse_sqlite_datetime(&updated)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                identity,
+                identity_type: id_type,
+                comment,
+                state_before: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sb,
+                    encoding: sbe,
+                },
+                state_after: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sa,
+                    encoding: sae,
+                },
+            });
+        }
+        // Go emits a token only when the page is full; the token points at the
+        // last returned row even if the next page turns out to be empty.
+        let next_page_token = if logs.len() >= page_size {
+            logs.last()
+                .map(|log| encode_page_token(log.created_time_nanos, &log.event_id))
+        } else {
+            None
+        };
+        Ok(DomainAuditLogPage {
+            logs,
+            next_page_token,
+        })
+    }
+}
+
 impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDomainMetadataStore {
     fn metadata_version(&self) -> Result<i64, String> {
         self.get_metadata_version().map_err(|error| error.to_string())
@@ -1457,6 +1640,29 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
 
     fn delete_domain(&self, id: &str) -> Result<(), String> {
         GoSqlDomainPersistence::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+
+    fn supports_domain_audit_log(&self) -> bool {
+        true
+    }
+
+    fn create_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), String> {
+        self.insert_domain_audit_log(log)
+            .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        self.select_domain_audit_logs(domain_id, operation_type, page_size, page_token)
+            .map_err(|error| error.to_string())
     }
 }
 

@@ -660,18 +660,6 @@ pub fn next_domain_replication_message_id(
         .wrapping_add(1)
 }
 
-#[cfg(test)]
-mod domain_replication_queue_tests {
-    use super::next_domain_replication_message_id;
-
-    #[test]
-    fn queue_id_follows_go_last_message_and_ack_levels_rule() {
-        assert_eq!(next_domain_replication_message_id(-1, []), 0);
-        assert_eq!(next_domain_replication_message_id(3, [1, 2]), 4);
-        assert_eq!(next_domain_replication_message_id(3, [7, 4]), 8);
-    }
-}
-
 impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMetadataStore {
     fn create_domain(
         &self,
@@ -844,5 +832,17 @@ fn query_error(error: crate::matching_mysql::TimedQueryError) -> MatchingDomainM
         crate::matching_mysql::TimedQueryError::Pool(error) => {
             MatchingDomainMetadataError::MySqlPool(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod domain_replication_queue_tests {
+    use super::next_domain_replication_message_id;
+
+    #[test]
+    fn queue_id_follows_go_last_message_and_ack_levels_rule() {
+        assert_eq!(next_domain_replication_message_id(-1, []), 0);
+        assert_eq!(next_domain_replication_message_id(3, [1, 2]), 4);
+        assert_eq!(next_domain_replication_message_id(3, [7, 4]), 8);
     }
 }
