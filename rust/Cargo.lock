@@ -417,6 +417,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

@@ -632,9 +632,120 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         let request = self.validate_request(operation, request)?;
         let request = self.prepare_backend_request(operation, request)?;
+        if operation == WorkflowOperation::RestartWorkflowExecution {
+            return self.restart_workflow_execution(request, target_cluster).await;
+        }
         self.backend
             .invoke_on_cluster(operation, request, target_cluster)
             .await
+    }
+
+    async fn restart_workflow_execution(
+        &self,
+        request: Value,
+        target_cluster: Option<String>,
+    ) -> Result<Value, CadenceError> {
+        let domain = request
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let execution = request
+            .get("workflowExecution")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let Some(domains) = &self.domain_lookup else {
+            return self
+                .backend
+                .invoke_on_cluster(
+                    WorkflowOperation::RestartWorkflowExecution,
+                    request,
+                    target_cluster,
+                )
+                .await;
+        };
+        let domain_id = domains.domain_id(domain)?;
+
+        let history = self
+            .backend
+            .invoke_on_cluster(
+                WorkflowOperation::GetWorkflowExecutionHistory,
+                serde_json::json!({
+                    "domain": domain,
+                    "execution": execution,
+                    "skipArchival": true
+                }),
+                target_cluster.clone(),
+            )
+            .await
+            .map_err(|_| {
+                CadenceError::BadRequest(BadRequestError::new(
+                    "Requested workflow history not found, may have passed retention period.",
+                ))
+            })?;
+
+        let started = history
+            .get("history")
+            .and_then(|value| value.get("events"))
+            .and_then(Value::as_array)
+            .and_then(|events| events.first())
+            .and_then(|event| event.get("workflowExecutionStartedEventAttributes"))
+            .filter(|attributes| !attributes.is_null())
+            .ok_or_else(|| {
+                CadenceError::BadRequest(BadRequestError::new(
+                    "Requested workflow history not found, may have passed retention period.",
+                ))
+            })?;
+        let workflow_id = execution
+            .get("workflowId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let mut start_request = serde_json::json!({
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "domain": domain,
+            "workflowId": workflow_id,
+            "workflowType": {
+                "name": started.get("workflowType").and_then(|v| v.get("name")).cloned().unwrap_or(Value::Null)
+            },
+            "taskList": {
+                "name": started.get("taskList").and_then(|v| v.get("name")).cloned().unwrap_or(Value::Null),
+                "kind": started.get("taskList").and_then(|v| v.get("kind")).cloned().unwrap_or(Value::from(0))
+            },
+            "input": started.get("input").cloned().unwrap_or(Value::Null),
+            "executionStartToCloseTimeoutSeconds": started.get("executionStartToCloseTimeoutSeconds").cloned().unwrap_or(Value::Null),
+            "taskStartToCloseTimeoutSeconds": started.get("taskStartToCloseTimeoutSeconds").cloned().unwrap_or(Value::Null),
+            "identity": request.get("identity").cloned().unwrap_or(Value::Null),
+            "workflowIDReusePolicy": 3,
+            "delayStartSeconds": 0
+        });
+        for field in [
+            "cronSchedule",
+            "retryPolicy",
+            "jitterStartSeconds",
+            "header",
+            "memo",
+            "searchAttributes",
+            "cronOverlapPolicy",
+            "activeClusterSelectionPolicy",
+        ] {
+            if let Some(value) = started.get(field) {
+                start_request[field] = value.clone();
+            }
+        }
+
+        let response = self
+            .backend
+            .invoke_on_cluster(
+                WorkflowOperation::StartWorkflowExecution,
+                serde_json::json!({
+                    "domainUUID": domain_id,
+                    "startRequest": start_request
+                }),
+                target_cluster,
+            )
+            .await?;
+        Ok(serde_json::json!({
+            "runID": response.get("runID").cloned().unwrap_or(Value::Null)
+        }))
     }
 
     fn prepare_backend_request(
@@ -1372,6 +1483,9 @@ mod tests {
     #[derive(Default)]
     struct CapturingBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
 
+    #[derive(Default)]
+    struct RestartBackend(Mutex<Vec<(WorkflowOperation, Value)>>);
+
     impl WorkflowBackend for CapturingBackend {
         fn invoke<'a>(
             &'a self,
@@ -1381,6 +1495,39 @@ mod tests {
             Box::pin(async move {
                 self.0.lock().unwrap().push((operation, request));
                 Ok(Value::Null)
+            })
+        }
+    }
+
+    impl WorkflowBackend for RestartBackend {
+        fn invoke<'a>(&'a self, operation: WorkflowOperation, request: Value) -> WorkflowFuture<'a> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push((operation, request));
+                match operation {
+                    WorkflowOperation::GetWorkflowExecutionHistory => Ok(serde_json::json!({
+                        "history": {"events": [{
+                            "workflowExecutionStartedEventAttributes": {
+                                "workflowType": {"name": "Order"},
+                                "taskList": {"name": "orders", "kind": 0},
+                                "input": "AQI=",
+                                "executionStartToCloseTimeoutSeconds": 3600,
+                                "taskStartToCloseTimeoutSeconds": 10,
+                                "cronSchedule": "0 * * * *",
+                                "retryPolicy": {"initialIntervalInSeconds": 5},
+                                "jitterStartSeconds": 7,
+                                "header": {"fields": {"trace": "AQ=="}},
+                                "memo": {"fields": {"key": "dmFsdWU="}},
+                                "searchAttributes": {"indexedFields": {"Keyword": "dmFsdWU="}},
+                                "cronOverlapPolicy": 1,
+                                "activeClusterSelectionPolicy": 0
+                            }
+                        }]}
+                    })),
+                    WorkflowOperation::StartWorkflowExecution => {
+                        Ok(serde_json::json!({"runID": "new-run"}))
+                    }
+                    _ => Ok(Value::Null),
+                }
             })
         }
     }
@@ -2198,6 +2345,44 @@ mod tests {
                 "signalWithStartRequest": request
             })
         );
+    }
+
+    #[tokio::test]
+    async fn restart_reads_start_event_and_starts_a_new_run_with_go_fields() {
+        let handler = Handler::new(RestartBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup));
+        let response = handler
+            .dispatch(
+                "RestartWorkflowExecution",
+                serde_json::json!({
+                    "domain": "shop",
+                    "workflowExecution": {
+                        "workflowId": "order-1",
+                        "runId": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "identity": "operator"
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"runID": "new-run"}));
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, WorkflowOperation::GetWorkflowExecutionHistory);
+        assert_eq!(calls[0].1["skipArchival"], true);
+        assert_eq!(calls[1].0, WorkflowOperation::StartWorkflowExecution);
+        assert_eq!(calls[1].1["domainUUID"], "uuid:shop");
+        let start = &calls[1].1["startRequest"];
+        assert_eq!(start["workflowIDReusePolicy"], 3);
+        assert_eq!(start["domain"], "shop");
+        assert_eq!(start["workflowId"], "order-1");
+        assert_eq!(start["workflowType"]["name"], "Order");
+        assert_eq!(start["identity"], "operator");
+        assert_eq!(start["delayStartSeconds"], 0);
+        assert_eq!(start["cronSchedule"], "0 * * * *");
+        assert_eq!(start["jitterStartSeconds"], 7);
+        assert!(uuid::Uuid::parse_str(start["requestId"].as_str().unwrap()).is_ok());
     }
 
     #[tokio::test]
