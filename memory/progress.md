@@ -1909,3 +1909,7 @@ CI verification remain open. See `memory/frontend-domain-admin-2026-10-31.md`.
 The same checkpoint adds the Go-shaped `DescribeCluster` response builder in
 `handler_admin.rs`; live membership collection and transport wiring are not
 included in this helper-level slice.
+
+Package CI run 41173547050 caught the schedule module's undeclared direct
+`cadence-common` dependency. The crate manifest and workspace lockfile now
+declare it; run 41173868530 is validating the corrected head on Actions.
