@@ -292,3 +292,16 @@ migration forward.
   includes DLQ/replication operations and task maintenance; Domain durability
   and replication queue, scheduler workflow integration, and mixed-cluster
   validation remain open.
+
+## CI failure and converter import fix
+
+- CI run [41178167224](https://github.com/auenkr/cadence-rust/actions/runs/41178167224)
+  reached Clippy at head `6b67253f79170dc07d7fe3e315a121a318be16ef` and failed
+  in `cadence-thrift` because the new wildcard import of Admin types conflicted
+  with the pre-existing `RefreshWorkflowTasksRequest` type. Replaced it with
+  explicit Admin imports in commit `ea87244aa` and pushed both
+  `frontend-domain-admin` and its T3-prefixed mirror.
+- Fresh package run [41178360466](https://github.com/auenkr/cadence-rust/actions/runs/41178360466)
+  targets `ea87244aa`; pending at dispatch with CI formatting enabled. The
+  latest source is still unverified until this run passes Clippy, Formatting,
+  and Test.
