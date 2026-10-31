@@ -986,3 +986,21 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   https://github.com/auenkr/cadence-rust/actions/runs/41197648965 validated
   `d4c547d1789e4e85208d25166071eedf1f1a7182` and concluded `success`
   (formatting, Clippy, and tests).
+
+## Cassandra domain delete parity follow-up — 2026-10-31
+
+- The configured Cassandra store now supplies the Frontend domain manager
+  contract through `CassandraFrontendDomainPersistence`; configured SQL
+  backends supply it through SQLite, MySQL, or PostgreSQL.
+- Matched Go Cassandra `DeleteDomain` failure ordering: delete the
+  `domains_by_name_v2` index row first, then delete the UUID row from
+  `domains`. If the second write fails, this leaves the same unindexed UUID
+  orphan that Go leaves, rather than an index pointing at a missing UUID row.
+  Source comparison: `go/common/persistence/nosql/nosqlplugin/cassandra/domain.go`
+  `deleteDomain`.
+- This fix is committed and pushed as `PENDING_SHA`; persistence-package CI is
+  `PENDING_RUN`. It does not close the requested production Visibility,
+  History, or Execution managers, nor prove live Cassandra transaction
+  behavior. Lifecycle still lacks production global quota collection
+  construction/wiring. The Go request-validator matrix remains covered by the
+  recorded 91-case CI evidence; no validator source changed.
