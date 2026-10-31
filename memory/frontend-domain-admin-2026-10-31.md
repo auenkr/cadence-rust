@@ -1435,3 +1435,39 @@ migration forward.
   scheduler workflow wiring and RPC lifecycle/retries/metrics; complete Domain
   failover cooldown/replication semantics; and mixed Go/Rust failure,
   restart/recovery acceptance. No service-parity claim is made.
+
+## Durable failover audit — design and first slice — 2026-10-31
+
+- Go source of truth: `ListFailoverHistory` (`go/service/frontend/api/domain_handlers.go:269`)
+  reads `DomainAuditManager.GetDomainAuditLogs` filtered by operation type
+  Failover (5), default page size 50, and calls `ToFailoverEvents`. Rows are
+  written by `updateDomainAuditLog` (`go/common/domain/handler.go:686`), gated by
+  `EnableDomainAuditLogging`. Go's `domain_audit_manager.go` ThriftRW+snappy-encodes
+  a raw `DescribeDomainResponse` (no version byte) for state_before/state_after,
+  uses UUIDv7 event IDs, and a TTL from `DomainAuditLogTTL`. Pages order by
+  `created_time DESC, event_id ASC` with a `created_time` lower bound.
+- Rust gap: `InMemoryDomainStore.failover_history` reads only in-memory
+  `FailoverAuditEntry`; restart loses all failover history. The Rust
+  `failover_history` also pages with an offset token, not Go's cursor.
+- Slice landed: `rust/crates/cadence-persistence/src/domain_audit.rs` adds the
+  Go-compatible snapshot codec (`encode_domain_state`/`decode_domain_state`),
+  `DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER = 5`, and table tests for round trips,
+  unknown encodings and trailing bytes. Not wired yet. Persistence-crate CI is
+  the validation for this commit.
+- Remaining steps, in order:
+  1. Add `create_domain_audit_log` / `get_domain_audit_logs` to
+     `DomainMetadataPersistence` with default `Err`, then implement for SQLite
+     (`MatchingDomainMetadataStore`), MySQL, Postgres (`domain_audit_log` table
+     exists in every SQL schema), and Cassandra (`domain_audit_log.cql`, v0.44).
+  2. In `PersistedFrontendDomainManager::failover`, after the domain row persists,
+     append a failover audit row (UUIDv7 event id, before/after snapshots).
+  3. `failover_history` reads durable rows, decodes snapshots and maps them with
+     the existing `ToFailoverEvents`-equivalent logic. Refactor that per-entry
+     body so both paths share it.
+- Known gap: `DescribeDomainResponse` in Rust has no `FailoverInfo`
+  (`FailoverEndTime`). Go derives graceful vs force from it, so the durable path
+  cannot yet classify failover type from the blob. Add the thrift field first, or
+  store the type separately, and state it in the parity audit.
+- Other audit operation types (create/update/deprecate/delete) are not written.
+  `ListFailoverHistory` does not read them, so this is not blocking parity for
+  that RPC, but Go's audit table is incomplete until they are added.

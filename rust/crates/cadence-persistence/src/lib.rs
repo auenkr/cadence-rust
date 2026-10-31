@@ -8,6 +8,7 @@ pub mod cassandra;
 pub mod config_store;
 pub mod domain_replication;
 pub mod domain_update;
+pub mod domain_audit;
 pub mod domains;
 pub mod dynamic_config;
 pub mod executions;
