@@ -1784,6 +1784,52 @@ async fn handle_list_dynamic_config(state: &AppState, body: &Struct) -> HandlerR
     Ok(wrap_success(&ListDynamicConfigResponse { entries }))
 }
 
+async fn handle_describe_cluster(_state: &AppState, _body: &Struct) -> HandlerResult {
+    let identity = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+    let roles = ["frontend", "history", "matching", "worker"];
+    let rings = roles
+        .iter()
+        .map(|role| cadence_api::admin::RingInfo {
+            role: (*role).to_string(),
+            member_count: 1,
+            members: vec![cadence_api::admin::HostInfo {
+                identity: identity.clone(),
+            }],
+        })
+        .collect();
+    let persistence_info = std::collections::HashMap::from([
+        (
+            "historyStore".to_string(),
+            cadence_api::admin::PersistenceInfo {
+                backend: "memory".to_string(),
+                features: Vec::new(),
+            },
+        ),
+        (
+            "visibilityStore".to_string(),
+            cadence_api::admin::PersistenceInfo {
+                backend: "memory".to_string(),
+                features: vec![cadence_api::admin::PersistenceFeature {
+                    key: "advancedVisibilityEnabled".to_string(),
+                    enabled: false,
+                }],
+            },
+        ),
+    ]);
+    Ok(wrap_success(&cadence_api::admin::DescribeClusterResponse {
+        supported_client_versions: Some(cadence_api::types::SupportedClientVersions {
+            go_sdk: "<=1.7.0".to_string(),
+            java_sdk: "<=1.5.0".to_string(),
+        }),
+        membership_info: Some(cadence_api::admin::MembershipInfo {
+            current_host: Some(cadence_api::admin::HostInfo { identity: identity.clone() }),
+            reachable_members: vec![identity],
+            rings,
+        }),
+        persistence_info: Some(persistence_info),
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -1816,6 +1862,7 @@ pub async fn dispatch(
         "ListArchivedWorkflowExecutions" => handle_visibility_archived(state, body).await,
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
+        "DescribeCluster" => handle_describe_cluster(state, body).await,
         "AddSearchAttribute" => handle_add_search_attribute(state, body).await,
         "GetDynamicConfig" => handle_get_dynamic_config(state, body).await,
         "UpdateDynamicConfig" => handle_update_dynamic_config(state, body).await,
