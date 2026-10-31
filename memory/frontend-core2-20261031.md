@@ -1004,3 +1004,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   behavior. Lifecycle still lacks production global quota collection
   construction/wiring. The Go request-validator matrix remains covered by the
   recorded 91-case CI evidence; no validator source changed.
+- Follow-up log inspection of run
+  https://github.com/auenkr/cadence-rust/actions/runs/41198273943 at
+  `d2e55b219aef5bd18c78fa11c940f58e0f4762c9` found Clippy errors in the
+  Cassandra write adapter: a stale `Some(Option<...>)` expression and two
+  unused status locals. The optional data expression was already corrected in
+  `4fa73bbee`; removed the unused locals. That earlier run is a failure and
+  does not validate the current head.
