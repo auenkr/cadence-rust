@@ -289,6 +289,10 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   before Clippy/tests. Applied the exact runner diff to one line in the new
   domain-presence matrix. The matrix now also covers wrong tokens for register
   and non-failover update. A new exact-head run is required.
+- Added explicit empty task-list validation through the partition-list entry
+  point and set the validator matrix's graceful failover limit to the Go test's
+  300-second value. These latest test corrections are pushed after run
+  `41180907810` was dispatched and still need a new exact-head CI run.
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41179758023 at
   `3bc2dcca870ea3875d0915f6769d9b09ae9dcbe4` passed Frontend Clippy but failed
   the crate formatting step. The runner emitted 22 rustfmt hunks in

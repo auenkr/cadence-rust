@@ -703,6 +703,15 @@ mod tests {
             "TaskList is not set on request.",
         );
         bad(
+            validator.validate_list_task_list_partitions_request(Some(
+                &ListTaskListPartitionsRequest {
+                    domain: "d".into(),
+                    task_list: Some(TaskList::default()),
+                },
+            )),
+            "TaskList is not set on request.",
+        );
+        bad(
             validator.validate_get_task_lists_by_domain_request(Some(
                 &GetTaskListsByDomainRequest {
                     domain: String::new(),
@@ -1035,6 +1044,7 @@ mod tests {
         validator.config.admin_protection = true;
         validator.config.admin_operation_token = "token".into();
         validator.config.required_domain_data_keys = vec!["tier".into()];
+        validator.config.max_failover_timeout_seconds = 300;
         let valid_time_filter = || StartTimeFilter {
             earliest_time: Some(1),
             latest_time: Some(2),
