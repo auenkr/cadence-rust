@@ -1047,3 +1047,10 @@ migration forward.
   package selection compiles the changed service-core/thrift dependencies, but
   does not run their own unit-test suites; dispatch focused `cadence-thrift` and
   `cadence-persistence` package runs for the new conversion and cursor tests.
+- Thrift package run [41203933467](https://github.com/auenkr/cadence-rust/actions/runs/41203933467)
+  failed Clippy test compilation at documentation head
+  `f7deb0b709fed8ec6193a1dcd38bbd3a46af6781`. Existing Admin conversion tests
+  revealed missing `ToThrift` implementations for eight Admin request types
+  (isolation groups, async-workflow configuration, ReapplyEvents and corrupt
+  workflow maintenance). Added encoders using the IDL field IDs. Dispatch
+  focused Thrift CI for the updated source; that run did not reach tests.

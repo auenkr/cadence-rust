@@ -968,6 +968,12 @@ impl FromThrift for GetGlobalIsolationGroupsRequest {
     }
 }
 
+impl ToThrift for GetGlobalIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
 impl ToThrift for GetGlobalIsolationGroupsResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
@@ -984,6 +990,14 @@ impl FromThrift for UpdateGlobalIsolationGroupsRequest {
     }
 }
 
+impl ToThrift for UpdateGlobalIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
 impl ToThrift for UpdateGlobalIsolationGroupsResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
@@ -995,6 +1009,14 @@ impl FromThrift for GetDomainIsolationGroupsRequest {
         Ok(Self {
             domain: s.req_string(10, "")?,
         })
+    }
+}
+
+impl ToThrift for GetDomainIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.finish()
     }
 }
 
@@ -1015,6 +1037,15 @@ impl FromThrift for UpdateDomainIsolationGroupsRequest {
     }
 }
 
+impl ToThrift for UpdateDomainIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
 impl ToThrift for UpdateDomainIsolationGroupsResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
@@ -1026,6 +1057,14 @@ impl FromThrift for GetDomainAsyncWorkflowConfiguratonRequest {
         Ok(Self {
             domain: s.req_string(10, "")?,
         })
+    }
+}
+
+impl ToThrift for GetDomainAsyncWorkflowConfiguratonRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.finish()
     }
 }
 
@@ -1046,6 +1085,15 @@ impl FromThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
     }
 }
 
+impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.configuration.as_ref());
+        f.finish()
+    }
+}
+
 impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
@@ -1062,6 +1110,16 @@ impl FromThrift for ReapplyEventsRequest {
     }
 }
 
+impl ToThrift for ReapplyEventsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.workflow_execution.as_ref());
+        f.ostruct(30, self.events.as_ref());
+        f.finish()
+    }
+}
+
 impl ToThrift for ReapplyEventsResponse {
     fn to_thrift(&self) -> Struct {
         Fields::new().finish()
@@ -1074,6 +1132,15 @@ impl FromThrift for MaintainCorruptWorkflowRequest {
             domain: s.req_string(10, "")?,
             execution: s.opt_struct(20)?,
         })
+    }
+}
+
+impl ToThrift for MaintainCorruptWorkflowRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.execution.as_ref());
+        f.finish()
     }
 }
 
