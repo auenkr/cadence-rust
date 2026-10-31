@@ -498,10 +498,14 @@ pub async fn get_dynamic_config(
     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.get(false, &req.config_name, &req.filters) {
         Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: entry.value }),
-        None => entity_not_exists(cadence_api::errors::EntityNotExistsError::new(format!(
-            "Dynamic config {:?} does not have a value for the given filters.",
-            req.config_name
-        ))),
+        None => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "Failed to get dynamic config {:?} for the given filters.",
+                req.config_name
+            ),
+        ),
     }
 }
 

@@ -14,7 +14,7 @@ use cadence_api::{
         PersistenceInfo, RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigResponse,
     },
     enums::IndexedValueType,
-    errors::{BadRequestError, EntityNotExistsError, InternalServiceError},
+    errors::{BadRequestError, InternalServiceError},
     types::SupportedClientVersions,
 };
 use cadence_service_core::admin::DynamicConfigOverlay;
@@ -22,7 +22,7 @@ use cadence_service_core::admin::DynamicConfigOverlay;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminError {
     BadRequest(BadRequestError),
-    EntityNotExists(EntityNotExistsError),
+    Internal(InternalServiceError),
 }
 
 impl std::fmt::Display for AdminError {
@@ -235,8 +235,8 @@ impl Handler {
         let value = overlay
             .get(operational, config_name, filters)
             .ok_or_else(|| {
-                AdminError::EntityNotExists(EntityNotExistsError::new(format!(
-                    "Dynamic config {config_name:?} does not have a value for the given filters."
+                AdminError::Internal(InternalServiceError::new(format!(
+                    "Failed to get dynamic config {config_name:?} for the given filters."
                 )))
             })?;
         Ok(GetDynamicConfigResponse { value: value.value })

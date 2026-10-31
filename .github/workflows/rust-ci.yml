@@ -251,7 +251,9 @@ jobs:
           set -euo pipefail
           files=(
             crates/cadence-service-core/src/admin.rs
+            crates/cadence-service-core/src/handlers.rs
             crates/cadence-service-core/src/yarpc.rs
+            crates/cadence-persistence/src/dynamic_config.rs
             crates/cadence-thrift/src/convert.rs
             crates/cadence-frontend/src/lib.rs
             crates/cadence-frontend/src/main.rs
