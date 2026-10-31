@@ -245,7 +245,11 @@ pub fn native_queue_registry(
                         || selector_domains.global_isolation_groups().into_iter().flat_map(|c| c.isolation_groups).any(|g| g.name.as_bytes() == requested.as_bytes() && g.state == Some(cadence_api::enums::IsolationGroupState::Drained))
                     });
                     let partition_id = cadence_common::task_list::TaskListNameBytes::parse(selector_task.as_bytes()).map(|n| n.partition() as i32).unwrap_or_default();
-                    let partition_groups = partitions.get().and_then(|c| c.read_partitions.get(&partition_id).cloned());
+                    // Go PartitionReadConfig: no stored config means one default partition with no group restriction.
+                    let partition_groups = match partitions.get() {
+                        None => Some(Vec::new()),
+                        Some(c) => c.read_partitions.get(&partition_id).cloned(),
+                    };
                     let recent = pollers.lock().expect("poller history lock").has_group_after(requested.as_bytes(), now.saturating_sub(window));
                     let (group, duration, cause) = select_isolation_bytes(
                         enabled, kind == 1, &requested, known.iter().any(|g| g == &requested), drained, recent,
