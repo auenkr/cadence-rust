@@ -1427,12 +1427,11 @@ async fn run_with_lifecycle(
                     .as_ref()
                     .and_then(|stores| stores.domain_persistence.clone())
                 {
-                    state.domain_manager = std::sync::Arc::new(
-                        cadence_persistence::GoSqlFrontendDomainManager::new(
+                    state.domain_manager =
+                        std::sync::Arc::new(cadence_persistence::GoSqlFrontendDomainManager::new(
                             state.domains.clone(),
                             persistence,
-                        ),
-                    );
+                        ));
                 }
             }
             if run_frontend && !run_matching {
