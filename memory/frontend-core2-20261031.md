@@ -1482,3 +1482,9 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   https://github.com/auenkr/cadence-rust/actions/runs/41216539671
   (conclusion `success`, formatting/Clippy/tests and configured Go oracle
   checks). It contains only this memory update; no Cargo command ran locally.
+- Exact-head Frontend CI for pushed evidence checkpoint
+  `a23c509aad03389ba148b17aae6d8dc69362e7ce` passed:
+  https://github.com/auenkr/cadence-rust/actions/runs/41216892623
+  (conclusion `success`, formatting/Clippy/tests and configured Go oracle
+  checks). This is a documentation-only checkpoint. The open production
+  execution/history/visibility managers and lifecycle owners remain unchanged.
