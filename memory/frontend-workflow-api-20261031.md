@@ -241,3 +241,33 @@ these fixes; no green CI evidence covers the current changes.
   rather than duplicating them. Stateful redirect, authorization, quota,
   transport conversion, mixed-cluster compatibility and SDK recovery tests
   still need live wiring and parity tests.
+
+## Exact-head CI checkpoint — wrappers and validation
+
+- `rust-ci.yml` package run
+  [41178373998](https://github.com/auenkr/cadence-rust/actions/runs/41178373998)
+  tested head `0e76f49f10ffab8cb22ca0a8d99ebfa5eab86ec3` and concluded
+  `success` (Clippy and tests).
+- This confirms the current helper policies and validation compile and pass
+  their tests. It does not close the Go parity task: the registered Rust
+  service still uses the shared `cadence_matching::launcher::run()` path, and
+  the Frontend `Handler` is not instantiated by that runtime. The generic
+  backend dispatch also does not yet implement the History, Matching,
+  visibility, archival, async producer, or domain-cache transformations in
+  `go/service/frontend/api/handler.go`.
+- Source audit: Go `WorkflowHandler` has 55 methods in `handler.go`; the Rust
+  operation catalogue has 40 workflow/worker/visibility/task-list methods,
+  omitting health-related signatures outside that list and broader admin/domain
+  and schedule surfaces. Generated Go ratelimited wrapper has 57 methods and
+  its preflight/quota policy is not attached to a live Rust handler. The Go
+  constructor order is access control -> optional cluster redirection ->
+  metering -> rate limiting -> version check -> API handler. Rust currently
+  meters dispatch and performs validation but has no caller metadata or
+  configured authorizer/version/quota/redirector in its live path.
+- Remaining required interfaces for the API bodies: domain lookup (name/UUID
+  and domain config), shutdown state and dynamic config, visibility query
+  validation and visibility manager/archive provider, async request producer
+  and ThriftRW encoder, task-token context/serializer, caller headers/identity,
+  and typed outbound History/Matching method calls. The latter two client
+  wrappers only expose generated gRPC clients; they do not yet provide the
+  operation adapters needed by these handler methods.
