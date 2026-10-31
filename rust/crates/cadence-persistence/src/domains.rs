@@ -1646,7 +1646,20 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         &self,
         request: &DescribeDomainRequest,
     ) -> Result<DescribeDomainResponse, EntityNotExistsError> {
-        self.cache.describe(request)
+        match self.cache.describe(request) {
+            Ok(response) => Ok(response),
+            Err(miss) => {
+                // Runtime cache miss: read the Go row like Go's DomainCache does.
+                // The insert never replaces an entry that appeared meanwhile.
+                let name = request.name.as_deref().filter(|value| !value.is_empty());
+                let id = request.uuid.as_deref().filter(|value| !value.is_empty());
+                let Ok(metadata) = self.persistence.get_domain(name, id) else {
+                    return Err(miss);
+                };
+                self.cache.insert_matching_metadata_if_missing(&metadata);
+                self.cache.describe(request)
+            }
+        }
     }
 
     fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
@@ -2687,13 +2700,10 @@ mod go_sql_frontend_manager_tests {
             .unwrap();
         assert_eq!(persistence.get_metadata_version().unwrap(), 8);
 
-        // Startup hydrates the empty cache from the Go-format rows, as the
-        // launcher's domain-cache loop does before serving Frontend reads.
-        let cache = InMemoryDomainStore::new();
-        cache.sync_matching_metadata(&persistence.list_domains(100, None).unwrap().domains);
+        // A fresh cache misses and must read the Go-format row through SQL.
         let restarted =
             PersistedFrontendDomainManager::new(
-                cache,
+                InMemoryDomainStore::new(),
                 persistence.clone(),
                 std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
             );
