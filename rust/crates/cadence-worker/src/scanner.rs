@@ -1,5 +1,14 @@
 //! Scanner and fixer system workflow names from Go `scanner`.
-pub const TASK_LIST: &str = "cadence-sys-tl-scanner-tasklist";
+pub const TASK_LIST: &str = "cadence-sys-tl-scanner-tasklist-0";
+pub const HISTORY_TASK_LIST: &str = "cadence-sys-history-scanner-tasklist-0";
+pub const CONCRETE_EXECUTIONS_TASK_LIST: &str = "cadence-sys-executions-scanner-tasklist-0";
+pub const CONCRETE_EXECUTIONS_FIXER_TASK_LIST: &str = "cadence-sys-executions-fixer-tasklist-0";
+pub const CURRENT_EXECUTIONS_TASK_LIST: &str =
+    "cadence-sys-current-executions-scanner-tasklist-0";
+pub const CURRENT_EXECUTIONS_FIXER_TASK_LIST: &str =
+    "cadence-sys-current-executions-fixer-tasklist-0";
+pub const TIMERS_TASK_LIST: &str = "cadence-sys-timers-scanner-tasklist-0";
+pub const TIMERS_FIXER_TASK_LIST: &str = "cadence-sys-timers-fixer-tasklist-0";
 pub const TASK_LIST_WORKFLOW_TYPE: &str = "cadence-sys-tl-scanner-workflow";
 pub const HISTORY_WORKFLOW_TYPE: &str = "cadence-sys-history-scanner-workflow";
 pub const CONCRETE_EXECUTIONS_WORKFLOW_TYPE: &str = "cadence-sys-executions-scanner-workflow";

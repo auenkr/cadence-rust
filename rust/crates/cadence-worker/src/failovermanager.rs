@@ -1,5 +1,5 @@
 //! Failover-manager workflow registration names from Go `failovermanager`.
-pub const TASK_LIST: &str = "cadence-sys-failover-manager-tasklist";
+pub const TASK_LIST: &str = "cadence-sys-failoverManager-tasklist";
 pub const LEGACY_WORKFLOW_TYPE: &str = "cadence-sys-failoverManager-workflow";
 pub const FAILOVER_V2_WORKFLOW_TYPE: &str = "cadence-sys-failover-v2-workflow";
 pub const REBALANCE_WORKFLOW_TYPE: &str = "cadence-sys-rebalance-workflow";
