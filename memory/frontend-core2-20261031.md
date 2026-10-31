@@ -1294,3 +1294,30 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - This source edit is pending commit and exact-head CI. Cargo was not run
   locally. The persistence managers and complete direct Go validator test
   matrix remain the active gaps.
+- Limiter startup hook checkpoint commit `74bff6691f94705d26c3ddbf1567a8a5472be3ad`
+  passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41209257515
+  (conclusion `success`; formatting, Clippy, Frontend tests and configured Go
+  oracle checks passed). No Cargo command was run locally.
+- Recounted `go/service/frontend/api/request_validator_test.go`: 15 test
+  functions and 88 named cases (`name:` rows). The Rust validator currently
+  has tests covering every public entry point and grouped row parity cases;
+  retain this audit as complete for the source test matrix. The file has no
+  Go table for `ValidateDeleteDomainRequest`, so coverage there is supplied by
+  the Rust nil/success/admin-token cases rather than a nonexistent Go table.
+
+## Current remaining implementation boundary
+
+Production persistence is not closed. The configured SQL/Cassandra factory
+opens Matching's native task store and its Go domain/metadata adapter. It does
+not implement or open Go-compatible execution, History, or Visibility
+managers. Frontend workflow state and visibility/history query behavior still
+use `InMemoryExecutionStore`; adding a separate snapshot or ad-hoc table would
+not preserve Go persistence semantics or schema compatibility. Continue by
+porting the Go execution manager and history/visibility stores into
+`cadence-persistence`, reusing backend pools and Go blob/schema contracts.
+
+Lifecycle sequencing is green-tested, but parity is not closed: production
+constructs none of Go's seven global quota collection owners, and the Admin
+handler has no owned DLQ/failover watcher workers to receive the stop signal.
+The shared listener drain hook is not a substitute for those service owners.
