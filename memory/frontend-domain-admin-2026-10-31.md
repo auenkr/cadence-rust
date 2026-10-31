@@ -373,3 +373,10 @@ migration forward.
   UpdateSchedule so an empty domain returns Go's `Domain not set on request.`
   before dynamic feature gating or schedule-ID checks. Dispatch fresh package CI
   after committing this edit.
+- Run [41178826780](https://github.com/auenkr/cadence-rust/actions/runs/41178826780)
+  at `348639c20477b44b673c0ec030f860a8efca071b` failed before Clippy/tests in
+  the existing changed-runtime formatting check: `cadence-persistence`'s
+  `dynamic_config.rs` and `cadence-service-core/src/admin.rs` need rustfmt.
+  The Go oracles and workspace format step passed. Extended the existing
+  CI-only Frontend formatting patch step to include those touched core files;
+  dispatch it with `format_frontend_files=true` and apply its uploaded patch.
