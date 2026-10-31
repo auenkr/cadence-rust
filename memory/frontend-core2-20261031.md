@@ -1421,3 +1421,9 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   global quota collection owners, and the Rust Admin handler does not own the
   Go domain DLQ/failover watcher loops. Their stop hooks therefore have no
   production owners; full `service.go` parity remains open.
+- The pushed evidence-only checkpoint `f17ac7e005aad53be016a79ba094b67b1b6b9120`
+  also passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41215343243
+  (conclusion `success`). This validates formatting, Clippy, and Frontend tests
+  against the memory update; it does not close any of the persistence or
+  lifecycle gaps above.
