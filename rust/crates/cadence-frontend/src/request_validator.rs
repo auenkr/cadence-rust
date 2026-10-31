@@ -383,6 +383,14 @@ impl RequestValidator {
         } else {
             self.config.required_domain_data_keys.clone()
         };
+        let required_keys_go_format = format!(
+            "map[{}]",
+            required_keys
+                .iter()
+                .map(|key| format!("{key}:true"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         for key in &required_keys {
             if !request
                 .data
@@ -390,8 +398,7 @@ impl RequestValidator {
                 .is_some_and(|data| data.contains_key(key))
             {
                 return Err(Self::bad(format!(
-                    "domain data error, missing required key {key} . All required keys: {:?}",
-                    required_keys
+                    "domain data error, missing required key {key} . All required keys: {required_keys_go_format}"
                 )));
             }
         }
@@ -862,5 +869,235 @@ mod tests {
                 .message,
             "Domain is not accepting fail overs at this time due to lockdown."
         );
+    }
+
+    #[test]
+    fn go_request_validator_remaining_table_cases() {
+        let mut validator = RequestValidator::default();
+        validator.config.visibility_max_page_size = 10;
+        validator.config.visibility_archival_query_max_page_size = 100;
+        validator.config.es_index_max_result_window = 100;
+        validator.config.max_domain_name_length = 10;
+        validator.config.max_retention_days = 3;
+        validator.config.max_failover_timeout_seconds = 300;
+        validator.config.admin_protection = true;
+        validator.config.admin_operation_token = "token".into();
+        validator.config.required_domain_data_keys = vec!["tier".into()];
+        let valid_time_filter = || StartTimeFilter {
+            earliest_time: Some(1),
+            latest_time: Some(2),
+        };
+        let bad = |result: Result<(), BadRequestError>, expected: &str| {
+            assert_eq!(result.unwrap_err().message, expected);
+        };
+
+        // Go's open/closed visibility tests cover all three time-filter
+        // omissions independently, filter conflicts, and default mutation.
+        let mut open = ListOpenWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(valid_time_filter()),
+            maximum_page_size: 0,
+            ..Default::default()
+        };
+        validator
+            .validate_list_open_workflow_executions_request(Some(&mut open))
+            .unwrap();
+        assert_eq!(open.maximum_page_size, 10);
+        for filter in [
+            StartTimeFilter::default(),
+            StartTimeFilter {
+                earliest_time: Some(1),
+                ..Default::default()
+            },
+            StartTimeFilter {
+                latest_time: Some(2),
+                ..Default::default()
+            },
+            StartTimeFilter {
+                earliest_time: Some(3),
+                latest_time: Some(2),
+            },
+        ] {
+            let mut request = ListOpenWorkflowExecutionsRequest {
+                domain: "domain".into(),
+                start_time_filter: Some(filter),
+                ..Default::default()
+            };
+            assert!(validator
+                .validate_list_open_workflow_executions_request(Some(&mut request))
+                .is_err());
+        }
+
+        let valid_closed = || ListClosedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            start_time_filter: Some(valid_time_filter()),
+            ..Default::default()
+        };
+        let mut closed = valid_closed();
+        validator
+            .validate_list_closed_workflow_executions_request(Some(&mut closed))
+            .unwrap();
+        assert_eq!(closed.maximum_page_size, 10);
+        let mut closed_conflict = valid_closed();
+        closed_conflict.execution_filter = Some(WorkflowExecutionFilter::default());
+        closed_conflict.status_filter = Some(
+            cadence_api::enums::WorkflowExecutionCloseStatus::Failed,
+        );
+        bad(
+            validator.validate_list_closed_workflow_executions_request(Some(&mut closed_conflict)),
+            "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed",
+        );
+        let mut closed_conflict = valid_closed();
+        closed_conflict.type_filter = Some(WorkflowTypeFilter::default());
+        closed_conflict.status_filter = Some(
+            cadence_api::enums::WorkflowExecutionCloseStatus::Failed,
+        );
+        assert!(validator
+            .validate_list_closed_workflow_executions_request(Some(&mut closed_conflict))
+            .is_err());
+
+        let mut archived = ListArchivedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            ..Default::default()
+        };
+        validator
+            .validate_list_archived_workflow_executions_request(Some(&mut archived))
+            .unwrap();
+        assert_eq!(archived.page_size, 10);
+        let mut archived_too_large = ListArchivedWorkflowExecutionsRequest {
+            domain: "domain".into(),
+            page_size: 101,
+            ..Default::default()
+        };
+        bad(
+            validator.validate_list_archived_workflow_executions_request(Some(&mut archived_too_large)),
+            "Pagesize is larger than allowed 100",
+        );
+
+        // Domain tests cover successful identifier alternatives, all guarded
+        // operations, required registration data, and failover shape variants.
+        validator
+            .validate_describe_domain_request(Some(&DescribeDomainRequest {
+                name: Some("domain".into()),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_describe_domain_request(Some(&DescribeDomainRequest {
+                uuid: Some("uuid".into()),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_register_domain_request(Some(&RegisterDomainRequest {
+                name: "domain".into(),
+                security_token: "token".into(),
+                data: Some(std::collections::HashMap::from([("tier".into(), "3".into())])),
+                ..Default::default()
+            }))
+            .unwrap();
+        bad(
+            validator.validate_register_domain_request(Some(&RegisterDomainRequest {
+                name: "domain".into(),
+                security_token: "token".into(),
+                ..Default::default()
+            })),
+            "domain data error, missing required key tier . All required keys: [\"tier\"]",
+        );
+        validator
+            .validate_update_domain_request(Some(&UpdateDomainRequest {
+                name: "domain".into(),
+                security_token: "token".into(),
+                ..Default::default()
+            }))
+            .unwrap();
+        bad(
+            validator.validate_delete_domain_request(Some(&DeleteDomainRequest {
+                name: "domain".into(),
+                security_token: "wrong".into(),
+                ..Default::default()
+            })),
+            "No permission to do this operation.",
+        );
+        bad(
+            validator.validate_deprecate_domain_request(Some(&DeprecateDomainRequest {
+                name: "domain".into(),
+                security_token: "wrong".into(),
+                ..Default::default()
+            })),
+            "No permission to do this operation.",
+        );
+        let active_active = cadence_api::types::ActiveClusters {
+            attribute_scopes: std::collections::HashMap::new(),
+        };
+        validator
+            .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                active_clusters: Some(active_active),
+                ..Default::default()
+            }))
+            .unwrap();
+        validator
+            .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some(String::new()),
+                failover_timeout_in_seconds: Some(120),
+                ..Default::default()
+            }))
+            .unwrap();
+        bad(
+            validator.validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("c".into()),
+                failover_timeout_in_seconds: Some(0),
+                ..Default::default()
+            })),
+            "FailoverTimeoutInSeconds must be positive",
+        );
+        bad(
+            validator.validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("c".into()),
+                failover_timeout_in_seconds: Some(-1),
+                ..Default::default()
+            })),
+            "FailoverTimeoutInSeconds must be positive",
+        );
+
+        // A configured dynamic overlay is consulted on every call, as Go's
+        // dynamic-property closures are, rather than being snapshotted.
+        let overlay = Arc::new(Mutex::new(
+            cadence_service_core::admin::DynamicConfigOverlay::default(),
+        ));
+        let dynamic = RequestValidator::default().with_dynamic_config(overlay.clone());
+        let mut page = ListWorkflowExecutionsRequest {
+            domain: "d".into(),
+            page_size: 0,
+            ..Default::default()
+        };
+        dynamic
+            .validate_list_workflow_executions_request(Some(&mut page))
+            .unwrap();
+        assert_eq!(page.page_size, 1000);
+        overlay.lock().unwrap().update(
+            false,
+            "frontend.visibilityMaxPageSize",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(
+                    EncodingType::JSON,
+                    serde_json::to_vec(&serde_json::json!(7)).unwrap(),
+                )),
+                filters: vec![],
+            }],
+        );
+        let mut page = ListWorkflowExecutionsRequest {
+            domain: "d".into(),
+            page_size: 0,
+            ..Default::default()
+        };
+        dynamic
+            .validate_list_workflow_executions_request(Some(&mut page))
+            .unwrap();
+        assert_eq!(page.page_size, 7);
     }
 }

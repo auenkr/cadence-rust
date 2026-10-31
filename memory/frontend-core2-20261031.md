@@ -87,6 +87,36 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   passed. The test set includes nil-request coverage for all 16 validator
   methods, but it is still not the full Go test matrix.
 
+## Continuation update — 2026-10-31
+
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41177528727 at
+  `ba8d475dee603c6821be483b4a82422dd33d2bfc` concluded `failure` in Clippy
+  compilation. The Frontend admission interceptor wrapped generated tonic
+  servers before applying their decoding limits; the limit methods then
+  resolved against `InterceptedService` and failed. Reordered construction to
+  apply each generated server's configured decode limit before wrapping it.
+  This correction still needs exact-head CI validation.
+- Expanded `request_validator.rs` coverage against Go's tables for the missing
+  open/closed/archived visibility cases, all filter conflict shapes, default
+  page-size mutation, required domain data, admin-protected operations,
+  active-active/passive failover, invalid timeouts, and live dynamic updates.
+  The complete Go table has not yet been ported; exact-head CI must confirm this
+  test addition compiles and passes.
+- No change closes the production persistence gap: current Frontend startup
+  opens the default Matching backend and reads domain metadata, but only has a
+  read-only metadata source. The durable write-capable domain/metadata,
+  visibility, history, and execution managers, including Go SQL/Cassandra
+  selection, are still missing.
+- Shutdown is wired into Frontend listener lifecycle: readiness flips first,
+  `frontend.shutdownDrainDuration` controls failure detection and the final
+  one-second request window, then the HTTP/gRPC/TChannel listener tasks are
+  torn down. Matching membership/runtime shutdown still follows the shared
+  launcher sequence. Stop hooks for Go's handler/admin handler, limiter
+  collections, and base resource do not yet exist as separately wired owners;
+  compare and close this lifecycle gap before calling it complete.
+- Cargo was not run locally. The next package run must be dispatched after
+  pushing the current fixes; record its exact head and terminal conclusion.
+
 ## Remaining gaps (this branch is not Frontend complete)
 
 - Wire the shared dynamic overlay into the production Frontend validator

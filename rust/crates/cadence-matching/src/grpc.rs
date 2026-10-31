@@ -1876,39 +1876,62 @@ pub async fn serve(
     tonic::transport::Server::builder()
         .add_service(reflection)
         .add_service(
-            p::meta_api_server::MetaApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::domain_api_server::DomainApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::workflow_api_server::WorkflowApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::visibility_api_server::VisibilityApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::worker_api_server::WorkerApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::schedule_api_server::ScheduleApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            p::semaphore_api_server::SemaphoreApiServer::with_interceptor(service.clone(), admission())
-                .max_decoding_message_size(limit),
-        )
-        .add_service(
-            cadence_proto::admin::admin_api_server::AdminApiServer::with_interceptor(
-                crate::grpc_admin::Admin { frontend: service.clone() },
+            tonic::service::interceptor::InterceptedService::new(
+                p::meta_api_server::MetaApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
                 admission(),
-            )
-            .max_decoding_message_size(limit),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::domain_api_server::DomainApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::workflow_api_server::WorkflowApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::visibility_api_server::VisibilityApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::worker_api_server::WorkerApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::schedule_api_server::ScheduleApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                p::semaphore_api_server::SemaphoreApiServer::new(service.clone())
+                    .max_decoding_message_size(limit),
+                admission(),
+            ),
+        )
+        .add_service(
+            tonic::service::interceptor::InterceptedService::new(
+                cadence_proto::admin::admin_api_server::AdminApiServer::new(
+                    crate::grpc_admin::Admin { frontend: service.clone() },
+                )
+                .max_decoding_message_size(limit),
+                admission(),
+            ),
         )
         .add_service(
             cadence_proto::sharddistributor::shard_distributor_api_server::ShardDistributorApiServer::new(
