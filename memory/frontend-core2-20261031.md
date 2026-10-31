@@ -896,3 +896,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - The complete 91-case Go request-validator matrix remains closed by fresh
   uncached CI run `41181338783` plus later failover/lockdown rows in
   `41188887361`; validator code has not changed in this continuation.
+- Fresh-target Frontend run
+  https://github.com/auenkr/cadence-rust/actions/runs/41195127536 checked
+  head `a4098142b1b7925e6eb4fc6dee0ba4a2f973e929`: formatting, Clippy, and
+  Frontend tests passed, but the optional runtime smoke failed when the Go
+  development YAML selected Cassandra at `127.0.0.1:9042`; CI did not provide
+  Cassandra/schema, and configured-store startup correctly exited on
+  connection refusal. This is not a smoke pass and does not establish
+  production persistence. Re-run fresh-target Frontend package CI without that
+  database-dependent smoke after recording this evidence.
