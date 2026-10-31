@@ -1056,3 +1056,9 @@ Frontend parity until these are implemented and validated.
   `InternalServiceError`, preserving Go's error category as well as its exact
   diagnostic text. This amendment is newer than the active CI run and requires
   another exact-head package run.
+- Run [41198459752](https://github.com/auenkr/cadence-rust/actions/runs/41198459752)
+  checked exact SHA `d62eb71a37e162f5a5bb4f578b830756fbccc23a`; format checks
+  passed, while Clippy stopped at `verify_history_is_complete` for eight
+  Go-mirroring parameters. Added a function-scoped `too_many_arguments`
+  allowance with the argument mapping documented above. The run did not reach
+  unit tests. Exact-head validation is pending.

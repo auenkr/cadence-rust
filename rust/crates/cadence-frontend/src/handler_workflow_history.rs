@@ -67,6 +67,7 @@ pub fn validate_history_run_id(
 /// by Frontend. This matches Go's `verifyHistoryIsComplete`, including the
 /// lower-bound page-size rule used when the persistence token says more pages
 /// remain.
+#[allow(clippy::too_many_arguments)]
 pub fn verify_history_is_complete(
     first_event_id: Option<i64>,
     last_event_id: Option<i64>,
