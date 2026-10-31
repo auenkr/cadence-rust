@@ -278,6 +278,11 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
 
 ## Continuation — Frontend lifecycle and validator audit
 
+- Corrected Frontend-only resource ordering in the shared launcher: once the
+  final request-drain interval completes, the dedicated `cadence-frontend`
+  process now aborts and joins its listener tasks and TChannel task before
+  returning from the resource-stop phase. Combined service runs retain their
+  Matching membership/runtime teardown order. CI is pending for this change.
 - The first lifecycle adjustment moved resource worker joins ahead of the
   request-drain window. A source comparison with Go's `WorkflowHandler.Stop`
   and `AdminHandler.Stop` showed that Rust timer/snapshot workers belong to
@@ -327,6 +332,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   Go-development runtime smoke step was skipped by workflow conditions. The
   branch tip after this run only has documentation updates. Cargo remains
   prohibited locally.
+- New exact-head CI for the Frontend-only listener/resource ordering is running
+  at https://github.com/auenkr/cadence-rust/actions/runs/41186056305, head
+  `beeba8334704bc57c97fafe549cfb2aa661c3d1f`; record its conclusion below.
 
 ## Exact-head follow-up — 2026-10-31
 
