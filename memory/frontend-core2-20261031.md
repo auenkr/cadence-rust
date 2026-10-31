@@ -577,3 +577,8 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   checked `c4aa845cf24fe5dcaf81e3d8028485e46ad176ed` and failed Clippy on an
   unnecessary `return` in the shutdown-select branch. Simplified the branch;
   this run did not reach tests. Dispatching a fresh exact-head run.
+- Exact-head warmup validation run
+  https://github.com/auenkr/cadence-rust/actions/runs/41187035454 completed
+  `success` on `3682a3f69d0c1abd47b20b0db0191b0f6010de91`; Go source oracles,
+  Formatting, Clippy, Frontend tests, and Frontend development-config smoke all
+  passed. This validates the startup warmup and shutdown suppression change.

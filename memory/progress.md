@@ -1872,3 +1872,4 @@ https://github.com/auenkr/cadence-rust/actions/runs/41174450063 at head
 predates the subsequent dynamic-config and failover corrections. No local Cargo
 command was run. Remaining Frontend work is listed in
 `frontend-core2-20261031.md`; this slice is not a service parity claim.
+- Frontend continuation: ported Go `frontend.warmupDuration` readiness transition and shutdown suppression; fresh exact-head Frontend CI passed at `3682a3f69d0c1abd47b20b0db0191b0f6010de91` (run 41187035454). Durable Frontend managers and actual quota/admin worker owners remain open; see `frontend-core2-20261031.md`.
