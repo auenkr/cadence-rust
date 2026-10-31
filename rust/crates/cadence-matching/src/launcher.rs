@@ -945,6 +945,11 @@ async fn run_with_lifecycle(
             {
                 state.grpc_max_message_size = limit;
             }
+            if wanted.contains(&service::ServiceName::Frontend) {
+                // Go starts all Frontend global quota collections before
+                // starting the workflow and admin handlers.
+                state.start_frontend_limiters().await?;
+            }
             // Optional file durability: load snapshots, then persist every
             // 5 seconds. Crash losses are bounded by the interval.
             let snapshot_paths: Option<(std::path::PathBuf, std::path::PathBuf)> =

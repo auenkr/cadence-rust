@@ -42,6 +42,9 @@ use std::pin::Pin;
 /// seven collections before opening the request drain window.
 pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
+    fn on_start(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
     fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
 }
 
@@ -177,6 +180,31 @@ impl AppState {
             .lock()
             .expect("frontend limiter registry lock")
             .push(limiter);
+    }
+
+    /// Start every service-owned global quota collection with the shared
+    /// one-second deadline used by Go Frontend `Service.Start`.
+    pub async fn start_frontend_limiters(&self) -> anyhow::Result<()> {
+        use anyhow::Context;
+
+        let limiters = self
+            .frontend_limiters
+            .lock()
+            .expect("frontend limiter registry lock")
+            .clone();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        for limiter in limiters {
+            match tokio::time::timeout_at(deadline, limiter.on_start()).await {
+                Ok(result) => result.with_context(|| {
+                    format!("starting Frontend global rate limiter collection {}", limiter.name())
+                })?,
+                Err(_) => anyhow::bail!(
+                    "timed out starting Frontend global rate limiter collection {}",
+                    limiter.name()
+                ),
+            }
+        }
+        Ok(())
     }
 
     /// Stop all constructed global limiter collections with Go's shared
@@ -2762,6 +2790,13 @@ mod frontend_drain_tests {
             "test"
         }
 
+        fn on_start(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        }
+
         fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Ok(()) })
@@ -2810,6 +2845,18 @@ mod frontend_drain_tests {
 
         assert_eq!(stopped.load(Ordering::SeqCst), 1);
         assert!(state.frontend_limiters.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn frontend_start_invokes_registered_limiter_owners() {
+        let state = AppState::default();
+        let started = Arc::new(AtomicUsize::new(0));
+        state.register_frontend_limiter(Arc::new(TestLimiter(started.clone())));
+
+        state.start_frontend_limiters().await.unwrap();
+
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(state.frontend_limiters.lock().unwrap().len(), 1);
     }
 
     #[test]

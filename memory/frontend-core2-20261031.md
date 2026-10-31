@@ -192,6 +192,61 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   failure/restart/recovery gate, or Frontend parity audit has run for this
   branch.
 
+## Persistence and lifecycle continuation — 2026-10-31
+
+- Rechecked the current launcher and persistence code. The configured default
+  Cassandra/MySQL/PostgreSQL domain persistence adapter is write-capable and
+  Frontend installs `GoSqlFrontendDomainManager` over it. It persists domain
+  and singleton metadata rows using Matching's native store selection. This
+  closes the earlier note that called domain/metadata writes absent; it does
+  not imply that all Go manager semantics or store roles are complete.
+- Added explicit `PersistenceStoreRole` variants for Go's domain, metadata,
+  history, and execution managers. They resolve to `defaultStore`, while
+  `visibility` resolves only to `visibilityStore`; config unit coverage checks
+  all roles select the configured SQL backend. This gives subsequent manager
+  wiring one role-specific selection API. Exact-head GitHub Actions validation
+  is pending after push.
+- Remaining production persistence gap is unchanged in substance: the
+  Frontend state and handlers use `InMemoryExecutionStore`; no SQL/Cassandra
+  execution/history managers are opened. No database visibility manager is
+  opened for `visibilityStore` (or a configured advanced-visibility manager).
+  The domain manager continues to rely on an in-memory cache alongside its
+  durable domain rows.
+- Shutdown's listener owner now calls the shared Go-ordered drain hooks for
+  health, handler admission, registered limiter collections, and background
+  resources. The production launcher registers no real global quota collection
+  owners, and the admin handler's domain DLQ/failover watcher workers are not
+  implemented in Rust. Therefore the sequencing helper is present, but
+  `service.go` lifecycle parity remains open.
+- Row-by-row static audit of `go/service/frontend/api/request_validator_test.go`
+  counted all 15 tables and 88 named rows. Rust coverage maps as follows:
+  refresh (3) to nil/success/execution tests; describe task list (7), partitions
+  (6), get-task-lists (3), and reset-sticky (6) to domain-presence, task-list,
+  reset-identifier and success tests; count (3) and list (4) to nil/domain,
+  size-mutation and size-limit tests; open (9) and closed (11) to nil/domain,
+  all start-time omissions/order, all filter conflicts, default page mutation,
+  and max-page tests; archived (4) to nil/domain/default/max-page; deprecate
+  (4) and describe-domain (4) to success/nil/domain/token and name/UUID cases;
+  update (7) to success/nil/domain/retention/token and both lockdown shapes;
+  register (7) to success/nil/domain/name-length/retention/required-data/token;
+  failover (10) to active-passive, active-active, graceful, nil/domain/missing
+  shape, zero/negative/over-limit timeout and lockdown. Several rows are grouped
+  in Rust tests rather than retaining Go's `t.Run` names; the tested request
+  conditions and outcomes correspond to all named source rows. The CI run on
+  the pushed head below must pass before considering this matrix closed.
+- Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41208155748 validated
+  source head `2f1de3f321983cc393738d69d520c708124757d1` and concluded
+  `success`: Clippy, formatting, Frontend tests, and the enabled Go oracle
+  steps passed. The subsequent commit `8537a4ae6615455c40ae335b3af00a718c484a56`
+  changes only this memory audit. The follow-up added Cassandra selection
+  assertions for domain, metadata, history, and execution roles. Exact-source
+  Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41208565512 validated
+  `59b2986cb76f2a4b4defc132098ce0fce7390204` and concluded `success`:
+  Clippy, formatting, Frontend tests, and enabled Go oracle steps passed.
+  No Cargo command was run locally.
+
 ## Source pointers
 
 - Go: `go/service/frontend/api/request_validator.go`,
@@ -1194,3 +1249,115 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   audit remains closed at 15 Go groups / 88 named rows.
 - No Cargo command was run locally. Exact-head package CI is required for this
   source change; record the run URL, tested head and conclusion after it ends.
+
+## Thrift domain persistence routing — 2026-10-31
+
+- Auditing the production Frontend domain manager found that HTTP domain
+  handlers used the configured `GoSqlFrontendDomainManager`, while Thrift /
+  YARPC handlers still called the shared in-memory `InMemoryDomainStore`
+  directly. Routed Thrift domain registration, description, listing, update,
+  deprecation, deletion, failover, failover-history, and task-token domain
+  lookup through `AppState.domain_manager`. This allows the existing MySQL,
+  PostgreSQL, SQLite, and Cassandra domain/metadata adapters to serve both
+  listener paths.
+- Source commit: `ca4a89f7414434bfab457d7d74f70f0b7124bcc4`, pushed to
+  `frontend-core2`.
+- Exact-head Frontend CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41206938291 checks
+  source head `ca4a89f7414434bfab457d7d74f70f0b7124bcc4` and concluded
+  `success` (formatting, Clippy, and Frontend tests). Runtime smoke was skipped.
+- This closes the Thrift bypass only. Durable execution/history and visibility
+  managers are still absent; workflow execution, visibility reads and history
+  remain backed by in-memory state. Frontend also constructs no production
+  quota collection owners, and the AdminHandler remains a stub without Go's
+  domain DLQ and failover watcher workers. Ordered drain hooks are wired, but
+  these missing owners leave lifecycle parity open.
+- The request-validator audit remains closed at 15 Go table groups / 88 named
+  rows, with exact-head package CI evidence above. No Cargo command was run
+  locally.
+- Matching package CI also passed after this routing change:
+  https://github.com/auenkr/cadence-rust/actions/runs/41207277516 validated
+  current head `65bafbbb99621090ada47720d5fac2ad4e0bff23` and concluded
+  `success` (formatting, Clippy, and Matching tests). The Frontend run above
+  validates the source commit; the commits after it only updated this evidence
+  file. No Cargo command was run locally.
+
+## Frontend limiter lifecycle startup hook — 2026-10-31
+
+- Added the Go one-second startup deadline for registered Frontend global
+  limiter collections and invoke their `OnStart` equivalents before opening
+  Frontend handlers/listeners. Added a focused owner-start test.
+- Wired the shared launcher to start registered Frontend limiter owners when
+  Frontend is enabled. Production currently registers no limiter owners, so
+  this closes only the lifecycle hook seam; seven actual global quota owners
+  and AdminHandler worker owners remain missing.
+- This source edit is pending commit and exact-head CI. Cargo was not run
+  locally. The persistence managers and complete direct Go validator test
+  matrix remain the active gaps.
+- Limiter startup hook checkpoint commit `74bff6691f94705d26c3ddbf1567a8a5472be3ad`
+  passed exact-head Frontend CI:
+  https://github.com/auenkr/cadence-rust/actions/runs/41209257515
+  (conclusion `success`; formatting, Clippy, Frontend tests and configured Go
+  oracle checks passed). No Cargo command was run locally.
+- Recounted `go/service/frontend/api/request_validator_test.go`: 15 test
+  functions and 88 named cases (`name:` rows). The Rust validator currently
+  has tests covering every public entry point and grouped row parity cases;
+  retain this audit as complete for the source test matrix. The file has no
+  Go table for `ValidateDeleteDomainRequest`, so coverage there is supplied by
+  the Rust nil/success/admin-token cases rather than a nonexistent Go table.
+
+## Current remaining implementation boundary
+
+Production persistence is not closed. The configured SQL/Cassandra factory
+opens Matching's native task store and its Go domain/metadata adapter. It does
+not implement or open Go-compatible execution, History, or Visibility
+managers. Frontend workflow state and visibility/history query behavior still
+use `InMemoryExecutionStore`; adding a separate snapshot or ad-hoc table would
+not preserve Go persistence semantics or schema compatibility. Continue by
+porting the Go execution manager and history/visibility stores into
+`cadence-persistence`, reusing backend pools and Go blob/schema contracts.
+
+Lifecycle sequencing is green-tested, but parity is not closed: production
+constructs none of Go's seven global quota collection owners, and the Admin
+handler has no owned DLQ/failover watcher workers to receive the stop signal.
+The shared listener drain hook is not a substitute for those service owners.
+
+## Validator matrix verification detail — 2026-10-31
+
+Re-read `go/service/frontend/api/request_validator_test.go` and counted its
+named rows within each Go test table:
+
+| Go validator test | Rows |
+| --- | ---: |
+| Refresh workflow tasks | 3 |
+| Describe task list | 7 |
+| List task-list partitions | 6 |
+| Get task lists by domain | 3 |
+| Reset sticky task list | 6 |
+| Count workflow executions | 3 |
+| List workflow executions | 4 |
+| List open workflow executions | 9 |
+| List closed workflow executions | 11 |
+| List archived workflow executions | 4 |
+| Deprecate domain | 4 |
+| Describe domain | 4 |
+| Update domain | 7 |
+| Register domain | 7 |
+| Failover domain | 10 |
+| **Total** | **88** |
+
+Rust coverage is grouped across `every_go_validator_entry_point_rejects_a_nil_request`,
+`go_request_validator_error_and_mutation_matrix`,
+`go_domain_presence_matrix_covers_every_domain_scoped_validator`,
+`go_request_validator_limit_filter_and_lockdown_matrix`,
+`go_request_validator_remaining_table_cases`,
+`go_request_validator_success_cases_cover_all_entry_points`,
+`go_visibility_matrix_checks_exact_time_filter_and_filter_conflict_errors`,
+`go_validator_matrix_covers_task_list_reset_and_failover_boundaries`,
+`go_table_covers_visibility_limits_and_update_failover_lockdown`, and the
+remaining failover boundary tests. These include nil and success checks for
+all 16 entry points; exact public error text for time-filter omissions/order,
+filter conflicts, visibility page limits, domain/token checks, lockdown,
+required domain data, and failover timeout boundaries; and page-size mutation
+checks. No new Rust source was changed in this audit; the latest source remains
+validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.

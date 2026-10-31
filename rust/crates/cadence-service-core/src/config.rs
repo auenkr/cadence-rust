@@ -571,12 +571,20 @@ impl PersistenceConfig {
     /// configured a separate visibility database.
     pub fn store_name_for(&self, role: PersistenceStoreRole) -> Result<Option<&str>, String> {
         let configured = match role {
-            PersistenceStoreRole::Default => self.default_store.as_str(),
+            PersistenceStoreRole::Default
+            | PersistenceStoreRole::Domain
+            | PersistenceStoreRole::Metadata
+            | PersistenceStoreRole::History
+            | PersistenceStoreRole::Execution => self.default_store.as_str(),
             PersistenceStoreRole::Visibility => self.visibility_store.as_str(),
         };
         if configured.is_empty() {
             return match role {
-                PersistenceStoreRole::Default => {
+                PersistenceStoreRole::Default
+                | PersistenceStoreRole::Domain
+                | PersistenceStoreRole::Metadata
+                | PersistenceStoreRole::History
+                | PersistenceStoreRole::Execution => {
                     Err("Frontend persistence requires persistence.defaultStore".into())
                 }
                 PersistenceStoreRole::Visibility => Ok(None),
@@ -683,6 +691,12 @@ impl PersistenceConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceStoreRole {
     Default,
+    /// Go's domain and metadata managers use persistence.defaultStore.
+    Domain,
+    Metadata,
+    /// Workflow execution and history managers use persistence.defaultStore.
+    History,
+    Execution,
     Visibility,
 }
 
@@ -1723,6 +1737,15 @@ shard-distributor-matching:
             persistence.store_name_for(PersistenceStoreRole::Default),
             Ok(Some("primary"))
         );
+        for role in [
+            PersistenceStoreRole::Domain,
+            PersistenceStoreRole::Metadata,
+            PersistenceStoreRole::History,
+            PersistenceStoreRole::Execution,
+        ] {
+            assert_eq!(persistence.store_name_for(role), Ok(Some("primary")));
+            assert!(persistence.datastore_for(role).unwrap().unwrap().sql.is_some());
+        }
         assert_eq!(
             persistence.store_name_for(PersistenceStoreRole::Visibility),
             Ok(Some("visibility"))
@@ -1745,6 +1768,30 @@ shard-distributor-matching:
             persistence.store_name_for(PersistenceStoreRole::Visibility),
             Ok(None)
         );
+
+        let cassandra: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: primary\ndatastores:\n  primary: {nosql: {pluginName: cassandra, hosts: '127.0.0.1'}}\n",
+        )
+        .unwrap();
+        for role in [
+            PersistenceStoreRole::Domain,
+            PersistenceStoreRole::Metadata,
+            PersistenceStoreRole::History,
+            PersistenceStoreRole::Execution,
+        ] {
+            assert_eq!(cassandra.store_name_for(role), Ok(Some("primary")));
+            assert_eq!(
+                cassandra
+                    .datastore_for(role)
+                    .unwrap()
+                    .unwrap()
+                    .nosql
+                    .as_ref()
+                    .unwrap()
+                    .plugin_name,
+                "cassandra"
+            );
+        }
     }
 
     #[test]
