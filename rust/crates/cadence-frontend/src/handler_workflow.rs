@@ -12,6 +12,7 @@ use cadence_api::{service_types, tasks};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -213,6 +214,7 @@ pub struct Handler<B> {
     version_check: Option<VersionCheck>,
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
     visibility_query_validator: Option<Arc<dyn VisibilityQueryValidator>>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 /// Caller metadata carried by the transport into the same wrapper layers that
@@ -266,6 +268,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -283,6 +286,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -305,6 +309,7 @@ impl<B: WorkflowBackend> Handler<B> {
             version_check: None,
             rate_limit: None,
             visibility_query_validator: None,
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -364,6 +369,13 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> Self {
         self.visibility_query_validator = Some(validator);
         self
+    }
+
+    /// Match `WorkflowHandler.Stop`: subsequent workflow operations return
+    /// the shared Frontend shutting-down error. Health remains available so
+    /// peers can observe service state during the drain window.
+    pub fn stop(&self) {
+        self.shutting_down.store(true, Ordering::Release);
     }
 
     pub async fn dispatch(&self, operation: &str, request: Value) -> Result<Value, CadenceError> {
@@ -446,6 +458,13 @@ impl<B: WorkflowBackend> Handler<B> {
                 &caller.feature_version,
                 version_check.checker.as_ref(),
             )?;
+        }
+        if operation != WorkflowOperation::Health
+            && self.shutting_down.load(Ordering::Acquire)
+        {
+            return Err(CadenceError::Internal(
+                cadence_api::errors::InternalServiceError::new("Shutting down"),
+            ));
         }
         let request = self.validate_request(operation, request)?;
         self.backend
@@ -1045,6 +1064,27 @@ mod tests {
             &[WorkflowOperation::StartWorkflowExecution]
         );
         assert!(handler.dispatch("NotAnApi", Value::Null).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stop_rejects_workflow_calls_but_keeps_health_available() {
+        let handler = Handler::new(FakeBackend::default());
+        handler.stop();
+
+        let error = handler
+            .dispatch("StartWorkflowExecution", serde_json::json!({"domain":"shop"}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "Shutting down");
+
+        assert!(handler
+            .dispatch("Health", serde_json::Value::Null)
+            .await
+            .is_ok());
+        assert_eq!(
+            handler.backend.0.lock().unwrap().as_slice(),
+            &[WorkflowOperation::Health]
+        );
     }
 
     #[tokio::test]
