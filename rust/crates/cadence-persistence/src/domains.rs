@@ -19,6 +19,12 @@ pub struct DomainRecord {
     pub configuration: DomainConfiguration,
     pub replication: DomainReplicationConfiguration,
     pub failover_version: i64,
+    /// Go's domain notification version is stored in the flattened SQL blob
+    /// and is also used by SQL domain metadata transactions. Keep it in the
+    /// domain cache so a durable Frontend manager can round-trip it without
+    /// inventing a version during cache refresh.
+    #[serde(default)]
+    pub notification_version: i64,
     #[serde(default)]
     pub failover_notification_version: i64,
     pub is_global_domain: bool,
@@ -194,6 +200,7 @@ impl InMemoryDomainStore {
             configuration: metadata.configuration.clone(),
             replication: metadata.replication.clone(),
             failover_version: metadata.failover_version,
+            notification_version: metadata.notification_version,
             failover_notification_version: metadata.failover_notification_version,
             is_global_domain: metadata.is_global_domain,
             archival_bucket: metadata.archival_bucket.clone(),
@@ -247,6 +254,7 @@ impl InMemoryDomainStore {
                 configuration: metadata.configuration.clone(),
                 replication: metadata.replication.clone(),
                 failover_version: metadata.failover_version,
+                notification_version: metadata.notification_version,
                 failover_notification_version: metadata.failover_notification_version,
                 is_global_domain: metadata.is_global_domain,
                 archival_bucket: metadata.archival_bucket.clone(),
@@ -373,6 +381,7 @@ impl InMemoryDomainStore {
             configuration,
             replication,
             failover_version,
+            notification_version: 0,
             failover_notification_version: 0,
             is_global_domain,
             archival_bucket: String::new(),
@@ -1138,6 +1147,17 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
+            domains
+                .inner
+                .read()
+                .unwrap()
+                .by_name
+                .get("go-seeded")
+                .unwrap()
+                .notification_version,
+            6
+        );
+        assert_eq!(
             view.configuration
                 .unwrap()
                 .workflow_execution_retention_period_in_days,
@@ -1168,6 +1188,17 @@ mod tests {
         metadata.notification_version = 7;
         metadata.configuration.workflow_execution_retention_period_in_days = 18;
         domains.sync_matching_metadata(&[metadata.clone()]);
+        assert_eq!(
+            domains
+                .inner
+                .read()
+                .unwrap()
+                .by_name
+                .get("go-seeded")
+                .unwrap()
+                .notification_version,
+            7
+        );
         assert!(!failover.has_changed().unwrap());
 
         // Go's IsActiveActive excludes attribute-scoped domains from the
