@@ -1873,6 +1873,7 @@ predates the subsequent dynamic-config and failover corrections. No local Cargo
 command was run. Remaining Frontend work is listed in
 `frontend-core2-20261031.md`; this slice is not a service parity claim.
 - Frontend continuation: ported Go `frontend.warmupDuration` readiness transition and shutdown suppression; fresh exact-head Frontend CI passed at `3682a3f69d0c1abd47b20b0db0191b0f6010de91` (run 41187035454). Durable Frontend managers and actual quota/admin worker owners remain open; see `frontend-core2-20261031.md`.
+- Frontend core2 continuation: production default-store opening now uses the shared persistence role selector for task, semaphore, SQLite option and domain/metadata manager setup while preserving Matching startup diagnostics. Exact-head CI is being collected; this does not add Visibility, History or Execution managers or instantiate Go's quota/admin lifecycle owners. See `frontend-core2-20261031.md`.
 # 2026-10-31 — Frontend core2 continuation
 
 - Added and CI-validated centralized Go-compatible `defaultStore` and optional
