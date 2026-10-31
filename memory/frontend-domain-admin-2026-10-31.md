@@ -1029,3 +1029,10 @@ migration forward.
   missing newly added isolation/async config fields in SQL metadata decoding,
   and ambiguous Cassandra `HashMap` key/value types. All three source repairs
   are now applied and need exact-head CI. The run did not reach Rust tests.
+- Exact-head run [41203031658](https://github.com/auenkr/cadence-rust/actions/runs/41203031658)
+  targeted `b5273a34e5bba6844ac1b637717ffaeb3d46fcb2`. Formatting passed and
+  persistence compiled, but Clippy failed because YARPC's newly wired domain
+  replication route lacked `FromThrift` for its request model. Added the Go
+  field-ID decoder (10/20/30 from `replicator.thrift`) and a focused converter
+  case. This needs another exact-head CI run; the failed run did not reach Rust
+  tests.
