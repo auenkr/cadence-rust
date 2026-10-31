@@ -439,3 +439,29 @@ diagnostics, the rest of failovermanager (legacy workflow, V2 workflow bodies,
 rebalance bodies, starter), the rest of esanalyzer (workflow and metric emission),
 indexer (Kafka and ES processor), domaindeprecation/archiver/replicator/asyncworkflow
 bodies, pollers, deterministic replay, lifecycle/drain, and the mixed Go/Rust gates.
+
+## Checkpoint — scheduler backfill and policy helpers (2026-10-31, continuation)
+
+Ported (Go-mirroring pure logic, Go-derived tests):
+- `scheduler/backfill.rs`: backfill signal/request types, queue validation (invalid
+  range, queue cap of 10, duplicate non-empty BackfillID), overlap inheritance
+  (only `Invalid` inherits), capped cron counting, and the drain loop (paused
+  short-circuit, budget, truncated-window resume, runs_total cap and caching).
+  Times are Unix nanoseconds. Cron evaluation and fire processing are injected.
+- `scheduler/policy.rs`: buffer and concurrency clamping, catch-up window default,
+  `applyMissedRunPolicy`, pause/unpause state with the one-shot catch-up override,
+  schedule state strings, and `generateWorkflowID` with an in-crate RFC 3339 UTC
+  formatter (checked against 1970, 2024-02-29 and 2026-01-01).
+
+Not ported in scheduler: `computeNextRunTime`/`computeMissedFireTimes` (need a cron
+library), `generateRequestID` (needs a SHA-1 UUID dependency), signal loop and
+`SchedulerWorkflow` body, `processScheduleFire`/`tryStartFire`/buffer drain, handleUpdate,
+describe/search attributes, JSON wire forms for time fields (Go RFC 3339 strings;
+the Rust port currently uses nanos), activities (`processScheduleFireActivity`,
+`watchWorkflowActivity`) and `client_worker.go`.
+
+CI: a first run (`41225326451`) passed but ran only 122 lib tests, because
+`scheduler.rs` (the `pub mod policy;` line) was not staged. Fixed in commit `f64de17ee`.
+Run https://github.com/auenkr/cadence-rust/actions/runs/41225688892 at
+`f64de17ee` — success, 131 worker lib tests passed (the count matches the source).
+The CI format patch for `policy.rs` is applied in `65b3137a6` (formatting only).
