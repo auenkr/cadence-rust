@@ -2031,3 +2031,6 @@ Then merged current `origin/frontend-core2` (`ce13c6b89`) and `origin/master`
 is still in progress at old source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`
 and predates these latest merges. The pushed handoff head needs fresh exact-head
 Frontend package CI. See `memory/frontend-domain-admin-2026-10-31.md`.
+Fresh run [41219703865](https://github.com/auenkr/cadence-rust/actions/runs/41219703865)
+targets `834ee549388110ab1ab00de08a5c74a4179abfa4`; last observed status is
+in progress, with no conclusion yet. Run 41219576105 was cancelled.

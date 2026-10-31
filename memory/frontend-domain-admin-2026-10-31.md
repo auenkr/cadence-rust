@@ -1396,10 +1396,11 @@ migration forward.
   remained in this refresh. Verify all three ancestry checks after pushing.
 - Latest existing Frontend package run is
   [41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105),
-  targeting source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`. At handoff it
-  is `in_progress`, last observed in the Go raw-byte string oracle; it does not
-  include the subsequently merged validator tests/current core2 and master
-  docs. Earlier run [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
+  targeting source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`. It was
+  initially observed in the Go raw-byte string oracle, then cancelled when the
+  newer exact-head run was dispatched. It does not include the subsequently
+  merged validator tests/current core2 and master docs. Earlier run
+  [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
   failed Clippy at that SHA because of a redundant `&str.clone()`; the fix is
   commit `ce2aab17b`.
 - **Current tree is not CI-validated and must not be marked green.** Dispatch
@@ -1407,6 +1408,14 @@ migration forward.
   after pushing the handoff commit, check `gh run list/view`, fix any failures,
   and record the exact pushed source SHA and final conclusion here before more
   feature work.
+- Fresh package run
+  [41219703865](https://github.com/auenkr/cadence-rust/actions/runs/41219703865)
+  targets source/head SHA `834ee549388110ab1ab00de08a5c74a4179abfa4`. Last
+  observed status is `in_progress`, with no conclusion yet. Run
+  [41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105)
+  was cancelled when this fresh run superseded it. The final handoff-log commit
+  after dispatch is documentation-only and does not change the Rust source in
+  run 41219703865.
 - Next implementation slice: port Go's failover-history persistence across
   restart. `InMemoryDomainStore.failover_history` currently reads the in-memory
   `DomainRecord.failover_audit`, while `PersistedFrontendDomainManager` only
