@@ -793,6 +793,15 @@ Frontend parity until these are implemented and validated.
   checks Go's enum mapping and callback delivery. This cancellation hook is a
   seam only: the runtime still must bind it to the typed Matching client and
   transport disconnect path. These edits are uncommitted and have no CI result.
+- CI run
+  [41191163658](https://github.com/auenkr/cadence-rust/actions/runs/41191163658)
+  validated exact SHA `6173164aa94eaae8fc0e51fd38d7e2a0644868c3` and concluded
+  `success` (Frontend Clippy, format and tests). It validates the injectable
+  drop guard, but not the following generated-client binding.
+- Added `MatchingPollCanceller<R>` to resolve a cluster-selected Matching
+  client, map the cancellation JSON into the generated typed protobuf request,
+  and call `CancelOutstandingPoll`; its field conversion test is uncommitted
+  and needs exact-head CI.
 - `origin/frontend-core2` advanced to `8dc83ffed`; the new commits are memory
   documentation only. Its latest note confirms there are still no Frontend
   durable managers or History/Matching operation adapters to merge.

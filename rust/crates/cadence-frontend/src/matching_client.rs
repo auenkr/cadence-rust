@@ -12,6 +12,102 @@ use tonic::{transport::Channel, Request};
 pub const DEFAULT_MATCHING_RPC_TIMEOUT: Duration = Duration::from_secs(60);
 pub const DEFAULT_MATCHING_LONG_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Frontend client-pool seam. Implementations select the local or forwarded
+/// Matching connection for the cluster chosen by cluster redirection.
+pub trait MatchingClientResolver: Send + Sync {
+    fn matching_client(&self, target_cluster: Option<&str>) -> Result<MatchingClient, String>;
+}
+
+pub struct MatchingPollCanceller<R> {
+    resolver: R,
+}
+
+impl<R> MatchingPollCanceller<R> {
+    pub fn new(resolver: R) -> Self {
+        Self { resolver }
+    }
+}
+
+impl<R: MatchingClientResolver> crate::handler_workflow::OutstandingPollCanceller
+    for MatchingPollCanceller<R>
+{
+    fn cancel_poll<'a>(
+        &'a self,
+        request: serde_json::Value,
+        target_cluster: Option<String>,
+    ) -> crate::handler_workflow::WorkflowFuture<'a> {
+        let request = match cancel_outstanding_poll_request(&request) {
+            Ok(request) => request,
+            Err(message) => {
+                return Box::pin(async move {
+                    Err(cadence_api::errors::BadRequestError::new(message).into())
+                });
+            }
+        };
+        let client = match self.resolver.matching_client(target_cluster.as_deref()) {
+            Ok(client) => client,
+            Err(message) => {
+                return Box::pin(async move {
+                    Err(cadence_api::errors::InternalServiceError::new(message).into())
+                });
+            }
+        };
+        Box::pin(async move {
+            client
+                .cancel_outstanding_poll(request)
+                .await
+                .map_err(|status| {
+                    cadence_api::errors::InternalServiceError::new(status.to_string()).into()
+                })?;
+            Ok(serde_json::Value::Null)
+        })
+    }
+}
+
+pub fn cancel_outstanding_poll_request(
+    request: &serde_json::Value,
+) -> Result<cadence_proto::matching::CancelOutstandingPollRequest, String> {
+    let domain_id = request
+        .get("domainUUID")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "DomainUUID not set on poll cancellation.".to_owned())?;
+    let poller_id = request
+        .get("pollerID")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "PollerID not set on poll cancellation.".to_owned())?;
+    let task_list_type = request
+        .get("taskListType")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| "TaskListType not set on poll cancellation.".to_owned())?
+        as i32;
+    let task_list = request.get("taskList").filter(|value| !value.is_null()).map(|value| {
+        cadence_proto::api::TaskList {
+            name: value
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            kind: value
+                .get("kind")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or_default() as i32,
+            base_name: value
+                .get("baseName")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        }
+    });
+    Ok(cadence_proto::matching::CancelOutstandingPollRequest {
+        domain_id: domain_id.to_owned(),
+        poller_id: poller_id.to_owned(),
+        task_list_type,
+        task_list,
+    })
+}
+
 #[derive(Clone)]
 pub struct MatchingClient {
     channel: Channel,
@@ -260,5 +356,23 @@ mod tests {
         let public = decision.request.unwrap();
         assert_eq!(public.domain, "shop");
         assert_eq!(public.binary_checksum, "checksum");
+    }
+
+    #[test]
+    fn cancel_poll_json_maps_to_typed_go_internal_request() {
+        let request = cancel_outstanding_poll_request(&serde_json::json!({
+            "domainUUID": "domain-uuid",
+            "pollerID": "poller-id",
+            "taskListType": 2,
+            "taskList": {"name": "orders", "kind": 1, "baseName": "orders-base"}
+        }))
+        .unwrap();
+        assert_eq!(request.domain_id, "domain-uuid");
+        assert_eq!(request.poller_id, "poller-id");
+        assert_eq!(request.task_list_type, 2);
+        let task_list = request.task_list.unwrap();
+        assert_eq!(task_list.name, "orders");
+        assert_eq!(task_list.kind, 1);
+        assert_eq!(task_list.base_name, "orders-base");
     }
 }
