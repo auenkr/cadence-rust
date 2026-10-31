@@ -116,6 +116,11 @@ these fixes; no green CI evidence covers the current changes.
   ID, validates heartbeat token presence, and checks heartbeat by ID
   workflow/activity fields before calling the backend. Tests cover query and
   diagnose validation order.
+- The handler now runs the generated ratelimit wrapper's request preflight
+  before handler validation: nil/domain checks for user, async, visibility and
+  worker-poll operations; token presence for token-based worker operations;
+  and domain checks for worker by-ID and sticky-reset methods. Quota policy
+  evaluation still needs a live decorator/config injection.
 - The authorization request filter strips hidden payload fields from nested
   async requests as Go's `json:"-"` fields do. Metering normalizes errors
   outside Go's typed error switch to the generic internal error and increments

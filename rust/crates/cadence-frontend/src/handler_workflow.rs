@@ -195,6 +195,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 "unknown workflow operation: {operation}"
             )))
         })?;
+        validate_ratelimit_wrapper_request(operation, &request)?;
         let request = self.validate_request(operation, request)?;
         self.backend.invoke(operation, request).await
     }
@@ -328,6 +329,57 @@ impl<B: WorkflowBackend> Handler<B> {
         }
         Ok(value)
     }
+}
+
+/// Match the generated Go rate-limit wrapper's preflight checks. The quota
+/// policy itself is injected by the production decorator; these request
+/// checks run before that policy and before the workflow handler.
+fn validate_ratelimit_wrapper_request(
+    operation: WorkflowOperation,
+    request: &Value,
+) -> Result<(), CadenceError> {
+    let Some(rule) = crate::wrappers::ratelimited::operation_rule(operation.name()) else {
+        return Ok(());
+    };
+    if request.is_null() {
+        return Err(cadence_api::validation::err_request_not_set().into());
+    }
+    use crate::wrappers::ratelimited::RequestClass;
+    if rule.class != RequestClass::Worker {
+        if request
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            return Err(cadence_api::validation::err_domain_not_set().into());
+        }
+        return Ok(());
+    }
+
+    match operation {
+        WorkflowOperation::ResetStickyTaskList
+        | WorkflowOperation::RecordActivityTaskHeartbeatByID
+        | WorkflowOperation::RespondActivityTaskCanceledByID
+        | WorkflowOperation::RespondActivityTaskCompletedByID
+        | WorkflowOperation::RespondActivityTaskFailedByID => {
+            if request
+                .get("domain")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .is_empty()
+            {
+                return Err(cadence_api::validation::err_domain_not_set().into());
+            }
+        }
+        _ if request.get("taskToken").is_none_or(Value::is_null) => {
+            return Err(CadenceError::BadRequest(BadRequestError::new(
+                "Task token not set on request.",
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn validate_domain(request: &Value) -> Result<(), CadenceError> {
@@ -503,6 +555,28 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), "Execution is not set on request.");
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn generated_ratelimit_wrapper_checks_domain_and_worker_token_first() {
+        let handler = Handler::new(FakeBackend::default());
+        assert_eq!(
+            handler
+                .dispatch("GetTaskListsByDomain", serde_json::json!({}))
+                .await
+                .unwrap_err()
+                .to_string(),
+            "Domain not set on request."
+        );
+        assert_eq!(
+            handler
+                .dispatch("RespondActivityTaskCompleted", serde_json::json!({}))
+                .await
+                .unwrap_err()
+                .to_string(),
+            "Task token not set on request."
+        );
         assert!(handler.backend.0.lock().unwrap().is_empty());
     }
 }
