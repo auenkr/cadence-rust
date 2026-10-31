@@ -1321,3 +1321,43 @@ Lifecycle sequencing is green-tested, but parity is not closed: production
 constructs none of Go's seven global quota collection owners, and the Admin
 handler has no owned DLQ/failover watcher workers to receive the stop signal.
 The shared listener drain hook is not a substitute for those service owners.
+
+## Validator matrix verification detail — 2026-10-31
+
+Re-read `go/service/frontend/api/request_validator_test.go` and counted its
+named rows within each Go test table:
+
+| Go validator test | Rows |
+| --- | ---: |
+| Refresh workflow tasks | 3 |
+| Describe task list | 7 |
+| List task-list partitions | 6 |
+| Get task lists by domain | 3 |
+| Reset sticky task list | 6 |
+| Count workflow executions | 3 |
+| List workflow executions | 4 |
+| List open workflow executions | 9 |
+| List closed workflow executions | 11 |
+| List archived workflow executions | 4 |
+| Deprecate domain | 4 |
+| Describe domain | 4 |
+| Update domain | 7 |
+| Register domain | 7 |
+| Failover domain | 10 |
+| **Total** | **88** |
+
+Rust coverage is grouped across `every_go_validator_entry_point_rejects_a_nil_request`,
+`go_request_validator_error_and_mutation_matrix`,
+`go_domain_presence_matrix_covers_every_domain_scoped_validator`,
+`go_request_validator_limit_filter_and_lockdown_matrix`,
+`go_request_validator_remaining_table_cases`,
+`go_request_validator_success_cases_cover_all_entry_points`,
+`go_visibility_matrix_checks_exact_time_filter_and_filter_conflict_errors`,
+`go_validator_matrix_covers_task_list_reset_and_failover_boundaries`,
+`go_table_covers_visibility_limits_and_update_failover_lockdown`, and the
+remaining failover boundary tests. These include nil and success checks for
+all 16 entry points; exact public error text for time-filter omissions/order,
+filter conflicts, visibility page limits, domain/token checks, lockdown,
+required domain data, and failover timeout boundaries; and page-size mutation
+checks. No new Rust source was changed in this audit; the latest source remains
+validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
