@@ -416,3 +416,11 @@ migration forward.
   `EntityNotExists`/`InternalServiceError` type imports and made Display cover
   all three variants. `git diff --check` passes. This source correction needs a
   fresh package run; Cargo remains CI-only.
+- Shared Admin state is now injectable with `Handler::from_app_state`, using
+  the live `AppState.admin` dynamic-config overlay and custom search-attribute
+  registry. Added a focused test proving a scheduler property mutation is
+  observed by the runtime reader and a custom key lands in the shared map.
+  This removes the handler's previous isolated state, but Thrift's existing
+  service-core adapters still own their direct implementation and must be
+  unified with this module. Source whitespace validation (`git diff --check`)
+  passes; no local Cargo/rustfmt was run.
