@@ -111,7 +111,7 @@ impl PostgresDomainMetadataStore {
         &self,
         last_message_id: i64,
         max_count: usize,
-    ) -> Result<Vec<crate::matching_domain_mysql::DomainReplicationQueueMessage>, MatchingDomainMetadataError> {
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, MatchingDomainMetadataError> {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
         let mut client = self
@@ -129,7 +129,7 @@ impl PostgresDomainMetadataStore {
         let messages = rows
             .into_iter()
             .map(|row| {
-                Ok(crate::matching_domain_mysql::DomainReplicationQueueMessage {
+                Ok(crate::matching_domain_metadata::DomainReplicationQueueMessage {
                     id: row.try_get(0).map_err(domain_error)?,
                     payload: row.try_get(1).map_err(domain_error)?,
                 })
@@ -600,6 +600,44 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
 
     fn delete_domain(&self, id: &str) -> Result<(), String> {
         PostgresDomainMetadataStore::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+
+    fn enqueue_domain_replication_message(&self, payload: Vec<u8>) -> Result<i64, String> {
+        PostgresDomainMetadataStore::enqueue_domain_replication_message(self, payload)
+            .map_err(|error| error.to_string())
+    }
+
+    fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, String> {
+        PostgresDomainMetadataStore::read_domain_replication_messages(
+            self,
+            last_message_id,
+            max_count,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        PostgresDomainMetadataStore::get_domain_replication_ack_levels(self)
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain_replication_ack_level(
+        &self,
+        cluster_name: String,
+        message_id: i64,
+    ) -> Result<(), String> {
+        PostgresDomainMetadataStore::update_domain_replication_ack_level(
+            self,
+            cluster_name,
+            message_id,
+        )
+        .map_err(|error| error.to_string())
     }
 }
 

@@ -133,6 +133,12 @@ pub struct MatchingDomainPage {
     pub next_page_token: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReplicationQueueMessage {
+    pub id: i64,
+    pub payload: Vec<u8>,
+}
+
 /// Go SQL domain and singleton metadata persistence operations. Matching's
 /// cache and Frontend's domain manager share the same Go schema; keeping this
 /// contract beside the wire-compatible metadata type lets both services use
@@ -182,6 +188,35 @@ pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
         expected_version: i64,
     ) -> Result<(), String>;
     fn delete_domain(&self, id: &str) -> Result<(), String>;
+
+    /// Append a Go-compatible ThriftRW task to the configured domain
+    /// replication queue. Backends without the shared queue schema report it
+    /// as unavailable instead of accepting a non-durable write.
+    fn enqueue_domain_replication_message(&self, _payload: Vec<u8>) -> Result<i64, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn read_domain_replication_messages(
+        &self,
+        _last_message_id: i64,
+        _max_count: usize,
+    ) -> Result<Vec<DomainReplicationQueueMessage>, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn update_domain_replication_ack_level(
+        &self,
+        _cluster_name: String,
+        _message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
 }
 
 /// Convert Cassandra's nested domain/config/replication UDTs through the same
