@@ -1132,3 +1132,9 @@ Frontend parity until these are implemented and validated.
   Thrift requests to the handler and a production `WorkflowBackend`; current
   History/Matching client shells are low-level RPC clients and are not that
   adapter.
+- Follow-up run [41199957815](https://github.com/auenkr/cadence-rust/actions/runs/41199957815)
+  checked `83ef830f5dbfa7357ee6c57f5265a638706ee59f` and concluded
+  `failure` during Clippy before tests. The import fix had removed the trait
+  from `delete_domain` but missed its required scope in `create_domain`, where
+  `batch_lwt` and `exec` require `CqlExecutor`. Restored it to `create_domain`
+  and removed it only from `delete_domain`. Fresh exact-head CI is required.
