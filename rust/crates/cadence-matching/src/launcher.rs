@@ -1422,6 +1422,19 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
+            if run_frontend {
+                if let Some(persistence) = configured_matching_stores
+                    .as_ref()
+                    .and_then(|stores| stores.domain_persistence.clone())
+                {
+                    state.domain_manager = std::sync::Arc::new(
+                        cadence_persistence::GoSqlFrontendDomainManager::new(
+                            state.domains.clone(),
+                            persistence,
+                        ),
+                    );
+                }
+            }
             if run_frontend && !run_matching {
                 if let Some(source) = configured_matching_stores
                     .as_ref()

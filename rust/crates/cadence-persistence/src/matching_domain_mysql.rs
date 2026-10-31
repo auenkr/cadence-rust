@@ -19,6 +19,7 @@ const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const GO_DOMAIN_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
 type DomainMetadataRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
+#[derive(Clone)]
 pub struct MySqlDomainMetadataStore {
     pool: Arc<crate::matching_mysql::SyncConnectionPool>,
     active_cluster_name: String,
