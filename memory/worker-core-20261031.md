@@ -44,6 +44,14 @@ lookup-before-Abandon order and treats missing domains as successful skips;
 other lookup errors stop the batch. Remote client discovery/signal-with-start
 and History status classification remain open.
 
+Batcher now has a FIFO child-execution traversal helper mirroring Go's
+`processTask`: it invokes an injectable rate-limit/heartbeat boundary before
+each operation, applies before Describe, skips entity-not-exists from either
+RPC, and appends pending children in response order. A Go-derived test covers
+the breadth-first ordering and missing-entity behavior. API-specific batch
+operations, query paging, retries, heartbeat recovery, and V2 tuning are still
+unported.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 

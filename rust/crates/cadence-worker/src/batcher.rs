@@ -1,4 +1,6 @@
 //! Batch system workflow wire names from Go `batcher`.
+use std::collections::VecDeque;
+
 pub const TASK_LIST: &str = "cadence-sys-batcher-tasklist";
 pub const V1_WORKFLOW_TYPE: &str = "cadence-sys-batch-workflow";
 pub const V2_WORKFLOW_TYPE: &str = "cadence-sys-batch-workflow-v2";
@@ -11,6 +13,70 @@ pub const DEFAULT_PAGE_SIZE: i32 = 1000;
 pub const DEFAULT_RETRYABLE_ATTEMPTS: i32 = 50;
 pub const DEFAULT_MAX_ACTIVITY_RETRIES: i32 = 4;
 pub const DEFAULT_HEARTBEAT_TIMEOUT_NANOS: i64 = 10_000_000_000;
+pub const ACTIVITY_SCHEDULE_TO_START_TIMEOUT_SECONDS: u64 = 5 * 60;
+pub const ACTIVITY_START_TO_CLOSE_TIMEOUT_SECONDS: u64 = 20 * 365 * 24 * 60 * 60;
+pub const ACTIVITY_RETRY_INITIAL_INTERVAL_SECONDS: u64 = 10;
+pub const ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI: u64 = 1_700;
+pub const ACTIVITY_RETRY_MAXIMUM_INTERVAL_SECONDS: u64 = 5 * 60;
+pub const NON_RETRIABLE_ERROR_REASON: &str = "non-retriable-error";
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WorkflowExecution {
+    pub workflow_id: String,
+    pub run_id: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PendingChild {
+    pub workflow_id: String,
+    pub run_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BatchOperationError<E> {
+    EntityNotExists,
+    Other(E),
+}
+
+/// Walk one execution and, when requested, all children returned by Describe.
+/// Go uses a FIFO slice, waits on its limiter/records a heartbeat before each
+/// operation, applies before Describe, skips EntityNotExists from either RPC,
+/// and appends children in response order. `before_each` carries the limiter
+/// and heartbeat boundary into the worker runtime.
+pub fn process_execution_tree<E, B, A, D>(
+    root: WorkflowExecution,
+    apply_to_children: bool,
+    mut before_each: B,
+    mut apply: A,
+    mut describe_pending_children: D,
+) -> Result<(), E>
+where
+    B: FnMut(&WorkflowExecution) -> Result<(), E>,
+    A: FnMut(&WorkflowExecution) -> Result<(), BatchOperationError<E>>,
+    D: FnMut(&WorkflowExecution) -> Result<Vec<PendingChild>, BatchOperationError<E>>,
+{
+    let mut pending = VecDeque::from([root]);
+    while let Some(execution) = pending.pop_front() {
+        before_each(&execution)?;
+        match apply(&execution) {
+            Ok(()) => {}
+            Err(BatchOperationError::EntityNotExists) => continue,
+            Err(BatchOperationError::Other(error)) => return Err(error),
+        }
+        let children = match describe_pending_children(&execution) {
+            Ok(children) => children,
+            Err(BatchOperationError::EntityNotExists) => continue,
+            Err(BatchOperationError::Other(error)) => return Err(error),
+        };
+        if apply_to_children {
+            pending.extend(children.into_iter().map(|child| WorkflowExecution {
+                workflow_id: child.workflow_id,
+                run_id: child.run_id,
+            }));
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -231,5 +297,47 @@ mod tests {
         };
         let json = serde_json::to_string(&details).unwrap();
         assert!(json.starts_with(r#"{"PageToken":"AQID","CurrentPage":0"#));
+    }
+
+    #[test]
+    fn child_operations_follow_go_fifo_order_and_missing_entity_rules() {
+        let mut visited = Vec::new();
+        super::process_execution_tree::<String, _, _, _>(
+            super::WorkflowExecution {
+                workflow_id: "root".to_owned(),
+                run_id: "root-run".to_owned(),
+            },
+            true,
+            |_| Ok(()),
+            |execution| {
+                visited.push(execution.workflow_id.clone());
+                if execution.workflow_id == "gone" {
+                    Err(super::BatchOperationError::EntityNotExists)
+                } else {
+                    Ok(())
+                }
+            },
+            |execution| {
+                Ok(match execution.workflow_id.as_str() {
+                    "root" => vec![
+                        super::PendingChild {
+                            workflow_id: "first".to_owned(),
+                            run_id: "1".to_owned(),
+                        },
+                        super::PendingChild {
+                            workflow_id: "gone".to_owned(),
+                            run_id: "2".to_owned(),
+                        },
+                    ],
+                    "first" => vec![super::PendingChild {
+                        workflow_id: "grandchild".to_owned(),
+                        run_id: "3".to_owned(),
+                    }],
+                    _ => Vec::new(),
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(visited, vec!["root", "first", "gone", "grandchild"]);
     }
 }
