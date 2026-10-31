@@ -63,6 +63,55 @@ pub fn validate_history_run_id(
     Ok(())
 }
 
+/// Verify that a decoded persistence page covers the event interval requested
+/// by Frontend. This matches Go's `verifyHistoryIsComplete`, including the
+/// lower-bound page-size rule used when the persistence token says more pages
+/// remain.
+pub fn verify_history_is_complete(
+    first_event_id: Option<i64>,
+    last_event_id: Option<i64>,
+    event_count: usize,
+    expected_first_event_id: i64,
+    expected_last_event_id: i64,
+    is_first_page: bool,
+    is_last_page: bool,
+    page_size: usize,
+) -> Result<(), String> {
+    if event_count == 0 {
+        if is_last_page {
+            return Ok(());
+        }
+        return Err("invalid history: contains zero events".to_owned());
+    }
+    let first = first_event_id.unwrap_or_default();
+    let last = last_event_id.unwrap_or_default();
+    let mut expected_first = expected_first_event_id;
+    if !is_first_page {
+        if first <= expected_first_event_id {
+            return Err(format!(
+                "invalid history: expected first eventID to be > {expected_first_event_id} but got {first}"
+            ));
+        }
+        expected_first = first;
+    }
+    let expected_last = if is_last_page {
+        expected_last_event_id
+    } else {
+        expected_first.saturating_add(page_size as i64).saturating_sub(1)
+    };
+    let expected_count = expected_last.saturating_sub(expected_first).saturating_add(1);
+    let count = event_count as i64;
+    if first == expected_first
+        && ((is_last_page && last == expected_last && count == expected_count)
+            || (!is_last_page && last >= expected_last && count >= expected_count))
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "incomplete history: expected events [{expected_first}-{expected_last}] but got events [{first}-{last}] of length {event_count}:isFirstPage={is_first_page},isLastPage={is_last_page},pageSize={page_size}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +149,22 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "RunID in the request does not match the NextPageToken."
+        );
+    }
+
+    #[test]
+    fn history_page_completeness_matches_go_persistence_checks() {
+        assert!(verify_history_is_complete(Some(1), Some(3), 3, 1, 3, true, true, 3).is_ok());
+        assert!(verify_history_is_complete(Some(1), Some(4), 4, 1, 4, true, false, 3).is_ok());
+        assert!(verify_history_is_complete(None, None, 0, 1, 3, false, true, 3).is_ok());
+        assert_eq!(
+            verify_history_is_complete(None, None, 0, 1, 3, true, false, 3).unwrap_err(),
+            "invalid history: contains zero events"
+        );
+        assert_eq!(
+            verify_history_is_complete(Some(1), Some(2), 2, 1, 3, true, true, 3)
+                .unwrap_err(),
+            "incomplete history: expected events [1-3] but got events [1-2] of length 2:isFirstPage=true,isLastPage=true,pageSize=3"
         );
     }
 }

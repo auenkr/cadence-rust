@@ -1040,3 +1040,9 @@ Frontend parity until these are implemented and validated.
 - `origin/frontend-core2` is now `aa34b1081` (documentation-only since the
   merged SQL domain manager commits); no History/Matching handler adapter or
   visibility/execution persistence interface has landed to merge.
+
+- Added the Go `verifyHistoryIsComplete` persistence-page validation rules as a
+  reusable Frontend helper, including empty-last-page handling, continuation
+  page lower-bound checks, and the exact malformed/incomplete history errors.
+  Go-shaped fixtures cover valid terminal/continuation pages and both invalid
+  cases. It is not yet connected to a production persistence page reader.
