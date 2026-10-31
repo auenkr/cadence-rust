@@ -14,6 +14,10 @@ impl Default for WorkerService {
         let _ = registry.register(crate::parentclosepolicy::registration());
         let _ = registry.register(crate::archiver::registrations());
         let _ = registry.register(crate::domaindeprecation::registration());
+        for registration in crate::failovermanager::registrations() {
+            let _ = registry.register(registration);
+        }
+        let _ = registry.register(crate::scheduler::registration());
         for registration in crate::batcher::registrations() {
             let _ = registry.register(registration);
         }

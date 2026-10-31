@@ -100,6 +100,11 @@ archive processing and its storage dependencies remain unimplemented.
 Domain deprecation's Go workflow/task-list/activity names are also registered
 and fixture-tested. Its admin token, Frontend calls, retry/heartbeat behavior
 and domain mutation activities remain unported.
+Legacy and V2 failover/rebalance workflow and activity registrations plus the
+scheduler workflow/activity registration have now been mirrored in their
+module files and added to the service registry. Their underlying workflows,
+domain/client activities, dynamic configuration and per-domain scheduler
+worker manager are not implemented.
 
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
