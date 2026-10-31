@@ -1270,3 +1270,27 @@ migration forward.
   existing durable queue read/ack helper, so the two transports share cursor,
   ack-level and decode behavior. Exact-head package CI is pending; no local
   Cargo command ran.
+
+## Integration branch continuation — 2026-10-31
+
+- Confirmed `origin/master` (`94e79ff98`) and `origin/t3/frontend-workflow-api`
+  (`cbb69d675`) were already ancestors of this integration branch. Merged the
+  updated `origin/frontend-core2` tip (`a23c509aa`) at merge commit
+  `b5dd0bd4a071f39b549669349dd682d58af455a1`; no file-level conflict remained
+  in this checkout because its previous integration already contained the
+  source resolutions. Pushed to `origin/frontend-domain-admin`.
+- Merge-head package workflow
+  [41217071513](https://github.com/auenkr/cadence-rust/actions/runs/41217071513)
+  targets `b5dd0bd4a071f39b549669349dd682d58af455a1` and was still running at
+  last observation. No Cargo command ran locally.
+- Matched Go's domain replication queue ack behavior: every fetch now calls
+  durable `UpdateAckLevel`, using `-1` when `LastProcessedMessageID` is omitted;
+  ack persistence failures remain warning-only. Commit
+  `935564139b5e1f6c67b760558a35f2ce80e31475` is pushed. Its exact-head package
+  run [41217250761](https://github.com/auenkr/cadence-rust/actions/runs/41217250761)
+  was pending at last observation.
+- Added YARPC `CountDLQMessages` dispatch for the durable domain DLQ count.
+  Go also calls History for history-DLQ counts; no corresponding History client
+  RPC exists in the current Rust client, so this route still returns an empty
+  history count list. Cross-service count parity remains open. This source
+  change requires a fresh exact-head package run; no Cargo ran locally.

@@ -715,6 +715,26 @@ fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> Ha
         .map_err(AppError::internal)
 }
 
+fn handle_count_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let _request: cadence_api::admin::CountDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let persistence = state
+        .domain_metadata_persistence
+        .as_ref()
+        .ok_or_else(|| {
+            AppError::internal(
+                "domain replication DLQ is unavailable for this persistence backend".to_string(),
+            )
+        })?;
+    let domain = persistence
+        .domain_replication_dlq_size()
+        .map_err(AppError::internal)?;
+    Ok(wrap_success(&cadence_api::admin::CountDLQMessagesResponse {
+        history: Vec::new(),
+        domain,
+    }))
+}
+
 async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::ResetQueueRequest =
         decode_args(body).map_err(AppError::bad_request)?;
@@ -2120,6 +2140,7 @@ pub async fn dispatch(
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(),
         "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
+        "CountDLQMessages" => handle_count_dlq_messages(state, body),
         "ResetQueue" => handle_reset_queue(state, body).await,
         "DescribeQueue" => handle_describe_queue(state, body).await,
         "MergeDLQMessages" => handle_merge_dlq_messages(state, body),
