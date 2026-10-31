@@ -199,3 +199,22 @@ migration forward.
   rejected forms accepted by Go `google/uuid.Parse`; updated it to accept
   canonical, compact, braced and `urn:uuid:` spellings and added Go-shape cases.
   This still does not add multi-branch persistence or History-client paging.
+
+## YARPC dynamic-config wiring continuation
+
+- Added Frontend YARPC dispatch for Admin `GetDynamicConfig`,
+  `UpdateDynamicConfig`, `RestoreDynamicConfig` and `ListDynamicConfig` at
+  `428dacef917e8d00e1e46ce7aa360236ca7d661b`. These use the shared
+  `AppState.admin.dynamic_config` overlay so reads observe updates made through
+  the JSON Admin endpoints and dynamic properties. Requests validate required
+  `ConfigName`; missing get values map to the IDL-declared InternalServiceError.
+- Pushed `t3/frontend-domain-admin` to `origin/frontend-domain-admin`.
+- Package CI run
+  [41177742133](https://github.com/auenkr/cadence-rust/actions/runs/41177742133)
+  targets exact head `428dacef917e8d00e1e46ce7aa360236ca7d661b`; latest observed
+  status: in progress. No Cargo command was run locally.
+- Current continuation gaps still include Admin operational dynamic-config
+  RPCs, authorization, AddSearchAttribute Thrift dispatch and ES mapping writes;
+  domain durable persistence and replication queue; full multi-branch raw
+  history; schedule workflow RPC/lifecycle wiring; and complete method parity.
+  Do not claim Frontend parity on this checkpoint.
