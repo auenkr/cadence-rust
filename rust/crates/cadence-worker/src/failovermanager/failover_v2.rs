@@ -104,16 +104,20 @@ pub fn failover_preferences_for_domain(
                     {
                         continue;
                     }
-                    prefs.cluster_attribute_updates.push(ClusterAttributePreference {
-                        scope: scope.clone(),
-                        name: name.clone(),
-                        preferred_cluster: target_cluster.to_owned(),
-                    });
-                    snapshot.previous_cluster_attributes.push(ClusterAttributePreference {
-                        scope: scope.clone(),
-                        name: name.clone(),
-                        preferred_cluster: active_cluster.clone(),
-                    });
+                    prefs
+                        .cluster_attribute_updates
+                        .push(ClusterAttributePreference {
+                            scope: scope.clone(),
+                            name: name.clone(),
+                            preferred_cluster: target_cluster.to_owned(),
+                        });
+                    snapshot
+                        .previous_cluster_attributes
+                        .push(ClusterAttributePreference {
+                            scope: scope.clone(),
+                            name: name.clone(),
+                            preferred_cluster: active_cluster.clone(),
+                        });
                 }
             }
         }
@@ -226,7 +230,10 @@ mod tests {
                 preferred_cluster: "b".into(),
             }]
         );
-        assert_eq!(snapshot.previous_cluster_attributes[0].preferred_cluster, "a");
+        assert_eq!(
+            snapshot.previous_cluster_attributes[0].preferred_cluster,
+            "a"
+        );
         assert!(snapshot.previous_active_cluster.is_empty());
 
         // An attribute outside the filter is left alone.
@@ -246,9 +253,10 @@ mod tests {
             active_cluster_name: "a".into(),
             ..Default::default()
         };
-        domain
-            .data
-            .insert(DOMAIN_DATA_KEY_FOR_FAILOVER_TIMEOUT_SECONDS.into(), "300".into());
+        domain.data.insert(
+            DOMAIN_DATA_KEY_FOR_FAILOVER_TIMEOUT_SECONDS.into(),
+            "300".into(),
+        );
         let (prefs, _) = failover_preferences_for_domain(&domain, &["a".into()], "b", &[]).unwrap();
         assert_eq!(prefs.failover_timeout_seconds, 300);
 

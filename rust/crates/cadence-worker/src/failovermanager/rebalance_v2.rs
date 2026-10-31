@@ -129,7 +129,10 @@ mod tests {
             is_global: true,
             data: BTreeMap::from([
                 (DOMAIN_DATA_KEY_FOR_MANAGED_FAILOVER.into(), "true".into()),
-                (DOMAIN_DATA_KEY_FOR_PREFERRED_CLUSTER.into(), preferred.into()),
+                (
+                    DOMAIN_DATA_KEY_FOR_PREFERRED_CLUSTER.into(),
+                    preferred.into(),
+                ),
             ]),
             active_cluster_name: active.into(),
             clusters: vec!["a".into(), "b".into()],
@@ -220,9 +223,10 @@ mod tests {
     #[test]
     fn malformed_attribute_preferences_are_ignored() {
         let mut domain = managed_domain("a", "b");
-        domain
-            .data
-            .insert(DOMAIN_DATA_KEY_FOR_CLUSTER_ATTRIBUTE_PREFERENCES.into(), "{".into());
+        domain.data.insert(
+            DOMAIN_DATA_KEY_FOR_CLUSTER_ATTRIBUTE_PREFERENCES.into(),
+            "{".into(),
+        );
         let prefs = rebalance_preferences_for_domain(&domain).unwrap();
         assert_eq!(prefs.target_cluster, "b");
         assert!(prefs.cluster_attribute_updates.is_empty());

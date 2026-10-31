@@ -252,9 +252,7 @@ mod tests {
     #[test]
     fn eligibility_matches_go_table() {
         assert!(!is_eligible_for_failover(None));
-        assert!(!is_eligible_for_failover(Some(
-            &DomainView::default()
-        )));
+        assert!(!is_eligible_for_failover(Some(&DomainView::default())));
         assert!(is_eligible_for_failover(Some(&view("true", true, false))));
         assert!(is_eligible_for_failover(Some(&view(" TRUE ", true, false))));
         assert!(!is_eligible_for_failover(Some(&view("false", true, false))));

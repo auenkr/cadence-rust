@@ -3,13 +3,14 @@
 
 use std::collections::BTreeMap;
 
-use crate::failovermanager::shared::{failover_timeout_seconds, is_domain_failover_managed_by_cadence};
+use crate::failovermanager::shared::{
+    failover_timeout_seconds, is_domain_failover_managed_by_cadence,
+};
 
 /// Go `constants.DomainDataKeyForPreferredCluster`.
 pub const DOMAIN_DATA_KEY_FOR_PREFERRED_CLUSTER: &str = "PreferredCluster";
 /// Go `constants.DomainDataKeyForClusterAttributePreferences`.
-pub const DOMAIN_DATA_KEY_FOR_CLUSTER_ATTRIBUTE_PREFERENCES: &str =
-    "ClusterAttributePreferences";
+pub const DOMAIN_DATA_KEY_FOR_CLUSTER_ATTRIBUTE_PREFERENCES: &str = "ClusterAttributePreferences";
 
 /// Go `types.DomainStatus` values that planning distinguishes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
