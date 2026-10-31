@@ -29,21 +29,21 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            enable_batcher: false,
+            enable_batcher: true,
             enable_scheduler: false,
-            enable_parent_close_policy_worker: false,
-            parent_close_policy_system_workflows: 1,
+            enable_parent_close_policy_worker: true,
+            parent_close_policy_system_workflows: 10,
             enable_es_analyzer: false,
-            enable_failover_manager: false,
-            enable_async_workflow_consumption: false,
+            enable_failover_manager: true,
+            enable_async_workflow_consumption: true,
             enable_domain_audit_logging: false,
-            archiver_concurrency: 10,
-            archivals_per_iteration: 10,
-            scanner_persistence_max_qps: 0,
-            scanner_batch_size: 100,
-            scanner_task_list_enabled: false,
+            archiver_concurrency: 50,
+            archivals_per_iteration: 1000,
+            scanner_persistence_max_qps: 5,
+            scanner_batch_size: 1000,
+            scanner_task_list_enabled: true,
             scanner_history_enabled: false,
-            max_workflow_retention_days: 0,
+            max_workflow_retention_days: 30,
         }
     }
 }
@@ -61,6 +61,7 @@ mod tests {
         assert!(config.enable_batcher);
         assert!(config.enable_scheduler);
         assert_eq!(config.parent_close_policy_system_workflows, 4);
-        assert!(!config.enable_failover_manager);
+        assert!(config.enable_failover_manager);
+        assert!(config.enable_batcher);
     }
 }

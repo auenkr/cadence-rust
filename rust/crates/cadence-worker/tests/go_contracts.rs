@@ -13,6 +13,8 @@ const GO_DOMAIN_DEPRECATION: &str =
     include_str!("../../../../go/service/worker/domaindeprecation/workflow.go");
 const GO_SCHEDULER: &str = include_str!("../../../../go/service/worker/scheduler/types.go");
 const GO_DIAGNOSTICS: &str = include_str!("../../../../go/service/worker/diagnostics/workflow.go");
+const GO_DYNAMIC_CONFIG: &str =
+    include_str!("../../../../go/common/dynamicconfig/dynamicproperties/constants.go");
 
 fn has(source: &str, expected: &str) {
     assert!(source.contains(expected), "Go source lost contract {expected:?}");
@@ -46,4 +48,16 @@ fn remaining_initial_workflow_contracts_match_go_source() {
     has(GO_DOMAIN_DEPRECATION, "domain-deprecation-tasklist");
     has(GO_SCHEDULER, "cadence-scheduler");
     has(GO_DIAGNOSTICS, "diagnostics-workflow");
+}
+
+#[test]
+fn worker_dynamic_config_keys_and_defaults_match_go_registry() {
+    has(GO_DYNAMIC_CONFIG, "KeyName:      \"worker.enableBatcher\"");
+    has(GO_DYNAMIC_CONFIG, "KeyName:      \"system.enableParentClosePolicyWorker\"");
+    has(GO_DYNAMIC_CONFIG, "KeyName:      \"system.enableFailoverManager\"");
+    has(GO_DYNAMIC_CONFIG, "KeyName:      \"worker.enableAsyncWorkflowConsumption\"");
+    has(GO_DYNAMIC_CONFIG, "WorkerArchiverConcurrency:");
+    has(GO_DYNAMIC_CONFIG, "DefaultValue: 50,");
+    has(GO_DYNAMIC_CONFIG, "WorkerArchivalsPerIteration:");
+    has(GO_DYNAMIC_CONFIG, "DefaultValue: 1000,");
 }
