@@ -307,3 +307,15 @@ migration forward.
   and Test.
 
 - The second CI dispatch ([41178360466](https://github.com/auenkr/cadence-rust/actions/runs/41178360466), exact code head `ea87244aa`) was still in preflight when checked. Extended the workflow's CI rustfmt patch list to include `cadence-thrift/src/convert.rs`, since `cargo fmt --all --check` also validates the new converter code. Workflow commit `08eb6a783` is pushed. The newest formatting-enabled package run is [41178407221](https://github.com/auenkr/cadence-rust/actions/runs/41178407221), which targets `08eb6a783`; no current-source CI result yet.
+
+## Schedule validation parity correction
+
+- Cross-checked the live Thrift schedule handlers against Go's
+  `handler_schedule.go`. Go gates only `CreateSchedule` on `worker.enableScheduler`;
+  existing schedule operations remain available. Removed the extra Rust feature
+  gates from describe/list/delete/pause/unpause/backfill/update. Moved create
+  domain resolution until after request validation, added Go's distinct missing
+  Action error, and validate UpdateSchedule policies before its spec/action.
+- Commit `ebf2b19a3` is pushed. Package run
+  [41178498001](https://github.com/auenkr/cadence-rust/actions/runs/41178498001)
+  targets this source and includes CI formatting. Pending at dispatch.
