@@ -1217,3 +1217,16 @@ migration forward.
   the non-exhaustive API `DLQType` requires a wildcard arm in the outbound
   Thrift enum mapping. Formatting and source-oracle stages passed. Added the
   wildcard mapping to the invalid wire value; fresh exact-head CI is pending.
+
+## Integration head CI result — 2026-10-31
+
+- Exact-head Frontend package CI run
+  [41215408566](https://github.com/auenkr/cadence-rust/actions/runs/41215408566)
+  passed at `3a1f1cd231c526e8ff0e631d762fcdd51330c13e`. Go source oracles,
+  formatting, Clippy, Frontend package tests, and runtime smoke all completed
+  successfully. No local Cargo command ran.
+- Remaining blockers are unchanged: durable failover-history audit across
+  restarts; History-backed Admin raw-history and remaining queue/DLQ RPCs;
+  scheduler workflow integration; live membership; and mixed Go/Rust
+  failure/restart/recovery acceptance. This CI pass does not establish service
+  parity.

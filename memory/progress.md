@@ -1965,3 +1965,16 @@ workflow routing, and real membership remain open. See
 Frontend admin YARPC follow-up CI 41215148796 passed format/oracle stages and
 found one non-exhaustive enum match in MergeDLQ's outbound Thrift converter.
 Added the wildcard invalid-value mapping; exact-head package CI is pending.
+
+# Frontend integration checkpoint — 2026-10-31
+
+- `frontend-domain-admin` is integrated with `origin/frontend-core2`,
+  `origin/t3/frontend-workflow-api`, and `origin/master` at
+  `3a1f1cd231c526e8ff0e631d762fcdd51330c13e`.
+- Exact-head package CI
+  [41215408566](https://github.com/auenkr/cadence-rust/actions/runs/41215408566)
+  passed: Go source oracles, formatting, Clippy, Frontend package tests, and
+  Frontend runtime smoke. No local Cargo command ran.
+- Frontend parity remains incomplete. See
+  `memory/frontend-domain-admin-2026-10-31.md` for the remaining Domain,
+  Admin, Schedule and mixed-cluster blockers.
