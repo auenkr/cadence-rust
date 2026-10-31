@@ -1995,3 +1995,6 @@ The correction at `860cdc04e899be244a54290bce1582c537c45904` passed exact-head
 Frontend package CI [41216176446](https://github.com/auenkr/cadence-rust/actions/runs/41216176446),
 including Clippy, tests, and runtime smoke. The YARPC raw-history implementation
 still needs the JSON path's UUID canonicalization and cursor validation.
+
+Ported those two checks into the YARPC raw-history path. Exact-head package CI
+is pending; full History-backed branch pagination remains open.

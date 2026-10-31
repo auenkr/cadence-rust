@@ -867,6 +867,8 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     let mut req: Request = decode_args(body).map_err(AppError::bad_request)?;
     raw_history::validate_request(&req).map_err(|error| AppError::bad_request(error.message))?;
     let execution = req.execution.clone().unwrap_or_default();
+    let mut persistence_execution = execution.clone();
+    persistence_execution.run_id = raw_history::canonical_run_id(&persistence_execution.run_id);
     let executions = require_domain_thrift(state, &req.domain)?;
     let mut persistence_token = Vec::new();
     let mut continuation = None;
@@ -880,6 +882,8 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
         let token = RawHistoryToken::from_bytes(&req.next_page_token)
             .map_err(|error| AppError::bad_request(error.message))?;
         persistence_token = token.persistence_token.clone().unwrap_or_default();
+        raw_history::validate_persistence_token(&persistence_token)
+            .map_err(|error| AppError::bad_request(error.message))?;
         continuation = Some(token.clone());
         token.version_histories.unwrap_or_default()
     };
@@ -905,7 +909,7 @@ fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
     }
     match executions.raw_history(
         &req.domain,
-        &execution,
+        &persistence_execution,
         req.start_event_id,
         req.end_event_id,
         req.maximum_page_size as usize,

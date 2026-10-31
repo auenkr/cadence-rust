@@ -1254,6 +1254,7 @@ migration forward.
   Cargo command ran.
 - Admin raw-history audit found the JSON path canonicalizes UUID spellings and
   validates malformed persistence cursors, while the YARPC path does neither.
-  I am bringing those checks into parity before continuing broader
-  History-backed behavior; this is a source correction, not full raw-history
-  branch/persistence parity.
+  The YARPC handler now canonicalizes run UUID spellings before persistence
+  reads and rejects malformed persistence cursors consistently with JSON.
+  This is pushed for exact-head package CI; it does not establish full
+  raw-history branch/persistence parity.
