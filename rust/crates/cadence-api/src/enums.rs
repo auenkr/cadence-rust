@@ -74,6 +74,23 @@ cadence_enum!(ArchivalStatus {
     Enabled = 1 => "ENABLED",
 });
 
+// Go `common/types/replicator.go` values used by domain transmission tasks.
+cadence_enum!(DomainOperation {
+    Create = 0 => "Create",
+    Update = 1 => "Update",
+    Delete = 2 => "Delete",
+});
+
+cadence_enum!(ReplicationTaskType {
+    Domain = 0 => "Domain",
+    History = 1 => "History",
+    SyncShardStatus = 2 => "SyncShardStatus",
+    SyncActivity = 3 => "SyncActivity",
+    HistoryMetadata = 4 => "HistoryMetadata",
+    HistoryV2 = 5 => "HistoryV2",
+    FailoverMarker = 6 => "FailoverMarker",
+});
+
 cadence_enum!(CancelExternalWorkflowExecutionFailedCause {
     UnknownExternalWorkflowExecution = 0 => "UNKNOWN_EXTERNAL_WORKFLOW_EXECUTION",
     WorkflowAlreadyCompleted = 1 => "WORKFLOW_ALREADY_COMPLETED",

@@ -537,6 +537,41 @@ pub struct DomainReplicationConfiguration {
     pub active_clusters: Option<ActiveClusters>,
 }
 
+/// Domain replication payload carried by Go's `ReplicationTask` queue.
+/// These fields mirror `go/common/types/replicator.go`; queue persistence
+/// encodes the enclosing task with ThriftRW rather than JSON.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainTaskAttributes {
+    #[serde(rename = "domainOperation", default, skip_serializing_if = "Option::is_none")]
+    pub domain_operation: Option<crate::enums::DomainOperation>,
+    #[serde(rename = "id", default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    #[serde(rename = "info", default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<DomainInfo>,
+    #[serde(rename = "config", default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<DomainConfiguration>,
+    #[serde(rename = "replicationConfig", default, skip_serializing_if = "Option::is_none")]
+    pub replication_config: Option<DomainReplicationConfiguration>,
+    #[serde(rename = "configVersion", default, skip_serializing_if = "is_zero_i64")]
+    pub config_version: i64,
+    #[serde(rename = "failoverVersion", default, skip_serializing_if = "is_zero_i64")]
+    pub failover_version: i64,
+    #[serde(rename = "previousFailoverVersion", default, skip_serializing_if = "is_zero_i64")]
+    pub previous_failover_version: i64,
+}
+
+/// Domain-only fields from Go's envelope. Other replication task payloads are
+/// added alongside their service ports when those task queues are migrated.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicationTask {
+    #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<crate::enums::ReplicationTaskType>,
+    #[serde(rename = "sourceTaskId", default, skip_serializing_if = "is_zero_i64")]
+    pub source_task_id: i64,
+    #[serde(rename = "domainTaskAttributes", default, skip_serializing_if = "Option::is_none")]
+    pub domain_task_attributes: Option<DomainTaskAttributes>,
+}
+
 // ---------------------------------------------------------------------------
 // History types
 // ---------------------------------------------------------------------------
@@ -1111,5 +1146,29 @@ mod tests {
     fn task_list_kind_defaults_to_normal() {
         let t = TaskList::default();
         assert_eq!(t.kind_or_default(), TaskListKind::Normal);
+    }
+
+    #[test]
+    fn domain_replication_task_uses_go_field_names_and_enum_values() {
+        let task = ReplicationTask {
+            task_type: Some(crate::enums::ReplicationTaskType::Domain),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(crate::enums::DomainOperation::Create),
+                id: "domain-id".into(),
+                config_version: 2,
+                failover_version: 17,
+                previous_failover_version: -1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(task).unwrap();
+        assert_eq!(json["taskType"], 0);
+        assert_eq!(json["domainTaskAttributes"]["domainOperation"], 0);
+        assert_eq!(json["domainTaskAttributes"]["id"], "domain-id");
+        assert_eq!(json["domainTaskAttributes"]["configVersion"], 2);
+        assert_eq!(json["domainTaskAttributes"]["failoverVersion"], 17);
+        assert_eq!(json["domainTaskAttributes"]["previousFailoverVersion"], -1);
+        assert!(json.get("sourceTaskId").is_none());
     }
 }
