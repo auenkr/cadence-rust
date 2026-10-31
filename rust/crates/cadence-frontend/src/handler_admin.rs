@@ -10,9 +10,8 @@ use cadence_api::{
     admin::{
         AddSearchAttributeRequest, AddSearchAttributeResponse, DescribeClusterResponse,
         DynamicConfigEntry, DynamicConfigFilter, DynamicConfigValue, GetDynamicConfigResponse,
-        GetWorkflowExecutionRawHistoryV2Request,
-        HostInfo, MembershipInfo, PersistenceFeature, PersistenceInfo,
-        RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigResponse,
+        GetWorkflowExecutionRawHistoryV2Request, HostInfo, MembershipInfo, PersistenceFeature,
+        PersistenceInfo, RestoreDynamicConfigResponse, RingInfo, UpdateDynamicConfigResponse,
     },
     enums::IndexedValueType,
     errors::{BadRequestError, EntityNotExistsError, InternalServiceError},
@@ -443,11 +442,29 @@ mod tests {
 
     #[test]
     fn search_attribute_type_mapping_matches_go_elasticsearch_mapping() {
-        assert_eq!(search_attribute_es_type(IndexedValueType::String), Some("text"));
-        assert_eq!(search_attribute_es_type(IndexedValueType::Keyword), Some("keyword"));
-        assert_eq!(search_attribute_es_type(IndexedValueType::Int), Some("long"));
-        assert_eq!(search_attribute_es_type(IndexedValueType::Double), Some("double"));
-        assert_eq!(search_attribute_es_type(IndexedValueType::Bool), Some("boolean"));
-        assert_eq!(search_attribute_es_type(IndexedValueType::Datetime), Some("date"));
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::String),
+            Some("text")
+        );
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::Keyword),
+            Some("keyword")
+        );
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::Int),
+            Some("long")
+        );
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::Double),
+            Some("double")
+        );
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::Bool),
+            Some("boolean")
+        );
+        assert_eq!(
+            search_attribute_es_type(IndexedValueType::Datetime),
+            Some("date")
+        );
     }
 }
