@@ -130,8 +130,16 @@ Implemented in this slice:
   test-only constant assertion. Both are fixed locally (method-scoped lint
   allowance and removal of the constant assertion). The run's compile stage
   confirmed the new client RPC type signatures.
-- New package CI after the lint fixes and `workercommon` retry port is pending;
-  record its exact head, URL and conclusion here before relying on it.
+- Package run
+  https://github.com/auenkr/cadence-rust/actions/runs/41207447463 completed
+  `success` at exact head `56425246b0398fb4383141c4b730c10a4d10bd54`. Worker
+  Clippy, formatting and tests passed, including the scanner mismatch repair,
+  retry schedule, parent-close domain lookup and History adapter, and batcher
+  FIFO/missing-entity test. This run predates the Frontend WorkflowAPI
+  SignalWithStart request-builder commit `cbb8988f1`; that addition still needs
+  exact-head CI.
+- Exact-head package CI for the Frontend WorkflowAPI SignalWithStart request
+  builder is pending.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
