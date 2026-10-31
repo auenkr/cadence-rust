@@ -195,7 +195,7 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
         ));
     }
     let current = state
-        .domains
+        .domain_manager
         .describe(&DescribeDomainRequest {
             name: Some(req.name.clone()),
             uuid: None,
@@ -208,9 +208,14 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
         ));
     }
     state
-        .domains
+        .domain_manager
         .delete(&req.name)
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::NotFound(error) => {
+                AppError::entity_not_exists(error.message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     state.executions.unregister_domain(&req.name);
     Ok(Struct { fields: Vec::new() })
 }
@@ -352,7 +357,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             // void method: empty success struct.
             Ok(Struct { fields: vec![] })
         }
-        Err(e) => Err(AppError {
+        Err(cadence_persistence::FrontendDomainError::AlreadyExists(e)) => Err(AppError {
             exc_name: "DomainAlreadyExistsError",
             value: cadence_api::errors::DomainAlreadyExistsError {
                 message: e.message.clone(),
@@ -360,6 +365,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             .to_thrift(),
             message: e.message,
         }),
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -502,13 +508,17 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
         &state.domain_policy(&req.name),
     ) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -536,7 +546,10 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
     }
     match state.domain_manager.deprecate(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -1575,13 +1588,17 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         &state.domain_policy(&req.domain_name),
     ) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 

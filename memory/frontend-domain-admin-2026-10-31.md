@@ -646,3 +646,17 @@ migration forward.
   This remains wiring only until `FrontendDomainManager` calls it. Cassandra
   remains without a writer. These additions are in the current unvalidated
   source diff; next exact-head CI is required.
+- Package run [41193874841](https://github.com/auenkr/cadence-rust/actions/runs/41193874841)
+  failed at Clippy on `fc0143da8302134f366ddfe05028221ff2812940` because the
+  configured persistence trait object was held in `AppState` without a `Debug`
+  bound. Added explicit backend `Debug` implementations and a `Debug` bound;
+  this is fixed in the next pushed source checkpoint.
+- Implemented `PersistedFrontendDomainManager`: configured MySQL/PostgreSQL
+  create/update/deprecate/failover/delete now use the SQL writer and global
+  notification-version fence; mutations roll back their in-memory record on
+  persistence errors. Configured startup installs it after loading domain
+  metadata, and JSON/YARPC errors map persistence failures to internal errors.
+  `DomainRecord` now converts to the Go SQL blob's metadata representation.
+  This candidate still lacks a Cassandra writer, durable audit/replication
+  queue behavior, race/fault recovery coverage, and exact-head CI. `git diff
+  --check` passed; no local Cargo/rustfmt/tests ran.

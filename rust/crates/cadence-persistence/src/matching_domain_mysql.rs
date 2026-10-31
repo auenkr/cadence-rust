@@ -25,6 +25,14 @@ pub struct MySqlDomainMetadataStore {
     active_cluster_name: String,
 }
 
+impl std::fmt::Debug for MySqlDomainMetadataStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MySqlDomainMetadataStore")
+            .field("active_cluster_name", &self.active_cluster_name)
+            .finish_non_exhaustive()
+    }
+}
+
 impl MySqlDomainMetadataStore {
     /// Open a reader using the same connection options and pool limits as the
     /// MySQL Matching task store. Schema checks are deferred until reads.
