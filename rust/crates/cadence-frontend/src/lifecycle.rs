@@ -70,7 +70,16 @@ impl Lifecycle {
     /// Execute Go Frontend's drain sequence. The hooks are supplied by the
     /// service owner so health, API/admin handlers, quota collections and the
     /// base resource stop in the same order as `frontend.Service.Stop`.
-    pub async fn shutdown<Health, HealthFuture, StopHandlers, StopHandlersFuture, StopLimiters, StopLimitersFuture, StopResource, StopResourceFuture>(
+    pub async fn shutdown<
+        Health,
+        HealthFuture,
+        StopHandlers,
+        StopHandlersFuture,
+        StopLimiters,
+        StopLimitersFuture,
+        StopResource,
+        StopResourceFuture,
+    >(
         &self,
         shutdown_drain_duration: Duration,
         update_health: Health,
