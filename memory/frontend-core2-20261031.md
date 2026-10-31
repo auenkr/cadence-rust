@@ -238,7 +238,9 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   groups; Rust now has nil-request coverage for every entry point and expanded
   error, mutation, success, filter, permission, and failover matrices. Do not
   call the test matrix complete until a source-by-source audit confirms every
-  Go table row and CI passes the exact head.
+  Go table row and CI passes the exact head. A literal audit found the Go
+  600-second timeout / 300-second maximum example was only represented by a
+  smaller equivalent boundary; added an assertion for the exact Go case.
 - Persistence remains open: configured Frontend startup currently reuses
   Matching's default-store SQL/Cassandra handles only for Matching tasks and a
   read-only domain-metadata source. `AppState` still owns concrete in-memory

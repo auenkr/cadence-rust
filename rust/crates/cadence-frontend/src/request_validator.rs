@@ -1743,4 +1743,22 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn go_failover_timeout_table_case_600_exceeds_maximum_300() {
+        let mut validator = RequestValidator::default();
+        validator.config.max_failover_timeout_seconds = 300;
+        let error = validator
+            .validate_failover_domain_request(Some(&FailoverDomainRequest {
+                domain_name: "domain".into(),
+                domain_active_cluster_name: Some("cluster0".into()),
+                failover_timeout_in_seconds: Some(600),
+                ..Default::default()
+            }))
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            "FailoverTimeoutInSeconds 600 exceeds the maximum allowed 300"
+        );
+    }
 }
