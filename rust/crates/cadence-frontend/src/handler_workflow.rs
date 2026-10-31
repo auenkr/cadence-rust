@@ -526,7 +526,9 @@ impl<B: WorkflowBackend> Handler<B> {
                 version_check.checker.as_ref(),
             )?;
         }
-        if operation != WorkflowOperation::Health && self.shutting_down.load(Ordering::Acquire) {
+        if !matches!(operation, WorkflowOperation::Health | WorkflowOperation::GetClusterInfo)
+            && self.shutting_down.load(Ordering::Acquire)
+        {
             return Err(CadenceError::Internal(
                 cadence_api::errors::InternalServiceError::new("Shutting down"),
             ));
@@ -536,6 +538,16 @@ impl<B: WorkflowBackend> Handler<B> {
             return Ok(serde_json::json!({
                 "ok": status == HealthStatus::Ok,
                 "msg": status.message()
+            }));
+        }
+        // Go's GetClusterInfo is a local constant response and remains
+        // available while the handler drains; it does not call History.
+        if operation == WorkflowOperation::GetClusterInfo {
+            return Ok(serde_json::json!({
+                "supportedClientVersions": {
+                    "goSdk": "1.7.0",
+                    "javaSdk": "1.5.0"
+                }
             }));
         }
         let request = self.validate_request(operation, request)?;
@@ -597,6 +609,17 @@ impl<B: WorkflowBackend> Handler<B> {
             WorkflowOperation::ResetStickyTaskList => serde_json::json!({
                 "domainUUID": domain_id()?,
                 "execution": request.get("execution").cloned().unwrap_or(Value::Null),
+            }),
+            // These are the History service request envelopes constructed by
+            // Go's WorkflowHandler. The domain name remains in the public
+            // request, while the internal History call receives its UUID.
+            WorkflowOperation::StartWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "startRequest": request,
+            }),
+            WorkflowOperation::SignalWithStartWorkflowExecution => serde_json::json!({
+                "domainUUID": domain_id()?,
+                "signalWithStartRequest": request,
             }),
             WorkflowOperation::SignalWorkflowExecution => serde_json::json!({
                 "domainUUID": domain_id()?,
@@ -666,6 +689,12 @@ impl<B: WorkflowBackend> Handler<B> {
                 }
                 internal
             }
+            WorkflowOperation::RefreshWorkflowTasks => serde_json::json!({
+                // Preserve the legacy Go field spelling in its internal
+                // History request (DomainUIID is intentionally not UUID).
+                "domainUIID": domain_id()?,
+                "request": request,
+            }),
             _ => request,
         };
         Ok(prepared)
@@ -765,9 +794,10 @@ impl<B: WorkflowBackend> Handler<B> {
                 | WorkflowOperation::SignalWorkflowExecution
         ) {
             validate_domain(&value)?;
-            let field = if operation == WorkflowOperation::QueryWorkflow {
-                "execution"
-            } else if operation == WorkflowOperation::DescribeWorkflowExecution {
+            let field = if matches!(
+                operation,
+                WorkflowOperation::QueryWorkflow | WorkflowOperation::DescribeWorkflowExecution
+            ) {
                 "execution"
             } else {
                 "workflowExecution"
@@ -1415,6 +1445,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cluster_info_matches_go_constants_and_remains_available_while_stopping() {
+        let handler = Handler::new(FakeBackend::default());
+        handler.stop();
+        assert_eq!(
+            handler
+                .dispatch("GetClusterInfo", Value::Null)
+                .await
+                .unwrap(),
+            serde_json::json!({
+                "supportedClientVersions": {
+                    "goSdk": "1.7.0",
+                    "javaSdk": "1.5.0"
+                }
+            })
+        );
+        assert!(handler.backend.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn health_warmup_promotes_only_if_status_stays_warming() {
         let handler = Handler::new(FakeBackend::default());
         handler.start(std::time::Duration::from_millis(1));
@@ -1818,6 +1867,60 @@ mod tests {
                     "domain": "shop",
                     "execution": {"workflowId": "wf", "runId": "run"}
                 }
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn start_workflow_builds_history_request_with_domain_uuid() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
+        let request = serde_json::json!({
+            "domain": "shop",
+            "workflowId": "order-1",
+            "workflowType": {"name": "Order"},
+            "taskList": {"name": "orders"},
+            "requestId": "550e8400-e29b-41d4-a716-446655440000",
+            "executionStartToCloseTimeoutSeconds": 60,
+            "taskStartToCloseTimeoutSeconds": 10
+        });
+        handler
+            .dispatch("StartWorkflowExecution", request.clone())
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({"domainUUID": "uuid:shop", "startRequest": request})
+        );
+    }
+
+    #[tokio::test]
+    async fn signal_with_start_builds_history_request_with_domain_uuid() {
+        let backend = CapturingBackend::default();
+        let handler = Handler::new(backend).with_domain_lookup(Arc::new(StaticDomainLookup));
+        let request = serde_json::json!({
+            "domain": "shop",
+            "workflowId": "order-1",
+            "workflowType": {"name": "Order"},
+            "taskList": {"name": "orders"},
+            "requestId": "550e8400-e29b-41d4-a716-446655440000",
+            "executionStartToCloseTimeoutSeconds": 60,
+            "taskStartToCloseTimeoutSeconds": 10,
+            "signalName": "confirmed"
+        });
+        handler
+            .dispatch("SignalWithStartWorkflowExecution", request.clone())
+            .await
+            .unwrap();
+        let calls = handler.backend.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            serde_json::json!({
+                "domainUUID": "uuid:shop",
+                "signalWithStartRequest": request
             })
         );
     }

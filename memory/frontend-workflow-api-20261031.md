@@ -425,3 +425,45 @@ these fixes; no green CI evidence covers the current changes.
   detailed task completion behavior (limits/version normalization/decision
   response reconstruction), polling retry/isolation logic and workflow start
   request construction remain open.
+
+## Follow-up handler implementation — 2026-10-31
+
+- Confirmed `origin/frontend-core` (`4fe22eea2`) is already an ancestor of
+  `t3/frontend-workflow-api`; the branch is therefore based on the landed
+  skeleton and required no additional rebase commit. `frontend-core2`'s
+  request-validator and generated History/Matching clients are present in the
+  checked-out skeleton; no client or persistence files were changed here.
+- Pushed token-envelope work as `68506a418887cba9994f2a954547124a21e4b034`.
+  Package CI run
+  [41181623921](https://github.com/auenkr/cadence-rust/actions/runs/41181623921)
+  targets that exact SHA; it was still `in_progress` at the latest check.
+- Continued operation-specific request mapping for Go's `StartWorkflowExecution`,
+  `SignalWithStartWorkflowExecution`, and `RefreshWorkflowTasks` calls. Added
+  Go-mirroring tests for the first two request envelopes. Implemented local
+  `GetClusterInfo` using Go SDK compatibility constants (`1.7.0`/`1.5.0`),
+  including its Go behavior of remaining available during shutdown, with a
+  corresponding test. `git diff --check` passed; no Cargo command ran locally.
+- These edits remain uncommitted and are not covered by CI yet. Workflow
+  implementation remains incomplete: generic `WorkflowBackend::invoke` is
+  still a test/bootstrap seam rather than concrete History/Matching/visibility
+  routing. Required missing interfaces are (1) History API operations and
+  multi-call history pagination/raw/archive logic, (2) Matching poll and
+  query-completion calls with poll IDs, isolation, retries and response
+  conversion, (3) visibility operations with dynamic filter policy and
+  persistence response mapping, (4) domain config/cache metadata for size,
+  identity and archival checks, (5) async ThriftRW publisher and caller header
+  propagation, (6) search-attribute registry and cluster membership/version
+  metadata. In particular, Restart, Diagnose, both async start calls, search
+  attributes, poll completion reconstruction, archived history/listing, and
+  list filters still need their Go method bodies. The wrapper policies are
+  implemented as independent helpers and are partly wired in `Handler`, but
+  transport-specific Thrift/gRPC conversion and runtime production wiring are
+  still not proven.
+- Final result for run 41181623921: `failure` at Clippy on
+  `68506a418887cba9994f2a954547124a21e4b034`; it flagged identical branches in
+  a workflow execution-field selection. The condition was simplified. The
+  run did not reach Rust tests and does not validate the uncommitted follow-up.
+- Corrected the RefreshWorkflowTasks internal request to preserve Go's
+  historical `DomainUIID` JSON spelling and its nested `request` field, based
+  on `go/common/types/history.go`. This is included in the pending next CI
+  checkpoint.
