@@ -743,10 +743,7 @@ pub fn domain_replication_messages_response(
             cursor = ack_levels.get(&req.cluster_name).copied().unwrap_or(cursor);
         }
     }
-    let rows = match persistence.read_domain_replication_messages(cursor, 100) {
-        Ok(rows) => rows,
-        Err(error) => return Err(error),
-    };
+    let rows = persistence.read_domain_replication_messages(cursor, 100)?;
     let mut tasks = Vec::with_capacity(rows.len());
     for row in rows {
         let decoded = read_struct(&mut Reader::new(&row.payload))

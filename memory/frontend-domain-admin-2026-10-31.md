@@ -1036,3 +1036,8 @@ migration forward.
   field-ID decoder (10/20/30 from `replicator.thrift`) and a focused converter
   case. This needs another exact-head CI run; the failed run did not reach Rust
   tests.
+- Exact-head run [41203276647](https://github.com/auenkr/cadence-rust/actions/runs/41203276647)
+  at `f49290722da9a7cd7b1fdc9664ff1a74b4a37f0d` compiled through
+  `cadence-service-core`, then failed Clippy because the domain queue read's
+  three-arm `Result` match should use `?`. Replaced it with the equivalent
+  propagation. The next exact-head run is required; no Rust tests ran.
