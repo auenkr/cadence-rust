@@ -64,6 +64,15 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   have broad rustfmt differences, including the client changes and validator
   module. Use CI's `format_frontend_files` input to generate the formatting
   patch artifact, apply that artifact locally, then dispatch package CI again.
+- The formatter job in run
+  https://github.com/auenkr/cadence-rust/actions/runs/41175836837 generated and
+  uploaded the patch; formatting and Clippy passed on its runner, and four
+  validator/lifecycle tests passed. The test job found the visibility test
+  fixture had not selected an advanced store by domain, so the assertion did
+  not match Go behavior. Corrected the fixture to set
+  `system.readVisibilityStoreName=es` for domain `d`. Also aligned Matching's
+  default outbound timeout to Go's 60 seconds and added its 120-second long-poll
+  helper. The timeout call sites and test fixture require fresh CI validation.
 
 ## Remaining gaps (this branch is not Frontend complete)
 

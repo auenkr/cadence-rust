@@ -1,10 +1,14 @@
 //! Generated outbound gRPC client for the original Go Matching service.
 use cadence_proto::matching::matching_api_client::MatchingApiClient;
-use cadence_service_core::{config::TlsConfig, grpc_tls::{self, ClientTls}};
+use cadence_service_core::{
+    config::TlsConfig,
+    grpc_tls::{self, ClientTls},
+};
 use std::time::Duration;
 use tonic::{transport::Channel, Request};
 
-pub const DEFAULT_MATCHING_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_MATCHING_RPC_TIMEOUT: Duration = Duration::from_secs(60);
+pub const DEFAULT_MATCHING_LONG_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 pub struct MatchingClient {
@@ -19,15 +23,28 @@ impl MatchingClient {
         let client = MatchingApiClient::new(channel.clone())
             .max_decoding_message_size(max_message_size)
             .max_encoding_message_size(max_message_size);
-        Self { channel, client, tls: None, rpc_timeout: DEFAULT_MATCHING_RPC_TIMEOUT }
+        Self {
+            channel,
+            client,
+            tls: None,
+            rpc_timeout: DEFAULT_MATCHING_RPC_TIMEOUT,
+        }
     }
 
-    pub fn client(&self) -> MatchingApiClient<Channel> { self.client.clone() }
-    pub fn channel(&self) -> Channel { self.channel.clone() }
+    pub fn client(&self) -> MatchingApiClient<Channel> {
+        self.client.clone()
+    }
+    pub fn channel(&self) -> Channel {
+        self.channel.clone()
+    }
 
     /// Dial a discovered Matching peer with the shared Go-compatible TLS
     /// loader, including client credentials, CA roots and server-name rules.
-    pub fn for_peer(peer: &str, tls: Option<&TlsConfig>, max_message_size: usize) -> anyhow::Result<Self> {
+    pub fn for_peer(
+        peer: &str,
+        tls: Option<&TlsConfig>,
+        max_message_size: usize,
+    ) -> anyhow::Result<Self> {
         let tls = tls.map(grpc_tls::client_tls).transpose()?.flatten();
         let channel = grpc_tls::endpoint_channel(peer, tls.as_ref())?;
         let mut client = Self::from_channel(channel, max_message_size);
@@ -35,7 +52,9 @@ impl MatchingClient {
         Ok(client)
     }
 
-    pub fn tls(&self) -> Option<&ClientTls> { self.tls.as_ref() }
+    pub fn tls(&self) -> Option<&ClientTls> {
+        self.tls.as_ref()
+    }
 
     pub fn with_rpc_timeout(mut self, timeout: Duration) -> Self {
         self.rpc_timeout = timeout;
@@ -45,11 +64,29 @@ impl MatchingClient {
     /// Attach the same caller identity, encoding and per-attempt timeout used
     /// by Cadence's Go outbound RPC wrappers.
     pub fn request<T>(&self, payload: T) -> Request<T> {
+        self.request_with_timeout(payload, self.rpc_timeout)
+    }
+
+    /// Go Matching uses a two-minute deadline for long-poll calls.
+    pub fn long_poll_request<T>(&self, payload: T) -> Request<T> {
+        self.request_with_timeout(payload, DEFAULT_MATCHING_LONG_POLL_TIMEOUT)
+    }
+
+    pub fn request_with_timeout<T>(&self, payload: T, timeout: Duration) -> Request<T> {
         let mut request = Request::new(payload);
-        request.metadata_mut().insert("rpc-service", tonic::metadata::MetadataValue::from_static("cadence-matching"));
-        request.metadata_mut().insert("rpc-caller", tonic::metadata::MetadataValue::from_static("cadence-frontend"));
-        request.metadata_mut().insert("rpc-encoding", tonic::metadata::MetadataValue::from_static("proto"));
-        request.set_timeout(self.rpc_timeout);
+        request.metadata_mut().insert(
+            "rpc-service",
+            tonic::metadata::MetadataValue::from_static("cadence-matching"),
+        );
+        request.metadata_mut().insert(
+            "rpc-caller",
+            tonic::metadata::MetadataValue::from_static("cadence-frontend"),
+        );
+        request.metadata_mut().insert(
+            "rpc-encoding",
+            tonic::metadata::MetadataValue::from_static("proto"),
+        );
+        request.set_timeout(timeout);
         request
     }
 }

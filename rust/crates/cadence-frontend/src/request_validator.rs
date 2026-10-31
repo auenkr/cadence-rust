@@ -9,9 +9,7 @@ use cadence_api::{
         ListClosedWorkflowExecutionsRequest, ListOpenWorkflowExecutionsRequest,
         ListWorkflowExecutionsRequest, ResetStickyTaskListRequest, UpdateDomainRequest,
     },
-    tasks::{
-        DescribeTaskListRequest, GetTaskListsByDomainRequest, ListTaskListPartitionsRequest,
-    },
+    tasks::{DescribeTaskListRequest, GetTaskListsByDomainRequest, ListTaskListPartitionsRequest},
     types::{FailoverDomainRequest, RefreshWorkflowTasksRequest, RegisterDomainRequest},
 };
 use std::sync::{Arc, Mutex};
@@ -76,35 +74,63 @@ impl RequestValidator {
     }
 
     fn dynamic_integer(&self, key: &str, domain: Option<&str>, default: i64) -> i64 {
-        let Some(dynamic) = &self.dynamic else { return default };
-        let Ok(dynamic) = dynamic.lock() else { return default };
+        let Some(dynamic) = &self.dynamic else {
+            return default;
+        };
+        let Ok(dynamic) = dynamic.lock() else {
+            return default;
+        };
         cadence_persistence::dynamic_config::integer(dynamic.property_values(key), domain, default)
     }
 
     fn dynamic_boolean(&self, key: &str, domain: Option<&str>, default: bool) -> bool {
-        let Some(dynamic) = &self.dynamic else { return default };
-        let Ok(dynamic) = dynamic.lock() else { return default };
+        let Some(dynamic) = &self.dynamic else {
+            return default;
+        };
+        let Ok(dynamic) = dynamic.lock() else {
+            return default;
+        };
         cadence_persistence::dynamic_config::boolean(dynamic.property_values(key), domain, default)
     }
 
     fn dynamic_string(&self, key: &str, default: &str) -> String {
-        let Some(dynamic) = &self.dynamic else { return default.to_owned() };
-        let Ok(dynamic) = dynamic.lock() else { return default.to_owned() };
+        let Some(dynamic) = &self.dynamic else {
+            return default.to_owned();
+        };
+        let Ok(dynamic) = dynamic.lock() else {
+            return default.to_owned();
+        };
         cadence_persistence::dynamic_config::string(dynamic.property_values(key), default)
     }
 
     fn dynamic_string_domain(&self, key: &str, domain: &str, default: &str) -> String {
-        let Some(dynamic) = &self.dynamic else { return default.to_owned() };
-        let Ok(dynamic) = dynamic.lock() else { return default.to_owned() };
-        cadence_persistence::dynamic_config::string_domain(dynamic.property_values(key), domain, default)
+        let Some(dynamic) = &self.dynamic else {
+            return default.to_owned();
+        };
+        let Ok(dynamic) = dynamic.lock() else {
+            return default.to_owned();
+        };
+        cadence_persistence::dynamic_config::string_domain(
+            dynamic.property_values(key),
+            domain,
+            default,
+        )
     }
 
     fn visibility_max_page_size(&self, domain: &str) -> i32 {
-        self.dynamic_integer("frontend.visibilityMaxPageSize", Some(domain), i64::from(self.config.visibility_max_page_size)) as i32
+        self.dynamic_integer(
+            "frontend.visibilityMaxPageSize",
+            Some(domain),
+            i64::from(self.config.visibility_max_page_size),
+        ) as i32
     }
 
     fn es_index_max_result_window(&self) -> i32 {
-        self.dynamic_integer("frontend.esIndexMaxResultWindow", None, i64::from(self.config.es_index_max_result_window)) as i32
+        self.dynamic_integer(
+            "frontend.esIndexMaxResultWindow",
+            None,
+            i64::from(self.config.es_index_max_result_window),
+        ) as i32
     }
 
     fn domain_missing(domain: &str) -> Result<(), BadRequestError> {
@@ -116,7 +142,8 @@ impl RequestValidator {
     }
 
     fn page_size_too_large(&self, size: i32, domain: &str) -> bool {
-        let domain_uses_advanced = self.dynamic_string_domain("system.readVisibilityStoreName", domain, "db") != "db";
+        let domain_uses_advanced =
+            self.dynamic_string_domain("system.readVisibilityStoreName", domain, "db") != "db";
         self.config.advanced_visibility_store
             && domain_uses_advanced
             && size > self.es_index_max_result_window()
@@ -133,23 +160,37 @@ impl RequestValidator {
     }
 
     fn check_permission(&self, token: &str) -> Result<(), BadRequestError> {
-        let protected = self.dynamic_boolean("history.enableAdminProtection", None, self.config.admin_protection);
-        let required = self.dynamic_string("history.adminOperationToken", &self.config.admin_operation_token);
-        if protected && (token.is_empty() || token != required)
-        {
+        let protected = self.dynamic_boolean(
+            "history.enableAdminProtection",
+            None,
+            self.config.admin_protection,
+        );
+        let required = self.dynamic_string(
+            "history.adminOperationToken",
+            &self.config.admin_operation_token,
+        );
+        if protected && (token.is_empty() || token != required) {
             return Err(Self::bad("No permission to do this operation."));
         }
         Ok(())
     }
 
-    fn check_task_list(&self, task_list: Option<&cadence_api::types::TaskList>, domain: &str) -> Result<(), BadRequestError> {
+    fn check_task_list(
+        &self,
+        task_list: Option<&cadence_api::types::TaskList>,
+        domain: &str,
+    ) -> Result<(), BadRequestError> {
         let Some(task_list) = task_list else {
             return Err(Self::bad("TaskList is not set on request."));
         };
         if task_list.name.is_empty() {
             return Err(Self::bad("TaskList is not set on request."));
         }
-        let max_length = self.dynamic_integer("limit.taskListNameLength", Some(domain), self.config.max_task_list_name_length as i64) as usize;
+        let max_length = self.dynamic_integer(
+            "limit.taskListNameLength",
+            Some(domain),
+            self.config.max_task_list_name_length as i64,
+        ) as usize;
         if task_list.name.len() > max_length {
             return Err(Self::bad("TaskList length exceeds limit."));
         }
@@ -250,7 +291,9 @@ impl RequestValidator {
         Self::domain_missing(&request.domain)?;
         Self::check_time_filter(request.start_time_filter.as_ref())?;
         if request.execution_filter.is_some() && request.type_filter.is_some() {
-            return Err(Self::bad("Only one of ExecutionFilter or TypeFilter is allowed"));
+            return Err(Self::bad(
+                "Only one of ExecutionFilter or TypeFilter is allowed",
+            ));
         }
         if request.maximum_page_size <= 0 {
             request.maximum_page_size = self.visibility_max_page_size(&request.domain);
@@ -267,7 +310,11 @@ impl RequestValidator {
         if request.page_size <= 0 {
             request.page_size = self.visibility_max_page_size(&request.domain);
         }
-        let max_page_size = self.dynamic_integer("frontend.visibilityArchivalQueryMaxPageSize", None, i64::from(self.config.visibility_archival_query_max_page_size)) as i32;
+        let max_page_size = self.dynamic_integer(
+            "frontend.visibilityArchivalQueryMaxPageSize",
+            None,
+            i64::from(self.config.visibility_archival_query_max_page_size),
+        ) as i32;
         if request.page_size > max_page_size {
             return Err(Self::bad(format!(
                 "Pagesize is larger than allowed {}",
@@ -306,23 +353,42 @@ impl RequestValidator {
         if request.name.is_empty() {
             return Err(Self::bad("Domain not set on request."));
         }
-        let max_domain_length = self.dynamic_integer("limit.domainNameLength", Some(&request.name), self.config.max_domain_name_length as i64) as usize;
+        let max_domain_length = self.dynamic_integer(
+            "limit.domainNameLength",
+            Some(&request.name),
+            self.config.max_domain_name_length as i64,
+        ) as usize;
         if request.name.len() > max_domain_length {
             return Err(Self::bad("Domain length exceeds limit."));
         }
-        let max_retention = self.dynamic_integer("system.maxRetentionDays", None, i64::from(self.config.max_retention_days)) as i32;
+        let max_retention = self.dynamic_integer(
+            "system.maxRetentionDays",
+            None,
+            i64::from(self.config.max_retention_days),
+        ) as i32;
         if request.workflow_execution_retention_period_in_days > max_retention {
             return Err(Self::bad("RetentionDays is invalid."));
         }
         let required_keys = if let Some(dynamic) = &self.dynamic {
-            dynamic.lock().ok().map(|dynamic| {
-                cadence_persistence::dynamic_config::string_list(dynamic.property_values("system.requiredDomainDataKeys"))
-            }).filter(|keys| !keys.is_empty()).unwrap_or_else(|| self.config.required_domain_data_keys.clone())
+            dynamic
+                .lock()
+                .ok()
+                .map(|dynamic| {
+                    cadence_persistence::dynamic_config::string_list(
+                        dynamic.property_values("system.requiredDomainDataKeys"),
+                    )
+                })
+                .filter(|keys| !keys.is_empty())
+                .unwrap_or_else(|| self.config.required_domain_data_keys.clone())
         } else {
             self.config.required_domain_data_keys.clone()
         };
         for key in &required_keys {
-            if !request.data.as_ref().is_some_and(|data| data.contains_key(key)) {
+            if !request
+                .data
+                .as_ref()
+                .is_some_and(|data| data.contains_key(key))
+            {
                 return Err(Self::bad(format!(
                     "domain data error, missing required key {key} . All required keys: {:?}",
                     required_keys
@@ -355,7 +421,13 @@ impl RequestValidator {
             .configuration
             .as_ref()
             .and_then(|config| config.workflow_execution_retention_period_in_days)
-            .is_some_and(|days| days > self.dynamic_integer("system.maxRetentionDays", None, i64::from(self.config.max_retention_days)) as i32)
+            .is_some_and(|days| {
+                days > self.dynamic_integer(
+                    "system.maxRetentionDays",
+                    None,
+                    i64::from(self.config.max_retention_days),
+                ) as i32
+            })
         {
             return Err(Self::bad("RetentionDays is invalid."));
         }
@@ -399,7 +471,11 @@ impl RequestValidator {
             if timeout <= 0 {
                 return Err(Self::bad("FailoverTimeoutInSeconds must be positive"));
             }
-            let max_timeout = self.dynamic_integer("frontend.maxFailoverTimeoutInSeconds", Some(&request.domain_name), i64::from(self.config.max_failover_timeout_seconds)) as i32;
+            let max_timeout = self.dynamic_integer(
+                "frontend.maxFailoverTimeoutInSeconds",
+                Some(&request.domain_name),
+                i64::from(self.config.max_failover_timeout_seconds),
+            ) as i32;
             if timeout > max_timeout {
                 return Err(Self::bad(format!(
                     "FailoverTimeoutInSeconds {timeout} exceeds the maximum allowed {}",
@@ -424,47 +500,97 @@ impl RequestValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_api::service_types::{StartTimeFilter, WorkflowExecutionFilter, WorkflowTypeFilter};
+    use cadence_api::{
+        admin::{DynamicConfigFilter, DynamicConfigValue},
+        enums::EncodingType,
+        types::DataBlob,
+    };
+    use cadence_api::service_types::{
+        StartTimeFilter, WorkflowExecutionFilter, WorkflowTypeFilter,
+    };
     use cadence_api::types::{TaskList, WorkflowExecution};
 
     #[test]
     fn list_page_size_mutation_and_visibility_limit_match_go() {
         let validator = RequestValidator::default();
-        let mut request = ListWorkflowExecutionsRequest { domain: "d".into(), ..Default::default() };
-        validator.validate_list_workflow_executions_request(Some(&mut request)).unwrap();
+        let mut request = ListWorkflowExecutionsRequest {
+            domain: "d".into(),
+            ..Default::default()
+        };
+        validator
+            .validate_list_workflow_executions_request(Some(&mut request))
+            .unwrap();
         assert_eq!(request.page_size, 1000);
 
         let mut validator = validator;
         validator.config.advanced_visibility_store = true;
         validator.config.es_index_max_result_window = 100;
-        assert!(validator.validate_list_workflow_executions_request(Some(&mut request)).is_err());
+        validator.dynamic = Some(Arc::new(Mutex::new(
+            cadence_service_core::admin::DynamicConfigOverlay::default(),
+        )));
+        validator.dynamic.as_ref().unwrap().lock().unwrap().update(
+            false,
+            "system.readVisibilityStoreName",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob::new(
+                    EncodingType::JSON,
+                    serde_json::to_vec(&serde_json::json!("es")).unwrap(),
+                )),
+                filters: vec![DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(DataBlob::new(
+                        EncodingType::JSON,
+                        serde_json::to_vec(&serde_json::json!("d")).unwrap(),
+                    )),
+                }],
+            }],
+        );
+        assert!(validator
+            .validate_list_workflow_executions_request(Some(&mut request))
+            .is_err());
     }
 
     #[test]
     fn task_list_and_time_filter_validation_match_go_order() {
         let validator = RequestValidator::default();
-        let err = validator.validate_describe_task_list_request(Some(&DescribeTaskListRequest {
-            domain: "d".into(), task_list: Some(TaskList::default()), task_list_type: Some(cadence_api::TaskListType::Decision), ..Default::default()
-        })).unwrap_err();
+        let err = validator
+            .validate_describe_task_list_request(Some(&DescribeTaskListRequest {
+                domain: "d".into(),
+                task_list: Some(TaskList::default()),
+                task_list_type: Some(cadence_api::TaskListType::Decision),
+                ..Default::default()
+            }))
+            .unwrap_err();
         assert_eq!(err.message, "TaskList is not set on request.");
 
         let mut request = ListOpenWorkflowExecutionsRequest {
             domain: "d".into(),
-            start_time_filter: Some(StartTimeFilter { earliest_time: Some(2), latest_time: Some(1) }),
+            start_time_filter: Some(StartTimeFilter {
+                earliest_time: Some(2),
+                latest_time: Some(1),
+            }),
             execution_filter: Some(WorkflowExecutionFilter::default()),
             type_filter: Some(WorkflowTypeFilter::default()),
             ..Default::default()
         };
-        assert_eq!(validator.validate_list_open_workflow_executions_request(Some(&mut request)).unwrap_err().message,
-            "EarliestTime in StartTimeFilter should not be larger than LatestTime");
+        assert_eq!(
+            validator
+                .validate_list_open_workflow_executions_request(Some(&mut request))
+                .unwrap_err()
+                .message,
+            "EarliestTime in StartTimeFilter should not be larger than LatestTime"
+        );
     }
 
     #[test]
     fn reset_sticky_requires_execution_and_validates_identifiers() {
         let validator = RequestValidator::default();
-        let err = validator.validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
-            domain: "d".into(), execution: Some(WorkflowExecution::default())
-        })).unwrap_err();
+        let err = validator
+            .validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
+                domain: "d".into(),
+                execution: Some(WorkflowExecution::default()),
+            }))
+            .unwrap_err();
         assert_eq!(err.message, "WorkflowId is not set on request.");
     }
 
@@ -472,23 +598,53 @@ mod tests {
     fn every_go_validator_entry_point_rejects_a_nil_request() {
         let validator = RequestValidator::default();
         let errors = [
-            validator.validate_refresh_workflow_tasks_request(None).unwrap_err(),
-            validator.validate_describe_task_list_request(None).unwrap_err(),
-            validator.validate_list_task_list_partitions_request(None).unwrap_err(),
-            validator.validate_get_task_lists_by_domain_request(None).unwrap_err(),
-            validator.validate_reset_sticky_task_list_request(None).unwrap_err(),
-            validator.validate_count_workflow_executions_request(None).unwrap_err(),
-            validator.validate_list_workflow_executions_request(None).unwrap_err(),
-            validator.validate_list_open_workflow_executions_request(None).unwrap_err(),
-            validator.validate_list_archived_workflow_executions_request(None).unwrap_err(),
-            validator.validate_list_closed_workflow_executions_request(None).unwrap_err(),
-            validator.validate_register_domain_request(None).unwrap_err(),
-            validator.validate_describe_domain_request(None).unwrap_err(),
+            validator
+                .validate_refresh_workflow_tasks_request(None)
+                .unwrap_err(),
+            validator
+                .validate_describe_task_list_request(None)
+                .unwrap_err(),
+            validator
+                .validate_list_task_list_partitions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_get_task_lists_by_domain_request(None)
+                .unwrap_err(),
+            validator
+                .validate_reset_sticky_task_list_request(None)
+                .unwrap_err(),
+            validator
+                .validate_count_workflow_executions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_list_workflow_executions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_list_open_workflow_executions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_list_archived_workflow_executions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_list_closed_workflow_executions_request(None)
+                .unwrap_err(),
+            validator
+                .validate_register_domain_request(None)
+                .unwrap_err(),
+            validator
+                .validate_describe_domain_request(None)
+                .unwrap_err(),
             validator.validate_update_domain_request(None).unwrap_err(),
             validator.validate_delete_domain_request(None).unwrap_err(),
-            validator.validate_deprecate_domain_request(None).unwrap_err(),
-            validator.validate_failover_domain_request(None).unwrap_err(),
+            validator
+                .validate_deprecate_domain_request(None)
+                .unwrap_err(),
+            validator
+                .validate_failover_domain_request(None)
+                .unwrap_err(),
         ];
-        assert!(errors.iter().all(|error| error.message == "Request is nil."));
+        assert!(errors
+            .iter()
+            .all(|error| error.message == "Request is nil."));
     }
 }
