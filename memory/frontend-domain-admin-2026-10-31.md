@@ -155,3 +155,23 @@ migration forward.
   parity: update/deprecate transmission and audit, archival provider behavior,
   durable metadata/version locking and replication queue integration still
   require implementation. Admin and Schedule RPC dispatch wiring is also open.
+
+## Continued service-core integration
+
+- The shared YARPC dispatch used by the running Frontend still bypasses the
+  new frontend domain handler, so I tightened the live `RegisterDomain` path
+  in `cadence-service-core/src/yarpc.rs` to match Go's primary-cluster gate,
+  duplicate-before-name validation, domain-name and length checks, enabled
+  archival URI requirement, and UUID v7 generation. `DeprecateDomain` now
+  checks the existing domain's global flag and primary-cluster ownership before
+  mutation. This does not yet add archival-provider scheme checks, domain
+  replication queue transmission, or the audit record.
+- `GetSearchAttributes` now merges registered custom keys from the shared
+  `AppState.admin` map into the default registry for both JSON and YARPC paths;
+  this connects the existing AddSearchAttribute state mutation to reads.
+- These changes are in progress at the current branch head and need a fresh
+  package CI run. The previous run [41175622384](https://github.com/auenkr/cadence-rust/actions/runs/41175622384)
+  targets `508ae8ce85a05a9db5c8a6f3d1c909e0a1817a0a` and was still in progress
+  at the last check; it does not cover these edits. Remaining Admin and
+  Schedule RPC dispatch, real persistence/client behavior, RPC lifecycle,
+  mixed-cluster validation, and full Go method coverage remain open.
