@@ -39,7 +39,9 @@ pub fn validate_create_request(
         .as_ref()
         .ok_or_else(|| BadRequestError::new("Spec is not set on request."))?;
     if spec.cron_expression.is_empty() {
-        return Err(BadRequestError::new("CronExpression is not set on request."));
+        return Err(BadRequestError::new(
+            "CronExpression is not set on request.",
+        ));
     }
     let now = cadence_common::cron::naive_from_nanos(
         std::time::SystemTime::now()
@@ -124,12 +126,21 @@ mod tests {
     #[test]
     fn create_validation_matches_go_first_error_order() {
         let mut request = CreateScheduleRequest::default();
-        assert_eq!(validate_create_request(&request, false).unwrap_err().message,
-            "Domain not set on request.");
+        assert_eq!(
+            validate_create_request(&request, false)
+                .unwrap_err()
+                .message,
+            "Domain not set on request."
+        );
         request.domain = "payments".into();
-        assert!(validate_create_request(&request, false).unwrap_err().message.contains("worker.enableScheduler=true"));
-        assert_eq!(validate_create_request(&request, true).unwrap_err().message,
-            "ScheduleID is not set on request.");
+        assert!(validate_create_request(&request, false)
+            .unwrap_err()
+            .message
+            .contains("worker.enableScheduler=true"));
+        assert_eq!(
+            validate_create_request(&request, true).unwrap_err().message,
+            "ScheduleID is not set on request."
+        );
     }
 
     #[test]
