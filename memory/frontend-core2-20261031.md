@@ -1220,3 +1220,9 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - The request-validator audit remains closed at 15 Go table groups / 88 named
   rows, with exact-head package CI evidence above. No Cargo command was run
   locally.
+- Matching package CI also passed after this routing change:
+  https://github.com/auenkr/cadence-rust/actions/runs/41207277516 validated
+  current head `65bafbbb99621090ada47720d5fac2ad4e0bff23` and concluded
+  `success` (formatting, Clippy, and Matching tests). The Frontend run above
+  validates the source commit; the commits after it only updated this evidence
+  file. No Cargo command was run locally.
