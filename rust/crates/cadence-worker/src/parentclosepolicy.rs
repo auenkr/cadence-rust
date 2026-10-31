@@ -201,6 +201,98 @@ pub struct Operation {
     pub external_workflow_execution: Option<WorkflowExecution>,
 }
 
+/// Errors returned by the History calls made by Go's processor activity.
+/// The Cadence Go client exposes these as concrete error types; keeping the
+/// cases explicit avoids converting terminal races into retryable failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HistoryError {
+    EntityNotExists,
+    WorkflowAlreadyCompleted,
+    CancellationAlreadyRequested,
+    DomainNotActive,
+    Other(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteBatch {
+    pub cluster: String,
+    pub executions: Vec<RequestDetail>,
+}
+
+/// Run the ordered History portion of Go's `ProcessorActivity` and collect
+/// executions that must be forwarded to their domain's active cluster.
+/// Terminal workflow races count as success; a domain-not-active response is
+/// forwarded only after resolving that domain's current active cluster.
+pub fn process_history_outcomes<R, H, C, E>(
+    request: &Request,
+    mut resolve_domain_id: R,
+    mut apply_history: H,
+    mut active_cluster_for_domain: C,
+) -> Result<Vec<RemoteBatch>, String>
+where
+    R: FnMut(&str) -> Result<String, DomainLookupError>,
+    H: FnMut(&Operation) -> Result<(), HistoryError>,
+    C: FnMut(&str) -> Result<String, E>,
+    E: std::fmt::Display,
+{
+    let mut batches: std::collections::BTreeMap<String, Vec<RequestDetail>> =
+        std::collections::BTreeMap::new();
+
+    let child_workflow_only = !request.parent_execution.workflow_id.is_empty()
+        && !request.parent_execution.run_id.is_empty();
+    for execution in &request.executions {
+        let domain_name = if execution.domain_name.is_empty() {
+            request.domain_name.as_str()
+        } else {
+            execution.domain_name.as_str()
+        };
+        let domain_id = if execution.domain_id.is_empty() {
+            match resolve_domain_id(domain_name) {
+                Ok(domain_id) => domain_id,
+                Err(DomainLookupError::EntityNotExists) => continue,
+                Err(DomainLookupError::Other(error)) => return Err(error),
+            }
+        } else {
+            execution.domain_id.clone()
+        };
+        let action = match execution.policy {
+            POLICY_ABANDON => continue,
+            POLICY_REQUEST_CANCEL => Action::RequestCancel,
+            POLICY_TERMINATE => Action::Terminate,
+            policy => return Err(format!("unknown parent close policy: {policy}")),
+        };
+        let operation = Operation {
+            action,
+            domain_id,
+            domain_name: domain_name.to_owned(),
+            workflow_id: execution.workflow_id.clone(),
+            first_execution_run_id: execution.run_id.clone(),
+            identity: WORKFLOW_TYPE,
+            reason: (action == Action::Terminate).then_some(TERMINATE_REASON),
+            child_workflow_only,
+            external_workflow_execution: child_workflow_only
+                .then(|| request.parent_execution.clone()),
+        };
+        match apply_history(&operation) {
+            Ok(())
+            | Err(HistoryError::EntityNotExists)
+            | Err(HistoryError::WorkflowAlreadyCompleted)
+            | Err(HistoryError::CancellationAlreadyRequested) => {}
+            Err(HistoryError::DomainNotActive) => {
+                let cluster = active_cluster_for_domain(&operation.domain_id)
+                    .map_err(|error| error.to_string())?;
+                batches.entry(cluster).or_default().push(execution.clone());
+            }
+            Err(HistoryError::Other(error)) => return Err(error),
+        }
+    }
+
+    Ok(batches
+        .into_iter()
+        .map(|(cluster, executions)| RemoteBatch { cluster, executions })
+        .collect())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DomainLookupError {
     EntityNotExists,
@@ -396,5 +488,76 @@ mod tests {
         .unwrap();
         assert_eq!(requested_domain, "legacy-domain");
         assert!(operations.is_empty());
+    }
+
+    #[test]
+    fn processor_activity_suppresses_terminal_races_and_routes_inactive_domains() {
+        let request = super::Request {
+            parent_execution: super::WorkflowExecution {
+                workflow_id: "parent".into(),
+                run_id: "parent-run".into(),
+            },
+            executions: vec![
+                super::RequestDetail {
+                    domain_id: "local-domain-id".into(),
+                    domain_name: "local-domain".into(),
+                    workflow_id: "already-gone".into(),
+                    policy: super::POLICY_REQUEST_CANCEL,
+                    ..Default::default()
+                },
+                super::RequestDetail {
+                    domain_id: "remote-domain-id".into(),
+                    domain_name: "remote-domain".into(),
+                    workflow_id: "remote-child".into(),
+                    policy: super::POLICY_TERMINATE,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let mut applied = Vec::new();
+        let routed = super::process_history_outcomes(
+            &request,
+            |_| unreachable!("both domain IDs are present"),
+            |operation| {
+                applied.push(operation.workflow_id.clone());
+                if operation.workflow_id == "already-gone" {
+                    Err(super::HistoryError::WorkflowAlreadyCompleted)
+                } else {
+                    assert_eq!(operation.action, super::Action::Terminate);
+                    assert!(operation.child_workflow_only);
+                    Err(super::HistoryError::DomainNotActive)
+                }
+            },
+            |domain_id| {
+                assert_eq!(domain_id, "remote-domain-id");
+                Ok::<_, &'static str>("cluster-b".into())
+            },
+        )
+        .unwrap();
+        assert_eq!(applied, ["already-gone", "remote-child"]);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].cluster, "cluster-b");
+        assert_eq!(routed[0].executions, [request.executions[1].clone()]);
+    }
+
+    #[test]
+    fn processor_activity_retries_unclassified_history_errors() {
+        let request = super::Request {
+            executions: vec![super::RequestDetail {
+                domain_id: "domain-id".into(),
+                policy: super::POLICY_REQUEST_CANCEL,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let error = super::process_history_outcomes(
+            &request,
+            |_| unreachable!("domain ID is present"),
+            |_| Err(super::HistoryError::Other("history unavailable".into())),
+            |_| Ok::<_, &'static str>("cluster-a".into()),
+        )
+        .unwrap_err();
+        assert_eq!(error, "history unavailable");
     }
 }

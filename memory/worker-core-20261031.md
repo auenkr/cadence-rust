@@ -67,6 +67,16 @@ protection. Go-derived tests cover cutoff, task ordering, fairness and the
 exact grace-period boundary. Persistence retries, executor pool lifecycle,
 orphan-task cleanup and task-list execution are still unported.
 
+Parent-close policy now also has an ordered History outcome processor matching
+Go `ProcessorActivity`: EntityNotExists, WorkflowExecutionAlreadyCompleted,
+and CancellationAlreadyRequested are treated as success; DomainNotActive
+resolves the domain's active cluster and queues the original request detail for
+remote forwarding; other History and domain-cache errors remain retryable
+activity failures. Go-mirroring tests cover the terminal race, remote routing,
+child-only guard, and unclassified failure behavior. The helper is still a
+testable orchestration boundary: no production domain-cache/remote-client
+provider is wired into a poller, and the workflow replay runtime is absent.
+
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
 
@@ -147,6 +157,11 @@ Implemented in this slice:
   exact-head CI.
 - Exact-head package CI for the Frontend WorkflowAPI SignalWithStart request
   builder is pending.
+- Follow-up exact-head CI at `f03cae26b53d517a05150d26cf84aab66adfdbe7`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41207805929 completed
+  `success`; Clippy, formatting and tests passed for the task-list scavenger
+  change. This predates the parent-close History outcome processor in the
+  current working tree; dispatch package CI after that change is pushed.
 
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
