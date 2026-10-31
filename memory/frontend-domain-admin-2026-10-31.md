@@ -979,3 +979,10 @@ migration forward.
 - Dispatched exact-head Frontend package CI [41201182327](https://github.com/auenkr/cadence-rust/actions/runs/41201182327), targeting `478bdd1ec91e37270933613fe61b7937865e7f3d`; it was still in progress at this checkpoint. No local Cargo commands were run.
 - The task encoder commit contains Go field IDs and ThriftRW structure support. Open blocker: no persistence-backed QueueStore integration. Go's shared queue schema uses `queue` and `queue_metadata`; SQL assigns the next ID as `max(last message ID, all ack levels)+1`, and Cassandra uses the same logical queue type with LWT allocation. Domain mutation publication and Admin queue/DLQ consumers are still not wired.
 - Remaining blockers: SQL/PostgreSQL/Cassandra durable replication queue plus producer/consumer/ack semantics; domain cooldown/failover audit persistence; Admin DLQ and full raw-history RPC behavior; scheduler RPC calls to scheduler workflows; runtime membership; parity audit and mixed Go/Rust failure, restart, recovery evidence. No parity claim is made.
+
+## Queue SQL implementation slice and rebase Clippy repair — 2026-10-31
+
+- Exact-head CI [41201182327](https://github.com/auenkr/cadence-rust/actions/runs/41201182327) failed on `478bdd1ec91e37270933613fe61b7937865e7f3d` before Frontend tests. The diagnostic was `DomainConfiguration: Eq` requiring `AsyncWorkflowConfiguration: Eq`, exposed after the rebase while compiling `cadence-api`.
+- Added `Eq` to `AsyncWorkflowConfiguration` (all constituent fields already support equality).
+- Added the first MySQL durable domain replication queue adapter on the Go shared `queue` table: queue type 1, transactional row/ack lock ordering, ack-aware monotonic ID allocation, ordered cursor reads, and a helper test for Go's `max(lastID, ackLevels)+1` rule. This is persistence support only; it is not yet connected to domain mutation publication, Admin fetch/ack, or DLQ operations, and PostgreSQL/Cassandra adapters remain open.
+- `git diff --check` passes. No local Cargo command was run. Queue slice and derive repair need a new exact-head package CI run after commit/push.

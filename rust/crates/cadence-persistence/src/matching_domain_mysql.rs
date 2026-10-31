@@ -17,7 +17,14 @@ use std::{
 
 const GO_DEFAULT_SHARD_ID: i32 = 54321;
 const GO_DOMAIN_PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(3);
+const GO_DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
 type DomainMetadataRow = (Vec<u8>, String, bool, Vec<u8>, String);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReplicationQueueMessage {
+    pub id: i64,
+    pub payload: Vec<u8>,
+}
 
 #[derive(Clone)]
 pub struct MySqlDomainMetadataStore {
@@ -383,6 +390,109 @@ impl MySqlDomainMetadataStore {
             encoding,
             &self.active_cluster_name,
         )
+    }
+
+    /// Persist a ThriftRW domain replication task in Cadence's shared SQL
+    /// `queue` table. Queue type 1 is DomainReplicationQueueType in Go.
+    /// Message IDs are allocated under the same row locks and ack-level rule
+    /// used by Go's sqlQueueStore.EnqueueMessage.
+    pub fn enqueue_domain_replication_message(
+        &self,
+        payload: Vec<u8>,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let mut transaction = connection
+                        .start_transaction(mysql_async::TxOpts::default())
+                        .await?;
+                    let last_id: Option<i64> = transaction
+                        .exec_first(
+                            "SELECT message_id FROM queue WHERE queue_type=? ORDER BY message_id DESC LIMIT 1 FOR UPDATE",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                        )
+                        .await?;
+                    let ack_data: Option<Vec<u8>> = transaction
+                        .exec_first(
+                            "SELECT data FROM queue_metadata WHERE queue_type=? FOR UPDATE",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE,),
+                        )
+                        .await?;
+                    let ack_levels: std::collections::HashMap<String, i64> = ack_data
+                        .map(|data| serde_json::from_slice(&data))
+                        .transpose()
+                        .map_err(|error| {
+                            mysql_async::Error::Other(Box::new(std::io::Error::other(error)))
+                        })?
+                        .unwrap_or_default();
+                    let id = next_domain_replication_message_id(
+                        last_id.unwrap_or(-1),
+                        ack_levels.values().copied(),
+                    );
+                    transaction
+                        .exec_drop(
+                            "INSERT INTO queue (queue_type, message_id, message_payload) VALUES (?, ?, ?)",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE, id, payload),
+                        )
+                        .await?;
+                    transaction.commit().await?;
+                    Ok(id)
+                })
+            })
+            .map_err(query_error)
+    }
+
+    /// Read ordered queue rows after `last_message_id`, matching Go's SQL
+    /// QueueStore cursor semantics.
+    pub fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<DomainReplicationQueueMessage>, MatchingDomainMetadataError> {
+        use mysql_async::prelude::Queryable;
+        let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
+        self.pool
+            .query_until(deadline, move |connection| {
+                Box::pin(async move {
+                    let rows: Vec<(i64, Vec<u8>)> = connection
+                        .exec(
+                            "SELECT message_id, message_payload FROM queue WHERE queue_type=? AND message_id>? ORDER BY message_id ASC LIMIT ?",
+                            (GO_DOMAIN_REPLICATION_QUEUE_TYPE, last_message_id, max_count as u64),
+                        )
+                        .await?;
+                    Ok(rows
+                        .into_iter()
+                        .map(|(id, payload)| DomainReplicationQueueMessage { id, payload })
+                        .collect())
+                })
+            })
+            .map_err(query_error)
+    }
+}
+
+/// Go allocates a queue ID above both the last persisted row and every known
+/// consumer ack, preserving monotonic IDs even when queue rows were collected.
+pub fn next_domain_replication_message_id(
+    last_message_id: i64,
+    ack_levels: impl IntoIterator<Item = i64>,
+) -> i64 {
+    ack_levels
+        .into_iter()
+        .fold(last_message_id, i64::max)
+        .wrapping_add(1)
+}
+
+#[cfg(test)]
+mod domain_replication_queue_tests {
+    use super::next_domain_replication_message_id;
+
+    #[test]
+    fn queue_id_follows_go_last_message_and_ack_levels_rule() {
+        assert_eq!(next_domain_replication_message_id(-1, []), 0);
+        assert_eq!(next_domain_replication_message_id(3, [1, 2]), 4);
+        assert_eq!(next_domain_replication_message_id(3, [7, 4]), 8);
     }
 }
 
