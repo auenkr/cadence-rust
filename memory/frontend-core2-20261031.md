@@ -118,4 +118,30 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
 - Rust: `rust/crates/cadence-frontend/src/request_validator.rs`,
   `history_client.rs`, `matching_client.rs`, and
   `rust/crates/cadence-api/src/service_types.rs`.
+
+## Continuation checkpoint — 2026-10-31
+
+Changes on the continuation head wire Frontend-only shutdown through the
+shared launcher. HTTP health becomes unhealthy first; after the live
+`frontend.shutdownDrainDuration` failure-detection interval, the router rejects
+new requests, then the launcher waits the final `min(duration, 1s)` drain
+window before listener teardown. Other service binaries keep their existing
+shutdown path. A Rust test matrix now exercises representative Go validator
+error ordering, page-size mutation, task-list/execution identity checks,
+visibility filters, admin protection, and domain failover validation, in
+addition to nil-request coverage for every validator entry point.
+
+Frontend startup now opens the configured default datastore through Matching's
+native persistence adapter (Cassandra, MySQL, or PostgreSQL), retains the
+connection/pool, and seeds the existing domain view from the Go-compatible
+domain metadata source when available. This is only read/bootstrap support.
+The following originally requested persistence managers remain incomplete:
+write-capable domain and metadata managers, configured visibility manager,
+durable History manager, and durable execution manager; SQL/Cassandra backend
+selection for the visibility datastore is also not wired to a manager. The
+Frontend still uses in-memory execution state and in-memory domain writes.
+
+CI for this continuation must include `cadence-frontend` Clippy and tests on a
+fresh target, plus the Frontend formatting patch for the new launcher and
+shared HTTP handler changes. Record exact head and final run conclusion below.
 - Previous skeleton analysis and baseline CI: `frontend-core-20261031.md`.

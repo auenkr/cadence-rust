@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
+use axum::middleware::{self, Next};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -74,6 +75,10 @@ pub struct AppState {
     pub current_cluster_name: String,
     pub cluster_metadata: cadence_common::cluster::Metadata,
     pub grpc_max_message_size: usize,
+    /// Frontend readiness and admission state are split so shutdown can first
+    /// fail health checks, wait for discovery, and only then reject new RPCs.
+    pub frontend_ready: Arc<std::sync::atomic::AtomicBool>,
+    pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
     pub domains: InMemoryDomainStore,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
@@ -99,6 +104,8 @@ impl Default for AppState {
             current_cluster_name: "cluster0".to_string(),
             cluster_metadata: cadence_common::cluster::Metadata::default(),
             grpc_max_message_size: 4 * 1024 * 1024,
+            frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             domains: InMemoryDomainStore::new(),
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
@@ -325,6 +332,29 @@ fn task_error(e: TaskError) -> Response {
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"ok": true}))
+}
+
+async fn frontend_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let ok = state.frontend_ready.load(std::sync::atomic::Ordering::Acquire);
+    let status = if ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    (status, Json(serde_json::json!({"ok": ok})))
+}
+
+async fn reject_frontend_during_shutdown(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if request.uri().path() != "/health"
+        && !state.frontend_accepting.load(std::sync::atomic::Ordering::Acquire)
+    {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Frontend is shutting down.".to_string(),
+        );
+    }
+    next.run(request).await
 }
 
 // ---------------------------------------------------------------------------
@@ -903,7 +933,7 @@ pub fn health_router() -> Router {
 pub fn router(state: AppState) -> Router {
     let shared = Arc::new(state);
     Router::new()
-        .route("/health", get(health))
+        .route("/health", get(frontend_health))
         .route("/api/v1/tasks/reset-sticky", post(reset_sticky_task_list))
         .route("/api/v1/domains/register", post(register_domain))
         .route("/api/v1/domains/describe", get(describe_domain))
@@ -1127,6 +1157,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/workflows/archived", post(list_archived_workflows))
         .route("/", post(crate::yarpc::yarpc_handler))
         .route("/{*rest}", post(crate::yarpc::yarpc_handler))
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            reject_frontend_during_shutdown,
+        ))
         .with_state(shared)
 }
 

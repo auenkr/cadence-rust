@@ -522,6 +522,23 @@ pub async fn run(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
 ) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, false).await
+}
+
+/// Run the shared launcher with Go Frontend's readiness and request-drain
+/// sequence enabled. Other service binaries keep their own shutdown contract.
+pub async fn run_frontend(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, true).await
+}
+
+async fn run_with_lifecycle(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+    frontend_lifecycle: bool,
+) -> anyhow::Result<()> {
     crate::grpc_tls::install_tls_crypto_provider();
     let cli = Cli::parse_as(bin_name);
     let (config, env, zone, root) = (cli.config, cli.env, cli.zone, cli.root);
@@ -1258,7 +1275,11 @@ pub async fn run(
             } else {
                 None
             };
-            let configured_matching_stores = if run_matching && !embedded_development {
+            // Frontend opens the same configured default datastore as Go's
+            // persistence factory. The shared Matching adapters provide the
+            // native SQL/Cassandra pools and read-compatible domain metadata
+            // source; keep the handles alive for the process lifetime.
+            let configured_matching_stores = if (run_matching || run_frontend) && !embedded_development {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
                 let dynamic_config = state.admin.dynamic_config.clone();
@@ -1321,6 +1342,42 @@ pub async fn run(
             } else {
                 None
             };
+            if run_frontend && !run_matching {
+                if let Some(source) = configured_matching_stores
+                    .as_ref()
+                    .and_then(|stores| stores.domain_metadata_source.as_ref())
+                {
+                    let mut token: Option<Vec<u8>> = None;
+                    loop {
+                        match source.list_domains(
+                            crate::matching_domain_cache::DOMAIN_CACHE_REFRESH_PAGE_SIZE,
+                            token.as_deref(),
+                            crate::matching_domain_cache::DOMAIN_CACHE_PERSISTENCE_TIMEOUT,
+                        ) {
+                            Ok(page) => {
+                                for domain in page.domains {
+                                    state
+                                        .domains
+                                        .insert_matching_metadata_if_missing(&domain);
+                                }
+                                token = page.next_page_token;
+                                if token.is_none() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("warning: loading configured Go domain metadata: {}", error.message);
+                                break;
+                            }
+                        }
+                    }
+                    state.executions.sync_domains(
+                        &state.domains.list().domains.into_iter()
+                            .filter_map(|desc| desc.domain_info.map(|info| (info.name, info.uuid)))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
             let matching_domain_cache = if run_matching && !embedded_development {
                 let stores = configured_matching_stores
                     .as_ref()
@@ -1828,6 +1885,30 @@ pub async fn run(
                 signal_result.is_some(),
                 serving_result.is_some()
             ));
+            if frontend_lifecycle && run_frontend {
+                // Go Frontend changes RPC health before waiting for Ringpop/YARPC
+                // failure detection, then rejects new calls and leaves the
+                // final (at most one second) window for in-flight requests.
+                state
+                    .frontend_ready
+                    .store(false, std::sync::atomic::Ordering::Release);
+                let shutdown_drain = {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    let nanos = cadence_persistence::dynamic_config::duration(
+                        overlay.property_values("frontend.shutdownDrainDuration"),
+                        None,
+                        0,
+                    );
+                    std::time::Duration::from_nanos(nanos.max(0) as u64)
+                };
+                let request_drain = shutdown_drain.min(std::time::Duration::from_secs(1));
+                let failure_detection = shutdown_drain.saturating_sub(request_drain);
+                tokio::time::sleep(failure_detection).await;
+                state
+                    .frontend_accepting
+                    .store(false, std::sync::atomic::Ordering::Release);
+                tokio::time::sleep(request_drain).await;
+            }
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())

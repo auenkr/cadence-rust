@@ -264,6 +264,8 @@ jobs:
             crates/cadence-frontend/src/wrappers/ratelimited.rs
             crates/cadence-frontend/src/wrappers/thrift.rs
             crates/cadence-frontend/src/wrappers/versioncheck.rs
+            crates/cadence-matching/src/launcher.rs
+            crates/cadence-service-core/src/handlers.rs
           )
           rustfmt --edition 2021 "${files[@]}"
           git diff -- "${files[@]}" > "$RUNNER_TEMP/frontend-format.patch"

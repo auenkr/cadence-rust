@@ -647,4 +647,96 @@ mod tests {
             .iter()
             .all(|error| error.message == "Request is nil."));
     }
+
+    // These cases mirror the Go table tests in request_validator_test.go.
+    // Keep the assertion on the public BadRequest message: callers and SDKs
+    // observe this text over both gRPC and Thrift transports.
+    #[test]
+    fn go_request_validator_error_and_mutation_matrix() {
+        let validator = RequestValidator::default();
+        let bad = |result: Result<(), BadRequestError>, expected: &str| {
+            assert!(result.unwrap_err().message.contains(expected));
+        };
+
+        bad(
+            validator.validate_refresh_workflow_tasks_request(Some(
+                &RefreshWorkflowTasksRequest::default(),
+            )),
+            "Execution is not set on request.",
+        );
+        bad(
+            validator.validate_describe_task_list_request(Some(&DescribeTaskListRequest {
+                domain: String::new(),
+                task_list: Some(TaskList { name: "tl".into(), ..Default::default() }),
+                task_list_type: Some(cadence_api::TaskListType::Decision),
+                ..Default::default()
+            })),
+            "Domain not set on request.",
+        );
+        bad(
+            validator.validate_list_task_list_partitions_request(Some(
+                &ListTaskListPartitionsRequest {
+                    domain: "d".into(),
+                    task_list: None,
+                    ..Default::default()
+                },
+            )),
+            "TaskList is not set on request.",
+        );
+        bad(
+            validator.validate_get_task_lists_by_domain_request(Some(
+                &GetTaskListsByDomainRequest { domain: String::new(), ..Default::default() },
+            )),
+            "Domain not set on request.",
+        );
+        bad(
+            validator.validate_reset_sticky_task_list_request(Some(&ResetStickyTaskListRequest {
+                domain: "d".into(),
+                execution: Some(WorkflowExecution { workflow_id: "wid".into(), run_id: "bad".into() }),
+            })),
+            "Invalid RunId.",
+        );
+        bad(
+            validator.validate_count_workflow_executions_request(Some(
+                &CountWorkflowExecutionsRequest { domain: String::new(), ..Default::default() },
+            )),
+            "Domain not set on request.",
+        );
+
+        let mut list = ListWorkflowExecutionsRequest { domain: "d".into(), page_size: 0, ..Default::default() };
+        validator.validate_list_workflow_executions_request(Some(&mut list)).unwrap();
+        assert_eq!(list.page_size, 1000);
+        let mut open = ListOpenWorkflowExecutionsRequest { domain: "d".into(), ..Default::default() };
+        bad(validator.validate_list_open_workflow_executions_request(Some(&mut open)), "StartTimeFilter is required");
+        let mut closed = ListClosedWorkflowExecutionsRequest { domain: "d".into(), ..Default::default() };
+        bad(validator.validate_list_closed_workflow_executions_request(Some(&mut closed)), "StartTimeFilter is required");
+        let mut archived = ListArchivedWorkflowExecutionsRequest { domain: "d".into(), page_size: 0, ..Default::default() };
+        validator.validate_list_archived_workflow_executions_request(Some(&mut archived)).unwrap();
+        assert_eq!(archived.page_size, 1000);
+
+        let mut protected = validator.clone();
+        protected.config.admin_protection = true;
+        protected.config.admin_operation_token = "secret".into();
+        bad(
+            protected.validate_register_domain_request(Some(&RegisterDomainRequest { name: "d".into(), ..Default::default() })),
+            "No permission to do this operation.",
+        );
+        assert!(validator.validate_describe_domain_request(Some(&DescribeDomainRequest::default())).is_err());
+        bad(
+            validator.validate_update_domain_request(Some(&UpdateDomainRequest { name: String::new(), ..Default::default() })),
+            "Domain not set on request.",
+        );
+        bad(
+            protected.validate_delete_domain_request(Some(&DeleteDomainRequest { name: "d".into(), ..Default::default() })),
+            "No permission to do this operation.",
+        );
+        bad(
+            protected.validate_deprecate_domain_request(Some(&DeprecateDomainRequest { name: "d".into(), ..Default::default() })),
+            "No permission to do this operation.",
+        );
+        bad(
+            validator.validate_failover_domain_request(Some(&FailoverDomainRequest { domain_name: "d".into(), ..Default::default() })),
+            "DomainActiveClusterName or ActiveClusters must be provided",
+        );
+    }
 }
