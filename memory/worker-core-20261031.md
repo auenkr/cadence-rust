@@ -299,3 +299,82 @@ absent. Remaining work for the successor:
 Commits pushed to `origin/worker-core` so far: `3d87ba4cf`, `0ecfb3889`,
 `627fe3ce7`, `a1c371111`, `f0a142870`.
 
+
+## Successor checkpoint — 2026-10-31 (archiver, domain deprecation, replicator, async workflow)
+
+Worker parity is still incomplete. This session ported the pure decision and
+wire-contract parts of four modules, one module file each, with Go-derived
+tests. Cargo ran only in GitHub Actions. No Go-service or mixed-cluster gate was
+run. The Worker service still refuses to poll (`WorkerService::start`).
+
+### Ported this session
+
+- **archiver** (`archiver/request.rs`, `archiver/util.rs`, `archiver/workflow.rs`,
+  constants in `archiver.rs`): Go `ArchiveRequest`, `Memo`, `CloseStatus`
+  (text enum) and `ArchivalTarget` (int) JSON with Go field names, base64 bytes
+  and `null` for nil slices/maps/pointers. Also `hashesEqual`,
+  `MaxArchivalIterationTimeout`, search-attribute string conversion and the
+  per-iteration time-limit cap. Still unported: `client.go`, `pump.go`,
+  `handler.go`, `activities.go`, the `archivalWorkflowHelper` body and the
+  replay metrics client.
+- **domaindeprecation** (`domaindeprecation/entities.rs`, `helpers.rs`,
+  `workflow.rs`): snake_case params JSON, error reasons, batch defaults, workflow
+  timeouts, retry policy, activity options, the terminate batch request
+  (validated by `batcher::validate_and_default`), the child workflow ID format,
+  the active-poller skip rule and the attempt-loop decision. Still unported:
+  the workflow body and its SDK calls (activities, child batch, visibility
+  sleep), `activities.go`, `module.go` (SDK worker wiring and the batcher
+  context).
+- **replicator** (`replicator/domain_replication_processor.rs`): poll/retry
+  constants, the start latch, the cursor defaults (-1), BadRequest-only
+  non-retry, the source-cluster ownership check, the DLQ domain-attribute
+  precondition, `apply_batch` (a DLQ failure stops the batch and keeps the
+  previous cursor, as Go does), and `JitInt64` bounds with an injected addon.
+  Still unported: the processor loop, the remote admin fetch, the DLQ
+  publisher, the domain task executor and `replicator.go`.
+- **asyncworkflow** (`asyncworkflow/consumer_manager.rs`): the
+  `refreshConsumers` and `stopConsumers` reconciliation, with start/stop injected
+  as closures. Still unported: the queue provider (predefined or typed lookup),
+  consumer creation, the refresh loop, the metrics and `Start`/`Stop`.
+
+### Deliberate deviation
+
+- `archiver::util::hash` uses FNV-1a 64 over deterministic JSON bytes in place of
+  Go's `farm.Fingerprint64`. The value is only compared within one run (pumped
+  versus handled) and is never persisted, so the behavior matches. Recorded in
+  the code comment. Replace it only if a persisted fingerprint is introduced.
+
+### CI evidence (exact heads, all `rust-ci.yml`, `package=cadence-worker`)
+
+- `43c2cfa42` archiver util/request: https://github.com/auenkr/cadence-rust/actions/runs/41220533546 — success
+- `c36d3636d` domaindeprecation + replicator: https://github.com/auenkr/cadence-rust/actions/runs/41220829725 — success (clippy, tests 75 passed)
+- `2941fc090` asyncworkflow consumer manager: https://github.com/auenkr/cadence-rust/actions/runs/41221234665 — success (format log shows pre-existing diffs; none needed to be fixed in this slice)
+- `bc75c173c` format patch dispatch (`format_worker_files=true`): https://github.com/auenkr/cadence-rust/actions/runs/41221597606 — success, 81 worker crate tests passed, `worker-format-patch` artifact produced
+- `34edff969` applied that CI rustfmt patch (formatting only): see the final CI run recorded below.
+
+### CI tooling changes this session
+
+- The Format check step now prints `format.log`. Before this, formatting diffs
+  were invisible in the log, and it is `continue-on-error`.
+- New `format_worker_files` workflow input. It rustfmts the Worker files listed
+  in the step (archiver, asyncworkflow, domaindeprecation, replicator) and uploads
+  `worker-format-patch`. Apply the artifact with `git apply`, which is CI
+  rustfmt output and not a local cargo run.
+
+### Next steps for the successor
+
+1. Format-check the whole worker crate against a CI run: the format log lists
+   pre-existing diffs in `batcher.rs`, `client.rs`, `failovermanager.rs`,
+   `launcher.rs`, `parentclosepolicy.rs` and others. Extend the format patch
+   list to those files, or wait until each is ported. Do not hand-format.
+2. Archiver: `client.go` (ArchiveRequest signal send with rate limits),
+   `pump.go`, `handler.go`, `activities.go`, then the workflow body. Each needs
+   the Rust Cadence client and blobstore/History/visibility dependencies.
+3. Domain deprecation: `activities.go` (Frontend calls, admin token, heartbeat
+   behavior), then `module.go` and the workflow body on the SDK runtime.
+4. Replicator: the processor loop, the remote admin client, the DLQ publisher,
+   the domain executor and `replicator.go`.
+5. Async workflow: the queue provider, consumer creation and refresh loop.
+6. Still unported in the requested order: failovermanager, scheduler,
+   esanalyzer, indexer, diagnostics. Then pollers, deterministic replay, the
+   registration dispatch, the lifecycle and drain, and the mixed Go/Rust gates.
