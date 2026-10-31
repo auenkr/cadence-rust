@@ -28,3 +28,23 @@
 - Port `go/service/frontend/api/handler.go` workflow methods and mirror their Go tests, including workflow lifecycle, polling/responding, visibility, history, and list/scan/count behavior.
 - Run the requested `rust-ci.yml` CI dispatch for `cadence-frontend`, record the run URL, exact head SHA and conclusion here, and report any parity gaps before claiming completion.
 - Mixed Go/Rust SDK compatibility and restart/recovery gates remain outstanding.
+
+## Go handler method inventory (initial)
+
+`go/service/frontend/api/handler.go` implements `WorkflowHandler` lifecycle and
+health, diagnostic execution, both poll methods, heartbeat/heartbeat-by-ID,
+activity and decision completion/failure/cancellation, query completion,
+sync and async start/signal-with-start, workflow signal, history retrieval,
+terminate/reset/cancel/restart, search attributes, query, describe, archived
+history conversion/validation, and cluster info. The major user-facing method
+locations are `StartWorkflowExecution` (1652), `GetWorkflowExecutionHistory`
+(1836), `SignalWorkflowExecution` (2114), `SignalWithStartWorkflowExecution`
+(2270), terminate/reset/cancel/restart (2455-2570), query (2643), and describe
+(2713). List/scan/count and task-list endpoints are implemented in adjacent
+frontend API files and still need a separate inventory. This is a source map,
+not a completeness audit.
+
+CI run [41172629964](https://github.com/auenkr/cadence-rust/actions/runs/41172629964)
+was dispatched for `cadence-frontend` at head
+`ab5b2fae8285dd9b73326c1ec4119b2eb1d67839`. Last observed state: in progress;
+no conclusion available yet.
