@@ -497,3 +497,9 @@ migration forward.
   `RegisterDomain` with Go's global-secondary error precedence and UUIDv7
   generation. Those follow-up edits are not part of `b2078a0ef` and require
   their own exact-head CI run.
+- Follow-up Go comparison found that both JSON and Thrift `DeleteDomain` paths
+  also skipped the global-domain primary-cluster guard. Added the lookup and
+  guard to both transports before deletion. This is another narrow parity fix;
+  persistence-backed deletion, replication transmission and audit records are
+  still not implemented. It supersedes the prior exact-head CI candidate and
+  must be validated at the next pushed head.

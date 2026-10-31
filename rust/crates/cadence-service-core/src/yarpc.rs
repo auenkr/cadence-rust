@@ -194,6 +194,19 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
+    let current = state
+        .domains
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .map_err(|error| AppError::entity_not_exists(error.message))?;
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return Err(AppError::bad_request(
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .to_string(),
+        ));
+    }
     state
         .domains
         .delete(&req.name)
