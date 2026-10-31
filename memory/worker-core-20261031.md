@@ -84,6 +84,9 @@ Go-shaped SignalWithStart request, carrying the original parent and execution
 details while allowing the caller to provide Go-compatible UUID/shard values.
 Its payload and cluster mapping have a fixture; production discovery and the
 actual RPC call are still not wired to the activity processor.
+The shared worker Cadence client now also exposes Frontend `StartWorkflowExecution`
+so the forthcoming service lifecycle can start periodic system workflows; no
+module currently schedules those requests from `WorkerService::start`.
 
 Worker registration descriptors now include Go's task-list and history
 scavengers plus the concrete/current/timer scanner and fixer workflow types,

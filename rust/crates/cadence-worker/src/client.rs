@@ -69,6 +69,18 @@ impl CadenceClient {
         Ok(response.into_inner())
     }
 
+    /// Start an internal system workflow over the public Frontend WorkflowAPI.
+    pub async fn start_workflow(
+        &mut self,
+        request: cadence_proto::api::StartWorkflowExecutionRequest,
+    ) -> Result<cadence_proto::api::StartWorkflowExecutionResponse, tonic::Status> {
+        let response = self
+            .frontend
+            .start_workflow_execution(tonic::Request::new(request))
+            .await?;
+        Ok(response.into_inner())
+    }
+
     /// Poll one decision task from the public WorkerAPI.
     pub async fn poll_decision_task(
         &mut self,
