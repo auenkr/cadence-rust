@@ -1209,8 +1209,8 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   `frontend-core2`.
 - Exact-head Frontend CI run
   https://github.com/auenkr/cadence-rust/actions/runs/41206938291 checks
-  this commit; its result was `in_progress` at the last read. Update this
-  evidence with its terminal conclusion after it completes.
+  source head `ca4a89f7414434bfab457d7d74f70f0b7124bcc4` and concluded
+  `success` (formatting, Clippy, and Frontend tests). Runtime smoke was skipped.
 - This closes the Thrift bypass only. Durable execution/history and visibility
   managers are still absent; workflow execution, visibility reads and history
   remain backed by in-memory state. Frontend also constructs no production
