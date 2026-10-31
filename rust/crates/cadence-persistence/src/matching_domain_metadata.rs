@@ -123,6 +123,39 @@ pub struct MatchingDomainPage {
     pub next_page_token: Option<Vec<u8>>,
 }
 
+/// Go SQL domain and singleton metadata persistence operations. Matching's
+/// cache and Frontend's domain manager share the same Go schema; keeping this
+/// contract beside the wire-compatible metadata type lets both services use
+/// one backend implementation without inventing another table layout.
+pub trait GoSqlDomainPersistence: Send + Sync {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError>;
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError>;
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError>;
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError>;
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError>;
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError>;
+}
+
 /// Convert Cassandra's nested domain/config/replication UDTs through the same
 /// Go DomainInfo field interpretation used by SQL domain metadata.
 #[allow(clippy::too_many_arguments)]

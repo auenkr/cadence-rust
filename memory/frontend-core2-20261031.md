@@ -860,6 +860,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   explicit transaction like Go's `txExecute`; exact-head CI is pending for that
   follow-up. Continue with transaction interoperability and manager wiring;
   visibility, history, and execution managers remain open.
+- Added a backend-neutral `GoSqlDomainPersistence` trait and implemented it for
+  the MySQL and PostgreSQL stores, covering create/update/delete, metadata
+  version, lookup, and page reads. This makes the SQL domain+metadata manager
+  operations injectable through one contract, but the production Frontend
+  factory and `FrontendDomainManager` still do not consume it. Cassandra and
+  the other four production managers are still open.
 - Persistence-package CI run
   https://github.com/auenkr/cadence-rust/actions/runs/41194438379 validated
   exact head `f93c0eb4bc4372fcf8766a3460e5061a7a04341f` and concluded
