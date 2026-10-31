@@ -12,6 +12,9 @@ use cadence_persistence::dynamic_config::{
     PropertyValues, RuntimePropertyProvider, RuntimePropertyRead,
 };
 
+/// Go `constants.ReadDLQMessagesPageSize`.
+const READ_DLQ_MESSAGES_DEFAULT_PAGE_SIZE: usize = 1_000;
+
 fn yaml_value_to_json(value: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
     Ok(match value {
         serde_yaml::Value::Null => serde_json::Value::Null,
@@ -847,11 +850,7 @@ pub async fn read_dlq_messages(
         }
     };
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
-    let page_size = if req.maximum_page_size > 0 {
-        req.maximum_page_size as usize
-    } else {
-        100
-    };
+    let page_size = read_dlq_page_size(req.maximum_page_size);
     match persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size) {
         Ok(rows) => {
             let mut tasks = Vec::with_capacity(rows.len());
@@ -967,6 +966,14 @@ fn encode_domain_dlq_page_token(message_id: i64) -> Vec<u8> {
     message_id.to_le_bytes().to_vec()
 }
 
+fn read_dlq_page_size(requested: i32) -> usize {
+    if requested > 0 {
+        requested as usize
+    } else {
+        READ_DLQ_MESSAGES_DEFAULT_PAGE_SIZE
+    }
+}
+
 /// Merge domain replication DLQ tasks through the shared Frontend domain
 /// manager. A task is deleted and acknowledged only after its mutation commits.
 pub async fn merge_dlq_messages(
@@ -1005,28 +1012,23 @@ pub fn merge_domain_dlq_messages(
         value::{read_struct, FromThrift},
     };
 
-    let persistence = state
-        .domain_metadata_persistence
-        .as_ref()
-        .ok_or_else(|| "domain replication DLQ is unavailable for this persistence backend".to_string())?;
+    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
+        "domain replication DLQ is unavailable for this persistence backend".to_string()
+    })?;
     let ack_levels = persistence.get_domain_replication_dlq_ack_levels()?;
     let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
-    let first_message_id = decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
+    let first_message_id =
+        decode_domain_dlq_page_token(&req.next_page_token)?.unwrap_or(ack_level);
     let end_message_id = req.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
-    let page_size = if req.maximum_page_size > 0 {
-        req.maximum_page_size as usize
-    } else {
-        100
-    };
-    let rows = persistence.read_domain_replication_dlq(
-        first_message_id,
-        end_message_id,
-        page_size,
-    )?;
+    // Go passes MergeDLQMessages.MaximumPageSize through unchanged. Unlike
+    // ReadDLQMessages, it does not apply the 1000-message read default.
+    let page_size = req.maximum_page_size.max(0) as usize;
+    let rows =
+        persistence.read_domain_replication_dlq(first_message_id, end_message_id, page_size)?;
     let mut last_processed = ack_level;
     for row in &rows {
-        let thrift = read_struct(&mut Reader::new(&row.payload))
-            .map_err(|error| error.to_string())?;
+        let thrift =
+            read_struct(&mut Reader::new(&row.payload)).map_err(|error| error.to_string())?;
         let task = cadence_api::types::ReplicationTask::from_thrift(&thrift)
             .map_err(|error| error.to_string())?;
         if task.task_type != Some(cadence_api::enums::ReplicationTaskType::Domain) {
@@ -1064,10 +1066,8 @@ pub fn merge_domain_dlq_messages(
     if last_processed > ack_level {
         persistence.delete_domain_replication_dlq_range(ack_level, last_processed)?;
         // Go treats acknowledgement metadata as best-effort after delete.
-        let _ = persistence.update_domain_replication_dlq_ack_level(
-            "domainReplication".into(),
-            last_processed,
-        );
+        let _ = persistence
+            .update_domain_replication_dlq_ack_level("domainReplication".into(), last_processed);
     }
     let next_page_token = if rows.len() >= page_size {
         encode_domain_dlq_page_token(rows.last().map_or(first_message_id, |row| row.id))
@@ -1666,6 +1666,13 @@ mod tests {
         );
         assert_eq!(decode_domain_dlq_page_token(&[]), Ok(None));
         assert!(decode_domain_dlq_page_token(&[1]).is_err());
+    }
+
+    #[test]
+    fn read_dlq_uses_go_default_page_size() {
+        assert_eq!(read_dlq_page_size(0), 1_000);
+        assert_eq!(read_dlq_page_size(-1), 1_000);
+        assert_eq!(read_dlq_page_size(12), 12);
     }
 
     #[test]

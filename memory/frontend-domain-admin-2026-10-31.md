@@ -1167,3 +1167,25 @@ migration forward.
   675 and 836. Removed the duplicate; the earlier implementation is retained
   alongside the Frontend `DomainMetadataPersistence` impl. No local Cargo ran.
   This repair needs fresh package CI.
+
+## Frontend integration branch merge — 2026-10-31
+
+- Merged the current `origin/frontend-core2` tip into the integration branch
+  with merge commit `ede64c6650f782d1fc0febeef86d3a71f09bca58` and pushed it to
+  `origin/frontend-domain-admin`. `origin/t3/frontend-workflow-api` and
+  `origin/master` were already ancestors of this branch at fetch time; no
+  duplicate merge commits were needed for those refs.
+- Conflict resolution retained core2's limiter start lifecycle and persistence
+  backed `FrontendDomainManager` YARPC calls while preserving primary-cluster
+  checks for global domain deprecation, the shared Matching domain cache, and
+  the integrated workflow handlers. `git diff --check` passed.
+- Exact-head package run
+  [41210257837](https://github.com/auenkr/cadence-rust/actions/runs/41210257837)
+  checked `ede64c6650f782d1fc0febeef86d3a71f09bca58` and failed before Cargo at
+  the changed Matching runtime rustfmt check. Its CI diff identified formatting
+  changes in the existing domain DLQ merge helper; no compilation or tests ran.
+- Corrected the DLQ page-size behavior found during source comparison:
+  `ReadDLQMessages` now uses Go's 1000-message default, while `MergeDLQMessages`
+  passes its requested maximum through unchanged. Added unit coverage for the
+  read default. This follow-up and the conflict resolution require a fresh
+  exact-head Frontend package run.

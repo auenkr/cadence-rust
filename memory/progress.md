@@ -1938,3 +1938,16 @@ wired into production WorkflowService transport, history/archive/poll/respond
 transformations and the concrete History/Matching/visibility backend remain
 open. See `frontend-workflow-api-20261031.md`.
 - Frontend core2 continuation merged at `54c2e54c45141b5499ee4d896dad9a639631ff27`: shared frontend lifecycle drain/warmup, validator matrix and dynamic required-domain-data mapping, Matching gRPC admission/runtime, and read-only persistence metadata updates. Fresh package/runtime validation is required on the merge.
+
+## Frontend integration sync — 2026-10-31
+
+- Merged current `origin/frontend-core2` into `origin/frontend-domain-admin` at
+  `ede64c6650f782d1fc0febeef86d3a71f09bca58`. Workflow-api and master were
+  already ancestors. Kept core2 durable YARPC domain-manager calls and limiter
+  startup while retaining global-domain primary checks and shared Matching
+  cache behavior.
+- Exact-head CI run 41210257837 failed at the changed runtime rustfmt check
+  before Cargo. Corrected Go DLQ page-size behavior: Read defaults to 1000 and
+  Merge passes the requested maximum through. Exact-head CI for this source is
+  pending. Durable failover audit, History-backed Admin calls, scheduler
+  workflow routing, live membership, and mixed Go/Rust acceptance remain open.
