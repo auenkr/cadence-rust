@@ -1024,3 +1024,19 @@ Frontend parity until these are implemented and validated.
   targets `d5cd40fc6d05a9fdc8b89703b927b96c95f41be2`; it was in progress at
   this update. It contains the manager corrections plus the Frontend token
   payload changes. Record terminal conclusion when complete.
+
+## Poll response shaping — continuation
+
+- Added explicit Frontend response allowlists for activity and decision poll
+  replies, matching the public fields copied by Go's `PollForActivityTask` and
+  `createPollForDecisionTaskResponse`. Empty decision polls now return only
+  `autoConfigHint`, or `{}` when no hint is present; internal Matching fields
+  such as `pollerID` and `branchToken` are stripped. Added tests for the public
+  allowlist and empty-decision response.
+- This does not yet build full decision history from Persistence, and task-token
+  creation/typed Matching production backend wiring remains open. No local
+  Cargo/rustfmt was run. Validation will be recorded from exact-head CI after
+  this source checkpoint is pushed.
+- `origin/frontend-core2` is now `aa34b1081` (documentation-only since the
+  merged SQL domain manager commits); no History/Matching handler adapter or
+  visibility/execution persistence interface has landed to merge.

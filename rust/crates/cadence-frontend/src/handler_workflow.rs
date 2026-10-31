@@ -1117,7 +1117,16 @@ impl<B: WorkflowBackend> Handler<B> {
             result?;
             return Ok(serde_json::json!({"cancelRequested": true}));
         }
-        result
+        let response = result?;
+        match operation {
+            WorkflowOperation::PollForActivityTask => {
+                Ok(shape_activity_poll_response(response))
+            }
+            WorkflowOperation::PollForDecisionTask => {
+                Ok(shape_decision_poll_response(response))
+            }
+            _ => Ok(response),
+        }
     }
 
     fn prepare_activity_blob_request(
@@ -2211,6 +2220,81 @@ fn activity_blob_payload_field(operation: WorkflowOperation) -> Option<&'static 
         | WorkflowOperation::RespondActivityTaskCanceledByID => Some("details"),
         _ => None,
     }
+}
+
+/// Copy the public activity poll fields explicitly, matching Go's
+/// `WorkflowHandler.PollForActivityTask`. In particular, do not leak Matching
+/// only fields through the public Frontend API response.
+fn shape_activity_poll_response(matching_response: Value) -> Value {
+    let fields = [
+        "taskToken",
+        "workflowExecution",
+        "activityID",
+        "activityType",
+        "input",
+        "scheduledTimestamp",
+        "scheduleToCloseTimeoutSeconds",
+        "startedTimestamp",
+        "startToCloseTimeoutSeconds",
+        "heartbeatTimeoutSeconds",
+        "attempt",
+        "scheduledTimestampOfThisAttempt",
+        "heartbeatDetails",
+        "workflowType",
+        "workflowDomain",
+        "header",
+        "autoConfigHint",
+    ];
+    let mut response = serde_json::Map::new();
+    for field in fields {
+        if let Some(value) = matching_response.get(field) {
+            response.insert(field.to_owned(), value.clone());
+        }
+    }
+    Value::Object(response)
+}
+
+/// Go's decision poll response is empty when Matching has no workflow
+/// execution. `autoConfigHint` is the sole Matching field retained in that
+/// case; the full task response includes only the public Workflow API fields.
+fn shape_decision_poll_response(matching_response: Value) -> Value {
+    if matching_response
+        .get("workflowExecution")
+        .is_none_or(Value::is_null)
+    {
+        return matching_response
+            .get("autoConfigHint")
+            .filter(|value| !value.is_null())
+            .map(|hint| serde_json::json!({"autoConfigHint": hint}))
+            .unwrap_or_else(|| serde_json::json!({}));
+    }
+
+    let fields = [
+        "taskToken",
+        "workflowExecution",
+        "workflowType",
+        "previousStartedEventID",
+        "startedEventID",
+        "query",
+        "backlogCountHint",
+        "attempt",
+        "history",
+        "nextPageToken",
+        "workflowExecutionTaskList",
+        "scheduledTimestamp",
+        "startedTimestamp",
+        "queries",
+        "nextEventID",
+        "totalHistoryBytes",
+        "autoConfigHint",
+    ];
+    let mut response = serde_json::Map::new();
+    for field in fields {
+        if let Some(value) = matching_response.get(field) {
+            response.insert(field.to_owned(), value.clone());
+        }
+    }
+    Value::Object(response)
 }
 
 fn activity_backend_request_field(operation: WorkflowOperation) -> &'static str {
@@ -4498,5 +4582,40 @@ mod tests {
         let calls = handler.backend.0.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1["domainUUID"], "uuid:shop");
+    }
+
+    #[test]
+    fn activity_poll_response_exposes_only_go_frontend_fields() {
+        let response = shape_activity_poll_response(serde_json::json!({
+            "taskToken": "AQI=",
+            "workflowExecution": {"workflowId": "wf", "runId": "run"},
+            "activityID": "activity",
+            "activityType": {"name": "work"},
+            "input": "AwQ=",
+            "autoConfigHint": {"enabled": true},
+            "branchToken": "internal-branch",
+            "pollerID": "internal-poller"
+        }));
+
+        assert_eq!(response["taskToken"], "AQI=");
+        assert_eq!(response["activityID"], "activity");
+        assert_eq!(response["autoConfigHint"]["enabled"], true);
+        assert!(response.get("branchToken").is_none());
+        assert!(response.get("pollerID").is_none());
+    }
+
+    #[test]
+    fn decision_poll_without_task_returns_only_auto_config_hint() {
+        assert_eq!(
+            shape_decision_poll_response(serde_json::json!({
+                "autoConfigHint": {"enabled": true},
+                "pollerID": "internal-poller"
+            })),
+            serde_json::json!({"autoConfigHint": {"enabled": true}})
+        );
+        assert_eq!(
+            shape_decision_poll_response(serde_json::json!({"pollerID": "internal-poller"})),
+            serde_json::json!({})
+        );
     }
 }
