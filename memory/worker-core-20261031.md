@@ -94,6 +94,9 @@ task lists and shardscanner activity names. `WorkerService` exposes these
 descriptors along with parent-close and batcher registrations. This records
 registration contracts only; no corresponding pollers, replay handlers or
 scanner persistence activities are executable yet.
+The archiver's registered workflow, task list and three activity names are now
+also exposed and tested against `go/service/worker/archiver/client_worker.go`;
+archive processing and its storage dependencies remain unimplemented.
 
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.

@@ -6,6 +6,18 @@ pub const UPLOAD_ACTIVITY_TYPE: &str = "uploadHistoryActivity";
 pub const DELETE_ACTIVITY_TYPE: &str = "deleteHistoryActivity";
 pub const ARCHIVE_VISIBILITY_ACTIVITY_TYPE: &str = "archiveVisibilityActivity";
 
+pub fn registrations() -> crate::runtime::WorkflowRegistration {
+    crate::runtime::WorkflowRegistration {
+        workflow_type: WORKFLOW_TYPE,
+        task_list: TASK_LIST,
+        activities: &[
+            UPLOAD_ACTIVITY_TYPE,
+            DELETE_ACTIVITY_TYPE,
+            ARCHIVE_VISIBILITY_ACTIVITY_TYPE,
+        ],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -14,5 +26,20 @@ mod tests {
         assert_eq!(super::WORKFLOW_TYPE, "archivalWorkflow");
         assert_eq!(super::SIGNAL_NAME, "cadence-archival-signal");
         assert_eq!(super::UPLOAD_ACTIVITY_TYPE, "uploadHistoryActivity");
+    }
+
+    #[test]
+    fn registration_matches_go_archiver_worker() {
+        let registration = super::registrations();
+        assert_eq!(registration.workflow_type, "archivalWorkflow");
+        assert_eq!(registration.task_list, "cadence-archival-tl");
+        assert_eq!(
+            registration.activities,
+            &[
+                "uploadHistoryActivity",
+                "deleteHistoryActivity",
+                "archiveVisibilityActivity",
+            ]
+        );
     }
 }
