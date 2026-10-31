@@ -944,3 +944,10 @@ migration forward.
   have the compatible replication task codec or a configured queue manager;
   replacing the disabled-queue response with an in-memory queue would not
   satisfy the durable or wire-compatible requirement.
+- Started the next queue slice by adding the Go numeric enums and typed domain
+  replication task envelope to `cadence-api`, preserving Go JSON field names
+  and omitting zero scalar fields. Added a focused field/enum contract test.
+  This is only the model layer; ThriftRW encoding, durable SQL/Cassandra queue
+  operations, publication on domain mutations, and Admin queue reads remain
+  open. `git diff --check` passed; no local Cargo command ran. Await exact-head
+  Frontend CI after push.
