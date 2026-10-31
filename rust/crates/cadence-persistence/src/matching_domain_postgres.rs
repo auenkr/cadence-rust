@@ -37,6 +37,139 @@ impl PostgresDomainMetadataStore {
         Ok(source)
     }
 
+    /// Create a Go SQL domain row and advance `domain_metadata` in the same
+    /// transaction, matching `sqlDomainStore.CreateDomain`. The flattened
+    /// ThriftRW blob is the existing Go schema payload; this never migrates or
+    /// creates tables.
+    pub fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let mut client = self
+            .pool
+            .checkout_with_timeout(DEFAULT_TIMEOUT)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        let row = transaction
+            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
+            .map_err(domain_error)?;
+        let notification_version: i64 = row.try_get(0).map_err(domain_error)?;
+        let mut domain = metadata.clone();
+        // Go serializes the current metadata version into the new domain row,
+        // then increments the singleton version before committing.
+        domain.notification_version = notification_version;
+        let blob = crate::matching_domain_metadata::encode_go_sql_domain_metadata(&domain)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        transaction
+            .execute(
+                "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES ($1, $2, $3, $4, $5, $6)",
+                &[
+                    &GO_DEFAULT_SHARD_ID,
+                    &uuid.as_bytes().as_slice(),
+                    &metadata.info.name,
+                    &metadata.is_global_domain,
+                    &blob,
+                    &"thriftrw",
+                ],
+            )
+            .map_err(domain_error)?;
+        let changed = transaction
+            .execute(
+                "UPDATE domain_metadata SET notification_version=$1 WHERE notification_version=$2",
+                &[&(notification_version + 1), &notification_version],
+            )
+            .map_err(domain_error)?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit().map_err(domain_error)?;
+        Ok(notification_version)
+    }
+
+    /// Update a Go SQL domain row and its global notification version in one
+    /// transaction, matching `sqlDomainStore.UpdateDomain` optimistic
+    /// notification-version handling.
+    pub fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let mut client = self
+            .pool
+            .checkout_with_timeout(DEFAULT_TIMEOUT)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        let blob = crate::matching_domain_metadata::encode_go_sql_domain_metadata(metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let changed = transaction
+            .execute(
+                "UPDATE domains SET name=$1, data=$2, data_encoding=$3 WHERE shard_id=$4 AND id=$5",
+                &[
+                    &metadata.info.name,
+                    &blob,
+                    &"thriftrw",
+                    &GO_DEFAULT_SHARD_ID,
+                    &uuid.as_bytes().as_slice(),
+                ],
+            )
+            .map_err(domain_error)?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::NotFound(
+                metadata.info.uuid.clone(),
+            ));
+        }
+        let row = transaction
+            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
+            .map_err(domain_error)?;
+        let current: i64 = row.try_get(0).map_err(domain_error)?;
+        if current != expected_notification_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_notification_version}, found {current}"
+            )));
+        }
+        let changed = transaction
+            .execute(
+                "UPDATE domain_metadata SET notification_version=$1 WHERE notification_version=$2",
+                &[&(expected_notification_version + 1), &expected_notification_version],
+            )
+            .map_err(domain_error)?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit().map_err(domain_error)
+    }
+
+    /// Delete a Go SQL domain row. Go does not advance `domain_metadata` for
+    /// deletion, so this operation deliberately touches only `domains`.
+    pub fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        let uuid = uuid::Uuid::parse_str(domain_id)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let started = Instant::now();
+        let mut client = self
+            .pool
+            .checkout_with_timeout(DEFAULT_TIMEOUT)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        transaction
+            .execute(
+                "DELETE FROM domains WHERE shard_id=$1 AND id=$2",
+                &[&GO_DEFAULT_SHARD_ID, &uuid.as_bytes().as_slice()],
+            )
+            .map_err(domain_error)?;
+        transaction.commit().map_err(domain_error)
+    }
+
     pub(crate) fn from_shared_pool(
         pool: Arc<PostgresConnectionPool>,
         active_cluster_name: impl Into<String>,
