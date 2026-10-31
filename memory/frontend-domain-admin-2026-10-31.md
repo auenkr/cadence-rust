@@ -499,6 +499,11 @@ migration forward.
   rebase; corrected it manually. Run [41181380560](https://github.com/auenkr/cadence-rust/actions/runs/41181380560)
   targets `faeff2796` and is the current validation candidate; poll for its
   conclusion and inspect any follow-up failures.
+- CI [41181443949](https://github.com/auenkr/cadence-rust/actions/runs/41181443949)
+  at `81a705cdc` passed the workspace format check, then failed the changed
+  runtime format check on two `admin.rs` lines in the raw-history patch. Applied
+  the rustfmt layout reported by CI manually; no Clippy/test stage ran. Dispatch
+  a fresh exact-head package run after pushing this repair.
 
 - Rebased the implementation branch onto the then-current
   `origin/frontend-core2` at `3bc2dcca8`; conflict resolution kept the newer
