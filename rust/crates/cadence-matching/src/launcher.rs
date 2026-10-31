@@ -956,45 +956,47 @@ async fn run_with_lifecycle(
             // Go's timer queue must keep advancing while development snapshots
             // serialize or write large histories. Never block an async RPC worker
             // with snapshot CPU or filesystem work.
-            let snapshot_task = if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
-                let snapshot_store = state.executions.clone();
-                let snapshot_domains = state.domains.clone();
-                let mut shutdown = state.background_shutdown.subscribe();
-                Some(tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    loop {
-                        tokio::select! {
-                            biased;
-                            changed = shutdown.changed() => {
-                                if changed.is_err() || *shutdown.borrow() {
-                                    // Go Resource.Stop runs after the drain;
-                                    // flush development snapshots at that boundary.
+            let snapshot_task =
+                if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
+                    let snapshot_store = state.executions.clone();
+                    let snapshot_domains = state.domains.clone();
+                    let mut shutdown = state.background_shutdown.subscribe();
+                    Some(tokio::spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(std::time::Duration::from_secs(5));
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                changed = shutdown.changed() => {
+                                    if changed.is_err() || *shutdown.borrow() {
+                                        // Go Resource.Stop runs after the drain;
+                                        // flush development snapshots at that boundary.
+                                        persist_frontend_snapshot(
+                                            snapshot_domains,
+                                            snapshot_store,
+                                            domains_path,
+                                            executions_path,
+                                        ).await;
+                                        break;
+                                    }
+                                }
+                                _ = interval.tick() => {
+                                    // Await one write so snapshots cannot overlap
+                                    // or race their atomic temporary-file rename.
                                     persist_frontend_snapshot(
-                                        snapshot_domains,
-                                        snapshot_store,
-                                        domains_path,
-                                        executions_path,
+                                        snapshot_domains.clone(),
+                                        snapshot_store.clone(),
+                                        domains_path.clone(),
+                                        executions_path.clone(),
                                     ).await;
-                                    break;
                                 }
                             }
-                            _ = interval.tick() => {
-                                // Await one write so snapshots cannot overlap
-                                // or race their atomic temporary-file rename.
-                                persist_frontend_snapshot(
-                                    snapshot_domains.clone(),
-                                    snapshot_store.clone(),
-                                    domains_path.clone(),
-                                    executions_path.clone(),
-                                ).await;
-                            }
                         }
-                    }
-                }))
-            } else {
-                None
-            };
+                    }))
+                } else {
+                    None
+                };
             let timer_store = state.executions.clone();
             let mut shutdown = state.background_shutdown.subscribe();
             let timer_task = tokio::spawn(async move {
