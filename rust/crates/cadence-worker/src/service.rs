@@ -13,6 +13,7 @@ impl Default for WorkerService {
         let mut registry = WorkflowRegistry::default();
         let _ = registry.register(crate::parentclosepolicy::registration());
         let _ = registry.register(crate::archiver::registrations());
+        let _ = registry.register(crate::domaindeprecation::registration());
         for registration in crate::batcher::registrations() {
             let _ = registry.register(registration);
         }

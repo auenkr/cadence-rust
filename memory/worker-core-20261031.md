@@ -97,6 +97,9 @@ scanner persistence activities are executable yet.
 The archiver's registered workflow, task list and three activity names are now
 also exposed and tested against `go/service/worker/archiver/client_worker.go`;
 archive processing and its storage dependencies remain unimplemented.
+Domain deprecation's Go workflow/task-list/activity names are also registered
+and fixture-tested. Its admin token, Frontend calls, retry/heartbeat behavior
+and domain mutation activities remain unported.
 
 This is an initial crate bootstrap and partial contract/logic port, not Worker
 parity. Cargo was not run locally. `git diff --check` passed before each push.
