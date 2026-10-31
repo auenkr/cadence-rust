@@ -912,3 +912,9 @@ Frontend parity until these are implemented and validated.
   `handler_workflow_async.rs` to its patch/check lists. The artifact contains
   the async handler formatting delta. Clippy, format and Frontend tests passed
   in the runner workspace; exact committed-head validation remains pending.
+- Added the History archival selection/read seam: the handler skips it for
+  `skipArchival`, resolves the domain UUID, passes the validated public request
+  to the adapter, and returns an archive hit directly. A Go-shaped test checks
+  the request, UUID and skip behavior. The adapter still must implement Go's
+  archival config/retention selection and archive read; live History paging is
+  still missing. This source change has not yet been validated by CI.

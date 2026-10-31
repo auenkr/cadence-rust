@@ -241,6 +241,17 @@ pub trait ArchivedVisibilityReader: Send + Sync {
     fn list_archived<'a>(&'a self, request: Value) -> WorkflowFuture<'a>;
 }
 
+/// History archival adapter. `None` means the request should continue through
+/// the live History path; `Some` is the archive response. The adapter owns the
+/// archival-read gate and history-retention query used by Go's `historyArchived`.
+pub trait ArchivedHistoryReader: Send + Sync {
+    fn get_if_archived<'a>(
+        &'a self,
+        domain_id: String,
+        request: Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, CadenceError>> + Send + 'a>>;
+}
+
 pub type WorkflowNext<'a> = Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
 
 /// Outer cluster-redirection decorator. It can invoke `next` on the selected
@@ -284,6 +295,7 @@ pub struct Handler<B> {
     blob_size_policy: Option<Arc<dyn WorkflowBlobSizePolicy>>,
     domain_lookup: Option<Arc<dyn WorkflowDomainLookup>>,
     archived_visibility_reader: Option<Arc<dyn ArchivedVisibilityReader>>,
+    archived_history_reader: Option<Arc<dyn ArchivedHistoryReader>>,
     search_attributes: Option<Arc<dyn SearchAttributeProvider>>,
     shutting_down: Arc<AtomicBool>,
     health_status: Arc<AtomicU8>,
@@ -467,6 +479,7 @@ impl<B: WorkflowBackend> Handler<B> {
             blob_size_policy: None,
             domain_lookup: None,
             archived_visibility_reader: None,
+            archived_history_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -497,6 +510,7 @@ impl<B: WorkflowBackend> Handler<B> {
             blob_size_policy: None,
             domain_lookup: None,
             archived_visibility_reader: None,
+            archived_history_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -532,6 +546,7 @@ impl<B: WorkflowBackend> Handler<B> {
             blob_size_policy: None,
             domain_lookup: None,
             archived_visibility_reader: None,
+            archived_history_reader: None,
             search_attributes: None,
             shutting_down: Arc::new(AtomicBool::new(false)),
             health_status: Arc::new(AtomicU8::new(HealthStatus::WarmingUp as u8)),
@@ -655,6 +670,14 @@ impl<B: WorkflowBackend> Handler<B> {
         reader: Arc<dyn ArchivedVisibilityReader>,
     ) -> Self {
         self.archived_visibility_reader = Some(reader);
+        self
+    }
+
+    pub fn with_archived_history_reader(
+        mut self,
+        reader: Arc<dyn ArchivedHistoryReader>,
+    ) -> Self {
+        self.archived_history_reader = Some(reader);
         self
     }
 
@@ -816,6 +839,31 @@ impl<B: WorkflowBackend> Handler<B> {
             validate_long_poll_deadline(caller.deadline)?;
         }
         let request = self.validate_request(operation, request)?;
+        if operation == WorkflowOperation::GetWorkflowExecutionHistory
+            && !request
+                .get("skipArchival")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            if let Some(reader) = &self.archived_history_reader {
+                let domain = request
+                    .get("domain")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let domain_id = self
+                    .domain_lookup
+                    .as_ref()
+                    .map(|domains| domains.domain_id(domain))
+                    .transpose()?
+                    .unwrap_or_default();
+                if let Some(response) = reader
+                    .get_if_archived(domain_id, request.clone())
+                    .await?
+                {
+                    return Ok(response);
+                }
+            }
+        }
         if operation == WorkflowOperation::ListArchivedWorkflowExecutions {
             if let Some(reader) = &self.archived_visibility_reader {
                 let domain = request
@@ -2262,6 +2310,26 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingArchivedHistoryReader(Mutex<Vec<(String, Value)>>);
+
+    impl ArchivedHistoryReader for RecordingArchivedHistoryReader {
+        fn get_if_archived<'a>(
+            &'a self,
+            domain_id: String,
+            request: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, CadenceError>> + Send + 'a>> {
+            self.0.lock().unwrap().push((domain_id, request));
+            Box::pin(async {
+                Ok(Some(serde_json::json!({
+                    "history": {"events": []},
+                    "nextPageToken": null,
+                    "archived": true
+                })))
+            })
+        }
+    }
+
     struct DrainedIsolationGroup;
 
     struct SmallQueryBlobLimit;
@@ -2530,6 +2598,43 @@ mod tests {
         );
         assert_eq!(response["executions"][0]["executionTime"], 123);
         assert_eq!(response["nextPageToken"], "AQI=");
+    }
+
+    #[tokio::test]
+    async fn archived_history_reader_receives_validated_request_and_skip_archival_bypasses_it() {
+        let reader = Arc::new(RecordingArchivedHistoryReader::default());
+        let handler = Handler::new(CapturingBackend::default())
+            .with_domain_lookup(Arc::new(StaticDomainLookup))
+            .with_archived_history_reader(reader.clone());
+        let request = serde_json::json!({
+            "domain": "history-domain",
+            "execution": {"workflowId": "workflow-1"},
+            "maximumPageSize": 50,
+            "waitForNewEvent": false
+        });
+        let response = handler
+            .dispatch("GetWorkflowExecutionHistory", request.clone())
+            .await
+            .unwrap();
+        assert_eq!(response["archived"], true);
+        assert_eq!(reader.0.lock().unwrap()[0].0, "uuid:history-domain");
+        assert_eq!(reader.0.lock().unwrap()[0].1["maximumPageSize"], 50);
+
+        let response = handler
+            .dispatch(
+                "GetWorkflowExecutionHistory",
+                serde_json::json!({
+                    "domain": "history-domain",
+                    "execution": {"workflowId": "workflow-1"},
+                    "maximumPageSize": 50,
+                    "waitForNewEvent": false,
+                    "skipArchival": true
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response, Value::Null);
+        assert_eq!(reader.0.lock().unwrap().len(), 1);
     }
 
     #[test]
