@@ -334,7 +334,10 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   prohibited locally.
 - New exact-head CI for the Frontend-only listener/resource ordering is running
   at https://github.com/auenkr/cadence-rust/actions/runs/41186056305, head
-  `beeba8334704bc57c97fafe549cfb2aa661c3d1f`; record its conclusion below.
+  `beeba8334704bc57c97fafe549cfb2aa661c3d1f`; it concluded `failure` in the
+  changed Matching runtime formatting check before Clippy/tests. Applied the
+  runner's rustfmt hunk in the next commit; rerun package CI on that corrected
+  source head.
 
 ## Exact-head follow-up — 2026-10-31
 
