@@ -1040,4 +1040,10 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
 - Dispatched `cadence-frontend` run
   https://github.com/auenkr/cadence-rust/actions/runs/41200023535 on the same
   head to compile the Matching launcher factory that selects the Cassandra
-  adapter. Its final conclusion is pending at this save.
+  adapter. It was cancelled when the documentation checkpoint was pushed.
+- Exact-head `cadence-frontend` CI run
+  https://github.com/auenkr/cadence-rust/actions/runs/41200241416 validated
+  `0a5008ffa58e2ce35d282cbfcc0be3049b0a5c23` and concluded `success` for
+  formatting, Clippy, and Frontend tests. This confirms the configured-store
+  launcher compiles with the Cassandra manager wiring; it does not validate a
+  live Cassandra instance or close Visibility, History, or Execution managers.
