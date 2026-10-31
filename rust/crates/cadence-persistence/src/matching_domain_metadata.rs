@@ -117,6 +117,15 @@ pub struct MatchingDomainMetadataStore {
     busy_timeout: Duration,
 }
 
+impl std::fmt::Debug for MatchingDomainMetadataStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MatchingDomainMetadataStore")
+            .field("active_cluster_name", &self.active_cluster_name)
+            .field("busy_timeout", &self.busy_timeout)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchingDomainPage {
     pub domains: Vec<MatchingDomainMetadata>,
@@ -1316,6 +1325,40 @@ impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
     }
 }
 
+impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDomainMetadataStore {
+    fn metadata_version(&self) -> Result<i64, String> {
+        self.get_metadata_version().map_err(|error| error.to_string())
+    }
+
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        let actual = GoSqlDomainPersistence::create_domain(self, metadata)
+            .map_err(|error| error.to_string())?;
+        if actual != expected_version {
+            return Err(format!(
+                "domain metadata notification version changed: expected {expected_version}, found {actual}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        GoSqlDomainPersistence::update_domain(self, metadata, expected_version)
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain(&self, id: &str) -> Result<(), String> {
+        GoSqlDomainPersistence::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+}
+
 /// Shared conversion used by SQLite and MySQL readers so both expose the same
 /// Go UUID, ThriftRW, blob encoding, and current-cluster semantics.
 pub(crate) fn decode_go_sql_domain_metadata(
@@ -1936,13 +1979,27 @@ mod tests {
             config_decode_error: None,
         };
 
-        assert_eq!(store.create_domain(&metadata).unwrap(), 7);
-        assert_eq!(store.get_metadata_version().unwrap(), 8);
+        crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
+            &store, &metadata, 7,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::metadata_version(&store)
+                .unwrap(),
+            8
+        );
         let mut persisted = store.get_domain(None, Some(&uuid.to_string())).unwrap();
         persisted.info.description = "updated".into();
         persisted.notification_version = 8;
-        store.update_domain(&persisted, 8).unwrap();
-        assert_eq!(store.get_metadata_version().unwrap(), 9);
+        crate::matching_domain_metadata::DomainMetadataPersistence::update_domain(
+            &store, &persisted, 8,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::metadata_version(&store)
+                .unwrap(),
+            9
+        );
         assert_eq!(
             store
                 .get_domain(Some("persisted-domain"), None)
@@ -1951,7 +2008,11 @@ mod tests {
                 .description,
             "updated"
         );
-        store.delete_domain(&uuid.to_string()).unwrap();
+        crate::matching_domain_metadata::DomainMetadataPersistence::delete_domain(
+            &store,
+            &uuid.to_string(),
+        )
+        .unwrap();
         assert!(matches!(
             store.get_domain(None, Some(&uuid.to_string())),
             Err(MatchingDomainMetadataError::NotFound(_))
