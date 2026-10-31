@@ -793,6 +793,27 @@ async fn run_with_lifecycle(
                 num_history_shards,
                 ..Default::default()
             };
+            // Frontend Admin queue operations delegate to the History service,
+            // as the Go handler does. Keep the channel lazy so startup does not
+            // require History to be reachable yet.
+            if let Some(history) = cfg.services.get("history") {
+                let host = if history.rpc.host.is_empty() {
+                    "127.0.0.1"
+                } else {
+                    history.rpc.host.as_str()
+                };
+                let port = if history.rpc.grpc_port == 0 {
+                    7834
+                } else {
+                    history.rpc.grpc_port
+                };
+                let peer = format!("http://{host}:{port}");
+                let tls = crate::grpc_tls::client_tls(&history.rpc.tls)?;
+                state.history_admin_channel = Some(crate::grpc_tls::endpoint_channel(
+                    &peer,
+                    tls.as_ref(),
+                )?);
+            }
             // Keep the registration alive through listener and Matching
             // shutdown. Drop runs on every normal/error return from this
             // command arm, mirroring the Go fx OnStop hook.

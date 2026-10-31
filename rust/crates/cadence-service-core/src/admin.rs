@@ -898,9 +898,8 @@ pub async fn remove_task(
     ok_json(cadence_api::admin::RemoveTaskResponse {})
 }
 
-/// Reset a persistence queue. Single host has no transfer/timer/replication
-/// queues (dispatch state is recomputed from runs), so a valid request is a
-/// no-op success.
+/// Reset a persistence queue through the configured History service, matching
+/// Go Admin's HistoryClient delegation.
 pub async fn reset_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ResetQueueRequest>,
@@ -911,10 +910,37 @@ pub async fn reset_queue(
     if req.task_type.is_none() {
         return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
+    if req.cluster_name.is_empty() {
+        return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    let Some(channel) = state.history_admin_channel.clone() else {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History client is not configured.".to_string(),
+        );
+    };
+    let request = cadence_proto::history::ResetQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type: req.task_type.unwrap_or_default(),
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    let response = match client.reset_queue(history_admin_request(request)).await {
+        Ok(response) => response.into_inner(),
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.message().to_string(),
+            );
+        }
+    };
+    let _ = response;
     ok_json(cadence_api::admin::ResetQueueResponse {})
 }
 
-/// Report live dispatch-queue depths as processing-queue states.
+/// Describe a History persistence queue through the configured History service.
 pub async fn describe_queue(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::DescribeQueueRequest>,
@@ -925,17 +951,50 @@ pub async fn describe_queue(
     if req.task_type.is_none() {
         return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
-    let (decisions, activities, timers, backoffs, schedules) = state.executions.queue_depths();
-    let states = vec![
-        format!("{{\"queue\":\"decision\",\"pending\":{decisions}}}"),
-        format!("{{\"queue\":\"activity\",\"pending\":{activities}}}"),
-        format!("{{\"queue\":\"timer\",\"pending\":{timers}}}"),
-        format!("{{\"queue\":\"backoff\",\"pending\":{backoffs}}}"),
-        format!("{{\"queue\":\"schedule\",\"registered\":{schedules}}}"),
-    ];
-    ok_json(cadence_api::admin::DescribeQueueResponse {
-        processing_queue_states: states,
-    })
+    if req.cluster_name.is_empty() {
+        return bad_request(BadRequestError::new("Cluster name is not set."));
+    }
+    let Some(channel) = state.history_admin_channel.clone() else {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "History client is not configured.".to_string(),
+        );
+    };
+    let request = cadence_proto::history::DescribeQueueRequest {
+        shard_id: req.shard_id,
+        cluster_name: req.cluster_name,
+        task_type: req.task_type.unwrap_or_default(),
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    match client.describe_queue(history_admin_request(request)).await {
+        Ok(response) => ok_json(cadence_api::admin::DescribeQueueResponse {
+            processing_queue_states: response.into_inner().processing_queue_states,
+        }),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.message().to_string(),
+        ),
+    }
+}
+
+fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(payload);
+    request.metadata_mut().insert(
+        "rpc-service",
+        tonic::metadata::MetadataValue::from_static("cadence-history"),
+    );
+    request.metadata_mut().insert(
+        "rpc-caller",
+        tonic::metadata::MetadataValue::from_static("cadence-frontend"),
+    );
+    request.metadata_mut().insert(
+        "rpc-encoding",
+        tonic::metadata::MetadataValue::from_static("proto"),
+    );
+    request.set_timeout(std::time::Duration::from_secs(30));
+    request
 }
 
 /// Serve one raw history page with an opaque offset cursor. Single branch:
