@@ -1971,3 +1971,53 @@ mod page_tests {
         assert!(second.next_page_token.is_empty());
     }
 }
+
+#[cfg(test)]
+mod go_sql_frontend_manager_tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_domain_manager_survives_cache_restart() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let persistence = std::sync::Arc::new(
+            crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
+                connection,
+                "cluster-a",
+            ),
+        );
+        let manager = GoSqlFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+        );
+        let domain_id = uuid::Uuid::from_u128(0x1234).to_string();
+        let (mut info, config, replication) = super::tests::sample("durable", &domain_id);
+        info.uuid = domain_id.clone();
+
+        manager
+            .create_with_version(info, config, replication, false, 1)
+            .unwrap();
+        assert_eq!(persistence.get_metadata_version().unwrap(), 8);
+
+        // A fresh Frontend cache must read the Go-format row from SQL.
+        let restarted = GoSqlFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+        );
+        let described = restarted
+            .describe(&DescribeDomainRequest {
+                name: Some("durable".into()),
+                uuid: None,
+            })
+            .unwrap();
+        assert_eq!(described.domain_info.unwrap().uuid, domain_id);
+        restarted.delete("durable").unwrap();
+        assert!(persistence.get_domain(Some("durable"), None).is_err());
+    }
+}
