@@ -10,7 +10,7 @@ on:
         required: false
         default: ""
       format_frontend_files:
-        description: "Apply rustfmt to Frontend skeleton files and upload the patch"
+        description: "Apply rustfmt to Frontend files and upload the patch"
         type: boolean
         default: false
       frontend_runtime_smoke:
@@ -250,6 +250,8 @@ jobs:
         run: |
           set -euo pipefail
           files=(
+            crates/cadence-service-core/src/admin.rs
+            crates/cadence-service-core/src/yarpc.rs
             crates/cadence-frontend/src/lib.rs
             crates/cadence-frontend/src/main.rs
             crates/cadence-frontend/src/config.rs
