@@ -870,3 +870,7 @@ migration forward.
   inserted domain row. This directly guards the rollback behavior reviewed in
   the preceding adapter fix. `git diff --check` passes; no Cargo command was run
   locally. The change is pending exact-head package CI.
+- The stale-create rollback regression at `d9e224920c536e11ad766e011e553685ad9baa4d`
+  passed exact-head Frontend package CI:
+  [41198466298](https://github.com/auenkr/cadence-rust/actions/runs/41198466298)
+  completed **success** (Clippy, Formatting and Test jobs).
