@@ -9,6 +9,10 @@ on:
         description: "Crate to test (empty = whole workspace)"
         required: false
         default: ""
+      format_frontend_files:
+        description: "Apply rustfmt to Frontend skeleton files and upload the patch"
+        type: boolean
+        default: false
       clean_target:
         description: "Use a fresh uncached target for final validation"
         type: boolean
@@ -231,7 +235,41 @@ jobs:
         run: test -z "$(gofmt -d go/tools/matching-metrics-emission-oracle/main.go)"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
+      - name: Format Frontend skeleton files
+        if: inputs.format_frontend_files == true
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          files=(
+            crates/cadence-frontend/src/lib.rs
+            crates/cadence-frontend/src/main.rs
+            crates/cadence-frontend/src/config.rs
+            crates/cadence-frontend/src/handler_admin.rs
+            crates/cadence-frontend/src/handler_domain.rs
+            crates/cadence-frontend/src/handler_schedule.rs
+            crates/cadence-frontend/src/handler_workflow.rs
+            crates/cadence-frontend/src/history_client.rs
+            crates/cadence-frontend/src/lifecycle.rs
+            crates/cadence-frontend/src/matching_client.rs
+            crates/cadence-frontend/src/request_validator.rs
+            crates/cadence-frontend/src/wrappers/mod.rs
+            crates/cadence-frontend/src/wrappers/accesscontrolled.rs
+            crates/cadence-frontend/src/wrappers/clusterredirection.rs
+            crates/cadence-frontend/src/wrappers/metered.rs
+            crates/cadence-frontend/src/wrappers/ratelimited.rs
+            crates/cadence-frontend/src/wrappers/thrift.rs
+            crates/cadence-frontend/src/wrappers/versioncheck.rs
+          )
+          rustfmt --edition 2021 "${files[@]}"
+          git diff -- "${files[@]}" > "$RUNNER_TEMP/frontend-format.patch"
+      - name: Upload Frontend formatting patch
+        if: inputs.format_frontend_files == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-format-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/frontend-format.patch
       - name: Format Matching parity files
         if: inputs.format_matching_parity_files == true
         working-directory: rust
