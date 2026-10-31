@@ -163,6 +163,12 @@ Implemented in this slice:
   and prior crate source at that head. Scanner config and shard-selection
   commits `e38a1282d` and `06ac7d0e2` are newer and remain unvalidated until a
   fresh package CI run completes.
+- Package CI at exact source head `56650b9d7ba8c59d4a6dbc698f6ce0e49a25593c`:
+  https://github.com/auenkr/cadence-rust/actions/runs/41210084086 completed
+  with conclusion `success`, validating scanner config resolution, fixer
+  defaults, shard selection and workflow initialization. Go-compatible
+  workflow/activity JSON payload and fixer-restart additions at later heads
+  remain unvalidated.
 - Package CI at exact source head `bb2042376618231a51e048aaaa64877eddf118d6`:
   https://github.com/auenkr/cadence-rust/actions/runs/41209390273 completed
   with conclusion `success` (Worker Clippy, formatting and tests).
