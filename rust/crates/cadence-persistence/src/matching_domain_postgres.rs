@@ -17,6 +17,7 @@ use std::{
 };
 
 const GO_DEFAULT_SHARD_ID: i32 = 54321;
+const GO_DOMAIN_REPLICATION_QUEUE_TYPE: i32 = 1;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 type DomainRow = (Vec<u8>, String, bool, Vec<u8>, String);
 
@@ -45,6 +46,97 @@ impl PostgresDomainMetadataStore {
                     MatchingDomainMetadataError::InvalidPostgresConfiguration(error.to_string())
                 })?;
         Ok(source)
+    }
+
+    /// Append a ThriftRW domain replication task to Go's shared SQL queue.
+    /// The row and ack-level reads use the same transaction and lock ordering
+    /// as Go's `sqlQueueStore.EnqueueMessage`.
+    pub fn enqueue_domain_replication_message(
+        &self,
+        payload: Vec<u8>,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let last_id = transaction
+            .query_opt(
+                "SELECT message_id FROM queue WHERE queue_type=$1 ORDER BY message_id DESC LIMIT 1 FOR UPDATE",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+            )
+            .map_err(domain_error)?
+            .map(|row| row.try_get::<_, i64>(0))
+            .transpose()
+            .map_err(domain_error)?
+            .unwrap_or(-1);
+        let ack_data = transaction
+            .query_opt(
+                "SELECT data FROM queue_metadata WHERE queue_type=$1 FOR UPDATE",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE],
+            )
+            .map_err(domain_error)?
+            .map(|row| row.try_get::<_, Vec<u8>>(0))
+            .transpose()
+            .map_err(domain_error)?;
+        let ack_levels: std::collections::HashMap<String, i64> = ack_data
+            .map(|data| serde_json::from_slice(&data))
+            .transpose()
+            .map_err(|error| {
+                MatchingDomainMetadataError::InvalidBlob(format!(
+                    "invalid domain replication queue ack levels: {error}"
+                ))
+            })?
+            .unwrap_or_default();
+        let id = crate::matching_domain_mysql::next_domain_replication_message_id(
+            last_id,
+            ack_levels.values().copied(),
+        );
+        transaction
+            .execute(
+                "INSERT INTO queue (queue_type, message_id, message_payload) VALUES ($1, $2, $3)",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE, &id, &payload],
+            )
+            .map_err(domain_error)?;
+        transaction.commit().map_err(domain_error)?;
+        Ok(id)
+    }
+
+    /// Read ordered queue rows after `last_message_id`, matching Go's SQL
+    /// QueueStore cursor semantics.
+    pub fn read_domain_replication_messages(
+        &self,
+        last_message_id: i64,
+        max_count: usize,
+    ) -> Result<Vec<crate::matching_domain_mysql::DomainReplicationQueueMessage>, MatchingDomainMetadataError> {
+        let started = Instant::now();
+        let timeout = DEFAULT_TIMEOUT;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
+        let mut transaction = client.transaction().map_err(domain_error)?;
+        set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
+        let rows = transaction
+            .query(
+                "SELECT message_id, message_payload FROM queue WHERE queue_type=$1 AND message_id>$2 ORDER BY message_id ASC LIMIT $3",
+                &[&GO_DOMAIN_REPLICATION_QUEUE_TYPE, &last_message_id, &(max_count as i64)],
+            )
+            .map_err(domain_error)?;
+        let messages = rows
+            .into_iter()
+            .map(|row| {
+                Ok(crate::matching_domain_mysql::DomainReplicationQueueMessage {
+                    id: row.try_get(0).map_err(domain_error)?,
+                    payload: row.try_get(1).map_err(domain_error)?,
+                })
+            })
+            .collect::<Result<Vec<_>, MatchingDomainMetadataError>>()?;
+        transaction.commit().map_err(domain_error)?;
+        Ok(messages)
     }
 
     /// Create a Go SQL domain row and advance `domain_metadata` in the same
