@@ -1138,3 +1138,6 @@ Frontend parity until these are implemented and validated.
   from `delete_domain` but missed its required scope in `create_domain`, where
   `batch_lwt` and `exec` require `CqlExecutor`. Restored it to `create_domain`
   and removed it only from `delete_domain`. Fresh exact-head CI is required.
+- Fresh-target run [41200219212](https://github.com/auenkr/cadence-rust/actions/runs/41200219212)
+  is dispatched for `cadence-frontend` with `clean_target=true` at
+  `974a6efc7db54ca8600bc3799457e7721041751f`; outcome is pending.
