@@ -2703,9 +2703,15 @@ pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttri
         .get(false, "frontend.validSearchAttributes", &[])
         .and_then(|entry| entry.value)
     {
+<<<<<<< HEAD
         if let Ok(configured) =
             serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data)
         {
+=======
+        if let Ok(configured) = serde_json::from_slice::<std::collections::HashMap<String, i32>>(
+            &value.data,
+        ) {
+>>>>>>> 7069b321d (fix(frontend): remove unreachable admin YARPC dispatch)
             keys.extend(configured.into_iter().filter_map(|(key, raw_type)| {
                 cadence_api::enums::IndexedValueType::from_i32(raw_type)
                     .map(|value_type| (key, value_type))
