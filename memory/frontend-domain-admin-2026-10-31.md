@@ -65,8 +65,10 @@
   cancelled after Admin source changed.
 - Fresh package run [41173547050](https://github.com/auenkr/cadence-rust/actions/runs/41173547050)
   targets head `e6f7d159923b3295e455f0959c7b3af4973aaa2e`. Its conclusion is
-  pending; inspect with `gh run view 41173547050` before treating the new Admin
-  code as CI-verified.
+  **failure**: Clippy could not resolve the direct `cadence_common` references
+  used by cron validation in `handler_schedule.rs`. Go oracle and formatting
+  steps passed; Rust formatting and tests were skipped. Added the missing direct
+  path dependency to `cadence-frontend/Cargo.toml`; fresh CI is required.
 
 ## Known gaps — do not claim service parity
 

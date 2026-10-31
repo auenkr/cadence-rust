@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 cadence-api = { path = "../cadence-api" }
+cadence-common = { path = "../cadence-common" }
 cadence-matching = { path = "../cadence-matching" }
 cadence-service-core = { path = "../cadence-service-core" }
 cadence-proto = { path = "../cadence-proto" }
