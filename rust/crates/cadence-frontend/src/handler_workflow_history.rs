@@ -161,12 +161,15 @@ mod tests {
         assert!(verify_history_is_complete(Some(1), Some(4), 4, 1, 4, true, false, 3).is_ok());
         assert!(verify_history_is_complete(None, None, 0, 1, 3, false, true, 3).is_ok());
         assert_eq!(
-            verify_history_is_complete(None, None, 0, 1, 3, true, false, 3).unwrap_err(),
+            verify_history_is_complete(None, None, 0, 1, 3, true, false, 3)
+                .unwrap_err()
+                .to_string(),
             "invalid history: contains zero events"
         );
         assert_eq!(
             verify_history_is_complete(Some(1), Some(2), 2, 1, 3, true, true, 3)
-                .unwrap_err(),
+                .unwrap_err()
+                .to_string(),
             "incomplete history: expected events [1-3] but got events [1-2] of length 2:isFirstPage=true,isLastPage=true,pageSize=3"
         );
     }

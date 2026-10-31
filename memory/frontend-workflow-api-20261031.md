@@ -1062,3 +1062,8 @@ Frontend parity until these are implemented and validated.
   Go-mirroring parameters. Added a function-scoped `too_many_arguments`
   allowance with the argument mapping documented above. The run did not reach
   unit tests. Exact-head validation is pending.
+- Run [41198683095](https://github.com/auenkr/cadence-rust/actions/runs/41198683095)
+  checked `fb1e16249347c3d96cf8e4512283790ce12bd894` and failed Clippy in the
+  two history verifier tests: their assertions compared the now-typed error
+  directly with `&str`. Updated both to compare `InternalServiceError` display
+  text. No tests ran; next package CI must compile and run them.
