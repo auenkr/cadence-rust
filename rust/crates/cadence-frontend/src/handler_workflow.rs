@@ -163,6 +163,35 @@ pub trait WorkflowBackend: Send + Sync {
         operation: WorkflowOperation,
         request: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
+
+    /// Forward a call to a selected Frontend cluster. Backends that do not
+    /// support cross-cluster calls retain local behavior; production clients
+    /// should attach Go's autoforwarding cluster header here.
+    fn invoke_on_cluster<'a>(
+        &'a self,
+        operation: WorkflowOperation,
+        request: Value,
+        _target_cluster: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>> {
+        self.invoke(operation, request)
+    }
+}
+
+pub type WorkflowFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>;
+pub type WorkflowNext<'a> =
+    Box<dyn FnMut(Option<String>) -> WorkflowFuture<'a> + Send + 'a>;
+
+/// Outer cluster-redirection decorator. It can invoke `next` on the selected
+/// cluster and retry once on the active cluster after DomainNotActive, while
+/// keeping each attempt inside metering/rate/version handling.
+pub trait RequestRedirector: Send + Sync {
+    fn invoke<'a>(
+        &'a self,
+        operation: WorkflowOperation,
+        request: &'a Value,
+        next: WorkflowNext<'a>,
+    ) -> WorkflowFuture<'a>;
 }
 
 /// Temporary compatibility constructor retained for the independent domain,
@@ -179,6 +208,7 @@ pub struct Handler<B> {
     validator: crate::request_validator::RequestValidator,
     metrics: Arc<dyn crate::wrappers::metered::Metrics + Send + Sync>,
     access_control: Option<Arc<dyn RequestAuthorization>>,
+    redirector: Option<Arc<dyn RequestRedirector>>,
     version_check: Option<VersionCheck>,
     rate_limit: Option<Arc<dyn RequestRateLimit>>,
 }
@@ -223,6 +253,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator: crate::request_validator::RequestValidator::default(),
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
+            redirector: None,
             version_check: None,
             rate_limit: None,
         }
@@ -237,6 +268,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             metrics: Arc::new(NoopWorkflowMetrics),
             access_control: None,
+            redirector: None,
             version_check: None,
             rate_limit: None,
         }
@@ -256,6 +288,7 @@ impl<B: WorkflowBackend> Handler<B> {
             validator,
             metrics,
             access_control: None,
+            redirector: None,
             version_check: None,
             rate_limit: None,
         }
@@ -266,6 +299,14 @@ impl<B: WorkflowBackend> Handler<B> {
     /// outermost Go handler decorator.
     pub fn with_access_control(mut self, authorizer: Arc<dyn RequestAuthorization>) -> Self {
         self.access_control = Some(authorizer);
+        self
+    }
+
+    /// Install Go's cluster redirection decorator outside metering. The
+    /// redirector may retry the same operation after a DomainNotActive error;
+    /// each selected attempt remains metered independently.
+    pub fn with_cluster_redirection(mut self, redirector: Arc<dyn RequestRedirector>) -> Self {
+        self.redirector = Some(redirector);
         self
     }
 
@@ -301,11 +342,11 @@ impl<B: WorkflowBackend> Handler<B> {
             .await
     }
 
-    pub async fn dispatch_with_metadata(
-        &self,
+    pub async fn dispatch_with_metadata<'a>(
+        &'a self,
         operation: &str,
         request: Value,
-        caller: &CallerMetadata,
+        caller: &'a CallerMetadata,
     ) -> Result<Value, CadenceError> {
         let operation = WorkflowOperation::from_name(operation).ok_or_else(|| {
             CadenceError::BadRequest(BadRequestError::new(format!(
@@ -315,10 +356,32 @@ impl<B: WorkflowBackend> Handler<B> {
         if let Some(access_control) = &self.access_control {
             access_control.authorize(operation.name(), &request, &caller.actor)?;
         }
+        if let Some(redirector) = &self.redirector {
+            let redirect_request = request.clone();
+            let mut next = |target_cluster| {
+                self.dispatch_metered(operation, request.clone(), caller, target_cluster)
+            };
+            return redirector
+                .invoke(operation, &redirect_request, Box::new(next))
+                .await;
+        }
+        self.dispatch_metered(operation, request, caller, None).await
+    }
+
+    fn dispatch_metered<'a>(
+        &'a self,
+        operation: WorkflowOperation,
+        request: Value,
+        caller: &'a CallerMetadata,
+        target_cluster: Option<String>,
+    ) -> WorkflowFuture<'a> {
+        Box::pin(async move {
         let start = std::time::Instant::now();
         self.metrics.increment_requests(operation.name());
         let tags = crate::wrappers::metered::request_tags(operation.name(), &request);
-        let result = self.dispatch_operation(operation, request, caller).await;
+        let result = self
+            .dispatch_operation(operation, request, caller, target_cluster)
+            .await;
         let elapsed = start.elapsed();
         self.metrics
             .record_operation(operation.name(), elapsed, &tags);
@@ -332,6 +395,7 @@ impl<B: WorkflowBackend> Handler<B> {
                 Err(error)
             }
         }
+        })
     }
 
     async fn dispatch_operation(
@@ -339,6 +403,7 @@ impl<B: WorkflowBackend> Handler<B> {
         operation: WorkflowOperation,
         request: Value,
         caller: &CallerMetadata,
+        target_cluster: Option<String>,
     ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
         if let Some(rate_limit) = &self.rate_limit {
@@ -354,7 +419,9 @@ impl<B: WorkflowBackend> Handler<B> {
             )?;
         }
         let request = self.validate_request(operation, request)?;
-        self.backend.invoke(operation, request).await
+        self.backend
+            .invoke_on_cluster(operation, request, target_cluster)
+            .await
     }
 
     fn validate_request(
@@ -764,6 +831,45 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RedirectBackend(Mutex<Vec<Option<String>>>);
+
+    impl WorkflowBackend for RedirectBackend {
+        fn invoke<'a>(
+            &'a self,
+            _: WorkflowOperation,
+            _: Value,
+        ) -> WorkflowFuture<'a> {
+            Box::pin(async { Ok(Value::Null) })
+        }
+
+        fn invoke_on_cluster<'a>(
+            &'a self,
+            _: WorkflowOperation,
+            _: Value,
+            target_cluster: Option<String>,
+        ) -> WorkflowFuture<'a> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(target_cluster);
+                Ok(Value::Null)
+            })
+        }
+    }
+
+    struct ForwardToCluster(&'static str);
+
+    impl RequestRedirector for ForwardToCluster {
+        fn invoke<'a>(
+            &'a self,
+            _: WorkflowOperation,
+            _: &'a Value,
+            mut next: WorkflowNext<'a>,
+        ) -> WorkflowFuture<'a> {
+            let target = self.0.to_owned();
+            Box::pin(async move { next(Some(target)).await })
+        }
+    }
+
     #[derive(serde::Serialize)]
     struct EncodedHistoryToken {
         #[serde(
@@ -1011,6 +1117,26 @@ mod tests {
         assert_eq!(error.to_string(), "Request unauthorized.");
         assert!(metrics.requests.lock().unwrap().is_empty());
         assert!(metrics.counters.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cluster_redirection_wraps_and_selects_the_backend_cluster() {
+        let backend = RedirectBackend::default();
+        let metrics = Arc::new(RecordingMetrics::default());
+        let handler = Handler::with_metrics(
+            backend,
+            crate::request_validator::RequestValidator::default(),
+            metrics.clone(),
+        )
+        .with_cluster_redirection(Arc::new(ForwardToCluster("cluster-b")));
+
+        handler.dispatch("Health", Value::Null).await.unwrap();
+
+        assert_eq!(
+            *handler.backend.0.lock().unwrap(),
+            [Some("cluster-b".to_owned())]
+        );
+        assert_eq!(*metrics.requests.lock().unwrap(), ["Health"]);
     }
 
     #[tokio::test]
