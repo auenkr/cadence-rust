@@ -73,6 +73,13 @@ Branch: `frontend-core2`, based on `origin/frontend-core` at start.
   `system.readVisibilityStoreName=es` for domain `d`. Also aligned Matching's
   default outbound timeout to Go's 60 seconds and added its 120-second long-poll
   helper. The timeout call sites and test fixture require fresh CI validation.
+- CI run https://github.com/auenkr/cadence-rust/actions/runs/41176185814
+  validated head `981e17c690d108d42a2ce2a2eb0f3cba394d9de8` and concluded
+  `success`: Frontend formatting, package Clippy and tests all passed. It also
+  exercised the full validator nil-request test and the corrected advanced
+  visibility selector fixture. Applied the runner's final four-line import
+  ordering patch locally; run the package workflow once more on the resulting
+  exact head before treating it as the validated checkpoint.
 
 ## Remaining gaps (this branch is not Frontend complete)
 
