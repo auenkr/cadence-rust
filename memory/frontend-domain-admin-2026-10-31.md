@@ -971,3 +971,11 @@ migration forward.
   byte-for-byte oracle exists yet. Queue persistence, mutation publication,
   Admin read/ack behavior, and DLQ operations remain open. `git diff --check`
   passed and no Cargo ran locally; this needs fresh exact-head CI.
+
+## Rebase onto frontend-core2 and queue continuation — 2026-10-31
+
+- Fetched `origin/frontend-core2` at `f6d20834f` and rebased the 116 Frontend commits cleanly. Pushed rewritten branch head `478bdd1ec91e37270933613fe61b7937865e7f3d` with force-with-lease.
+- Previous run [41201041499](https://github.com/auenkr/cadence-rust/actions/runs/41201041499) was cancelled during the rebase and targeted the stale pre-rebase SHA `c6e5c9110a8d16157b53f145b069536b64dea586`.
+- Dispatched exact-head Frontend package CI [41201182327](https://github.com/auenkr/cadence-rust/actions/runs/41201182327), targeting `478bdd1ec91e37270933613fe61b7937865e7f3d`; it was still in progress at this checkpoint. No local Cargo commands were run.
+- The task encoder commit contains Go field IDs and ThriftRW structure support. Open blocker: no persistence-backed QueueStore integration. Go's shared queue schema uses `queue` and `queue_metadata`; SQL assigns the next ID as `max(last message ID, all ack levels)+1`, and Cassandra uses the same logical queue type with LWT allocation. Domain mutation publication and Admin queue/DLQ consumers are still not wired.
+- Remaining blockers: SQL/PostgreSQL/Cassandra durable replication queue plus producer/consumer/ack semantics; domain cooldown/failover audit persistence; Admin DLQ and full raw-history RPC behavior; scheduler RPC calls to scheduler workflows; runtime membership; parity audit and mixed Go/Rust failure, restart, recovery evidence. No parity claim is made.
