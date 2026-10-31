@@ -187,12 +187,16 @@ impl MySqlDomainMetadataStore {
         self.pool
             .query_until(deadline, move |connection| {
                 Box::pin(async move {
-                    connection
+                    let mut transaction = connection
+                        .start_transaction(mysql_async::TxOpts::default())
+                        .await?;
+                    transaction
                         .exec_drop(
                             "DELETE FROM domains WHERE shard_id=? AND id=?",
                             (GO_DEFAULT_SHARD_ID, domain_id),
                         )
-                        .await
+                        .await?;
+                    transaction.commit().await
                 })
             })
             .map_err(query_error)
