@@ -424,3 +424,10 @@ migration forward.
   service-core adapters still own their direct implementation and must be
   unified with this module. Source whitespace validation (`git diff --check`)
   passes; no local Cargo/rustfmt was run.
+
+## Current continuation status after the core2 rebase
+
+- Rebased onto current `origin/frontend-core2` (`642538a2720d28e7ff5611e690e1fe3208033d95`), force-pushed `frontend-domain-admin`; latest source head is `d39036c477249d4eeeb9762424b3d30071e0d995`.
+- Exact-head CI run [41179462360](https://github.com/auenkr/cadence-rust/actions/runs/41179462360) at `85eda7222fc63e579a8399f2e7a5cdf73fe3dfe6` was cancelled after later source changes. Run [41179565921](https://github.com/auenkr/cadence-rust/actions/runs/41179565921) at `f02bf9fb0c066f385679fd6b430342eb015e1010` was cancelled when shared-state changes were pushed. Run [41179614145](https://github.com/auenkr/cadence-rust/actions/runs/41179614145) targets exact current source `d39036c477249d4eeeb9762424b3d30071e0d995`; it remains in progress. Cargo has not been run locally.
+- Source inventory compared against Go methods shows the Thrift dispatch still lacks Admin lifecycle/History-client methods: `RemoveTask`, `CloseShard`, shard/history-host description, replication and DLQ methods, `ReapplyEvents`, `ResendReplicationTasks`, cross-cluster task methods, domain isolation/async configuration and task-list partition mutation. Existing `ResetQueue` is currently validation plus empty success, and `DescribeQueue` reports local in-memory queue depths rather than calling History. Domain dispatch lacks `UpdateIsolationGroups` and `UpdateAsyncWorkflowConfiguraton`. Schedule method names are routed, but the storage path remains in-memory and does not start/update scheduler workflows. This is a source inventory, not parity evidence.
+- No mixed Go/Rust Frontend validation has been run. Keep all of these gaps open until real History/Matching client wiring, durable persistence and SDK failure/restart/recovery lanes are complete.
