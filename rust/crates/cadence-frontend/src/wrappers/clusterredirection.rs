@@ -6,6 +6,7 @@
 //! separate: they are configuration contracts and have evolved independently.
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::time::Instant;
 
 use cadence_api::errors::{CadenceError, DomainNotActiveError};
@@ -178,11 +179,11 @@ pub enum Consistency {
     Strong,
 }
 
-pub trait RuntimeConfig {
+pub trait RuntimeConfig: Send + Sync {
     fn domain_auto_forwarding_enabled(&self, domain: &str) -> bool;
 }
 
-pub trait ActiveClusterManager {
+pub trait ActiveClusterManager: Send + Sync {
     fn active_cluster_for_workflow(
         &self,
         domain_id: &str,
@@ -201,7 +202,7 @@ pub trait ActiveClusterManager {
     ) -> Result<(bool, Option<String>), String>;
 }
 
-pub trait RedirectMetrics {
+pub trait RedirectMetrics: Send + Sync {
     fn record_forward(&self, record: &ForwardRecord);
 }
 
@@ -318,6 +319,170 @@ where
     result
 }
 
+/// Async counterpart used by the Frontend handler decorator. The forwarding
+/// choice, DomainNotActive retry and metrics mirror `redirect`; only the call
+/// boundary is asynchronous so generated gRPC clients can be used directly.
+#[allow(clippy::too_many_arguments)]
+pub async fn redirect_async<T, C, M, F, Fut>(
+    policy: ForwardingPolicy,
+    current_cluster: &str,
+    configured_target: &str,
+    domain: &DomainState,
+    execution: Option<&WorkflowRef>,
+    requested_cluster_attribute: Option<&str>,
+    operation: &str,
+    consistency: Consistency,
+    config: &C,
+    manager: &M,
+    metrics: &dyn RedirectMetrics,
+    mut call: F,
+) -> Result<T, CadenceError>
+where
+    C: RuntimeConfig,
+    M: ActiveClusterManager,
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = Result<T, CadenceError>>,
+{
+    if domain.deprecated_or_deleted && !allowed_on_deprecated_domain(operation) {
+        return Err(CadenceError::DomainNotActive(DomainNotActiveError {
+            message: "domain is deprecated or deleted.".into(),
+            domain_name: domain.name.clone(),
+            current_cluster: current_cluster.into(),
+            active_cluster: current_cluster.into(),
+            active_clusters: Vec::new(),
+        }));
+    }
+    if policy == ForwardingPolicy::Noop {
+        return call(current_cluster.to_owned()).await;
+    }
+    let auto_forward = domain.global && config.domain_auto_forwarding_enabled(&domain.name);
+    let mut target = current_cluster.to_owned();
+    let mut should_forward_after_inactive = false;
+    if auto_forward {
+        let mut active_cluster = domain.active_cluster.clone();
+        if domain.active_active
+            && (policy.is_all_domain()
+                || policy.allows_api(operation)
+                || consistency == Consistency::Strong)
+        {
+            active_cluster = active_active_target(
+                manager,
+                domain,
+                execution,
+                requested_cluster_attribute,
+                operation,
+                current_cluster,
+            );
+        }
+        if (policy.is_all_domain()
+            && (configured_target.is_empty() || configured_target == active_cluster))
+            || consistency == Consistency::Strong
+            || policy.allows_api(operation)
+        {
+            target = active_cluster;
+            should_forward_after_inactive = true;
+        }
+    }
+
+    let start = Instant::now();
+    let mut result = call(target.clone()).await;
+    metrics.record_forward(&ForwardRecord {
+        operation: operation.into(),
+        domain: domain.name.clone(),
+        source_cluster: current_cluster.into(),
+        target_cluster: target.clone(),
+        active_active: domain.active_active,
+        strong_consistency: consistency == Consistency::Strong,
+        elapsed_micros: start.elapsed().as_micros(),
+        succeeded: result.is_ok(),
+    });
+    if let Err(CadenceError::DomainNotActive(ref error)) = result {
+        if should_forward_after_inactive
+            && !error.active_cluster.is_empty()
+            && error.active_cluster != target
+        {
+            let fallback = error.active_cluster.clone();
+            let fallback_start = Instant::now();
+            result = call(fallback.clone()).await;
+            metrics.record_forward(&ForwardRecord {
+                operation: operation.into(),
+                domain: domain.name.clone(),
+                source_cluster: current_cluster.into(),
+                target_cluster: fallback,
+                active_active: domain.active_active,
+                strong_consistency: consistency == Consistency::Strong,
+                elapsed_micros: fallback_start.elapsed().as_micros(),
+                succeeded: result.is_ok(),
+            });
+        }
+    }
+    result
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RedirectRequest {
+    pub domain: DomainState,
+    pub execution: Option<WorkflowRef>,
+    pub requested_cluster_attribute: Option<String>,
+    pub consistency: Consistency,
+}
+
+/// Runtime adapter for the generated cluster-redirection wrapper. The domain
+/// resolver owns domain-cache lookups and extracts execution/cluster-selection
+/// attributes using the Go request semantics.
+pub trait RedirectRequestResolver: Send + Sync {
+    fn resolve(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+    ) -> Result<Option<RedirectRequest>, CadenceError>;
+}
+
+pub struct WorkflowRedirector<C, M, R> {
+    pub policy: ForwardingPolicy,
+    pub current_cluster: String,
+    pub configured_target: String,
+    pub config: C,
+    pub manager: M,
+    pub metrics: std::sync::Arc<dyn RedirectMetrics>,
+    pub requests: R,
+}
+
+impl<C, M, R> crate::handler_workflow::RequestRedirector for WorkflowRedirector<C, M, R>
+where
+    C: RuntimeConfig + 'static,
+    M: ActiveClusterManager + 'static,
+    R: RedirectRequestResolver + 'static,
+{
+    fn invoke<'a>(
+        &'a self,
+        operation: crate::handler_workflow::WorkflowOperation,
+        request: &'a serde_json::Value,
+        mut next: crate::handler_workflow::WorkflowNext<'a>,
+    ) -> crate::handler_workflow::WorkflowFuture<'a> {
+        Box::pin(async move {
+            let Some(route) = self.requests.resolve(operation.name(), request)? else {
+                return next(None).await;
+            };
+            redirect_async(
+                self.policy,
+                &self.current_cluster,
+                &self.configured_target,
+                &route.domain,
+                route.execution.as_ref(),
+                route.requested_cluster_attribute.as_deref(),
+                operation.name(),
+                route.consistency,
+                &self.config,
+                &self.manager,
+                self.metrics.as_ref(),
+                |cluster| next(Some(cluster)),
+            )
+            .await
+        })
+    }
+}
+
 fn active_active_target<M: ActiveClusterManager>(
     manager: &M,
     domain: &DomainState,
@@ -375,7 +540,7 @@ fn active_active_target<M: ActiveClusterManager>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
 
     struct Config(bool);
     impl RuntimeConfig for Config {
@@ -410,10 +575,10 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct RecordingMetrics(RefCell<Vec<ForwardRecord>>);
+    struct RecordingMetrics(Mutex<Vec<ForwardRecord>>);
     impl RedirectMetrics for RecordingMetrics {
         fn record_forward(&self, record: &ForwardRecord) {
-            self.0.borrow_mut().push(record.clone());
+            self.0.lock().unwrap().push(record.clone());
         }
     }
 
@@ -489,8 +654,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(targets, vec![String::from("cluster-b")]);
-        assert_eq!(metrics.0.borrow().len(), 1);
-        assert!(metrics.0.borrow()[0].succeeded);
+        assert_eq!(metrics.0.lock().unwrap().len(), 1);
+        assert!(metrics.0.lock().unwrap()[0].succeeded);
     }
 
     #[test]
@@ -536,7 +701,59 @@ mod tests {
             targets,
             vec![String::from("cluster-b"), String::from("cluster-c")]
         );
-        assert_eq!(metrics.0.borrow().len(), 2);
+        assert_eq!(metrics.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn async_forwarding_retries_at_domain_not_active_cluster() {
+        let metrics = RecordingMetrics::default();
+        let targets = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let domain = DomainState {
+            id: "id".into(),
+            name: "global".into(),
+            global: true,
+            active_cluster: "cluster-b".into(),
+            ..Default::default()
+        };
+        let observed = targets.clone();
+        redirect_async(
+            ForwardingPolicy::SelectedV3,
+            "cluster-a",
+            "",
+            &domain,
+            None,
+            None,
+            "StartWorkflowExecution",
+            Consistency::Eventual,
+            &Config(true),
+            &Manager,
+            &metrics,
+            move |target| {
+                let observed = observed.clone();
+                async move {
+                    observed.lock().unwrap().push(target.clone());
+                    if target == "cluster-b" {
+                        Err(CadenceError::DomainNotActive(DomainNotActiveError {
+                            message: "inactive".into(),
+                            domain_name: "global".into(),
+                            current_cluster: "cluster-b".into(),
+                            active_cluster: "cluster-c".into(),
+                            active_clusters: Vec::new(),
+                        }))
+                    } else {
+                        Ok("forwarded")
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *targets.lock().unwrap(),
+            ["cluster-b".to_owned(), "cluster-c".to_owned()]
+        );
+        assert_eq!(metrics.0.lock().unwrap().len(), 2);
     }
 
     #[test]
