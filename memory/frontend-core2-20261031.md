@@ -998,8 +998,8 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   orphan that Go leaves, rather than an index pointing at a missing UUID row.
   Source comparison: `go/common/persistence/nosql/nosqlplugin/cassandra/domain.go`
   `deleteDomain`.
-- This fix is committed and pushed as `PENDING_SHA`; persistence-package CI is
-  `PENDING_RUN`. It does not close the requested production Visibility,
+- This fix is committed and pushed as `f0736ac8c8405a3962b07291f6979f02270c7131`;
+  the exact-head persistence-package CI result is recorded below. It does not close the requested production Visibility,
   History, or Execution managers, nor prove live Cassandra transaction
   behavior. Lifecycle still lacks production global quota collection
   construction/wiring. The Go request-validator matrix remains covered by the
@@ -1032,3 +1032,12 @@ Authoritative Go interfaces are `go/common/persistence/data_manager_interfaces.g
   formatting, Clippy, and tests passed. This package selection does not compile
   the Matching launcher that constructs the Cassandra adapter; run the
   Frontend package gate too.
+- Follow-up `cadence-persistence` run
+  https://github.com/auenkr/cadence-rust/actions/runs/41199801341 validated
+  exact head `f0736ac8c8405a3962b07291f6979f02270c7131` and concluded
+  `success` (formatting, Clippy, and tests). This is the exact-head confirmation
+  for Cassandra domain-delete parity and the live consistency setting.
+- Dispatched `cadence-frontend` run
+  https://github.com/auenkr/cadence-rust/actions/runs/41200023535 on the same
+  head to compile the Matching launcher factory that selects the Cassandra
+  adapter. Its final conclusion is pending at this save.
