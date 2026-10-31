@@ -18,6 +18,7 @@ use cadence_api::admin::{
     UpdateDomainIsolationGroupsRequest, UpdateDomainIsolationGroupsResponse,
     GetDomainAsyncWorkflowConfiguratonRequest, GetDomainAsyncWorkflowConfiguratonResponse,
     UpdateDomainAsyncWorkflowConfiguratonRequest, UpdateDomainAsyncWorkflowConfiguratonResponse,
+    ReapplyEventsRequest, ReapplyEventsResponse,
 };
 use cadence_api::enums::*;
 use cadence_api::errors::*;
@@ -990,6 +991,20 @@ impl FromThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
 }
 
 impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonResponse {
+    fn to_thrift(&self) -> Struct { Fields::new().finish() }
+}
+
+impl FromThrift for ReapplyEventsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+            events: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for ReapplyEventsResponse {
     fn to_thrift(&self) -> Struct { Fields::new().finish() }
 }
 
@@ -5654,6 +5669,11 @@ mod tests {
                 queue_type: "FIFO".into(),
                 queue_config: Some(DataBlob::new(EncodingType::JSON, b"{}".to_vec())),
             }),
+        });
+        round_trip(&ReapplyEventsRequest {
+            domain: "payments".into(),
+            workflow_execution: Some(WorkflowExecution::new("wf", "run")),
+            events: Some(DataBlob::new(EncodingType::ThriftRW, vec![0x59])),
         });
     }
 

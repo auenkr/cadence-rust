@@ -449,3 +449,11 @@ migration forward.
   dispatcher registration/helper, keeping the common Thrift request handler,
   and now select the encoded batch bytes explicitly. These fixes and the new
   isolation/async config routes are pending exact-head CI.
+- Added the Admin `ReapplyEvents` Thrift path. It validates the request in Go
+  order, decodes the ThriftRW history batch, filters signal events, and invokes
+  the execution store's signal reapplication mutation with Go-compatible error
+  mapping. Added a converter round-trip case. This is single-version-history
+  behavior only; replication/version-history correctness and source Go tests
+  remain necessary. CI run [41179895028](https://github.com/auenkr/cadence-rust/actions/runs/41179895028)
+  at `83171ac866d417a39db3a6fc888f4b4c719e6a5a` was in progress against the
+  preceding code and will be superseded by exact-head validation.
