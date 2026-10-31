@@ -1217,3 +1217,50 @@ Frontend parity until these are implemented and validated.
   does not change the tested Rust source. This CI run does not validate a mixed
   Go History + Rust Matching/Frontend SDK workflow or the missing registered
   WorkflowService adapter.
+
+## Successor handoff — 2026-10-31
+
+- Handoff branch: `t3/frontend-workflow-api`.
+- Pre-handoff HEAD: `cbb69d675a00355a1e4e69e07b5affaf4bb36e6d`.
+  The worktree was clean and tracking `origin/t3/frontend-workflow-api`; there
+  was no uncommitted or unverified WIP to preserve. This continuation made
+  documentation-only commits; no new handler implementation was added.
+- Last CI run: [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621),
+  head `db22d15a3be324ee2ccb301f9f8b27fd9dd9323e`, conclusion `success`.
+  It passed Frontend package Clippy, formatting, tests and runtime smoke. The
+  later `12aeb3c57` and `cbb69d675` commits only changed memory documentation;
+  the tested Rust source is identical. No mixed Go History + Rust Matching +
+  Rust Frontend SDK gate has passed, and no Rust binary SHA256 evidence exists.
+- Remaining completion gaps:
+  - Implement production `WorkflowBackend` for all `WorkflowOperation`s with
+    typed History/Matching gRPC requests, cluster client selection, response
+    conversion and Cadence error preservation.
+  - Add/expose execution history persistence reads (mutable-state lookup and
+    paged raw history by branch/persistence token); connect history polling,
+    continuation validation, completeness checks, transient decisions and
+    close-event filtering to the live page reader.
+  - Add live Visibility list/scan/count persistence and archived history and
+    visibility providers. The current archive reader traits have no production
+    implementation.
+  - Route registered public Thrift and gRPC WorkflowService calls through the
+    Frontend Handler, composing ratelimited, metered, versioncheck,
+    accesscontrolled and clusterredirection behavior in the real path. Current
+    registered server ownership is in `cadence-matching::grpc::Frontend` and
+    `cadence-service-core::yarpc`; `cadence-frontend::run()` invokes the shared
+    launcher, but its `handler_workflow::Handler` is not registered there.
+  - Add the requested mixed Go History + Rust Matching/Frontend SDK gate with
+    failure/restart/recovery scenarios and Rust binary SHA256 evidence.
+- `origin/frontend-core2` last inspected at `fb0cd95b4`. It did not yet contain
+  the History/Matching workflow adapter, execution/history read interface,
+  visibility persistence interface, or archive provider. Check for new commits
+  before designing duplicates, then merge/cherry-pick the landed interfaces.
+- Recommended next steps: (1) fetch and inspect `origin/frontend-core2`; (2)
+  establish the typed client/persistence interfaces and the transport injection
+  boundary in `cadence-service-core`; (3) implement the adapter and register the
+  composed Handler on both transports; (4) connect live history and visibility
+  reads and close the remaining operation gaps; (5) add Go-mirroring tests;
+  (6) add and run the mixed-service SDK gate; (7) run
+  `gh workflow run rust-ci.yml --ref t3/frontend-workflow-api -f package=cadence-frontend -f clean_target=true`,
+  record the final URL/head/conclusion and binary hash, then push.
+- Continue respecting repo rules: do not run Cargo locally; use GitHub Actions
+  for Rust validation; push code and memory updates at least every 30 minutes.
