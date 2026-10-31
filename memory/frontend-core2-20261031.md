@@ -276,6 +276,37 @@ shared HTTP handler changes. Record exact head and final run conclusion below.
   validate formatting, Clippy, Frontend tests, and the configured development
   runtime smoke. Continue the implementation after confirming that result.
 
+## Continuation — Frontend lifecycle and validator audit
+
+- Moved shutdown of Frontend-owned background loops to the Go-equivalent
+  `WorkflowHandler.Stop` / `AdminHandler.Stop` point: after health failure
+  detection and admission stop, before the quota-stop hook and final request
+  drain. The loops are now signalled and joined before the final drain window;
+  listener/resource teardown remains after that window. This applies to the
+  Frontend lifecycle path in the shared launcher.
+- Audited Go's 15 table-driven `request_validator_test.go` groups (88 named
+  case rows) against the Rust tests. Coverage is organized in the Rust tests
+  by behavior rather than duplicating Go's row labels: nil and domain checks,
+  task-list and reset-sticky boundaries, all visibility time-filter and
+  conflict combinations, page mutation/limits, domain identifier alternatives,
+  admin tokens, required data, retention, active/passive and active/active
+  failover, timeout boundaries, lockdown, and dynamic updates. This audit still
+  needs exact-head CI after the launcher change; keep the row-level checklist
+  reviewable before claiming matrix closure.
+- Persistence remains unclosed. `AppState` and the handlers still directly
+  depend on `InMemoryDomainStore` / `InMemoryExecutionStore`; Matching's native
+  SQL/Cassandra adapters only provide Matching task storage and read-only
+  domain metadata. Durable Go-compatible domain/metadata, visibility, history,
+  and execution managers plus default/advanced SQL/Cassandra selection are not
+  implemented. Do not claim this branch complete until they are wired through
+  the Frontend handler graph.
+- The lifecycle path still has no actual global quota collection instances to
+  stop, so its Go limiter-stop slot is empty. The stop-order correction above
+  does not close the missing production persistence or quota-owner gaps.
+- Exact-head CI for this continuation is pending; dispatch after pushing and
+  record the run URL, head SHA, and conclusion here. Cargo remains prohibited
+  locally.
+
 ## Exact-head follow-up — 2026-10-31
 
 - Run https://github.com/auenkr/cadence-rust/actions/runs/41178553763 at
