@@ -1694,6 +1694,147 @@ fn normalize_mysql_error(error: MySqlError) -> StorageError {
     StorageError::Backend { kind, message }
 }
 
+
+impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
+    fn select_nodes(
+        &self,
+        shard_id: i32,
+        tree_id: [u8; 16],
+        branch_id: [u8; 16],
+        min_node: i64,
+        max_node: i64,
+        limit: i64,
+    ) -> std::result::Result<
+        Vec<crate::history_reader::HistoryNodeRow>,
+        crate::history_reader::HistoryReadError,
+    > {
+        use crate::history_reader::{HistoryNodeRow, HistoryReadError};
+        let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
+        let mut connection = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let discard = connection.discard.clone();
+        let rows: Vec<(i64, i64, Vec<u8>, String)> = connection
+            .exec(
+                "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND node_id >= ? and node_id < ? ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT ? ",
+                (shard_id, tree_id.as_slice(), branch_id.as_slice(), min_node, max_node, limit),
+            )
+            .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
+        Ok(rows
+            .into_iter()
+            .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow {
+                node_id,
+                txn_id,
+                data,
+                encoding,
+            })
+            .collect())
+    }
+}
+
+impl crate::visibility_reader::VisibilityStore for MySqlTaskStore {
+    fn select(
+        &self,
+        filter: &crate::visibility_reader::VisibilityFilter,
+    ) -> std::result::Result<
+        Vec<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        let (sql, params) = crate::visibility_reader::build_list_query(
+            filter,
+            crate::visibility_reader::SqlDialect::MySql,
+        );
+        self.visibility_query(
+            &sql,
+            &params,
+            crate::visibility_reader::is_closed_query(filter),
+        )
+    }
+
+    fn get_closed(
+        &self,
+        domain_id: &str,
+        run_id: &str,
+    ) -> std::result::Result<
+        Option<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        let (sql, params) = crate::visibility_reader::build_get_closed_query(
+            domain_id,
+            run_id,
+            crate::visibility_reader::SqlDialect::MySql,
+        );
+        Ok(self
+            .visibility_query(&sql, &params, true)?
+            .into_iter()
+            .next())
+    }
+}
+
+impl MySqlTaskStore {
+    fn visibility_query(
+        &self,
+        sql: &str,
+        params: &[crate::visibility_reader::SqlParam],
+        closed: bool,
+    ) -> std::result::Result<
+        Vec<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        use crate::visibility_reader::{SqlParam, VisibilityError, VisibilityRow};
+        let internal = |m: String| VisibilityError::Internal(m);
+        // Go visibility reads use DB shard 0 (domain sharding is not applied
+        // to the single visibility database).
+        let index = mysql_database_index(0, self.pools.len());
+        let mut connection = self.pools[index]
+            .checkout()
+            .map_err(|e| internal(format!("{e:?}")))?;
+        let discard = connection.discard.clone();
+        let values: Vec<mysql::Value> = params
+            .iter()
+            .map(|p| match p {
+                SqlParam::Text(s) => mysql::Value::from(s.as_str()),
+                SqlParam::Int(i) | SqlParam::TimeUs(i) => mysql::Value::from(*i),
+                SqlParam::Int32(i) => mysql::Value::from(*i),
+            })
+            .collect();
+        let rows: Vec<mysql::Row> = connection
+            .exec(sql, mysql::Params::Positional(values))
+            .map_err(|e| internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
+        rows.into_iter()
+            .map(|mut row| {
+                fn cell<T: mysql::prelude::FromValue>(
+                    row: &mut mysql::Row,
+                    i: usize,
+                ) -> std::result::Result<T, VisibilityError> {
+                    row.take_opt::<T, usize>(i)
+                        .ok_or_else(|| VisibilityError::Internal(format!("missing column {i}")))?
+                        .map_err(|e| VisibilityError::Internal(format!("column {i}: {e}")))
+                }
+                let mut out = VisibilityRow {
+                    workflow_id: cell::<String>(&mut row, 0)?.trim().to_string(),
+                    run_id: cell::<String>(&mut row, 1)?.trim().to_string(),
+                    start_time_us: cell(&mut row, 2)?,
+                    execution_time_us: cell(&mut row, 3)?,
+                    workflow_type_name: cell(&mut row, 4)?,
+                    memo: cell::<Option<Vec<u8>>>(&mut row, 5)?.unwrap_or_default(),
+                    encoding: cell(&mut row, 6)?,
+                    is_cron: cell::<Option<bool>>(&mut row, 7)?.unwrap_or(false),
+                    update_time_us: cell::<Option<i64>>(&mut row, 8)?.unwrap_or(0),
+                    shard_id: cell::<Option<i32>>(&mut row, 9)?.unwrap_or(0),
+                    ..Default::default()
+                };
+                if closed {
+                    out.close_time_us = cell(&mut row, 10)?;
+                    out.close_status = cell(&mut row, 11)?;
+                    out.history_length = cell(&mut row, 12)?;
+                }
+                Ok(out)
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2296,145 +2437,5 @@ mod tests {
             mysql_options(&config),
             Err(StorageError::BackendConfiguration(_))
         ));
-    }
-}
-
-impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
-    fn select_nodes(
-        &self,
-        shard_id: i32,
-        tree_id: [u8; 16],
-        branch_id: [u8; 16],
-        min_node: i64,
-        max_node: i64,
-        limit: i64,
-    ) -> std::result::Result<
-        Vec<crate::history_reader::HistoryNodeRow>,
-        crate::history_reader::HistoryReadError,
-    > {
-        use crate::history_reader::{HistoryNodeRow, HistoryReadError};
-        let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
-        let mut connection = self.pools[index]
-            .checkout()
-            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
-        let discard = connection.discard.clone();
-        let rows: Vec<(i64, i64, Vec<u8>, String)> = connection
-            .exec(
-                "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND node_id >= ? and node_id < ? ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT ? ",
-                (shard_id, tree_id.as_slice(), branch_id.as_slice(), min_node, max_node, limit),
-            )
-            .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
-        Ok(rows
-            .into_iter()
-            .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow {
-                node_id,
-                txn_id,
-                data,
-                encoding,
-            })
-            .collect())
-    }
-}
-
-impl crate::visibility_reader::VisibilityStore for MySqlTaskStore {
-    fn select(
-        &self,
-        filter: &crate::visibility_reader::VisibilityFilter,
-    ) -> std::result::Result<
-        Vec<crate::visibility_reader::VisibilityRow>,
-        crate::visibility_reader::VisibilityError,
-    > {
-        let (sql, params) = crate::visibility_reader::build_list_query(
-            filter,
-            crate::visibility_reader::SqlDialect::MySql,
-        );
-        self.visibility_query(
-            &sql,
-            &params,
-            crate::visibility_reader::is_closed_query(filter),
-        )
-    }
-
-    fn get_closed(
-        &self,
-        domain_id: &str,
-        run_id: &str,
-    ) -> std::result::Result<
-        Option<crate::visibility_reader::VisibilityRow>,
-        crate::visibility_reader::VisibilityError,
-    > {
-        let (sql, params) = crate::visibility_reader::build_get_closed_query(
-            domain_id,
-            run_id,
-            crate::visibility_reader::SqlDialect::MySql,
-        );
-        Ok(self
-            .visibility_query(&sql, &params, true)?
-            .into_iter()
-            .next())
-    }
-}
-
-impl MySqlTaskStore {
-    fn visibility_query(
-        &self,
-        sql: &str,
-        params: &[crate::visibility_reader::SqlParam],
-        closed: bool,
-    ) -> std::result::Result<
-        Vec<crate::visibility_reader::VisibilityRow>,
-        crate::visibility_reader::VisibilityError,
-    > {
-        use crate::visibility_reader::{SqlParam, VisibilityError, VisibilityRow};
-        let internal = |m: String| VisibilityError::Internal(m);
-        // Go visibility reads use DB shard 0 (domain sharding is not applied
-        // to the single visibility database).
-        let index = mysql_database_index(0, self.pools.len());
-        let mut connection = self.pools[index]
-            .checkout()
-            .map_err(|e| internal(format!("{e:?}")))?;
-        let discard = connection.discard.clone();
-        let values: Vec<mysql::Value> = params
-            .iter()
-            .map(|p| match p {
-                SqlParam::Text(s) => mysql::Value::from(s.as_str()),
-                SqlParam::Int(i) | SqlParam::TimeUs(i) => mysql::Value::from(*i),
-                SqlParam::Int32(i) => mysql::Value::from(*i),
-            })
-            .collect();
-        let rows: Vec<mysql::Row> = connection
-            .exec(sql, mysql::Params::Positional(values))
-            .map_err(|e| internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
-        rows.into_iter()
-            .map(|mut row| {
-                fn cell<T: mysql::prelude::FromValue>(
-                    row: &mut mysql::Row,
-                    i: usize,
-                ) -> std::result::Result<T, VisibilityError> {
-                    row.take_opt::<T, usize>(i)
-                        .ok_or_else(|| VisibilityError::Internal(format!("missing column {i}")))?
-                        .map_err(|e| VisibilityError::Internal(format!("column {i}: {e}")))
-                }
-                let mut out = VisibilityRow {
-                    workflow_id: cell::<String>(&mut row, 0)?.trim().to_string(),
-                    run_id: cell::<String>(&mut row, 1)?.trim().to_string(),
-                    start_time_us: cell(&mut row, 2)?,
-                    execution_time_us: cell(&mut row, 3)?,
-                    workflow_type_name: cell(&mut row, 4)?,
-                    memo: cell::<Option<Vec<u8>>>(&mut row, 5)?.unwrap_or_default(),
-                    encoding: cell(&mut row, 6)?,
-                    is_cron: cell::<Option<bool>>(&mut row, 7)?.unwrap_or(false),
-                    update_time_us: cell::<Option<i64>>(&mut row, 8)?.unwrap_or(0),
-                    shard_id: cell::<Option<i32>>(&mut row, 9)?.unwrap_or(0),
-                    ..Default::default()
-                };
-                if closed {
-                    out.close_time_us = cell(&mut row, 10)?;
-                    out.close_status = cell(&mut row, 11)?;
-                    out.history_length = cell(&mut row, 12)?;
-                }
-                Ok(out)
-            })
-            .collect()
     }
 }
