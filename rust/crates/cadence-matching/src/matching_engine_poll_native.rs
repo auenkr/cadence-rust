@@ -213,6 +213,7 @@ impl NativeMatchingEngine {
             ),
         };
         let active = context.domain_active(&request.domain_id)?;
+        eprintln!("POLL-TRACE decision active={} list={:?}", active, list.name);
         let _standby_wait = (!active).then(|| lifecycle.begin());
         let query_lifecycle = lifecycle.clone();
         let mut response = tokio::select! {
