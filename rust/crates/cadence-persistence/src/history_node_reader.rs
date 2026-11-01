@@ -95,7 +95,7 @@ fn deserialize_token(
 
 /// Go `serializeToken`.
 fn serialize_token(token: &mut HistoryPagingToken) -> Result<Option<Vec<u8>>, HistoryReadError> {
-    if token.store_token.as_ref().map_or(true, Vec::is_empty) {
+    if token.store_token.as_ref().is_none_or(Vec::is_empty) {
         if token.current_range_index == token.final_range_index {
             return Ok(None);
         }
