@@ -1418,6 +1418,8 @@ pub struct GetWorkflowExecutionHistoryRequest {
 pub struct GetWorkflowExecutionHistoryResponse {
     #[serde(rename = "history", default, skip_serializing_if = "Option::is_none")]
     pub history: Option<History>,
+    #[serde(rename = "rawHistory", default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_history: Vec<crate::types::DataBlob>,
     #[serde(
         rename = "nextPageToken",
         default = "b64_token_default",

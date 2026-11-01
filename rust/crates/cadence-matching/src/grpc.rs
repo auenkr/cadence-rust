@@ -236,6 +236,7 @@ fn hook_operation(
     let op = match (method.as_str(), route) {
         ("POST", "/api/v1/workflows/start") => "StartWorkflowExecution",
         ("POST", "/api/v1/workflows/signal-with-start") => "SignalWithStartWorkflowExecution",
+        ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
         ("POST", "/api/v1/workflows/terminate") => "TerminateWorkflowExecution",
@@ -1288,6 +1289,36 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         &self,
         request: tonic::Request<p::GetWorkflowExecutionHistoryRequest>,
     ) -> Result<Response<p::GetWorkflowExecutionHistoryResponse>, Status> {
+        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("GetWorkflowExecutionHistory")) {
+            let r = request.get_ref();
+            let input = st::GetWorkflowExecutionHistoryRequest {
+                domain: r.domain.clone(),
+                execution: r.workflow_execution.clone().map(cv::execution),
+                maximum_page_size: r.page_size,
+                next_page_token: r.next_page_token.clone(),
+                wait_for_new_event: r.wait_for_new_event,
+                history_event_filter_type: cv::enum_in(r.history_event_filter_type, enums::HistoryEventFilterType::from_i32)?,
+                skip_archival: r.skip_archival,
+                query_consistency_level: cv::enum_in(r.query_consistency_level, enums::QueryConsistencyLevel::from_i32)?,
+            };
+            let v: st::GetWorkflowExecutionHistoryResponse = self.call_with_headers(
+                Method::POST, "/api/v1/workflows/history", &input,
+                &[],
+            ).await?;
+            return Ok(Response::new(p::GetWorkflowExecutionHistoryResponse {
+                history: v.history.map(cv::history).transpose()?,
+                raw_history: v.raw_history.into_iter().map(|b| p::DataBlob {
+                    encoding_type: match b.encoding_type {
+                        Some(enums::EncodingType::ThriftRW) => 1,
+                        Some(enums::EncodingType::JSON) => 2,
+                        _ => 0,
+                    },
+                    data: b.data,
+                }).collect(),
+                next_page_token: v.next_page_token,
+                archived: v.archived,
+            }));
+        }
         let r = request.into_inner();
         let executions = self.domain(&r.domain)?;
         let execution = r
@@ -1328,7 +1359,14 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             {
                 return Ok(Response::new(p::GetWorkflowExecutionHistoryResponse {
                     history: v.history.map(cv::history).transpose()?,
-                    raw_history: Vec::new(),
+                    raw_history: v.raw_history.into_iter().map(|b| p::DataBlob {
+                        encoding_type: match b.encoding_type {
+                            Some(enums::EncodingType::ThriftRW) => 1,
+                            Some(enums::EncodingType::JSON) => 2,
+                            _ => 0,
+                        },
+                        data: b.data,
+                    }).collect(),
                     next_page_token: v.next_page_token,
                     archived: v.archived,
                 }));
@@ -2239,7 +2277,7 @@ mod workflow_hook_tests {
         fn serves(&self, operation: &str) -> bool {
             matches!(
                 operation,
-                "StartWorkflowExecution" | "SignalWithStartWorkflowExecution"
+                "StartWorkflowExecution" | "SignalWithStartWorkflowExecution" | "GetWorkflowExecutionHistory"
             )
         }
 
@@ -2273,6 +2311,19 @@ mod workflow_hook_tests {
         Frontend { state }
     }
 
+    fn valid_start_request() -> p::StartWorkflowExecutionRequest {
+        p::StartWorkflowExecutionRequest {
+            domain: "sample-domain".into(),
+            workflow_id: "sample-workflow".into(),
+            workflow_type: Some(p::WorkflowType { name: "sample-type".into() }),
+            task_list: Some(p::TaskList { name: "sample-task-list".into(), ..Default::default() }),
+            execution_start_to_close_timeout: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
+            task_start_to_close_timeout: Some(prost_types::Duration { seconds: 10, nanos: 0 }),
+            request_id: "request-id".into(),
+            ..Default::default()
+        }
+    }
+
     #[tokio::test]
     async fn synchronous_start_operations_use_workflow_hook_context_and_run_id() {
         let api = Arc::new(RecordingApi {
@@ -2286,9 +2337,7 @@ mod workflow_hook_tests {
             "x-cadence-caller".to_owned(),
             "sdk-worker".to_owned(),
         )]);
-        let start = frontend.start_workflow_execution(tonic::Request::new(
-            p::StartWorkflowExecutionRequest::default(),
-        ));
+        let start = frontend.start_workflow_execution(tonic::Request::new(valid_start_request()));
         let start_result = GRPC_CALLER
             .scope((headers.clone(), Some(deadline)), start)
             .await
@@ -2298,7 +2347,7 @@ mod workflow_hook_tests {
 
         let signal_start = frontend.signal_with_start_workflow_execution(tonic::Request::new(
             p::SignalWithStartWorkflowExecutionRequest {
-                start_request: Some(p::StartWorkflowExecutionRequest::default()),
+                start_request: Some(valid_start_request()),
                 ..Default::default()
             },
         ));
@@ -2330,10 +2379,77 @@ mod workflow_hook_tests {
         let frontend = frontend(api.clone());
         let result = frontend
             .start_workflow_execution(tonic::Request::new(
-                p::StartWorkflowExecutionRequest::default(),
+                valid_start_request(),
             ))
             .await;
         let error = result.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("hook failure"));
+        assert_eq!(api.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn history_hook_preserves_binary_fields_and_caller_context() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::json!({
+                "history": {"events": []},
+                "rawHistory": [{"EncodingType": 1, "Data": "AAE="}],
+                "nextPageToken": "AgM=",
+                "archived": true
+            }),
+            error: false,
+        });
+        let frontend = frontend(api.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let headers = std::collections::HashMap::from([(
+            "x-cadence-caller".to_owned(), "sdk-worker".to_owned(),
+        )]);
+        let request = p::GetWorkflowExecutionHistoryRequest {
+            domain: "sample-domain".into(),
+            workflow_execution: Some(p::WorkflowExecution {
+                workflow_id: "sample-workflow".into(), run_id: "sample-run".into(),
+            }),
+            page_size: 23,
+            next_page_token: vec![4, 5],
+            skip_archival: true,
+            ..Default::default()
+        };
+        let future = frontend.get_workflow_execution_history(tonic::Request::new(request));
+        let response = GRPC_CALLER.scope((headers, Some(deadline)), future).await.unwrap().into_inner();
+        assert_eq!(response.raw_history.len(), 1);
+        assert_eq!(response.raw_history[0].encoding_type, 2);
+        assert_eq!(response.raw_history[0].data, vec![0, 1]);
+        assert_eq!(response.next_page_token, vec![2, 3]);
+        assert!(response.archived);
+        assert!(response.history.is_some());
+        let calls = api.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "GetWorkflowExecutionHistory");
+        assert_eq!(calls[0].1["domain"], "sample-domain");
+        assert_eq!(calls[0].1["maximumPageSize"], 23);
+        assert_eq!(calls[0].1["nextPageToken"], "BAU=");
+        assert_eq!(calls[0].2.headers["x-cadence-caller"], "sdk-worker");
+        assert_eq!(calls[0].2.deadline, Some(deadline));
+    }
+
+    #[tokio::test]
+    async fn history_hook_converts_frontend_errors_to_grpc_status() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::Value::Null,
+            error: true,
+        });
+        let frontend = frontend(api.clone());
+        let error = frontend.get_workflow_execution_history(tonic::Request::new(
+            p::GetWorkflowExecutionHistoryRequest {
+                domain: "sample-domain".into(),
+                workflow_execution: Some(p::WorkflowExecution {
+                    workflow_id: "sample-workflow".into(), run_id: "sample-run".into(),
+                }),
+                ..Default::default()
+            },
+        )).await.unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("hook failure"));
         assert_eq!(api.calls.lock().unwrap().len(), 1);
