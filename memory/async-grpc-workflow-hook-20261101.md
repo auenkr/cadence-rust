@@ -19,7 +19,10 @@ Tests added to `workflow_hook_tests` cover both operation names, wrapper and nes
 - First CI conclusion: failed because the test looked for a `data` child on the serialized memo bytes; the model serializes byte vectors as base64 JSON strings. The second CI attempt confirmed the full values are base64 strings (the only failure was comparing against JSON arrays); assertions now check those full strings. Clippy and formatting completed successfully in both runs. The workspace formatter's patch was inspected, and its `grpc.rs` hunks were applied without taking unrelated hunks.
 - Corrected CI run: https://github.com/auenkr/cadence-rust/actions/runs/41332389967
 - Corrected tested head SHA: `e2b0fa1093afd7ddeb00158af1389f289b47ceaf`.
-- Corrected CI conclusion: success (format check, Clippy, and all `cadence-matching` tests passed). The CI formatter artifact contained only two formatting hunks in this file; both were applied locally. That formatting-only follow-up is being revalidated on CI.
+- Corrected CI conclusion: success (format check, Clippy, and all `cadence-matching` tests passed). The CI formatter artifact contained only two formatting hunks in this file; both were applied locally and revalidated below.
+- Final formatting follow-up CI run: https://github.com/auenkr/cadence-rust/actions/runs/41333008392
+- Final tested head SHA: `3fd0266d9020c4b308f9518db304b1a2d792dcf7`.
+- Final CI conclusion: success (format check, Clippy, and all `cadence-matching` tests passed); the formatter patch artifact was empty.
 
 ## Limitation
 
