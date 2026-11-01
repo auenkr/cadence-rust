@@ -5,6 +5,8 @@
 //! `encoding/json`: `time.Time` is RFC3339, `time.Duration` is nanoseconds and
 //! schedule enums are their string names.
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::{
     enums::{ScheduleCatchUpPolicy, ScheduleOverlapPolicy},
     errors::{CadenceError, EntityNotExistsError, InternalServiceError},
