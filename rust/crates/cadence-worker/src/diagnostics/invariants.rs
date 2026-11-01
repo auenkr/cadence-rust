@@ -303,3 +303,102 @@ mod tests_timeout {
         assert_eq!(heartbeat_root_cause(5, "START_TO_CLOSE", true), None);
     }
 }
+
+// ---- antipatterns: burst detection ----
+pub const ACTIVITY_BURST_WINDOW_IN_SECONDS: i64 = 10;
+pub const ACTIVITY_BURST_COUNT_THRESHOLD: usize = 50;
+
+/// One detected burst span (indexes are event ids and timestamps in Unix nanos).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Burst {
+    pub first_event_id: i64,
+    pub last_event_id: i64,
+    pub event_count: usize,
+    pub window_start_nanos: i64,
+    pub window_end_nanos: i64,
+}
+
+/// Port of `detectActivityScheduleBursts`; input is `(event_id, timestamp_nanos)`
+/// for ActivityTaskScheduled events that have a timestamp.
+pub fn detect_activity_schedule_bursts(events: &[(i64, i64)]) -> Vec<Burst> {
+    let mut scheduled: Vec<(i64, i64)> = events.to_vec();
+    if scheduled.len() < ACTIVITY_BURST_COUNT_THRESHOLD {
+        return Vec::new();
+    }
+    scheduled.sort_by_key(|e| e.1); // stable
+    let window = ACTIVITY_BURST_WINDOW_IN_SECONDS * 1_000_000_000;
+    let mk = |s: usize, e: usize| Burst {
+        first_event_id: scheduled[s].0,
+        last_event_id: scheduled[e].0,
+        event_count: e - s + 1,
+        window_start_nanos: scheduled[s].1,
+        window_end_nanos: scheduled[e].1,
+    };
+    let mut bursts = Vec::new();
+    let mut pending: Option<(usize, usize)> = None;
+    let mut left = 0usize;
+    for right in 0..scheduled.len() {
+        while scheduled[right].1 - scheduled[left].1 > window {
+            left += 1;
+        }
+        if right - left + 1 < ACTIVITY_BURST_COUNT_THRESHOLD {
+            continue;
+        }
+        if let Some((_, pe)) = pending.as_mut() {
+            if left <= *pe {
+                *pe = right;
+                continue;
+            }
+        }
+        if let Some((ps, pe)) = pending {
+            bursts.push(mk(ps, pe));
+        }
+        pending = Some((left, right));
+    }
+    if let Some((ps, pe)) = pending {
+        bursts.push(mk(ps, pe));
+    }
+    bursts
+}
+
+#[cfg(test)]
+mod tests_antipatterns {
+    use super::*;
+
+    const SEC: i64 = 1_000_000_000;
+
+    #[test]
+    fn below_threshold_has_no_burst() {
+        let ev: Vec<_> = (0..49).map(|i| (i + 1, i)).collect();
+        assert!(detect_activity_schedule_bursts(&ev).is_empty());
+    }
+
+    #[test]
+    fn single_burst_and_sustained_burst_merge() {
+        let ev: Vec<_> = (0..50).map(|i| (i + 1, i * SEC / 10)).collect();
+        let b = detect_activity_schedule_bursts(&ev);
+        assert_eq!(b.len(), 1);
+        assert_eq!((b[0].first_event_id, b[0].last_event_id, b[0].event_count), (1, 50, 50));
+        // Sustained: 200 events 0.1s apart, longer than the 10s window, one span.
+        let ev: Vec<_> = (0..200).map(|i| (i + 1, i * SEC / 10)).collect();
+        let b = detect_activity_schedule_bursts(&ev);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].event_count, 200);
+    }
+
+    #[test]
+    fn separated_bursts_are_distinct() {
+        let mut ev: Vec<_> = (0..50).map(|i| (i + 1, i)).collect();
+        ev.extend((0..50).map(|i| (100 + i, 100 * SEC + i)));
+        let b = detect_activity_schedule_bursts(&ev);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[1].first_event_id, 100);
+    }
+
+    #[test]
+    fn sparse_events_do_not_burst() {
+        let ev: Vec<_> = (0..100).map(|i| (i + 1, i * SEC)).collect();
+        // 11 events fit in a 10s window: below 50.
+        assert!(detect_activity_schedule_bursts(&ev).is_empty());
+    }
+}
