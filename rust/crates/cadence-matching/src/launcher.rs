@@ -600,8 +600,9 @@ async fn abort_and_join_frontend_tchannel(
     match task.await {
         Ok(()) => Ok(()),
         Err(error) if error.is_cancelled() => Ok(()),
-        Err(error) => Err(anyhow::Error::new(error)
-            .context("joining Frontend TChannel listener task")),
+        Err(error) => {
+            Err(anyhow::Error::new(error).context("joining Frontend TChannel listener task"))
+        }
     }
 }
 
@@ -615,10 +616,8 @@ fn spawn_frontend_tchannel_listener(
 ) {
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
-        let result = crate::tchannel::serve_frontend_with_ringpop_listener(
-            listener, state, ringpop,
-        )
-        .await;
+        let result =
+            crate::tchannel::serve_frontend_with_ringpop_listener(listener, state, ringpop).await;
         let _ = done_tx.send(result);
     });
     (task, done_rx)
@@ -1995,17 +1994,17 @@ async fn run_with_lifecycle(
             // API hook, and deliberately omit the Matching handler.
             let (mut frontend_tchannel_task, mut frontend_tchannel_done) =
                 if let (Some(listener), Some(provider)) = (
-                frontend_tchannel_listener.take(),
-                frontend_ringpop_provider.as_ref(),
-            ) {
-                let handler = provider.handler();
-                let ringpop_state = tchannel_state.clone();
-                let (task, done) =
-                    spawn_frontend_tchannel_listener(listener, ringpop_state, handler);
-                (Some(task), Some(done))
-            } else {
-                (None, None)
-            };
+                    frontend_tchannel_listener.take(),
+                    frontend_ringpop_provider.as_ref(),
+                ) {
+                    let handler = provider.handler();
+                    let ringpop_state = tchannel_state.clone();
+                    let (task, done) =
+                        spawn_frontend_tchannel_listener(listener, ringpop_state, handler);
+                    (Some(task), Some(done))
+                } else {
+                    (None, None)
+                };
             if let Some(provider) = frontend_ringpop_provider.as_ref() {
                 let start =
                     crate::matching_peer_provider::MatchingPeerProvider::start(provider.as_ref())
@@ -2380,8 +2379,7 @@ async fn run_with_lifecycle(
                 if let Err(error) =
                     abort_and_join_frontend_tchannel(&mut frontend_tchannel_task).await
                 {
-                    serving_shutdown_errors
-                        .push(format!("stopping Frontend TChannel: {error:#}"));
+                    serving_shutdown_errors.push(format!("stopping Frontend TChannel: {error:#}"));
                 }
                 if let Some(task) = matching_tchannel_task.take() {
                     task.abort();
@@ -2549,7 +2547,9 @@ mod frontend_tchannel_task_tests {
         // This wrapper mirrors the serving JoinSet waiter. Cancelling it drops
         // only the result receiver; the separately owned listener remains
         // bound until the lifecycle owner explicitly aborts and joins it.
-        let wrapper = tokio::spawn(async move { let _ = done.await; });
+        let wrapper = tokio::spawn(async move {
+            let _ = done.await;
+        });
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         wrapper.abort();
         let _ = wrapper.await;
