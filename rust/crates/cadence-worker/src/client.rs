@@ -20,6 +20,7 @@ use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 pub struct CadenceClient {
     inner: WorkerApiClient<Channel>,
     frontend: WorkflowApiClient<Channel>,
+    domain: cadence_proto::api::domain_api_client::DomainApiClient<Channel>,
 }
 
 impl CadenceClient {
@@ -40,9 +41,10 @@ impl CadenceClient {
         Ok(Self::from_channel(channel))
     }
 
-    fn from_channel(channel: Channel) -> Self {
+    pub fn from_channel(channel: Channel) -> Self {
         Self {
             inner: WorkerApiClient::new(channel.clone()),
+            domain: cadence_proto::api::domain_api_client::DomainApiClient::new(channel.clone()),
             frontend: WorkflowApiClient::new(channel),
         }
     }
@@ -50,6 +52,10 @@ impl CadenceClient {
     /// Obtain an owned generated client for poller calls.
     pub fn worker_api(&self) -> WorkerApiClient<Channel> {
         self.inner.clone()
+    }
+
+    pub fn domain_api(&self) -> cadence_proto::api::domain_api_client::DomainApiClient<Channel> {
+        self.domain.clone()
     }
 
     pub fn workflow_api(&self) -> WorkflowApiClient<Channel> {

@@ -17,6 +17,7 @@ pub mod failovermanager;
 pub mod indexer;
 pub mod launcher;
 pub mod parentclosepolicy;
+pub mod parentclosepolicy_processor;
 pub mod replicator;
 pub mod runtime;
 pub mod scanner;
