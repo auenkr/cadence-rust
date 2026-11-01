@@ -2541,7 +2541,7 @@ mod frontend_tchannel_task_tests {
                 body: b"{}".to_vec(),
             })
         });
-        let (mut listener_task, done) =
+        let (listener_task, done) =
             spawn_frontend_tchannel_listener(listener, handlers::AppState::default(), handler);
 
         // This wrapper mirrors the serving JoinSet waiter. Cancelling it drops
