@@ -8,6 +8,7 @@ pub mod grpc_tls;
 pub mod grpc_shard;
 pub mod handlers;
 pub mod history_forward;
+pub mod matching_client;
 pub mod frontend_lifecycle;
 pub mod ringpop_discovery;
 pub mod ringpop_tchannel;
