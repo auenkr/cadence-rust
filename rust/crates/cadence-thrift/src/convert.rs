@@ -9,7 +9,7 @@ use cadence_api::admin::{
     DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
     GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
     GetDomainIsolationGroupsResponse, GetDomainReplicationMessagesRequest,
-    GetDomainReplicationMessagesResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
+    GetDomainReplicationMessagesResponse, GetDynamicConfigRequest, GetDynamicConfigResponse, GetReplicationMessagesRequest, ReplicationTaskInfo, ReplicationToken, GetDLQReplicationMessagesRequest,
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
@@ -1510,6 +1510,16 @@ impl ToThrift for GetReplicationMessagesResponse {
 impl ToThrift for GetDLQReplicationMessagesResponse {
     fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.olist(10,&self.replication_tasks); f.finish() }
 }
+impl ToThrift for ReplicationToken { fn to_thrift(&self)->Struct {let mut f=Fields::new();f.oi32(10,Some(self.shard_id));f.oi64(20,Some(self.last_retrieved_message_id));f.oi64(30,Some(self.last_processed_message_id));f.finish()} }
+impl FromThrift for ReplicationToken { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{shard_id:s.opt_i32(10)?.unwrap_or_default(),last_retrieved_message_id:s.opt_i64(20)?.unwrap_or_default(),last_processed_message_id:s.opt_i64(30)?.unwrap_or_default()})} }
+impl ToThrift for GetReplicationMessagesRequest { fn to_thrift(&self)->Struct {let mut f=Fields::new();f.olist(10,&self.tokens);f.sstr(20,&self.cluster_name);f.finish()} }
+impl FromThrift for GetReplicationMessagesRequest { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{tokens:s.opt_list(10)?.unwrap_or_default(),cluster_name:s.req_string(20,"")?})} }
+impl ToThrift for GetDLQReplicationMessagesRequest { fn to_thrift(&self)->Struct {let mut f=Fields::new();f.olist(10,&self.task_infos);f.finish()} }
+impl FromThrift for GetDLQReplicationMessagesRequest { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{task_infos:s.opt_list(10)?.unwrap_or_default()})} }
+impl ToThrift for ReplicationTaskInfo { fn to_thrift(&self)->Struct {let mut f=Fields::new();f.sstr(10,&self.domain_id);f.ostr(20,&self.workflow_execution.as_ref().map(|x|x.workflow_id.clone()));f.ostr(30,&self.workflow_execution.as_ref().map(|x|x.run_id.clone()));f.fields.push((40,Value::I16(self.task_type as i16)));f.fields.push((50,Value::I64(self.task_id)));f.fields.push((60,Value::I64(self.version)));f.fields.push((70,Value::I64(self.first_event_id)));f.fields.push((80,Value::I64(self.next_event_id)));f.fields.push((90,Value::I64(self.scheduled_id)));f.finish()} }
+impl FromThrift for ReplicationTaskInfo { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{let t=match s.get(40){None=>0,Some(Value::I16(v))=>i32::from(*v),Some(v)=>return Err(crate::protocol::Error::Invalid(format!("field 40: expected i16, got {v:?}")))};let wf=s.opt_string(20)?;let run=s.opt_string(30)?;Ok(Self{domain_id:s.req_string(10,"")?,workflow_execution:if wf.is_some()||run.is_some(){Some(WorkflowExecution{workflow_id:wf.unwrap_or_default(),run_id:run.unwrap_or_default()})}else{None},task_type:t,task_id:s.opt_i64(50)?.unwrap_or_default(),version:s.opt_i64(60)?.unwrap_or_default(),first_event_id:s.opt_i64(70)?.unwrap_or_default(),next_event_id:s.opt_i64(80)?.unwrap_or_default(),scheduled_id:s.opt_i64(90)?.unwrap_or_default()})} }
+impl FromThrift for GetReplicationMessagesResponse { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{let mut out=std::collections::HashMap::new();if let Some(Value::Map(entries))=s.get(10){for (k,v) in entries{let id=match k{Value::I32(x)=>*x,_=>return Err(crate::protocol::Error::Invalid("messagesByShard key is not i32".into()))};let val=match v{Value::Struct(x)=>ReplicationMessages::from_thrift(x)?,_=>return Err(crate::protocol::Error::Invalid("messagesByShard value is not struct".into()))};out.insert(id,val);}}Ok(Self{messages_by_shard:out})} }
+impl FromThrift for GetDLQReplicationMessagesResponse { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{replication_tasks:s.opt_list(10)?.unwrap_or_default()})} }
 
 impl FromThrift for GetDomainReplicationMessagesRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
