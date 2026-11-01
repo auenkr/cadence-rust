@@ -45,3 +45,13 @@ Status: steps 1-4 and parentclosepolicy workflow done. CI green: https://github.
 - Remaining and NOT started (module stays NotPorted in startup_plan):
   - shardscanner scanner/fixer workflows (executions concrete/current, timers): need workflow.Go-style concurrent coroutines + self-signal channels in the SDK, plus the aggregators and 8 query handlers.
   - All scanner ACTIVITIES (tasklist scavenger, history scavenger, scan/fix shard, config/emit-metrics, corrupted keys) need persistence access (task manager, history manager, execution manager, blobstore); the worker crate currently talks to the cluster only over gRPC, so a persistence factory wired from service config is a prerequisite.
+
+## Step 4c: domaindeprecation (done, CI run 41293164627 green at 34c20e2d6)
+- domaindeprecation/workflow.rs: DomainDeprecationWorkflow on the SDK (activity options and retry policy equal to Go, force skips the poller check, child BatchWorkflowV2 with Go ids/timeouts, 3 attempts with visibility sleep, open-workflow check). Child id uses a deterministic UUID derived from run id and attempt because the Rust runtime matches child decisions by workflow id (Go uses uuid.New(); a Go-started in-flight deprecation replayed by Rust would not match its recorded child id).
+- domaindeprecation/activity.rs: 4 activities over a `Backend` trait + gRPC frontend backend (DescribeDomain, UpdateDomain with update_mask, DeprecateDomain, CountWorkflowExecutions, remote GetTaskListsByDomain). Non-retryable reasons identical to Go.
+- service.rs: `start_domain_deprecation` (always on, as in Go) on cadence-system / domain-deprecation-tasklist; also registers batcher workflows+activities there (Go gets them from the SDK global registry because the child runs on the same task list). Added `spawn_worker`, `batcher_backend` helpers.
+
+## Remaining step-4 status (not started)
+- scheduler: needs a cron (standard 5-field, robfig semantics) implementation, Go-JSON-compatible serde for types.Schedule* / StartWorkflowExecutionRequest / time.Time, workflow (selector over timer, watcher activity, 5 signal channels, local activities processScheduleFire), watchWorkflowActivity and the per-domain WorkerManager (client_worker.go). No coroutines are required (poll_fn selector is enough).
+- failovermanager: workflows + activities (frontend/admin gRPC); Go rebalance/failover v2 use workflow.Go; coroutine support still missing in sdk.
+- archiver: workflow uses workflow.Go, buffered channels, selector and a local activity; activities need persistence (DeleteHistoryBranch) and archiver providers (filestore/gcloud/s3), so it depends on the persistence factory.
