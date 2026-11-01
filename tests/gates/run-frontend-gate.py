@@ -135,15 +135,21 @@ status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
     start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', 'mysql', 'start', '--auto-setup', '--services', 'history,worker'])
-    record('go-history-listening', wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker'))
+    history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker')
+    record('go-history-listening', history_ready)
+    if not history_ready:
+        raise SystemExit(1)
+    # Matching opens gRPC only after Ringpop bootstrap. Launch its Frontend
+    # seed before waiting for Matching readiness so both can join the ring.
     start('rust-matching', rust_matching())
-    record('rust-matching-listening', wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching'))
     start('rust-frontend', rust_frontend(), env=frontend_env)
+    matching_ready = wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching')
+    record('rust-matching-listening', matching_ready)
     fe_t = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend')
     fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
     record('rust-frontend-tchannel-listening', fe_t)
     record('rust-frontend-grpc-listening', fe_g)
-    if not (fe_t and fe_g):
+    if not (matching_ready and fe_t and fe_g):
         raise SystemExit(1)
     time.sleep(20)  # ring convergence
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
