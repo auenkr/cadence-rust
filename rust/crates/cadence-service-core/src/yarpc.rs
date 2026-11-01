@@ -169,6 +169,40 @@ fn require_domain_thrift(
         .map_err(|e| AppError::entity_not_exists(e.message))
 }
 
+/// Resolve the domain UUID History requests are keyed by (Go
+/// `domainCache.GetDomainID`).
+fn forward_domain_id(state: &AppState, domain: &str) -> Result<String, AppError> {
+    if domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
+    let metadata = state
+        .domain_manager
+        .describe(&DescribeDomainRequest {
+            name: Some(domain.to_string()),
+            uuid: None,
+        })
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    Ok(metadata.domain_info.unwrap_or_default().uuid)
+}
+
+fn forward_error(error: crate::history_forward::ForwardError) -> AppError {
+    use crate::history_forward::ForwardError as F;
+    match error {
+        F::NotFound(m) => AppError::entity_not_exists(m),
+        F::AlreadyCompleted(m) => AppError::workflow_already_completed(m),
+        F::AlreadyStarted(e) => AppError {
+            exc_name: "WorkflowExecutionAlreadyStartedError",
+            value: e.to_thrift(),
+            message: e.message.clone(),
+        },
+        F::BadRequest(m) => AppError::bad_request(m),
+        F::Busy(m) => AppError::busy(m),
+        F::Internal(m) => AppError::internal(m),
+    }
+}
+
 fn require_task_domain_thrift(state: &AppState, bytes: &[u8]) -> Result<(), AppError> {
     let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(bytes)
         .map_err(|_| AppError::bad_request("Invalid TaskToken.".to_string()))?;
@@ -219,6 +253,14 @@ async fn handle_start(state: &AppState, body: &Struct) -> HandlerResult {
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::validate_start_workflow_execution_request(Some(&req), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        return forward
+            .start(&domain_id, &req)
+            .await
+            .map(|resp| wrap_success(&resp))
+            .map_err(forward_error);
+    }
     match executions.start(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::StartError::AlreadyStarted(e)) => Err(AppError {
@@ -1070,6 +1112,14 @@ async fn handle_signal(state: &AppState, body: &Struct) -> HandlerResult {
     }
     validation::check_execution(req.workflow_execution.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        forward
+            .signal(&domain_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     mutation_to_thrift(executions.signal(&req))
 }
 
@@ -1081,6 +1131,14 @@ async fn handle_signal_with_start(state: &AppState, body: &Struct) -> HandlerRes
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::validate_signal_with_start_request(Some(&req), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        return forward
+            .signal_with_start(&domain_id, &req)
+            .await
+            .map(|resp| wrap_success(&resp))
+            .map_err(forward_error);
+    }
     match executions.signal_with_start(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(cadence_persistence::StartError::AlreadyStarted(e)) => Err(AppError {
@@ -1102,6 +1160,14 @@ async fn handle_terminate(state: &AppState, body: &Struct) -> HandlerResult {
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::check_execution(req.workflow_execution.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        forward
+            .terminate(&domain_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match executions.terminate(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(mutation_error(e)),
@@ -1116,6 +1182,14 @@ async fn handle_request_cancel(state: &AppState, body: &Struct) -> HandlerResult
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::check_execution(req.workflow_execution.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        forward
+            .request_cancel(&domain_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match executions.request_cancel(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(mutation_error(e)),

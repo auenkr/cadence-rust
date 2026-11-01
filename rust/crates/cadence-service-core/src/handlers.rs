@@ -87,6 +87,9 @@ pub struct AppState {
     /// Outbound History API channel used by Frontend Admin operations. The
     /// configured Go History service remains the source of queue state.
     pub history_admin_channel: Option<tonic::transport::Channel>,
+    /// Workflow API forwarding to History (Go Frontend never mutates
+    /// executions itself). None keeps the embedded in-memory store.
+    pub history_forward: Option<crate::history_forward::HistoryForward>,
     pub grpc_max_message_size: usize,
     /// Frontend readiness and admission state are split so shutdown can first
     /// fail health checks, wait for discovery, and only then reject new RPCs.
@@ -141,6 +144,7 @@ impl Default for AppState {
             current_cluster_name: "cluster0".to_string(),
             cluster_metadata: cadence_common::cluster::Metadata::default(),
             history_admin_channel: None,
+            history_forward: None,
             grpc_max_message_size: 4 * 1024 * 1024,
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),

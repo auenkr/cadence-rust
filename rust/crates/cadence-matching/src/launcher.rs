@@ -809,8 +809,19 @@ async fn run_with_lifecycle(
                 };
                 let peer = format!("http://{host}:{port}");
                 let tls = crate::grpc_tls::client_tls(&history.rpc.tls)?;
-                state.history_admin_channel =
-                    Some(crate::grpc_tls::endpoint_channel(&peer, tls.as_ref())?);
+                let channel = crate::grpc_tls::endpoint_channel(&peer, tls.as_ref())?;
+                if wanted.contains(&service::ServiceName::Frontend) {
+                state.history_forward =
+                    Some(cadence_service_core::history_forward::HistoryForward::new(
+                        std::sync::Arc::new(
+                            cadence_service_core::history_forward::StaticHistoryPeer(
+                                channel.clone(),
+                            ),
+                        ),
+                        state.grpc_max_message_size,
+                    ));
+                }
+                state.history_admin_channel = Some(channel);
             }
             // Keep the registration alive through listener and Matching
             // shutdown. Drop runs on every normal/error return from this
