@@ -23,6 +23,51 @@ pub trait VersionChecker {
     ) -> Result<(), ClientVersionNotSupportedError>;
 }
 
+/// Go `client.NewVersionChecker` supported-client table (highest accepted
+/// client version per implementation).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GoVersionChecker;
+
+fn parse_semver(value: &str) -> Option<(u64, u64, u64)> {
+    let value = value.trim().trim_start_matches('v');
+    let core = value.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().map_or(Some(0), |p| p.parse().ok())?;
+    let patch = parts.next().map_or(Some(0), |p| p.parse().ok())?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+impl VersionChecker for GoVersionChecker {
+    fn client_supported(
+        &self,
+        enabled: bool,
+        client_impl: &str,
+        feature_version: &str,
+    ) -> Result<(), ClientVersionNotSupportedError> {
+        if !enabled || feature_version.is_empty() {
+            return Ok(());
+        }
+        let highest = match client_impl {
+            "uber-go" | "cli" => "1.7.0",
+            "uber-java" => "1.5.0",
+            _ => return Ok(()),
+        };
+        let max = parse_semver(highest).expect("constant version");
+        match parse_semver(feature_version) {
+            Some(version) if version <= max => Ok(()),
+            _ => Err(ClientVersionNotSupportedError {
+                feature_version: feature_version.to_owned(),
+                client_impl: client_impl.to_owned(),
+                supported_versions: format!("<={highest}"),
+            }),
+        }
+    }
+}
+
 pub fn check(
     operation: &str,
     enabled: bool,

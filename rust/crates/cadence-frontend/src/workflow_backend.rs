@@ -624,6 +624,22 @@ pub fn build_workflow_api(
     if let Some(store) = ctx.state.visibility_store.clone() {
         backend = backend.with_visibility_store(store);
     }
-    let handler = crate::handler_workflow::Handler::new(backend).with_domain_lookup(lookup);
+    let version_check_enabled = {
+        let overlay = ctx.state.admin.dynamic_config.clone();
+        let guard = overlay.lock();
+        guard.map_or(false, |overlay| {
+            cadence_persistence::dynamic_config::boolean(
+                overlay.property_values("frontend.enableClientVersionCheck"),
+                None,
+                false,
+            )
+        })
+    };
+    let handler = crate::handler_workflow::Handler::new(backend)
+        .with_domain_lookup(lookup)
+        .with_version_check(
+            version_check_enabled,
+            std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
+        );
     Ok(std::sync::Arc::new(HandlerApi { handler }))
 }
