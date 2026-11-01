@@ -162,6 +162,7 @@ pub fn delete_scheduler(
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum DescribeOnce {
     Done(DescribeScheduleResponse),
     Retry(CadenceError),
