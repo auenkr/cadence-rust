@@ -50,7 +50,7 @@ pub fn run(bin_name: &'static str) -> anyhow::Result<()> {
             }
             let config = load_config(&cli)?;
             config.validate()?;
-            crate::service::WorkerService::default().start()
+            crate::service::WorkerService::default().start(&config)
         }
     }
 }

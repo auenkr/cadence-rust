@@ -41,6 +41,12 @@ impl CadenceClient {
         Ok(Self::from_channel(channel))
     }
 
+    /// Build a client that connects on first use (remote clusters).
+    pub fn connect_lazy(endpoint: impl AsRef<str>) -> anyhow::Result<Self> {
+        let endpoint = Endpoint::from_shared(endpoint.as_ref().to_owned())?;
+        Ok(Self::from_channel(endpoint.connect_lazy()))
+    }
+
     pub fn from_channel(channel: Channel) -> Self {
         Self {
             inner: WorkerApiClient::new(channel.clone()),
