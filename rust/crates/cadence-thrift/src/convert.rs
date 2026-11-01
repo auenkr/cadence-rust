@@ -1322,6 +1322,93 @@ impl ToThrift for MaintainCorruptWorkflowResponse {
     }
 }
 
+impl FromThrift for cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
+    fn to_thrift(&self) -> Struct {
+        // The admin IDL declares shardId as a string.
+        let mut f = Fields::new();
+        f.sstr(10, &self.shard_id.to_string());
+        f.sstr(20, &self.history_addr);
+        f.sstr(40, &self.mutable_state_in_cache);
+        f.sstr(50, &self.mutable_state_in_database);
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::DescribeHistoryHostRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            host_address: s.opt_string(10)?,
+            shard_id_for_host: s.opt_i32(20)?,
+            execution_for_host: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DomainCacheInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, Some(self.num_of_items_in_cache_by_id));
+        f.oi64(20, Some(self.num_of_items_in_cache_by_name));
+        f.finish()
+    }
+}
+
+impl ToThrift for cadence_api::admin::DescribeHistoryHostResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, Some(self.number_of_shards));
+        if !self.shard_ids.is_empty() {
+            f.fields.push((
+                20,
+                Value::List(self.shard_ids.iter().map(|id| Value::I32(*id)).collect()),
+            ));
+        }
+        f.ostruct(30, self.domain_cache.as_ref());
+        f.sstr(40, &self.shard_controller_status);
+        f.sstr(50, &self.address);
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::DescribeShardDistributionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DescribeShardDistributionResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, Some(self.number_of_shards));
+        if let Some(shards) = &self.shards {
+            let mut items: Vec<_> = shards.iter().collect();
+            items.sort_by_key(|(id, _)| **id);
+            f.fields.push((
+                20,
+                Value::Map(
+                    items
+                        .into_iter()
+                        .map(|(id, addr)| (Value::I32(*id), Value::Bytes(addr.as_bytes().to_vec())))
+                        .collect(),
+                ),
+            ));
+        }
+        f.finish()
+    }
+}
+
 impl FromThrift for DomainReplicationConfiguration {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
@@ -2410,8 +2497,11 @@ impl ToThrift for StartWorkflowExecutionAsyncRequest {
 }
 
 impl FromThrift for StartWorkflowExecutionAsyncResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -2438,8 +2528,11 @@ impl ToThrift for SignalWithStartWorkflowExecutionAsyncRequest {
 }
 
 impl FromThrift for SignalWithStartWorkflowExecutionAsyncResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3200,8 +3293,11 @@ impl ToThrift for DeleteScheduleRequest {
 }
 
 impl FromThrift for DeleteScheduleResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3234,8 +3330,11 @@ impl ToThrift for PauseScheduleRequest {
 }
 
 impl FromThrift for PauseScheduleResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3268,8 +3367,11 @@ impl ToThrift for UnpauseScheduleRequest {
 }
 
 impl FromThrift for UnpauseScheduleResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3306,8 +3408,11 @@ impl ToThrift for BackfillScheduleRequest {
 }
 
 impl FromThrift for BackfillScheduleResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3344,8 +3449,11 @@ impl ToThrift for UpdateScheduleRequest {
 }
 
 impl FromThrift for UpdateScheduleResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
@@ -3454,8 +3562,11 @@ impl ToThrift for RespondQueryTaskCompletedRequest {
 }
 
 impl FromThrift for RespondQueryTaskCompletedResponse {
-    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {})
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
     }
 }
 
