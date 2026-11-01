@@ -31,3 +31,7 @@ ListClosedWorkflow, CLI `workflow list --open` over gRPC and TChannel (exit 0), 
    (all ten attempts) and Go History died with `failed to start peer provider ... bootstrap ringpop: join duration of 32.27s exceeded max 30s`
    (logs/go-history-worker.log line ~161). The Rust Frontend does not answer Ringpop join on its TChannel port.
 Artifact `frontend-mixed-gate` (3-day retention) has gate.log, steps.json, per-process logs under logs/.
+
+## Driver lifetime protection
+
+Source audit after master sync: SDK main has a ten-minute request context, but the Python harness waited indefinitely for driver exit and did not register that subprocess for its final cleanup. Added `--sdk-timeout-seconds` (positive integer, default 900), an explicit failed timeout step and driver process-group termination; the driver is now tracked alongside services for exception cleanup. The outer limit allows SDK context expiry and shutdown before diagnosing a hang. This changes only gate supervision, not service behavior. Verified Python syntax using ast.parse and `git diff --check`; no local Go/Cargo or cluster run. Actual mixed execution remains required on Actions. The already-live gate 41327590981 predates this change and was left running.

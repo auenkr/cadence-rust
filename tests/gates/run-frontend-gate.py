@@ -17,7 +17,11 @@ ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True, help='checkout of rust_ref (for rust/config/development.yaml)')
 ap.add_argument('--rust-outbound', choices=['grpc', 'tchannel'], default='grpc')
+ap.add_argument('--sdk-timeout-seconds', type=int, default=900,
+                help='SDK driver wall-clock limit, including restart and shutdown (default: 900)')
 args = ap.parse_args()
+if args.sdk_timeout_seconds <= 0:
+    ap.error('--sdk-timeout-seconds must be positive')
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
 (work / 'config').mkdir(exist_ok=True)
@@ -146,9 +150,15 @@ try:
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
     env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks)}
-    drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env)
+    drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env, start_new_session=True)
+    procs['sdk-driver'] = drv
+    sdk_deadline = time.monotonic() + args.sdk_timeout_seconds
     restarted = False
     while drv.poll() is None:
+        if time.monotonic() >= sdk_deadline:
+            record('sdk-driver-timeout', False, f'exceeded {args.sdk_timeout_seconds}s wall-clock limit')
+            kill('sdk-driver')
+            break
         if (marks / 'restart-request').exists() and not restarted:
             restarted = True
             kill('rust-frontend')
