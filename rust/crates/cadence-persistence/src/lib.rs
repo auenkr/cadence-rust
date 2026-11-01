@@ -14,6 +14,7 @@ pub mod dynamic_config;
 pub mod executions;
 pub mod history_branch;
 pub mod history_reader;
+pub mod visibility_reader;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;

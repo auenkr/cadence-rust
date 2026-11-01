@@ -1483,6 +1483,9 @@ async fn run_with_lifecycle(
             state.history_node_store = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.history_node_store.clone());
+            state.visibility_store = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.visibility_store.clone());
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());

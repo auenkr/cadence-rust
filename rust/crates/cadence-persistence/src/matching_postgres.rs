@@ -1500,3 +1500,97 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
             .collect()
     }
 }
+
+impl crate::visibility_reader::VisibilityStore for PostgresTaskStore {
+    fn select(
+        &self,
+        filter: &crate::visibility_reader::VisibilityFilter,
+    ) -> std::result::Result<
+        Vec<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        let (sql, params) = crate::visibility_reader::build_list_query(
+            filter,
+            crate::visibility_reader::SqlDialect::Postgres,
+        );
+        self.visibility_query(
+            &sql,
+            &params,
+            crate::visibility_reader::is_closed_query(filter),
+        )
+    }
+
+    fn get_closed(
+        &self,
+        domain_id: &str,
+        run_id: &str,
+    ) -> std::result::Result<
+        Option<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        let (sql, params) = crate::visibility_reader::build_get_closed_query(
+            domain_id,
+            run_id,
+            crate::visibility_reader::SqlDialect::Postgres,
+        );
+        Ok(self.visibility_query(&sql, &params, true)?.into_iter().next())
+    }
+}
+
+impl PostgresTaskStore {
+    fn visibility_query(
+        &self,
+        sql: &str,
+        params: &[crate::visibility_reader::SqlParam],
+        closed: bool,
+    ) -> std::result::Result<
+        Vec<crate::visibility_reader::VisibilityRow>,
+        crate::visibility_reader::VisibilityError,
+    > {
+        use crate::visibility_reader::{SqlParam, VisibilityError, VisibilityRow};
+        let internal = |m: String| VisibilityError::Internal(m);
+        let index = database_index(0, self.use_multiple_databases);
+        let mut client = self.pools[index]
+            .checkout()
+            .map_err(|e| internal(format!("{e:?}")))?;
+        let bound: Vec<&(dyn ToSql + Sync)> = params
+            .iter()
+            .map(|p| match p {
+                SqlParam::Text(s) => s as &(dyn ToSql + Sync),
+                SqlParam::Int(i) | SqlParam::TimeUs(i) => i as &(dyn ToSql + Sync),
+                SqlParam::Int32(i) => i as &(dyn ToSql + Sync),
+            })
+            .collect();
+        let rows = client.query(sql, &bound).map_err(|error| {
+            client.poison_if_closed(&error);
+            internal(format!("{:?}", normalize_postgres_error(error)))
+        })?;
+        let err = |e: postgres::Error| VisibilityError::Internal(e.to_string());
+        rows.into_iter()
+            .map(|row| {
+                let mut out = VisibilityRow {
+                    workflow_id: row.try_get::<_, String>(0).map_err(err)?.trim().to_string(),
+                    run_id: row.try_get::<_, String>(1).map_err(err)?.trim().to_string(),
+                    start_time_us: row.try_get(2).map_err(err)?,
+                    execution_time_us: row.try_get(3).map_err(err)?,
+                    workflow_type_name: row.try_get(4).map_err(err)?,
+                    memo: row
+                        .try_get::<_, Option<Vec<u8>>>(5)
+                        .map_err(err)?
+                        .unwrap_or_default(),
+                    encoding: row.try_get(6).map_err(err)?,
+                    is_cron: row.try_get::<_, Option<bool>>(7).map_err(err)?.unwrap_or(false),
+                    update_time_us: row.try_get::<_, Option<i64>>(8).map_err(err)?.unwrap_or(0),
+                    shard_id: row.try_get::<_, Option<i32>>(9).map_err(err)?.unwrap_or(0),
+                    ..Default::default()
+                };
+                if closed {
+                    out.close_time_us = row.try_get(10).map_err(err)?;
+                    out.close_status = row.try_get(11).map_err(err)?;
+                    out.history_length = row.try_get(12).map_err(err)?;
+                }
+                Ok(out)
+            })
+            .collect()
+    }
+}

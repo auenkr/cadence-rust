@@ -39,6 +39,7 @@ pub struct ProductionBackend {
     matching_addr: String,
     pub(crate) history_access: Option<crate::workflow_matching::HistoryAccess>,
     pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
+    pub(crate) visibility: Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -153,6 +154,7 @@ impl ProductionBackend {
             history_addr,
             matching_addr,
             history_access: None,
+            visibility: None,
             domains: None,
         }
     }
@@ -398,6 +400,11 @@ impl ProductionBackend {
             Op::ListTaskListPartitions => self.list_task_list_partitions(&request).await,
             Op::GetTaskListsByDomain => self.get_task_lists_by_domain(&request).await,
             Op::GetWorkflowExecutionHistory => self.get_workflow_execution_history(request).await,
+            Op::ListOpenWorkflowExecutions => self.list_visibility(&request, false).await,
+            Op::ListClosedWorkflowExecutions => self.list_visibility(&request, true).await,
+            Op::ListWorkflowExecutions | Op::ScanWorkflowExecutions | Op::CountWorkflowExecutions => {
+                Err(crate::workflow_visibility::not_supported())
+            }
             other => Err(crate::handler_workflow::unimplemented_operation(other.name()).into()),
         }
     }
@@ -529,6 +536,9 @@ pub fn build_workflow_api(
             store,
             ctx.config.persistence.num_history_shards,
         ));
+    }
+    if let Some(store) = ctx.state.visibility_store.clone() {
+        backend = backend.with_visibility_store(store);
     }
     let handler = crate::handler_workflow::Handler::new(backend).with_domain_lookup(lookup);
     Ok(std::sync::Arc::new(HandlerApi { handler }))

@@ -59,6 +59,8 @@ pub struct ConfiguredMatchingStores {
     /// Frontend history reader over the default store's `history_node` table
     /// (SQL backends only).
     pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
+    /// Frontend `executions_visibility` reader (SQL backends only).
+    pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -224,6 +226,7 @@ pub fn open_configured_default_store(
         );
         return Ok(ConfiguredMatchingStores {
             history_node_store: None,
+            visibility_store: None,
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
             task_store,
@@ -264,6 +267,7 @@ pub fn open_configured_default_store(
                 metadata;
             Ok(ConfiguredMatchingStores {
                 history_node_store: None,
+                visibility_store: None,
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: task_store.clone(),
                 task_store,
@@ -329,6 +333,7 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_node_store: Some(store.clone()),
+                visibility_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
@@ -392,6 +397,7 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_node_store: Some(store.clone()),
+                visibility_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
