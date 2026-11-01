@@ -1,0 +1,9 @@
+# Async request payload framing correction
+
+Source audit found `handler_workflow_async.rs::thrift_payload` emitted unversioned Thrift bytes. Go frontend initializes `thriftrwEncoder` with `codec.NewThriftRWEncoder` and uses it to encode both async request types. `go/common/codec/version0_thriftrw.go::Encode` prefixes byte `0x59`; Decode rejects any other first byte. The Go async consumer uses that decoder for the nested payload. Thus the former Rust payload would be rejected even after a real queue publisher was installed.
+
+Corrected nested async payload framing and extended both request tests to decode after the marker. A literal `[0x59, 0x00]` fixture pins the version and STOP framing for empty optional-field wrappers; those wrappers are serializer fixtures, not valid API requests. Normal request tests retain workflow IDs and original caller-header assertions. No local Cargo/rustfmt/Go commands ran. GitHub Actions validation is pending at initial commit.
+
+The eventual Kafka producer must also encode the OUTER sqlblobs.AsyncRequestMessage using the same versioned codec: `go/common/messaging/kafka/producer_impl.go::getProducerMessage` calls serializeThrift for that message, not JSON or just the nested payload. Set the Kafka key to PartitionKey. The outer message requires pinned fields/type/header/encoding/payload and independent Go-consumer evidence. This patch does not implement publishing or claim runtime compatibility.
+
+Producer selection prerequisites remain: enabled domain config; predefined queue name wins over inline queue type/blob; JSON is the only inline config encoding; broker list is sorted before queue ID construction (`kafka::<topic>/<comma-separated brokers>`); producer cache is by queue ID, TTL five minutes, maximum 100. Kafka supports TLS and SASL plain/sha256/sha512. Port Go errors and acknowledged synchronous publication; do not replace production publishing with a local queue.

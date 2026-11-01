@@ -65,7 +65,11 @@ pub fn encode_async_workflow_request(
 fn thrift_payload<T: ToThrift>(value: &T) -> Vec<u8> {
     let mut writer = Writer::new();
     write_struct(&mut writer, &value.to_thrift());
-    writer.into_bytes()
+    // Go common/codec.ThriftRWEncoder prefixes even nested async request
+    // payloads with its version-0 marker. The Go consumer rejects raw Thrift.
+    let mut payload = vec![0x59];
+    payload.extend(writer.into_bytes());
+    payload
 }
 
 #[cfg(test)]
@@ -73,6 +77,22 @@ mod tests {
     use super::*;
     use cadence_thrift::value::{read_struct, FromThrift};
     use cadence_thrift::Reader;
+
+    #[test]
+    fn async_payload_has_go_versioned_thriftrw_framing() {
+        // Go's version-0 encoder emits 0x59 followed by Thrift STOP for an
+        // empty optional-field struct. This checks framing, not validation.
+        assert_eq!(
+            thrift_payload(&cadence_api::types::StartWorkflowExecutionAsyncRequest::default()),
+            [0x59, 0x00]
+        );
+        assert_eq!(
+            thrift_payload(
+                &cadence_api::service_types::SignalWithStartWorkflowExecutionAsyncRequest::default()
+            ),
+            [0x59, 0x00]
+        );
+    }
 
     #[test]
     fn async_start_matches_go_queue_envelope_and_keeps_original_headers() {
@@ -95,7 +115,8 @@ mod tests {
         assert_eq!(message.encoding, "ThriftRW");
         assert_eq!(message.headers["x-cadence-trace"], b"trace-1");
 
-        let mut reader = Reader::new(&message.payload);
+        assert_eq!(message.payload[0], 0x59);
+        let mut reader = Reader::new(&message.payload[1..]);
         let decoded = cadence_api::types::StartWorkflowExecutionAsyncRequest::from_thrift(
             &read_struct(&mut reader).unwrap(),
         )
@@ -122,5 +143,12 @@ mod tests {
         .unwrap();
         assert_eq!(message.request_type, 1);
         assert_eq!(message.partition_key, "order-18");
+        assert_eq!(message.payload[0], 0x59);
+        let decoded =
+            cadence_api::service_types::SignalWithStartWorkflowExecutionAsyncRequest::from_thrift(
+                &read_struct(&mut Reader::new(&message.payload[1..])).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(decoded.request.unwrap().workflow_id, "order-18");
     }
 }
