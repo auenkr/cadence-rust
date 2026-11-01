@@ -5,9 +5,10 @@ Implementation commits: `5a04cec034517f8a1669b49f4a3660bda82a0a09`,
 `d1a2cdd54e9e9f439742ff6565b9a177ded95499`,
 `898b4a27f2f4d28fb06f83c67835e978359053d2`,
 `4596823884c6c79bd0d7cc58b92b3dd7fff8ada2` (Frontend-only AdminService
-TChannel dispatch), and
-`7b62ddc9ab38fdf9e344f8ec6996afd4213d0963` (Frontend leave test) on
-`t3/frontend-ringpop-lifecycle`.
+TChannel dispatch), `7b62ddc9ab38fdf9e344f8ec6996afd4213d0963` (Frontend
+leave test), `0f4155fef729c74f59af61dc17377d6501dc5085` (CI formatting
+artifact), and `da88b2bf64bb6bc19e12547c787490f3b4b6e1b3` (generated gRPC
+trait import required by existing hook tests) on `t3/frontend-ringpop-lifecycle`.
 
 ## Source and behavior evidence
 
@@ -45,14 +46,21 @@ TChannel dispatch), and
 
 - `git diff --check`: passed before commit; no Cargo, rustfmt, or Go commands
   were run locally.
-- Initial CI runs 41328506551, 41328645787, 41328689458, and 41328957772 were
-  superseded/cancelled after source corrections; none is validation evidence.
+- CI runs 41328506551, 41328645787, 41328689458, 41328957772, and
+  41329239984 were superseded/cancelled after source corrections; none is
+  validation evidence.
+- CI run 41328990185 reached Clippy and failed compiling the existing gRPC
+  workflow-hook test module because its generated trait was not imported. The
+  issue is fixed in `da88b2bf64bb6bc19e12547c787490f3b4b6e1b3`. Its
+  `format-all-patch` artifact was inspected with `git apply --stat` and
+  `git apply --check`, then applied with `git apply`; it formatted the touched
+  launcher code plus two existing hook expressions in `grpc.rs`.
 - Current GitHub Actions `rust-ci.yml` run:
-  https://github.com/auenkr/cadence-rust/actions/runs/41328990185
+  https://github.com/auenkr/cadence-rust/actions/runs/41329314627
   dispatched for `cadence-matching` with `format_all=true` at head
-  `7b62ddc9ab38fdf9e344f8ec6996afd4213d0963`. It was `in_progress` at the
-  latest observation. Retrieve its terminal result and inspect/apply any
-  formatting artifact before treating this slice as validated.
+  `da88b2bf64bb6bc19e12547c787490f3b4b6e1b3`. It was pending at the latest
+  observation. Retrieve its terminal result and inspect/apply any new format
+  artifact before treating this slice as validated.
 - Existing parent run 41328113275 and mixed gate 41327590981 were left
   untouched. This slice did not start a second mixed gate.
 
