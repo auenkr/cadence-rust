@@ -1170,10 +1170,6 @@ async fn run_with_lifecycle(
                 .or_else(|| frontend_rpc.map(|r| r.port).filter(|p| *p > 0))
                 .unwrap_or(7933);
             let tchannel_addr = std::net::SocketAddr::from((grpc_bind, tchannel_port));
-            if run_frontend {
-                println!("Cadence gRPC frontend listening on {grpc_addr}");
-                println!("Cadence TChannel frontend listening on {tchannel_addr}");
-            }
             // Reserve the Frontend TChannel endpoint before publishing its
             // address through Ringpop, and keep the actual bound port for the
             // provider's named-port labels.
@@ -1187,6 +1183,10 @@ async fn run_with_lifecycle(
                 .map(tokio::net::TcpListener::local_addr)
                 .transpose()?
                 .unwrap_or(tchannel_addr);
+            if run_frontend {
+                println!("Cadence gRPC frontend listening on {grpc_addr}");
+                println!("Cadence TChannel frontend listening on {tchannel_addr}");
+            }
             let history_rpc = cfg.services.get("history").map(|s| &s.rpc);
             let history_addr = std::net::SocketAddr::from((
                 if history_rpc.is_some_and(|r| r.bind_on_local_host) {
