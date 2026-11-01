@@ -12,8 +12,8 @@ use cadence_api::{
     errors::{CadenceError, EntityNotExistsError, InternalServiceError},
     schedule::{
         BackfillInfo, BackfillScheduleRequest, CreateScheduleRequest, DescribeScheduleResponse,
-        PauseScheduleRequest, SchedulePauseInfo, ScheduleInfo, ScheduleSpec, ScheduleState,
-        SchedulePolicies, UnpauseScheduleRequest, UpdateScheduleRequest,
+        PauseScheduleRequest, ScheduleInfo, SchedulePauseInfo, SchedulePolicies, ScheduleSpec,
+        ScheduleState, UnpauseScheduleRequest, UpdateScheduleRequest,
     },
 };
 use chrono::{DateTime, SecondsFormat};
@@ -121,7 +121,10 @@ pub fn policies_to_go(policies: &SchedulePolicies) -> Value {
         m.insert("catchUpPolicy".into(), json!(p.as_str()));
     }
     if let Some(w) = policies.catch_up_window_in_seconds.filter(|w| *w != 0) {
-        m.insert("catchUpWindow".into(), json!(i64::from(w) * NANOS_PER_SECOND));
+        m.insert(
+            "catchUpWindow".into(),
+            json!(i64::from(w) * NANOS_PER_SECOND),
+        );
     }
     if policies.pause_on_failure {
         m.insert("pauseOnFailure".into(), json!(true));
@@ -237,7 +240,11 @@ pub fn update_signal(request: &UpdateScheduleRequest) -> Vec<u8> {
     let mut m = Map::new();
     insert_if(&mut m, "spec", request.spec.as_ref().map(spec_to_go));
     insert_if(&mut m, "action", request.action.as_ref().map(to_value));
-    insert_if(&mut m, "policies", request.policies.as_ref().map(policies_to_go));
+    insert_if(
+        &mut m,
+        "policies",
+        request.policies.as_ref().map(policies_to_go),
+    );
     insert_if(
         &mut m,
         "searchAttributes",
@@ -366,11 +373,11 @@ pub fn normalize_schedule_error(
     domain: &str,
 ) -> CadenceError {
     match error {
-        CadenceError::EntityNotExists(_) => CadenceError::EntityNotExists(
-            EntityNotExistsError::new(format!(
+        CadenceError::EntityNotExists(_) => {
+            CadenceError::EntityNotExists(EntityNotExistsError::new(format!(
                 "schedule {schedule_id:?} not found in domain {domain:?}"
-            )),
-        ),
+            )))
+        }
         other => other,
     }
 }
