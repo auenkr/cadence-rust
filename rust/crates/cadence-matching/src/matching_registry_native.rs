@@ -584,6 +584,7 @@ impl NativeQueueHandle {
                 .queue
                 .append_in_domain(&tasks, source_domain, now)
                 .map_err(|error| Status::unavailable(error.to_string()))?;
+            eprintln!("QUEUE-TRACE appended n={}", tasks.len());
             handle.dispatcher.notify_new_tasks();
             Ok(tasks)
         })

@@ -209,6 +209,8 @@ impl MatchingHistoryClient {
             poll_request: Some(poll),
         };
         let max = self.max_message_size;
+        eprintln!("HIST-TRACE begin native RecordDecisionTaskStarted sched={}", task.data.schedule_id);
+        let __t0 = std::time::Instant::now();
         let started = self
             .instrument_history(
                 "RecordDecisionTaskStarted",
@@ -237,7 +239,9 @@ impl MatchingHistoryClient {
                     },
                 ),
             )
-            .await?;
+            .await;
+        eprintln!("HIST-TRACE end native RecordDecisionTaskStarted {}ms err={:?}", __t0.elapsed().as_millis(), started.as_ref().err());
+        let started = started?;
         decision_response(domain_id, execution, started)
     }
 
