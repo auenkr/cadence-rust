@@ -15,6 +15,7 @@ pub mod handler_workflow_history;
 pub mod history_client;
 pub mod lifecycle;
 pub mod matching_client;
+pub mod matching_task_list_backend;
 pub mod request_validator;
 pub mod wrappers;
 

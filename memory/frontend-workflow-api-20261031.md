@@ -1264,3 +1264,129 @@ Frontend parity until these are implemented and validated.
   record the final URL/head/conclusion and binary hash, then push.
 - Continue respecting repo rules: do not run Cargo locally; use GitHub Actions
   for Rust validation; push code and memory updates at least every 30 minutes.
+
+## Successor audit — typed adapter blockers — 2026-10-31 (no code change)
+
+- Worktree was on `t3/frontend-workflow-api-1` (stale, unrelated). Detached at
+  `origin/t3/frontend-workflow-api` `04e5fcf98` and pushed back to
+  `t3/frontend-workflow-api`. The branch is also checked out in
+  `t3-3cf506f9`; that worktree was not touched.
+- No Cargo or rustfmt ran locally. No source change. Last green source run
+  remains [41204671621](https://github.com/auenkr/cadence-rust/actions/runs/41204671621)
+  at `db22d15a3`; later commits are documentation only.
+- Confirmed: `cadence-frontend/src/history_client.rs` and
+  `matching_client.rs` typed clients have no callers besides
+  `MatchingPollCanceller`. `handler_workflow::WorkflowBackend` is still
+  JSON-only (`invoke(operation, Value)`), so no production typed backend exists.
+- Confirmed blocker 1: converters live in
+  `cadence-matching/src/grpc_convert.rs`, declared `mod grpc_convert;`
+  (private). The Frontend crate cannot reuse them without making that module
+  public or moving it.
+- Confirmed blocker 2: most converters run api→proto (responses, e.g.
+  `decision_task`, `history`). Proto→api request conversion exists only for a
+  few types such as `start`. Poll requests (`PollForDecisionTaskRequest`,
+  `PollForActivityTaskRequest`) and Describe/ListPartitions/GetTaskListsByDomain
+  need new proto→api converters. Poll responses and `History`/events need the
+  reverse direction for every event attribute, which is not implemented. This
+  is the main size driver for the adapter.
+- Confirmed blocker 3: `cadence-api` has no proto dependency. The
+  `cadence-proto` crate holds only generated code and native helpers.
+- Confirmed blocker 4: the registered public WorkflowService
+  (`cadence-matching/src/grpc.rs` `impl WorkflowApi for Frontend`, around line
+  686) calls the local persistence and engine directly. It does not call
+  `handler_workflow::Handler`.
+- Next decision needed: the converters are in a file owned by the Matching
+  branch. Making them shared (move to `cadence-proto`/`cadence-service-core`, or
+  make `grpc_convert` pub) touches other branches, so it needs an explicit
+  go-ahead. Recommended order: (1) shared converter module with proto↔api for
+  the poll request and response family; (2) typed Matching backend for
+  Poll/Describe/ListPartitions/GetTaskListsByDomain/CancelPoll; (3) typed History
+  backend starting from the simplest RPCs; (4) History events proto→api
+  conversion; (5) register the composed Handler on gRPC and Thrift; (6) the mixed
+  Go History + Rust Matching/Frontend gate with binary SHA256.
+
+## Converter sharing, reverse task-list converters, typed Matching backend — 2026-10-31
+
+Branch `t3/frontend-workflow-api` (worker run on `t3/frontend-workflow-api-2`).
+Commits, in order:
+
+- `b5a6b021d` refactor(proto): move Matching proto<->API converters into
+  `cadence-proto::convert` (`mod.rs` = former `grpc_convert.rs`, plus
+  `history.rs` = event API->proto and `decisions.rs` = decision proto->API).
+  Matching re-exports them as `grpc_convert`/`grpc_history`/`grpc_decisions`,
+  so call sites are unchanged. `cadence-proto` now depends on `cadence-api`
+  (no cycle: cadence-api depends only on cadence-common). Generator templates in
+  `rust/tools/generate-grpc-{history,decisions}.py` point at the new paths.
+- `9f8e63eb7` feat(proto): reverse task-list converters: `poll_for_decision_task_request_in/_out`,
+  `poll_for_activity_task_request_in/_out`, `describe_task_list_request_in/_out`,
+  `describe_task_list_in`, `list_task_list_partitions_{request,}_{in,out}`,
+  `get_task_lists_by_domain_{request,}_in`, plus private helpers. Round-trip tests
+  in `convert::reverse_tests`.
+- `c280e4c6a` feat(frontend): `matching_task_list_backend::MatchingTaskListBackend<R>`
+  implements `WorkflowBackend` for `ListTaskListPartitions` and
+  `GetTaskListsByDomain` over the typed Matching client (via
+  `MatchingClientResolver`). Other operations return `Internal`. Three unit
+  tests (malformed request, resolver failure, unserved operation).
+- `066e8d885` fix(proto): prost maps `google.protobuf.DoubleValue` to
+  `Option<f64>`; `prost_types::DoubleValue` does not exist. Caught by CI.
+
+CI evidence (rust-ci.yml, clippy then tests, standard runner):
+
+| Run | Package | Head | Conclusion |
+|---|---|---|---|
+| [41220709660](https://github.com/auenkr/cadence-rust/actions/runs/41220709660) | cadence-matching | b5a6b021d (step 1) | success |
+| [41221582350](https://github.com/auenkr/cadence-rust/actions/runs/41221582350) | cadence-proto | 066e8d885 | success |
+| [41221841031](https://github.com/auenkr/cadence-rust/actions/runs/41221841031) | cadence-frontend | 066e8d885 | success |
+| [41222168706](https://github.com/auenkr/cadence-rust/actions/runs/41222168706) | cadence-matching | 066e8d885 (final) | success |
+
+The first proto run [41221279687](https://github.com/auenkr/cadence-rust/actions/runs/41221279687)
+failed at `c280e4c6a` on the DoubleValue error above; it is superseded.
+No Cargo or rustfmt ran locally. No Rust binary SHA256 exists for these runs
+(unit and package gates only; no mixed-cluster gate).
+
+### What is NOT done (remaining gaps, in priority order)
+
+1. Proto->API poll **responses** (`PollForDecisionTaskResponse`,
+   `PollForActivityTaskResponse`) and History event reverse conversion. Needs a
+   reverse event converter for all `HistoryEvent` attribute types; the existing
+   `convert::history` only maps API->proto. Blocks any typed poll path.
+2. Typed `WorkflowBackend` coverage for the remaining operations (poll,
+   DescribeTaskList needs the matching `domain_id` from the domain lookup,
+   History-backed operations via `HistoryClient`). Only two operations are served.
+3. Registration: `MatchingTaskListBackend` is not wired. The public
+   WorkflowService still calls the local engine in `cadence-matching::grpc`;
+   `cadence-frontend::run()` still calls the shared Matching launcher. Needs the
+   transport injection point from gap 4 in the earlier list.
+4. Mixed Go History + Rust Matching/Frontend SDK gate, failure/restart/recovery,
+   and recorded binary SHA256. Not started.
+
+## Registration audit — 2026-10-31 (no runtime change)
+
+Attempted next gap: route the registered WorkflowService through
+`handler_workflow::Handler`. Decided NOT to land a partial swap. Facts:
+
+- Registered gRPC WorkflowApi is `impl WorkflowApi for Frontend` in
+  `cadence-matching/src/grpc.rs` (~line 686), with 48 RPCs. Each one calls the
+  local persistence/engine directly (or Matching HTTP via `self.call`).
+- `Handler` exposes only `dispatch(operation: &str, Value)` (JSON seam). There
+  is no typed per-RPC entry point, so every RPC needs a proto->API request
+  converter and an API->proto response converter. `cadence-proto::convert` has
+  reverse converters only for the task-list family (poll requests, Describe,
+  ListPartitions, GetTaskListsByDomain) and `start`/`failover`/`schedule`/
+  `query_completed`. Missing: poll responses, History events, and most other
+  workflow request/response types.
+- Public Thrift/TChannel dispatch lives in `cadence-service-core::yarpc` and has
+  its own persistence calls. Routing only gRPC would make the two transports
+  diverge.
+- Injection: `launcher.rs` calls `grpc::serve(addr, AppState)` (~line 1864)
+  with `Frontend { state }` built inside matching. A Frontend-owned override
+  needs a field on `AppState` or a new parameter threaded through
+  `run_with_lifecycle`. Matching cannot depend on cadence-frontend, so the
+  trait must live in cadence-service-core or cadence-proto.
+
+Decision needed before more code: (A) cut over gRPC and Thrift together, only
+once every operation has a typed backend and converters (no partial regression);
+or (B) route per operation with legacy fallback, gRPC first, accepting a window
+where Thrift and gRPC behave differently. Recommended: B for gRPC with
+per-operation parity tests, then Thrift, then delete the fallback. Neither has
+been implemented.
