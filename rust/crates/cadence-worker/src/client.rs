@@ -222,4 +222,99 @@ impl CadenceClient {
             .await?;
         Ok(response.into_inner())
     }
+    /// Fetch the next history page of a decision task (non-sticky tasks carry
+    /// the history in pages).
+    pub async fn get_history_page(
+        &mut self,
+        domain: impl Into<String>,
+        execution: cadence_proto::api::WorkflowExecution,
+        next_page_token: Vec<u8>,
+    ) -> Result<cadence_proto::api::GetWorkflowExecutionHistoryResponse, tonic::Status> {
+        let response = self
+            .frontend
+            .get_workflow_execution_history(tonic::Request::new(
+                cadence_proto::api::GetWorkflowExecutionHistoryRequest {
+                    domain: domain.into(),
+                    workflow_execution: Some(execution),
+                    page_size: 1000,
+                    next_page_token,
+                    wait_for_new_event: false,
+                    history_event_filter_type: 1,
+                    skip_archival: true,
+                    query_consistency_level: 0,
+                },
+            ))
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    /// Complete a decision task, optionally answering consistent queries.
+    pub async fn respond_decision_task_completed(
+        &mut self,
+        request: RespondDecisionTaskCompletedRequest,
+    ) -> Result<RespondDecisionTaskCompletedResponse, tonic::Status> {
+        let response = self
+            .inner
+            .respond_decision_task_completed(tonic::Request::new(request))
+            .await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn fail_decision_task(
+        &mut self,
+        task_token: Vec<u8>,
+        cause: i32,
+        details: Vec<u8>,
+        identity: impl Into<String>,
+        binary_checksum: impl Into<String>,
+    ) -> Result<(), tonic::Status> {
+        self.inner
+            .respond_decision_task_failed(tonic::Request::new(
+                cadence_proto::api::RespondDecisionTaskFailedRequest {
+                    task_token,
+                    cause,
+                    details: Some(Payload { data: details }),
+                    identity: identity.into(),
+                    binary_checksum: binary_checksum.into(),
+                },
+            ))
+            .await?;
+        Ok(())
+    }
+
+    /// Answer a legacy (non-consistent) query task.
+    pub async fn complete_query_task(
+        &mut self,
+        task_token: Vec<u8>,
+        result: cadence_proto::api::WorkflowQueryResult,
+    ) -> Result<(), tonic::Status> {
+        self.inner
+            .respond_query_task_completed(tonic::Request::new(
+                cadence_proto::api::RespondQueryTaskCompletedRequest {
+                    task_token,
+                    result: Some(result),
+                    worker_version_info: None,
+                },
+            ))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn cancel_activity_task(
+        &mut self,
+        task_token: Vec<u8>,
+        details: Option<Payload>,
+        identity: impl Into<String>,
+    ) -> Result<(), tonic::Status> {
+        self.inner
+            .respond_activity_task_canceled(tonic::Request::new(
+                cadence_proto::api::RespondActivityTaskCanceledRequest {
+                    task_token,
+                    details,
+                    identity: identity.into(),
+                },
+            ))
+            .await?;
+        Ok(())
+    }
 }

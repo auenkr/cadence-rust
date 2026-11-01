@@ -300,7 +300,7 @@ pub fn process_decision_task(
         .workflow(&input.workflow_type)
         .ok_or_else(|| ReplayError::UnknownWorkflowType(input.workflow_type.clone()))?;
     let secs = |d: &Option<prost_types::Duration>| d.as_ref().map(|d| d.seconds as i32).unwrap_or(0);
-    let core = Core::new(WorkflowInfo {
+    let core = Core::new_ref(WorkflowInfo {
         workflow_id: input.workflow_id.clone(),
         run_id: input.run_id.clone(),
         workflow_type: input.workflow_type.clone(),

@@ -165,7 +165,7 @@ fn secs_ceil(d: Duration) -> i64 {
 }
 
 impl Core {
-    pub fn new(info: WorkflowInfo) -> CoreRef {
+    pub fn new_ref(info: WorkflowInfo) -> CoreRef {
         Rc::new(RefCell::new(Core {
             info,
             ..Core::default()
@@ -224,10 +224,7 @@ impl Core {
                 secs_ceil(o.schedule_to_start) as u64 + secs_ceil(o.start_to_close) as u64,
             );
         }
-        let retry = match &o.retry_policy {
-            None => None,
-            Some(p) => Some(convert_retry_policy(p)?),
-        };
+        let retry = o.retry_policy.as_ref().map(convert_retry_policy).transpose()?;
         let activity_id = match &o.activity_id {
             Some(id) if !id.is_empty() => id.clone(),
             _ => self.generate_sequence().to_string(),
