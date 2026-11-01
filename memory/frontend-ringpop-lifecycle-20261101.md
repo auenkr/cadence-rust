@@ -76,12 +76,18 @@ bound-port test), and `c6c011c3b` (Clippy fix) on
   restart recovery. It predates the task ownership fix.
 - CI run 41331009654 failed Clippy on one unnecessary `mut` in the new bound
   port test. Fixed in `c6c011c3b` without lint suppression.
+- CI run 41331347247 completed SUCCESS at
+  `c6c011c3b4fc8573b3419032760944ff9b23d861`: Clippy, formatting, and
+  `cadence-matching` tests all passed. The listener ownership regression and
+  Frontend role/leave/recovery test each passed; crate test summary was 988
+  passed, 0 failed, 2 ignored. Its `format-all-patch` artifact was downloaded
+  and inspected; it was empty (0 bytes), so there was no additional patch to
+  apply.
 - Current GitHub Actions `rust-ci.yml` run:
   https://github.com/auenkr/cadence-rust/actions/runs/41331347247
   dispatched for `cadence-matching` with `format_all=true` at head
-  `c6c011c3b4fc8573b3419032760944ff9b23d861`. It was in progress at the latest
-  observation. Retrieve its terminal result and inspect/apply any new format
-  artifact before treating this slice as validated.
+  `c6c011c3b4fc8573b3419032760944ff9b23d861`; conclusion SUCCESS. The code head
+  is validated. A docs-only commit updated this evidence afterwards.
 - CI run 41329314627 reached Clippy and failed on the hook test's
   `field_reassign_with_default`; `71c70ab2e` fixes it without a lint
   suppression. The branch then merged `origin/master` at
