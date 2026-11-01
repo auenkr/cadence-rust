@@ -2700,9 +2700,13 @@ mod go_sql_frontend_manager_tests {
         assert_eq!(persistence.get_metadata_version().unwrap(), 8);
 
         // A fresh cache misses and must read the Go-format row through SQL.
-        persistence
+        let direct = persistence
             .get_domain(Some("durable"), None)
             .unwrap_or_else(|error| panic!("direct get_domain failed: {error:?}"));
+        assert_eq!(
+            (direct.info.name.as_str(), direct.info.uuid.as_str()),
+            ("durable", domain_id.as_str())
+        );
         let restarted = PersistedFrontendDomainManager::new(
             InMemoryDomainStore::new(),
             persistence.clone(),
