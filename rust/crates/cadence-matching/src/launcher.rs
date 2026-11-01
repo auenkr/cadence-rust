@@ -1136,9 +1136,6 @@ async fn run_with_lifecycle(
                     }
                 }
             });
-            let grpc_state = state.clone();
-            let history_state = state.clone();
-            let tchannel_state = state.clone();
             let run_frontend = wanted.contains(&service::ServiceName::Frontend);
             if run_frontend {
                 state
@@ -1165,11 +1162,6 @@ async fn run_with_lifecycle(
                     shutdown,
                 ));
             }
-            let app = if run_frontend {
-                handlers::router(state.clone())
-            } else {
-                handlers::health_router()
-            };
             // Go creates an HTTP transport only when `rpc.http` is configured, so a
             // Matching-only process binds the legacy JSON API port only on request.
             let http_port = port.or_else(|| {
@@ -1596,6 +1588,17 @@ async fn run_with_lifecycle(
                         serialization_encoding,
                     ));
             }
+            // The transport states and legacy router above were cloned before the
+            // configured stores and the persisted domain manager were installed
+            // on `state`; refresh them so Frontend RPCs write Go's tables.
+            let grpc_state = state.clone();
+            let history_state = state.clone();
+            let tchannel_state = state.clone();
+            let app = if run_frontend {
+                handlers::router(state.clone())
+            } else {
+                handlers::health_router()
+            };
             let matching_domain_cache = if run_matching && !embedded_development {
                 let stores = configured_matching_stores
                     .as_ref()
