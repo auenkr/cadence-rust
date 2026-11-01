@@ -129,7 +129,9 @@ func main() {
 		for i := 0; i < 20; i++ {
 			qr, e := c.QueryWorkflow(ctx, sq.GetID(), sq.GetRunID(), "state")
 			qerr = e
-			if qerr == nil {
+			if qerr == nil && qr == nil {
+				qerr = errors.New("QueryWorkflow returned nil result and nil error")
+			} else if qerr == nil {
 				qerr = qr.Get(&st)
 				if qerr == nil && st == "one" {
 					break
