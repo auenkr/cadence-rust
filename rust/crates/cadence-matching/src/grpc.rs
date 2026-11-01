@@ -2516,10 +2516,7 @@ mod workflow_hook_tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "StartWorkflowExecutionAsync");
         assert_eq!(calls[0].1["request"]["domain"], "sample-domain");
-        assert_eq!(
-            calls[0].1["request"]["memo"]["fields"]["memo-key"],
-            "AQID"
-        );
+        assert_eq!(calls[0].1["request"]["memo"]["fields"]["memo-key"], "AQID");
         assert_eq!(
             calls[0].1["request"]["header"]["fields"]["header-key"],
             "BAU="
@@ -2527,10 +2524,7 @@ mod workflow_hook_tests {
         assert_eq!(calls[1].0, "SignalWithStartWorkflowExecutionAsync");
         assert_eq!(calls[1].1["request"]["domain"], "sample-domain");
         assert_eq!(calls[1].1["request"]["signalName"], "async-signal");
-        assert_eq!(
-            calls[1].1["request"]["signalInput"],
-            "Bgc="
-        );
+        assert_eq!(calls[1].1["request"]["signalInput"], "Bgc=");
         assert_eq!(calls[1].1["request"]["control"], "CAk=");
         for (_, request, context) in calls.iter() {
             assert!(request["request"].is_object());
