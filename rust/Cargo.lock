@@ -619,6 +619,8 @@ dependencies = [
  "base64 0.22.1",
  "cadence-proto",
  "cadence-service-core",
+ "chrono",
+ "chrono-tz",
  "prost-types",
  "serde",
  "serde_json",
