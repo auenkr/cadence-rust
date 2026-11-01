@@ -580,7 +580,6 @@ async fn child_default_id_workflow(ctx: WorkflowContext, _: Vec<u8>) -> Workflow
         ..Default::default()
     };
     let f = ctx.execute_child_workflow("child", &options, &());
-    let _ = ctx.timer(Duration::from_secs(1));
     let _ = f.workflow_id();
     std::future::pending::<()>().await;
     Ok(None)
