@@ -37,6 +37,10 @@ on:
         description: "Apply rustfmt to Frontend persistence adapter files and upload the patch"
         type: boolean
         default: false
+      format_all:
+        description: "Run cargo fmt --all and upload the patch"
+        type: boolean
+        default: false
       go_sdk_compile:
         description: "Compile the existing Go SDK mixed Matching diagnostic fixture"
         type: boolean
@@ -244,6 +248,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: Format whole workspace
+        if: inputs.format_all == true
+        working-directory: rust
+        run: |
+          cargo fmt --all
+          git -C "$GITHUB_WORKSPACE" diff --binary -- rust > "$RUNNER_TEMP/format-all.patch"
+      - name: Upload workspace formatting patch
+        if: always() && inputs.format_all == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-all-patch
+          retention-days: 3
+          path: ${{ runner.temp }}/format-all.patch
       - name: Format Frontend skeleton files
         if: inputs.format_frontend_files == true
         working-directory: rust
