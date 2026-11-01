@@ -90,6 +90,11 @@ pub struct AppState {
     /// Workflow API forwarding to History (Go Frontend never mutates
     /// executions itself). None keeps the embedded in-memory store.
     pub history_forward: Option<crate::history_forward::HistoryForward>,
+    /// Frontend -> Matching client (poll and task-list APIs). None keeps the
+    /// embedded in-memory task queues.
+    pub matching_client: Option<crate::matching_client::MatchingClient>,
+    /// Reads history branches from persistence for polls and GetWorkflowExecutionHistory.
+    pub history_reader: Option<cadence_persistence::history_node_reader::HistoryReader>,
     pub grpc_max_message_size: usize,
     /// Frontend readiness and admission state are split so shutdown can first
     /// fail health checks, wait for discovery, and only then reject new RPCs.
@@ -145,6 +150,8 @@ impl Default for AppState {
             cluster_metadata: cadence_common::cluster::Metadata::default(),
             history_admin_channel: None,
             history_forward: None,
+            matching_client: None,
+            history_reader: None,
             grpc_max_message_size: 4 * 1024 * 1024,
             frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),

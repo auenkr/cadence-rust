@@ -487,6 +487,213 @@ impl HistoryForward {
     }
 }
 
+/// Result of `RespondDecisionTaskCompleted` at History.
+#[derive(Debug, Clone, Default)]
+pub struct DecisionCompleted {
+    pub started: Option<h::RecordDecisionTaskStartedResponse>,
+}
+
+pub fn failure_out(reason: Option<String>, details: Vec<u8>, options: Option<t::FailureOptions>) -> Option<p::Failure> {
+    cv::failure(reason, details, options)
+}
+
+pub fn respond_decision_completed_out(
+    req: &tk::RespondDecisionTaskCompletedRequest,
+) -> Result<p::RespondDecisionTaskCompletedRequest, ForwardError> {
+    let mut decisions = Vec::with_capacity(req.decisions.len());
+    for decision in req.decisions.clone() {
+        decisions.push(
+            cv::decision_out(decision)
+                .map_err(|s| ForwardError::BadRequest(s.message().to_owned()))?,
+        );
+    }
+    Ok(p::RespondDecisionTaskCompletedRequest {
+        task_token: req.task_token.clone(),
+        decisions,
+        execution_context: req.execution_context.clone(),
+        identity: req.identity.clone(),
+        sticky_attributes: req.sticky_attributes.clone().map(|s| p::StickyExecutionAttributes {
+            worker_task_list: s.worker_task_list.map(cv::task_list_out),
+            schedule_to_start_timeout: dur(s.schedule_to_start_timeout_seconds),
+        }),
+        return_new_decision_task: req.return_new_decision_task,
+        force_create_new_decision_task: req.force_create_new_decision_task,
+        binary_checksum: req.binary_checksum.clone(),
+        query_results: req
+            .query_results
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, r)| {
+                (
+                    k,
+                    p::WorkflowQueryResult {
+                        result_type: pb_enum(r.result_type.map(|x| x as i32)),
+                        answer: cv::payload(r.answer),
+                        error_message: r.error_message,
+                    },
+                )
+            })
+            .collect(),
+    })
+}
+
+impl HistoryForward {
+    pub async fn respond_decision_completed(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RespondDecisionTaskCompletedRequest,
+    ) -> Result<DecisionCompleted, ForwardError> {
+        let request = respond_decision_completed_out(req)?;
+        let mut client = self.client(workflow_id)?;
+        let response = client
+            .respond_decision_task_completed(Self::request(h::RespondDecisionTaskCompletedRequest {
+                request: Some(request),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?
+            .into_inner();
+        Ok(DecisionCompleted {
+            started: response.started_response,
+        })
+    }
+
+    pub async fn respond_decision_failed(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RespondDecisionTaskFailedRequest,
+    ) -> Result<(), ForwardError> {
+        let mut client = self.client(workflow_id)?;
+        client
+            .respond_decision_task_failed(Self::request(h::RespondDecisionTaskFailedRequest {
+                request: Some(p::RespondDecisionTaskFailedRequest {
+                    task_token: req.task_token.clone(),
+                    cause: pb_enum(req.cause.map(|x| x as i32)),
+                    details: cv::payload(req.details.clone()),
+                    identity: req.identity.clone(),
+                    binary_checksum: req.binary_checksum.clone(),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?;
+        Ok(())
+    }
+
+    pub async fn respond_activity_completed(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RespondActivityTaskCompletedRequest,
+    ) -> Result<(), ForwardError> {
+        let mut client = self.client(workflow_id)?;
+        client
+            .respond_activity_task_completed(Self::request(h::RespondActivityTaskCompletedRequest {
+                request: Some(p::RespondActivityTaskCompletedRequest {
+                    task_token: req.task_token.clone(),
+                    result: cv::payload(req.result.clone()),
+                    identity: req.identity.clone(),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?;
+        Ok(())
+    }
+
+    pub async fn respond_activity_failed(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RespondActivityTaskFailedRequest,
+    ) -> Result<(), ForwardError> {
+        let mut client = self.client(workflow_id)?;
+        client
+            .respond_activity_task_failed(Self::request(h::RespondActivityTaskFailedRequest {
+                request: Some(p::RespondActivityTaskFailedRequest {
+                    task_token: req.task_token.clone(),
+                    failure: failure_out(
+                        req.reason.clone(),
+                        req.details.clone(),
+                        req.failure_options.clone(),
+                    ),
+                    identity: req.identity.clone(),
+                    heartbeat_details: cv::payload(req.heartbeat_details.clone()),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?;
+        Ok(())
+    }
+
+    pub async fn respond_activity_canceled(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RespondActivityTaskCanceledRequest,
+    ) -> Result<(), ForwardError> {
+        let mut client = self.client(workflow_id)?;
+        client
+            .respond_activity_task_canceled(Self::request(h::RespondActivityTaskCanceledRequest {
+                request: Some(p::RespondActivityTaskCanceledRequest {
+                    task_token: req.task_token.clone(),
+                    details: cv::payload(req.details.clone()),
+                    identity: req.identity.clone(),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?;
+        Ok(())
+    }
+
+    pub async fn record_heartbeat(
+        &self,
+        domain_id: &str,
+        workflow_id: &str,
+        req: &tk::RecordActivityTaskHeartbeatRequest,
+    ) -> Result<bool, ForwardError> {
+        let mut client = self.client(workflow_id)?;
+        let response = client
+            .record_activity_task_heartbeat(Self::request(h::RecordActivityTaskHeartbeatRequest {
+                request: Some(p::RecordActivityTaskHeartbeatRequest {
+                    task_token: req.task_token.clone(),
+                    details: cv::payload(req.details.clone()),
+                    identity: req.identity.clone(),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?
+            .into_inner();
+        Ok(response.cancel_requested)
+    }
+
+    pub async fn reset_sticky_task_list(
+        &self,
+        domain_id: &str,
+        req: &st::ResetStickyTaskListRequest,
+    ) -> Result<(), ForwardError> {
+        let execution = req.execution.clone().unwrap_or_default();
+        let mut client = self.client(&execution.workflow_id)?;
+        client
+            .reset_sticky_task_list(Self::request(h::ResetStickyTaskListRequest {
+                request: Some(p::ResetStickyTaskListRequest {
+                    domain: req.domain.clone(),
+                    workflow_execution: Some(cv::execution_out(execution)),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?;
+        Ok(())
+    }
+}
+
 /// History wraps the public describe response field-for-field.
 fn h_describe(v: h::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflowExecutionResponse {
     p::DescribeWorkflowExecutionResponse {

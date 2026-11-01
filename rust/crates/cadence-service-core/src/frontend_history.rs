@@ -284,6 +284,33 @@ pub async fn create_poll_for_decision_task_response(
     Ok(response)
 }
 
+/// Go `common.CreateMatchingPollForDecisionTaskResponse`.
+pub fn matching_response_from_started(
+    started: &cadence_proto::history::RecordDecisionTaskStartedResponse,
+    execution: cadence_proto::api::WorkflowExecution,
+    task_token: Vec<u8>,
+) -> m::PollForDecisionTaskResponse {
+    m::PollForDecisionTaskResponse {
+        task_token,
+        workflow_execution: Some(execution),
+        workflow_type: started.workflow_type.clone(),
+        previous_started_event_id: started.previous_started_event_id,
+        started_event_id: started.started_event_id,
+        attempt: started.attempt,
+        next_event_id: started.next_event_id,
+        sticky_execution_enabled: started.sticky_execution_enabled,
+        decision_info: started.decision_info.clone(),
+        workflow_execution_task_list: started.workflow_execution_task_list.clone(),
+        event_store_version: started.event_store_version,
+        branch_token: started.branch_token.clone(),
+        scheduled_time: started.scheduled_time.clone(),
+        started_time: started.started_time.clone(),
+        queries: started.queries.clone(),
+        total_history_bytes: started.history_size,
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

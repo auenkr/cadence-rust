@@ -203,6 +203,17 @@ fn forward_error(error: crate::history_forward::ForwardError) -> AppError {
     }
 }
 
+fn forward_task_token(bytes: &[u8]) -> Result<cadence_api::tasktoken::TaskToken, AppError> {
+    let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(bytes)
+        .map_err(|_| AppError::bad_request("Error deserializing task token.".to_string()))?;
+    if token.workflow_id.is_empty() {
+        return Err(AppError::bad_request("Invalid TaskToken: workflow ID not set.".to_string()));
+    }
+    Ok(token)
+}
+
+const FRONTEND_HISTORY_PAGE_SIZE: i32 = 1000;
+
 fn require_task_domain_thrift(state: &AppState, bytes: &[u8]) -> Result<(), AppError> {
     let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(bytes)
         .map_err(|_| AppError::bad_request("Invalid TaskToken.".to_string()))?;
@@ -1202,6 +1213,16 @@ async fn handle_reset_sticky(state: &AppState, body: &Struct) -> HandlerResult {
     let store = require_domain_thrift(state, &request.domain)?;
     cadence_api::validation::check_execution(request.execution.as_ref())
         .map_err(|error| AppError::bad_request(error.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &request.domain)?;
+        forward
+            .reset_sticky_task_list(&domain_id, &request)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(
+            &cadence_api::service_types::ResetStickyTaskListResponse {},
+        ));
+    }
     store
         .reset_sticky_task_list(&request.domain, request.execution.as_ref().unwrap())
         .map_err(mutation_error)?;
@@ -1329,6 +1350,23 @@ async fn handle_poll_decision(state: &AppState, body: &Struct, deadline: Instant
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::validate_poll_request(&req.domain, req.task_list.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let (Some(matching), Some(reader)) = (&state.matching_client, &state.history_reader) {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        let poller_id = uuid::Uuid::new_v4().to_string();
+        let response = matching
+            .poll_for_decision_task(&domain_id, &poller_id, "", &req)
+            .await
+            .map_err(forward_error)?;
+        let task = crate::frontend_history::create_poll_for_decision_task_response(
+            reader,
+            state.num_history_shards.max(1) as u32,
+            FRONTEND_HISTORY_PAGE_SIZE,
+            response,
+        )
+        .await
+        .map_err(forward_error)?;
+        return Ok(wrap_success(&task));
+    }
     let task_list = req
         .task_list
         .as_ref()
@@ -1375,6 +1413,49 @@ async fn handle_respond_decision_completed(state: &AppState, body: &Struct) -> H
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        let completed = forward
+            .respond_decision_completed(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        let mut response = cadence_api::tasks::RespondDecisionTaskCompletedResponse::default();
+        if let (true, Some(started), Some(reader)) = (
+            req.return_new_decision_task,
+            completed.started.as_ref(),
+            &state.history_reader,
+        ) {
+            let new_token = cadence_api::tasktoken::TaskToken {
+                domain_id: token.domain_id.clone(),
+                workflow_id: token.workflow_id.clone(),
+                run_id: token.run_id.clone(),
+                schedule_id: started.scheduled_event_id,
+                schedule_attempt: i64::from(started.attempt),
+                ..Default::default()
+            };
+            let bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&new_token)
+                .map_err(|e| AppError::internal(e.to_string()))?;
+            let matching = crate::frontend_history::matching_response_from_started(
+                started,
+                cadence_proto::api::WorkflowExecution {
+                    workflow_id: token.workflow_id.clone(),
+                    run_id: token.run_id.clone(),
+                },
+                bytes,
+            );
+            response.decision_task = Some(
+                crate::frontend_history::create_poll_for_decision_task_response(
+                    reader,
+                    state.num_history_shards.max(1) as u32,
+                    FRONTEND_HISTORY_PAGE_SIZE,
+                    matching,
+                )
+                .await
+                .map_err(forward_error)?,
+            );
+        }
+        return Ok(wrap_success(&response));
+    }
     match state.executions.complete_decision(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(e) => Err(task_error(e)),
@@ -1391,6 +1472,14 @@ async fn handle_respond_decision_failed(state: &AppState, body: &Struct) -> Hand
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        forward
+            .respond_decision_failed(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match state.executions.fail_decision(
         &req.task_token,
         req.cause,
@@ -1411,6 +1500,15 @@ async fn handle_poll_activity(state: &AppState, body: &Struct, deadline: Instant
     let executions = require_domain_thrift(state, &req.domain)?;
     validation::validate_poll_request(&req.domain, req.task_list.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(matching) = &state.matching_client {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        let poller_id = uuid::Uuid::new_v4().to_string();
+        let response = matching
+            .poll_for_activity_task(&domain_id, &poller_id, "", &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(&crate::matching_client::activity_response_in(response)));
+    }
     let task_list = req
         .task_list
         .as_ref()
@@ -1460,6 +1558,14 @@ async fn handle_respond_activity_completed(state: &AppState, body: &Struct) -> H
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        forward
+            .respond_activity_completed(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match state.executions.complete_activity(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(task_error(e)),
@@ -1476,6 +1582,14 @@ async fn handle_respond_activity_failed(state: &AppState, body: &Struct) -> Hand
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        forward
+            .respond_activity_failed(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match state.executions.fail_activity(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(task_error(e)),
@@ -1492,6 +1606,14 @@ async fn handle_respond_activity_canceled(state: &AppState, body: &Struct) -> Ha
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        forward
+            .respond_activity_canceled(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(Struct { fields: vec![] });
+    }
     match state.executions.cancel_activity(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
         Err(e) => Err(task_error(e)),
@@ -1510,6 +1632,16 @@ async fn handle_record_heartbeat(state: &AppState, body: &Struct) -> HandlerResu
         ));
     }
     require_task_domain_thrift(state, &req.task_token)?;
+    if let Some(forward) = &state.history_forward {
+        let token = forward_task_token(&req.task_token)?;
+        let cancel_requested = forward
+            .record_heartbeat(&token.domain_id, &token.workflow_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(&RecordActivityTaskHeartbeatResponse {
+            cancel_requested,
+        }));
+    }
     match state
         .executions
         .record_heartbeat(&req.task_token, req.details.clone())
@@ -2082,6 +2214,14 @@ async fn handle_describe_task_list(state: &AppState, body: &Struct) -> HandlerRe
             "TaskList is not set on request.".to_string(),
         ));
     }
+    if let Some(matching) = &state.matching_client {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        let response = matching
+            .describe_task_list(&domain_id, &req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(&response));
+    }
     match crate::handlers::describe_task_list_response(state, &executions, &req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(crate::handlers::DescribeTaskListError::TaskListNotSet) => Err(AppError::bad_request(
@@ -2098,6 +2238,13 @@ async fn handle_get_task_lists_by_domain(state: &AppState, body: &Struct) -> Han
     let req: GetTaskListsByDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     let executions = require_domain_thrift(state, &req.domain)?;
+    if let Some(matching) = &state.matching_client {
+        let response = matching
+            .get_task_lists_by_domain(&req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(&response));
+    }
     let (decisions, activities) = executions.task_lists(&req.domain);
     let mut decision_task_list_map = std::collections::HashMap::new();
     for name in decisions {
@@ -2168,6 +2315,13 @@ async fn handle_list_task_list_partitions(state: &AppState, body: &Struct) -> Ha
             ));
         }
     };
+    if let Some(matching) = &state.matching_client {
+        let response = matching
+            .list_task_list_partitions(&req)
+            .await
+            .map_err(forward_error)?;
+        return Ok(wrap_success(&response));
+    }
     // Single-host deployment: every list has exactly its root partition.
     let owner = std::env::var("HOSTNAME").unwrap_or_default();
     let partition = cadence_api::tasks::TaskListPartitionMetadata {

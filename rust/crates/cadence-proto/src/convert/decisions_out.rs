@@ -17,6 +17,7 @@ fn failure_pb(reason: Option<String>, details: Vec<u8>) -> Option<p::Failure> {
         Some(p::Failure {
             reason: reason.unwrap_or_default(),
             details,
+            ..Default::default()
         })
     }
 }

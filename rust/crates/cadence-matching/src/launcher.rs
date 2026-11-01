@@ -821,6 +821,33 @@ async fn run_with_lifecycle(
                             state.grpc_max_message_size,
                         ));
                 }
+                if wanted.contains(&service::ServiceName::Frontend) {
+                    if let Some(matching) = cfg.services.get("matching") {
+                        let mhost = if matching.rpc.host.is_empty() {
+                            "127.0.0.1"
+                        } else {
+                            matching.rpc.host.as_str()
+                        };
+                        let mport = if matching.rpc.grpc_port == 0 {
+                            7835
+                        } else {
+                            matching.rpc.grpc_port
+                        };
+                        let mpeer = format!("http://{mhost}:{mport}");
+                        let mtls = crate::grpc_tls::client_tls(&matching.rpc.tls)?;
+                        let mchannel = crate::grpc_tls::endpoint_channel(&mpeer, mtls.as_ref())?;
+                        state.matching_client =
+                            Some(cadence_service_core::matching_client::MatchingClient::new(
+                                std::sync::Arc::new(
+                                    cadence_service_core::matching_client::StaticMatchingPeer(
+                                        mchannel,
+                                    ),
+                                ),
+                                std::sync::Arc::new(|_domain: &str, _task_list: &str, _kind: i32| 1usize),
+                                state.grpc_max_message_size,
+                            ));
+                    }
+                }
                 state.history_admin_channel = Some(channel);
             }
             // Keep the registration alive through listener and Matching
@@ -1467,6 +1494,9 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
+            state.history_reader = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.history_reader.clone());
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());
