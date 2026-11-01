@@ -25,6 +25,9 @@ Terminate, RequestCancel, Reset, Describe, Query, ResetStickyTaskList, RefreshWo
 RecordActivityTaskHeartbeat, RespondActivityTask{Completed,Failed,Canceled}, RespondDecisionTaskFailed
 (Thrift transport only).
 
+## Done (chunk 2)
+`cadence-persistence::history_reader` (Go ReadHistoryBranch port) + MySQL/Postgres `HistoryNodeStore` impls; `AppState.history_node_store`. Cassandra reader still a gap.
+
 ## Remaining gaps
 - gRPC transport (`cadence-matching/src/grpc.rs` Frontend adapters) still uses the legacy engine;
   needs per-RPC proto->api->hook->api->proto routing.
@@ -40,4 +43,6 @@ RecordActivityTaskHeartbeat, RespondActivityTask{Completed,Failed,Canceled}, Res
 ## CI evidence
 | run | head | package | conclusion |
 |---|---|---|---|
-| https://github.com/auenkr/cadence-rust/actions/runs/41314182425 | 21647b8441ba3be0fabe246fac25a8afca09fbe3 | cadence-frontend | in_progress (update) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41314182425 | 21647b8441ba3be0fabe246fac25a8afca09fbe3 | cadence-frontend | failure (op! macro arm order; fixed in 28ea37e96) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41314489059 | 28ea37e96b22d690a6851b9ebe89e34406258317 | cadence-frontend | failure (result_large_err; fixed in 8ea626d09) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41314823718 | 8ea626d097a8dffb213b8d456baf5a7c21d1ed45 | cadence-frontend | in_progress (update) |
