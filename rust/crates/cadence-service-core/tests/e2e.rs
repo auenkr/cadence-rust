@@ -1537,7 +1537,7 @@ async fn admin_shard_queue_history_and_maintain_flow() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/queues/reset",
-        json!({"shardID": 0, "type": 3}),
+        json!({"shardID": 0, "type": 3, "clusterName": "cluster0"}),
     )
     .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
