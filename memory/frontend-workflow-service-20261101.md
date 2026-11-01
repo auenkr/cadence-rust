@@ -55,4 +55,5 @@ RecordActivityTaskHeartbeat, RespondActivityTask{Completed,Failed,Canceled}, Res
 | https://github.com/auenkr/cadence-rust/actions/runs/41322544883 | after c2e0867b7 + domain get fix | cadence-persistence | success |
 | https://github.com/auenkr/cadence-rust/actions/runs/41322909641 | same | cadence-matching | success |
 | https://github.com/auenkr/cadence-rust/actions/runs/41323599602 | gRPC routing | cadence-matching format_all | success |
-| https://github.com/auenkr/cadence-rust/actions/runs/41324189872 | version checker | cadence-frontend format_all | in_progress |
+| https://github.com/auenkr/cadence-rust/actions/runs/41324189872 | version checker | cadence-frontend format_all | failure (clippy map_or) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41324523076 | is_ok_and fix | cadence-frontend | success |
