@@ -466,6 +466,7 @@ async fn handle_visibility_archived(_state: &AppState, body: &Struct) -> Handler
 /// Durable visibility list (Go `ListOpen/ClosedWorkflowExecutions` over the
 /// configured visibility store). Validation reuses the in-memory evaluator's
 /// messages; domain resolution is by ID like Go.
+#[allow(clippy::too_many_arguments)]
 fn durable_visibility_list(
     state: &AppState,
     manager: &Arc<dyn cadence_persistence::visibility_store::VisibilityManager>,
