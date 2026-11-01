@@ -1955,6 +1955,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForDecisionTaskRequest>,
     ) -> Result<Response<m::PollForDecisionTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::PollForDecisionTaskResponse>, Status>("poll_for_decision_task", async move {
+        eprintln!("MATCH-TRACE poll_for_decision_task domain={}", request.get_ref().domain_id);
         self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_decision_task")?;
         self.metrics.matching_request(
             "PollForDecisionTask",
@@ -2225,6 +2226,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::PollForActivityTaskRequest>,
     ) -> Result<Response<m::PollForActivityTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::PollForActivityTaskResponse>, Status>("poll_for_activity_task", async move {
+        eprintln!("MATCH-TRACE poll_for_activity_task domain={}", request.get_ref().domain_id);
         self.domain_lookup_guard(&request.get_ref().domain_id, "poll_for_activity_task")?;
         self.metrics.matching_request(
             "PollForActivityTask",
@@ -2439,6 +2441,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddDecisionTaskRequest>,
     ) -> Result<Response<m::AddDecisionTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AddDecisionTaskResponse>, Status>("add_decision_task", async move {
+        eprintln!("MATCH-TRACE add_decision_task domain={}", request.get_ref().domain_id);
         self.domain_lookup_guard(&request.get_ref().domain_id, "add_decision_task")?;
         self.metrics
             .matching_request(
@@ -2683,6 +2686,7 @@ impl m::matching_api_server::MatchingApi for Matching {
         request: Request<m::AddActivityTaskRequest>,
     ) -> Result<Response<m::AddActivityTaskResponse>, Status> {
         crate::matching_panic::capture::<Response<m::AddActivityTaskResponse>, Status>("add_activity_task", async move {
+        eprintln!("MATCH-TRACE add_activity_task domain={}", request.get_ref().domain_id);
         self.domain_lookup_guard(&request.get_ref().domain_id, "add_activity_task")?;
         self.metrics
             .matching_request(
