@@ -179,6 +179,17 @@ fn codec(method: &str) -> Option<Codec> {
             tk::RecordActivityTaskHeartbeatRequest,
             tk::RecordActivityTaskHeartbeatResponse
         ),
+        "RespondActivityTaskCompletedByID" => {
+            op!(tk::RespondActivityTaskCompletedByIDRequest, void)
+        }
+        "RespondActivityTaskFailedByID" => op!(tk::RespondActivityTaskFailedByIDRequest, void),
+        "RespondActivityTaskCanceledByID" => {
+            op!(tk::RespondActivityTaskCanceledByIDRequest, void)
+        }
+        "RecordActivityTaskHeartbeatByID" => op!(
+            tk::RecordActivityTaskHeartbeatByIDRequest,
+            tk::RecordActivityTaskHeartbeatResponse
+        ),
         "RespondQueryTaskCompleted" => op!(tk::RespondQueryTaskCompletedRequest, void),
         "ListOpenWorkflowExecutions" => op!(
             st::ListOpenWorkflowExecutionsRequest,

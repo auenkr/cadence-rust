@@ -4076,6 +4076,116 @@ impl ToThrift for RespondActivityTaskCanceledRequest {
     }
 }
 
+impl FromThrift for RecordActivityTaskHeartbeatByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            details: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RecordActivityTaskHeartbeatByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.details);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskCompletedByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            result: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskCompletedByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.result);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskCanceledByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            details: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskCanceledByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.details);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskFailedByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            reason: s.opt_string(50)?,
+            details: s.bytes_or_empty(60)?,
+            failure_options: s.opt_struct(65)?,
+            identity: s.req_string(70, "")?,
+            heartbeat_details: s.bytes_or_empty(80)?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskFailedByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.ostr(50, &self.reason);
+        f.sbytes(60, &self.details);
+        f.ostruct(65, self.failure_options.as_ref());
+        f.sstr(70, &self.identity);
+        f.sbytes(80, &self.heartbeat_details);
+        f.finish()
+    }
+}
+
 impl FromThrift for RecordActivityTaskHeartbeatRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {

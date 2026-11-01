@@ -1762,16 +1762,11 @@ impl<B: WorkflowBackend> Handler<B> {
                 return Err(cadence_api::validation::err_request_not_set().into());
             }
             validate_domain(&value)?;
-            for (field, message) in [
-                ("workflowId", "WorkflowId is not set on request."),
-                ("activityId", "ActivityID is not set on request."),
+            for (field, alt, message) in [
+                ("workflowID", "workflowId", "WorkflowId is not set on request."),
+                ("activityID", "activityId", "ActivityID is not set on request."),
             ] {
-                if value
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .is_empty()
-                {
+                if request_string_any(&value, &[field, alt]).is_empty() {
                     return Err(CadenceError::BadRequest(BadRequestError::new(message)));
                 }
             }
@@ -2047,9 +2042,9 @@ fn prepare_by_id_task_request(
 ) -> Result<Value, CadenceError> {
     let token = cadence_api::tasktoken::TaskToken {
         domain_id,
-        workflow_id: request_string(&request, "workflowId"),
-        run_id: request_string(&request, "runId"),
-        activity_id: request_string(&request, "activityId"),
+        workflow_id: request_string_any(&request, &["workflowID", "workflowId"]),
+        run_id: request_string_any(&request, &["runID", "runId"]),
+        activity_id: request_string_any(&request, &["activityID", "activityId"]),
         ..Default::default()
     };
     let token_bytes = cadence_api::tasktoken::JsonTaskTokenSerializer::serialize(&token)
@@ -2077,6 +2072,14 @@ fn prepare_by_id_task_request(
         }
     }
     prepare_task_token_request(operation, token_request)
+}
+
+fn request_string_any(request: &Value, fields: &[&str]) -> String {
+    fields
+        .iter()
+        .map(|f| request_string(request, f))
+        .find(|v| !v.is_empty())
+        .unwrap_or_default()
 }
 
 fn request_string(request: &Value, field: &str) -> String {
