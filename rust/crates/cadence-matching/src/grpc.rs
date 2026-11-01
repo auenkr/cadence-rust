@@ -884,12 +884,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             .is_some_and(|api| api.serves("StartWorkflowExecution"))
         {
             let result: t::StartWorkflowExecutionResponse = self
-                .call_with_headers(
-                    Method::POST,
-                    "/api/v1/workflows/start",
-                    &input,
-                    &[],
-                )
+                .call_with_headers(Method::POST, "/api/v1/workflows/start", &input, &[])
                 .await?;
             return Ok(Response::new(p::StartWorkflowExecutionResponse {
                 run_id: result.run_id,
@@ -2288,10 +2283,9 @@ mod workflow_hook_tests {
             "x-cadence-caller".to_owned(),
             "sdk-worker".to_owned(),
         )]);
-        let start = frontend
-            .start_workflow_execution(tonic::Request::new(
-                p::StartWorkflowExecutionRequest::default(),
-            ));
+        let start = frontend.start_workflow_execution(tonic::Request::new(
+            p::StartWorkflowExecutionRequest::default(),
+        ));
         let start_result = GRPC_CALLER
             .scope((headers.clone(), Some(deadline)), start)
             .await

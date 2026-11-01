@@ -1,7 +1,12 @@
 # Frontend Ringpop listener lifecycle slice — 2026-11-01
 
 Integration base: `71c3c273334836a9634cc2c509f4c2cdcf22671c`.
-Implementation commit: `5a04cec034517f8a1669b49f4a3660bda82a0a09` on
+Implementation commits: `5a04cec034517f8a1669b49f4a3660bda82a0a09`,
+`d1a2cdd54e9e9f439742ff6565b9a177ded95499`,
+`898b4a27f2f4d28fb06f83c67835e978359053d2`,
+`4596823884c6c79bd0d7cc58b92b3dd7fff8ada2` (Frontend-only AdminService
+TChannel dispatch), and
+`7b62ddc9ab38fdf9e344f8ec6996afd4213d0963` (Frontend leave test) on
 `t3/frontend-ringpop-lifecycle`.
 
 ## Source and behavior evidence
@@ -24,23 +29,30 @@ Implementation commit: `5a04cec034517f8a1669b49f4a3660bda82a0a09` on
   gRPC port, starts the final workflow/admin TChannel state plus Ringpop
   listener before provider bootstrap, and installs no Matching handler on that
   listener. Shutdown self-evicts and stops the provider before listener abort.
-  Startup errors stop the provider and abort/join the listener task.
+  Startup errors stop the provider and abort/join the listener task. Frontend
+  bootstrap failure also withdraws/stops Matching membership and the Matching
+  runtime already started earlier in the combined launcher, aborts the shared
+  Matching listener, and shuts down its metrics.
 - Focused provider regression coverage now crosses the Frontend listener with
   a Matching provider JOIN and checks the Frontend role and named TChannel and
-  gRPC ports. This demonstrates Ringpop dispatch and role labeling only; it
-  does not establish Frontend consumer routing parity.
+  gRPC ports, then verifies Frontend self-eviction is observed by the Matching
+  peer before Frontend provider stop. A focused service filter test checks
+  Frontend workflow/admin allowance and unchanged Matching service allowance.
+  This demonstrates Ringpop dispatch and role labeling only; it does not
+  establish Frontend consumer routing parity.
 
 ## Validation
 
 - `git diff --check`: passed before commit; no Cargo, rustfmt, or Go commands
   were run locally.
-- GitHub Actions `rust-ci.yml` run:
-  https://github.com/auenkr/cadence-rust/actions/runs/41328506551
+- Initial CI runs 41328506551, 41328645787, 41328689458, and 41328957772 were
+  superseded/cancelled after source corrections; none is validation evidence.
+- Current GitHub Actions `rust-ci.yml` run:
+  https://github.com/auenkr/cadence-rust/actions/runs/41328990185
   dispatched for `cadence-matching` with `format_all=true` at head
-  `5a04cec034517f8a1669b49f4a3660bda82a0a09`. At dispatch, status was
-  `in_progress`; no compile/test/format conclusion is recorded yet. Retrieve
-  the final conclusion and inspect/apply any format artifact before treating
-  this slice as validated.
+  `7b62ddc9ab38fdf9e344f8ec6996afd4213d0963`. It was `in_progress` at the
+  latest observation. Retrieve its terminal result and inspect/apply any
+  formatting artifact before treating this slice as validated.
 - Existing parent run 41328113275 and mixed gate 41327590981 were left
   untouched. This slice did not start a second mixed gate.
 

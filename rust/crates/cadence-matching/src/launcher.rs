@@ -1977,10 +1977,9 @@ async fn run_with_lifecycle(
                 None
             };
             if let Some(provider) = frontend_ringpop_provider.as_ref() {
-                let start = crate::matching_peer_provider::MatchingPeerProvider::start(
-                    provider.as_ref(),
-                )
-                .await;
+                let start =
+                    crate::matching_peer_provider::MatchingPeerProvider::start(provider.as_ref())
+                        .await;
                 if let Err(start_error) = start {
                     let cleanup = crate::matching_peer_provider::MatchingPeerProvider::stop(
                         provider.as_ref(),
@@ -1996,7 +1995,8 @@ async fn run_with_lifecycle(
                     }
                     if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
                         if let Err(error) = lifecycle.withdraw().await {
-                            cleanup_errors.push(format!("withdrawing Matching membership: {error}"));
+                            cleanup_errors
+                                .push(format!("withdrawing Matching membership: {error}"));
                         }
                     }
                     if let Some(runtime) = matching_runtime.as_mut() {
@@ -2013,7 +2013,8 @@ async fn run_with_lifecycle(
                         task.abort();
                         if let Err(error) = task.await {
                             if !error.is_cancelled() {
-                                cleanup_errors.push(format!("joining Matching TChannel listener: {error}"));
+                                cleanup_errors
+                                    .push(format!("joining Matching TChannel listener: {error}"));
                             }
                         }
                     }
@@ -2221,10 +2222,8 @@ async fn run_with_lifecycle(
                             .push(format!("withdrawing Frontend membership: {error}"));
                     }
                     if let Err(error) =
-                        crate::matching_peer_provider::MatchingPeerProvider::stop(
-                            provider.as_ref(),
-                        )
-                        .await
+                        crate::matching_peer_provider::MatchingPeerProvider::stop(provider.as_ref())
+                            .await
                     {
                         serving_shutdown_errors
                             .push(format!("stopping Frontend membership: {error}"));
@@ -2260,16 +2259,13 @@ async fn run_with_lifecycle(
             } else {
                 stop_background_workers(&state, snapshot_task, timer_task).await;
                 if let Some(provider) = frontend_ringpop_provider.as_ref() {
-                    let _ =
-                        crate::matching_peer_provider::MatchingPeerProvider::self_evict(
-                            provider.as_ref(),
-                        )
-                        .await;
+                    let _ = crate::matching_peer_provider::MatchingPeerProvider::self_evict(
+                        provider.as_ref(),
+                    )
+                    .await;
                     if let Err(error) =
-                        crate::matching_peer_provider::MatchingPeerProvider::stop(
-                            provider.as_ref(),
-                        )
-                        .await
+                        crate::matching_peer_provider::MatchingPeerProvider::stop(provider.as_ref())
+                            .await
                     {
                         serving_shutdown_errors
                             .push(format!("stopping Frontend membership: {error}"));
