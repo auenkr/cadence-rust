@@ -38,3 +38,35 @@ Admin/Domain/Schedule APIs it calls must work against the Rust Frontend.
 - Domain gaps from the 2026-10-31 handoff: read-through on cache miss,
   Cassandra audit rows, FailoverInfo in DescribeDomainResponse, create/update/
   deprecate/delete audit rows, domain replication queue.
+
+## Domain + Admin(describe-host) + Schedule slices (branch fe-admin-domain)
+
+CI (full workspace clippy + tests): https://github.com/auenkr/cadence-rust/actions/runs/41322656303
+head 0826c242681a80a3e87f94b245280b9f03def636 — conclusion: success.
+
+### Domain (done)
+- Audit rows for create/update/deprecate/delete (+ existing failover), best effort like Go `updateDomainAuditLog`.
+  Left ungated by `EnableDomainAuditLogging` (Rust failover audit was already ungated).
+- `DescribeDomainResponse.failoverInfo` (thrift field 60) from `failover_end_time`.
+- SQL `DomainMetadataPersistence` now delegates get/list so a cold cache reads Go rows (fixed
+  previously failing `sqlite_domain_manager_survives_cache_restart`).
+- Remaining: audit identity/identity_type from request context.
+
+### Admin
+- `DescribeHistoryHost` validates selector and delegates to History (single-host fallback).
+- Still placeholders in service-core admin.rs: get_replication_messages, get_dlq_replication_messages,
+  cross-cluster tasks, describe_shard_distribution (single host), replication-type DLQ read/purge/merge
+  (needs History replication-task proto conversion), ReapplyEvents domain lookup, DescribeCluster real
+  membership, search-attribute persistence, isolation groups/async config persistence.
+- Pre-existing stale tests on the base branch were fixed (config store-name tests, admin e2e
+  expectations for History delegation without a History client).
+
+### Schedule (done)
+- `scheduler_wire` moved to cadence-service-core; new `schedule_flow.rs`.
+- create → start `cadence-scheduler:<id>` workflow (AllowDuplicate, 10y exec timeout, 10s decision);
+  AlreadyStarted → BadRequest "schedule %q already exists in domain %q".
+- update/pause/unpause/backfill → signal with Go JSON payloads, EntityNotExists normalized.
+- delete → signal, already-gone = success, transient (ServiceBusy/Internal) returned, else terminate fallback.
+- describe → probe + query (NotCompletedCleanly), 5x1s retry on ContinuedAsNew / "decision task".
+- list → open scheduler workflows, prefix stripped, internal search attrs filtered, default page 10.
+- Not yet validated against a real Go Worker scheduler workflow (mixed-cluster gate pending).
