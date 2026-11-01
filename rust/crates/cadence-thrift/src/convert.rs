@@ -17,7 +17,7 @@ use cadence_api::admin::{
     MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo, PurgeDLQMessagesRequest,
     PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
-    ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
+    ReplicationMessages, GetReplicationMessagesResponse, GetDLQReplicationMessagesResponse, SyncShardStatus, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
     RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
     UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
     UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
@@ -1434,17 +1434,17 @@ impl ToThrift for DomainReplicationConfiguration {
 impl ToThrift for DomainTaskAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.oenum(10, self.domain_operation);
-        f.sstr(20, &self.id);
-        f.ostruct(30, self.info.as_ref());
-        f.ostruct(40, self.config.as_ref());
-        f.ostruct(50, self.replication_config.as_ref());
+        f.oenum(5, self.domain_operation);
+        f.sstr(10, &self.id);
+        f.ostruct(20, self.info.as_ref());
+        f.ostruct(30, self.config.as_ref());
+        f.ostruct(40, self.replication_config.as_ref());
         // Go's transmission handler always sets these pointer fields, including
         // zero-valued versions, so they must remain present on the wire.
-        f.fields.push((60, Value::I64(self.config_version)));
-        f.fields.push((70, Value::I64(self.failover_version)));
+        f.fields.push((50, Value::I64(self.config_version)));
+        f.fields.push((60, Value::I64(self.failover_version)));
         f.fields
-            .push((80, Value::I64(self.previous_failover_version)));
+            .push((70, Value::I64(self.previous_failover_version)));
         f.finish()
     }
 }
@@ -1455,9 +1455,23 @@ impl ToThrift for ReplicationTask {
         f.oenum(10, self.task_type);
         f.oi64(11, self.source_task_id);
         f.ostruct(20, self.domain_task_attributes.as_ref());
+        f.ostruct(40, self.sync_shard_status_task_attributes.as_ref());
+        f.ostruct(50, self.sync_activity_task_attributes.as_ref());
+        f.ostruct(70, self.history_task_v2_attributes.as_ref());
+        f.ostruct(80, self.failover_marker_attributes.as_ref());
+        f.oi64(90, self.creation_time);
         f.finish()
     }
 }
+
+impl ToThrift for crate::types::SyncShardStatusTaskAttributes { fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.ostr(10,&self.source_cluster); f.oi64(20,self.shard_id); f.oi64(30,self.timestamp); f.finish() } }
+impl FromThrift for crate::types::SyncShardStatusTaskAttributes { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{source_cluster:s.opt_string(10)?,shard_id:s.opt_i64(20)?,timestamp:s.opt_i64(30)?})} }
+impl ToThrift for crate::types::FailoverMarkerAttributes { fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.ostr(10,&self.domain_id); f.oi64(20,self.failover_version); f.oi64(30,self.creation_time); f.finish() } }
+impl FromThrift for crate::types::FailoverMarkerAttributes { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{domain_id:s.opt_string(10)?,failover_version:s.opt_i64(20)?,creation_time:s.opt_i64(30)?})} }
+impl ToThrift for crate::types::HistoryTaskV2Attributes { fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.oi64(5,self.task_id); f.ostr(10,&self.domain_id); f.ostr(20,&self.workflow_id); f.ostr(30,&self.run_id); f.olist(40,self.version_history_items.as_deref().unwrap_or(&[])); f.ostruct(50,self.events.as_ref()); f.ostruct(70,self.new_run_events.as_ref()); f.finish() } }
+impl FromThrift for crate::types::HistoryTaskV2Attributes { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{task_id:s.opt_i64(5)?,domain_id:s.opt_string(10)?,workflow_id:s.opt_string(20)?,run_id:s.opt_string(30)?,version_history_items:s.opt_list(40)?,events:s.opt_struct(50)?,new_run_events:s.opt_struct(70)?})} }
+impl ToThrift for crate::types::SyncActivityTaskAttributes { fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.ostr(10,&self.domain_id); f.ostr(20,&self.workflow_id); f.ostr(30,&self.run_id); f.oi64(40,self.version); f.oi64(50,self.scheduled_id); f.oi64(60,self.scheduled_time); f.oi64(70,self.started_id); f.oi64(80,self.started_time); f.oi64(90,self.last_heartbeat_time); if let Some(v)=&self.details {f.fields.push((100,Value::Bytes(v.clone())))} f.oi32(110,self.attempt); f.ostr(120,&self.last_failure_reason); f.ostr(130,&self.last_worker_identity); if let Some(v)=&self.last_failure_details {f.fields.push((140,Value::Bytes(v.clone())))} f.ostruct(145,self.last_failure_options.as_ref()); f.ostruct(150,self.version_history.as_ref()); f.finish() } }
+impl FromThrift for crate::types::SyncActivityTaskAttributes { fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{domain_id:s.opt_string(10)?,workflow_id:s.opt_string(20)?,run_id:s.opt_string(30)?,version:s.opt_i64(40)?,scheduled_id:s.opt_i64(50)?,scheduled_time:s.opt_i64(60)?,started_id:s.opt_i64(70)?,started_time:s.opt_i64(80)?,last_heartbeat_time:s.opt_i64(90)?,details:s.opt_bytes(100)?,attempt:s.opt_i32(110)?,last_failure_reason:s.opt_string(120)?,last_worker_identity:s.opt_string(130)?,last_failure_details:s.opt_bytes(140)?,last_failure_options:s.opt_struct(145)?,version_history:s.opt_struct(150)?})} }
 
 impl ToThrift for ReplicationMessages {
     fn to_thrift(&self) -> Struct {
@@ -1468,6 +1482,7 @@ impl ToThrift for ReplicationMessages {
         if self.has_more {
             f.fields.push((30, Value::Bool(true)));
         }
+        f.ostruct(40, self.sync_shard_status.as_ref());
         f.finish()
     }
 }
@@ -1478,8 +1493,22 @@ impl FromThrift for ReplicationMessages {
             replication_tasks: s.opt_list(10)?.unwrap_or_default(),
             last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
             has_more: s.opt_bool(30)?.unwrap_or_default(),
+            sync_shard_status: s.opt_struct(40)?,
         })
     }
+}
+
+impl ToThrift for SyncShardStatus {
+    fn to_thrift(&self) -> Struct { let mut f=Fields::new(); f.oi64(10,self.timestamp); f.finish() }
+}
+impl FromThrift for SyncShardStatus {
+    fn from_thrift(s:&Struct)->Result<Self,crate::protocol::Error>{Ok(Self{timestamp:s.opt_i64(10)?})}
+}
+impl ToThrift for GetReplicationMessagesResponse {
+    fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.fields.push((10,Value::Map(self.messages_by_shard.iter().map(|(k,v)|(Value::I32(*k),Value::Struct(v.to_thrift()))).collect()))); f.finish() }
+}
+impl ToThrift for GetDLQReplicationMessagesResponse {
+    fn to_thrift(&self)->Struct { let mut f=Fields::new(); f.olist(10,&self.replication_tasks); f.finish() }
 }
 
 impl FromThrift for GetDomainReplicationMessagesRequest {
@@ -1514,6 +1543,11 @@ impl FromThrift for ReplicationTask {
             task_type: s.opt_enum(10)?,
             source_task_id: s.opt_i64(11)?,
             domain_task_attributes: s.opt_struct(20)?,
+            sync_shard_status_task_attributes: s.opt_struct(40)?,
+            sync_activity_task_attributes: s.opt_struct(50)?,
+            history_task_v2_attributes: s.opt_struct(70)?,
+            failover_marker_attributes: s.opt_struct(80)?,
+            creation_time: s.opt_i64(90)?,
         })
     }
 }
@@ -1521,14 +1555,14 @@ impl FromThrift for ReplicationTask {
 impl FromThrift for DomainTaskAttributes {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            domain_operation: s.opt_enum(10)?,
-            id: s.req_string(20, "")?,
-            info: s.opt_struct(30)?,
-            config: s.opt_struct(40)?,
-            replication_config: s.opt_struct(50)?,
-            config_version: s.opt_i64(60)?.unwrap_or_default(),
-            failover_version: s.opt_i64(70)?.unwrap_or_default(),
-            previous_failover_version: s.opt_i64(80)?.unwrap_or_default(),
+            domain_operation: s.opt_enum(5)?,
+            id: s.req_string(10, "")?,
+            info: s.opt_struct(20)?,
+            config: s.opt_struct(30)?,
+            replication_config: s.opt_struct(40)?,
+            config_version: s.opt_i64(50)?.unwrap_or_default(),
+            failover_version: s.opt_i64(60)?.unwrap_or_default(),
+            previous_failover_version: s.opt_i64(70)?.unwrap_or_default(),
         })
     }
 }
@@ -6352,6 +6386,7 @@ mod tests {
                 failover_version: 8,
                 previous_failover_version: -1,
             }),
+            ..Default::default()
         };
         let thrift = task.to_thrift();
         assert!(matches!(thrift.get(10), Some(Value::I32(0))));
@@ -6360,11 +6395,11 @@ mod tests {
             Some(Value::Struct(attributes)) => attributes,
             other => panic!("expected domain task attributes, got {other:?}"),
         };
-        assert!(matches!(attributes.get(10), Some(Value::I32(1))));
-        assert!(matches!(attributes.get(20), Some(Value::Bytes(id)) if id == b"domain-uuid"));
-        assert!(matches!(attributes.get(60), Some(Value::I64(0))));
-        assert!(matches!(attributes.get(70), Some(Value::I64(8))));
-        assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
+        assert!(matches!(attributes.get(5), Some(Value::I32(1))));
+        assert!(matches!(attributes.get(10), Some(Value::Bytes(id)) if id == b"domain-uuid"));
+        assert!(matches!(attributes.get(50), Some(Value::I64(0))));
+        assert!(matches!(attributes.get(60), Some(Value::I64(8))));
+        assert!(matches!(attributes.get(70), Some(Value::I64(-1))));
         assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
     }
 
