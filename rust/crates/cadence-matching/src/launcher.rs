@@ -843,7 +843,9 @@ async fn run_with_lifecycle(
                                         mchannel,
                                     ),
                                 ),
-                                std::sync::Arc::new(|_domain: &str, _task_list: &str, _kind: i32| 1usize),
+                                std::sync::Arc::new(
+                                    |_domain: &str, _task_list: &str, _kind: i32| 1usize,
+                                ),
                                 state.grpc_max_message_size,
                             ));
                     }
