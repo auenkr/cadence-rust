@@ -11,3 +11,5 @@ Latest observations before merge:
 - Source audit confirms the HTTP router captures state before workflow hook installation (launcher.rs router construction versus later grpc_state/tchannel_state installation); handlers.rs HTTP start/signal-with-start use execution_store directly. Shared production operation routing across HTTP remains a required follow-up; moving hook installation alone will not fix handlers that never consult it.
 
 No local Cargo or Go validation ran. Existing untracked memory/progress-dashboard.html was preserved untouched. Master push automatically requests rust-ci; final acceptance still requires fresh clippy followed by workspace tests and mixed failure/restart/recovery evidence with binary SHA256. Retain Go History/Worker and Rust Matching.
+
+Explicitly dispatched fresh uncached workspace validation (`clean_target=true`, no package restriction): https://github.com/auenkr/cadence-rust/actions/runs/41328313463 at master head 0c1d90d733d4fc8b125013603c06b65b044fd428. Result pending. Deleted merged frontend-integration-20261101 locally and remotely after verifying it was merged into origin/master and no worktree used it.
