@@ -398,7 +398,6 @@ pub fn describe_in(v: p::DescribeWorkflowExecutionResponse) -> st::DescribeWorkf
                 maximum_attempts: a.maximum_attempts,
                 schedule_id: a.schedule_id,
                 last_failure_reason: a.last_failure.map(|f| f.reason),
-                ..Default::default()
             })
             .collect(),
         pending_children: v
