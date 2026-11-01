@@ -1361,6 +1361,30 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
+            {
+                let plugin = |store: &str| {
+                    cfg.persistence.datastores.get(store).and_then(|ds| {
+                        ds.sql
+                            .as_ref()
+                            .map(|sql| sql.plugin_name.clone())
+                            .or_else(|| ds.nosql.as_ref().map(|nosql| nosql.plugin_name.clone()))
+                    })
+                };
+                let history = plugin(&cfg.persistence.default_store);
+                let visibility = plugin(&cfg.persistence.visibility_store).or_else(|| history.clone());
+                if let Some(history) = history {
+                    state.admin.persistence_description.history_backend = history.clone();
+                    state.admin.persistence_description.visibility_backend =
+                        visibility.unwrap_or(history);
+                }
+                state.admin.persistence_description.advanced_visibility =
+                    !cfg.persistence.advanced_visibility_store.is_empty();
+            }
+            if let Some(provider) = &frontend_ringpop_provider {
+                state.admin.membership.set(Some(std::sync::Arc::new(
+                    crate::matching_ringpop_provider::RingpopClusterMembership(provider.clone()),
+                )));
+            }
             let matching_membership = matching_ringpop_provider.as_ref().map(|provider| {
                 crate::matching_membership::Membership::new(
                     provider.local_identity().to_owned(),

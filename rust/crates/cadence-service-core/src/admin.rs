@@ -244,6 +244,8 @@ impl DynamicConfigOverlay {
 pub struct AdminState {
     pub dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
     pub custom_search_attributes: Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
+    pub membership: MembershipSlot,
+    pub persistence_description: PersistenceDescription,
 }
 
 // ---------------------------------------------------------------------------
@@ -266,54 +268,123 @@ fn ok_json<T: serde::Serialize>(value: T) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 
-/// Cluster membership and persistence backends, mirroring Go admin
-/// `DescribeCluster`. Single host: one member per role, in-memory
-/// persistence without advanced visibility.
-pub fn describe_cluster_response(hostname: &str) -> cadence_api::admin::DescribeClusterResponse {
-    let rings = ["frontend", "history", "matching", "worker"]
-        .into_iter()
-        .map(|role| cadence_api::admin::RingInfo {
-            role: role.to_string(),
-            member_count: 1,
-            members: vec![cadence_api::admin::HostInfo {
-                identity: hostname.to_string(),
-            }],
-        })
-        .collect();
-    let mut persistence_info = std::collections::HashMap::new();
-    for backend in ["history", "visibility"] {
-        persistence_info.insert(
-            backend.to_string(),
-            cadence_api::admin::PersistenceInfo {
-                backend: "memory".to_string(),
-                features: vec![cadence_api::admin::PersistenceFeature {
-                    key: "advancedVisibilityEnabled".to_string(),
-                    enabled: false,
-                }],
-            },
-        );
+/// Go `service.ListWithRing`: roles reported by `DescribeCluster`, in order.
+pub const RING_ROLES: [&str; 4] = [
+    "cadence-frontend",
+    "cadence-history",
+    "cadence-matching",
+    "cadence-worker",
+];
+
+/// Live membership view, mirroring the Go `membership.Resolver` methods used
+/// by `DescribeCluster` (`WhoAmI` and `Members`). Errors are returned to the
+/// caller unchanged, as Go does.
+pub trait ClusterMembership: Send + Sync {
+    fn who_am_i(&self) -> Result<String, String>;
+    fn members(&self, role: &str) -> Result<Vec<String>, String>;
+}
+
+/// Late-bound slot for the membership resolver. Go's `GetMembershipResolver`
+/// may be nil; in that case `DescribeCluster` returns empty membership info.
+#[derive(Clone, Default)]
+pub struct MembershipSlot(Arc<std::sync::RwLock<Option<Arc<dyn ClusterMembership>>>>);
+
+impl std::fmt::Debug for MembershipSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MembershipSlot")
     }
-    cadence_api::admin::DescribeClusterResponse {
+}
+
+impl MembershipSlot {
+    pub fn set(&self, resolver: Option<Arc<dyn ClusterMembership>>) {
+        *self.0.write().expect("membership slot lock") = resolver;
+    }
+    pub fn get(&self) -> Option<Arc<dyn ClusterMembership>> {
+        self.0.read().expect("membership slot lock").clone()
+    }
+}
+
+/// Persistence facts reported by `DescribeCluster` (Go manager `GetName()` and
+/// whether Elasticsearch/OpenSearch advanced visibility is configured).
+#[derive(Debug, Clone)]
+pub struct PersistenceDescription {
+    pub history_backend: String,
+    pub visibility_backend: String,
+    pub advanced_visibility: bool,
+}
+
+impl Default for PersistenceDescription {
+    fn default() -> Self {
+        Self {
+            history_backend: "memory".into(),
+            visibility_backend: "memory".into(),
+            advanced_visibility: false,
+        }
+    }
+}
+
+/// Mirrors Go admin `DescribeCluster`: ring members for every role come from
+/// the membership resolver; resolver errors are returned before any response
+/// is built. Persistence keys are `historyStore` / `visibilityStore`.
+pub fn describe_cluster_for(
+    admin: &AdminState,
+) -> Result<cadence_api::admin::DescribeClusterResponse, String> {
+    use cadence_api::admin::{HostInfo, MembershipInfo, RingInfo};
+    let mut membership_info = MembershipInfo::default();
+    if let Some(resolver) = admin.membership.get() {
+        membership_info.current_host = Some(HostInfo {
+            identity: resolver.who_am_i()?,
+        });
+        for role in RING_ROLES {
+            let identities = resolver.members(role)?;
+            let members: Vec<HostInfo> = identities
+                .iter()
+                .map(|identity| HostInfo {
+                    identity: identity.clone(),
+                })
+                .collect();
+            membership_info.reachable_members.extend(identities);
+            membership_info.rings.push(RingInfo {
+                role: role.to_string(),
+                member_count: members.len() as i32,
+                members,
+            });
+        }
+    }
+    let persistence = admin.persistence_description.clone();
+    let mut persistence_info = std::collections::HashMap::new();
+    persistence_info.insert(
+        "visibilityStore".to_string(),
+        cadence_api::admin::PersistenceInfo {
+            backend: persistence.visibility_backend,
+            features: vec![cadence_api::admin::PersistenceFeature {
+                key: "advancedVisibilityEnabled".to_string(),
+                enabled: persistence.advanced_visibility,
+            }],
+        },
+    );
+    persistence_info.insert(
+        "historyStore".to_string(),
+        cadence_api::admin::PersistenceInfo {
+            backend: persistence.history_backend,
+            features: Vec::new(),
+        },
+    );
+    Ok(cadence_api::admin::DescribeClusterResponse {
         supported_client_versions: Some(cadence_api::types::SupportedClientVersions {
             go_sdk: "<=1.7.0".to_string(),
             java_sdk: "<=1.5.0".to_string(),
         }),
-        membership_info: Some(cadence_api::admin::MembershipInfo {
-            current_host: Some(cadence_api::admin::HostInfo {
-                identity: hostname.to_string(),
-            }),
-            // Go appends every returned member in role iteration order, so a
-            // single host serving all four roles appears four times here.
-            reachable_members: vec![hostname.to_string(); 4],
-            rings,
-        }),
+        membership_info: Some(membership_info),
         persistence_info: Some(persistence_info),
-    }
+    })
 }
 
-pub async fn describe_cluster(State(_state): State<StdArc<AppState>>) -> Response {
-    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
-    ok_json(describe_cluster_response(&hostname))
+pub async fn describe_cluster(State(state): State<StdArc<AppState>>) -> Response {
+    match describe_cluster_for(&state.admin) {
+        Ok(response) => ok_json(response),
+        Err(error) => error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
 }
 
 /// Delete a workflow run's data, mirroring Go admin `DeleteWorkflow`.
@@ -1782,23 +1853,61 @@ mod tests {
         );
     }
 
+    struct FakeMembership {
+        fail_role: Option<&'static str>,
+    }
+    impl ClusterMembership for FakeMembership {
+        fn who_am_i(&self) -> Result<String, String> {
+            Ok("fe-1:7933".into())
+        }
+        fn members(&self, role: &str) -> Result<Vec<String>, String> {
+            if self.fail_role == Some(role) {
+                return Err("ring unavailable".into());
+            }
+            Ok(match role {
+                "cadence-frontend" => vec!["fe-1:7933".into(), "fe-2:7933".into()],
+                "cadence-history" => vec!["h-1:7934".into()],
+                "cadence-matching" => vec![],
+                _ => vec!["w-1:7939".into()],
+            })
+        }
+    }
+
     #[test]
-    fn describe_cluster_matches_go_versions_and_single_host_rings() {
-        let response = describe_cluster_response("frontend-1");
+    fn describe_cluster_uses_resolver_members_per_role_like_go() {
+        let admin = AdminState::default();
+        admin.membership.set(Some(Arc::new(FakeMembership { fail_role: None })));
+        let response = describe_cluster_for(&admin).unwrap();
         let versions = response.supported_client_versions.unwrap();
         assert_eq!(versions.go_sdk, "<=1.7.0");
         assert_eq!(versions.java_sdk, "<=1.5.0");
         let membership = response.membership_info.unwrap();
-        assert_eq!(membership.current_host.unwrap().identity, "frontend-1");
-        assert_eq!(membership.rings.len(), 4);
+        assert_eq!(membership.current_host.unwrap().identity, "fe-1:7933");
+        let roles: Vec<_> = membership.rings.iter().map(|r| r.role.as_str()).collect();
         assert_eq!(
-            membership
-                .reachable_members
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            vec!["frontend-1"; 4]
+            roles,
+            ["cadence-frontend", "cadence-history", "cadence-matching", "cadence-worker"]
         );
+        assert_eq!(membership.rings[0].member_count, 2);
+        assert_eq!(membership.rings[2].member_count, 0);
+        assert_eq!(
+            membership.reachable_members,
+            vec!["fe-1:7933", "fe-2:7933", "h-1:7934", "w-1:7939"]
+        );
+        let info = response.persistence_info.unwrap();
+        assert!(info.contains_key("historyStore"));
+        assert!(!info["visibilityStore"].features[0].enabled);
+    }
+
+    #[test]
+    fn describe_cluster_without_resolver_has_empty_membership_and_errors_propagate() {
+        let admin = AdminState::default();
+        let membership = describe_cluster_for(&admin).unwrap().membership_info.unwrap();
+        assert!(membership.current_host.is_none() && membership.rings.is_empty());
+        admin
+            .membership
+            .set(Some(Arc::new(FakeMembership { fail_role: Some("cadence-history") })));
+        assert_eq!(describe_cluster_for(&admin).unwrap_err(), "ring unavailable");
     }
 
     #[test]

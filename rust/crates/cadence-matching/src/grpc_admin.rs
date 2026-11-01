@@ -113,8 +113,8 @@ impl a::admin_api_server::AdminApi for Admin {
         &self,
         _request: Request<a::DescribeClusterRequest>,
     ) -> Result<Response<a::DescribeClusterResponse>, Status> {
-        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
-        let v = crate::admin::describe_cluster_response(&hostname);
+        let v = crate::admin::describe_cluster_for(&self.frontend.state.admin)
+            .map_err(Status::internal)?;
         Ok(Response::new(a::DescribeClusterResponse {
             supported_client_versions: v.supported_client_versions.map(|s| {
                 cadence_proto::api::SupportedClientVersions {

@@ -225,6 +225,24 @@ impl MatchingRingpopProvider {
     }
 }
 
+/// Go `membership.Resolver` view for Admin `DescribeCluster`, backed by this
+/// provider's live Ringpop snapshot (all roles, not just its own).
+pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>);
+
+impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership {
+    fn who_am_i(&self) -> Result<String, String> {
+        Ok(self.0.local_identity().to_owned())
+    }
+    fn members(&self, role: &str) -> Result<Vec<String>, String> {
+        Ok(
+            MatchingRingpopProvider::service_members(&self.0.snapshot().members, role)
+                .into_iter()
+                .map(|member| member.identity)
+                .collect(),
+        )
+    }
+}
+
 impl MatchingPeerProvider for MatchingRingpopProvider {
     async fn start(&self) -> Result<(), ProviderError> {
         eprintln!("Matching startup stage: Ringpop provider lifecycle lock begin");

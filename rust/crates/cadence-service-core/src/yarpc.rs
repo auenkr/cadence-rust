@@ -714,11 +714,10 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
     Ok(Struct { fields: vec![] })
 }
 
-fn handle_describe_cluster() -> HandlerResult {
-    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
-    Ok(wrap_success(&crate::admin::describe_cluster_response(
-        &hostname,
-    )))
+fn handle_describe_cluster(state: &AppState) -> HandlerResult {
+    let response = crate::admin::describe_cluster_for(&state.admin)
+        .map_err(AppError::internal)?;
+    Ok(wrap_success(&response))
 }
 
 fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
@@ -2445,7 +2444,7 @@ pub async fn dispatch_with_headers(
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
         "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
-        "DescribeCluster" => handle_describe_cluster(),
+        "DescribeCluster" => handle_describe_cluster(state),
         "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
         "ReadDLQMessages" => handle_read_dlq_messages(state, body),
         "PurgeDLQMessages" => handle_purge_dlq_messages(state, body),
