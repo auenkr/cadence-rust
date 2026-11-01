@@ -145,7 +145,7 @@ const DATA = {
     { name: "Frontend", order: 3,
       status: "part",
       acceptance: "Not accepted: mixed gate (Rust Frontend + Rust Matching + Go History/Worker) fails: QueryWorkflow nil result, open-workflow describe/list wrong, Ringpop join to Rust Frontend fails.",
-      note: "Most handlers exist on integration branch <code>frontend-domain-admin</code>/<code>fe-integ</code>; master still has a thin frontend crate. Passing: domain CRUD, start/complete/signal, list-closed, SIGKILL restart.",
+      note: "2026-11-01: fe-workflow-service (gRPC/Thrift routing, polls, history reader, ByID types) and fe-admin-domain (domain audit, Thrift AdminService, schedule via scheduler workflow) are merged into master, CI green. Latest mixed gate not yet accepted (see memory/frontend-*.md).  Passing: domain CRUD, start/complete/signal, list-closed, SIGKILL restart.",
       components: [
         {n:"api (workflow/domain handlers)", loc:7207, s:"part", r:"handler_workflow*, handler_domain"},
         {n:"wrappers (access, ratelimit, redirect, metered, version)", loc:8374, s:"part", r:"wrappers/*"},

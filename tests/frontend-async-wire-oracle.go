@@ -10,6 +10,7 @@ import (
 
 	"github.com/uber/cadence/.gen/go/shared"
 	"github.com/uber/cadence/common/codec"
+	"github.com/uber/cadence/common/constants"
 )
 
 func require(ok bool, message string) {
@@ -29,6 +30,7 @@ func main() {
 		return payload
 	}
 	startPayload := read("start.bin")
+	require(string(read("start.bin.encoding")) == string(constants.EncodingTypeThriftRW), "unsupported start encoding")
 	var start shared.StartWorkflowExecutionAsyncRequest
 	if err := encoder.Decode(startPayload, &start); err != nil {
 		panic(fmt.Errorf("Go rejected Rust async start payload: %w", err))
@@ -43,6 +45,7 @@ func main() {
 	require(encoder.Decode(startPayload[1:], &unversioned) != nil, "Go unexpectedly accepted unversioned payload")
 
 	var signal shared.SignalWithStartWorkflowExecutionAsyncRequest
+	require(string(read("signal-with-start.bin.encoding")) == string(constants.EncodingTypeThriftRW), "unsupported signal encoding")
 	if err := encoder.Decode(read("signal-with-start.bin"), &signal); err != nil {
 		panic(fmt.Errorf("Go rejected Rust async signal-with-start payload: %w", err))
 	}
@@ -56,6 +59,7 @@ func main() {
 		"go_decodes_rust_async_start": true,
 		"go_decodes_rust_async_signal_with_start": true,
 		"go_rejects_unversioned_payload": true,
+		"go_accepts_rust_encoding_metadata": true,
 	}); err != nil {
 		panic(err)
 	}

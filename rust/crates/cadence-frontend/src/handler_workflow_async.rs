@@ -57,7 +57,7 @@ pub fn encode_async_workflow_request(
         partition_key,
         request_type,
         headers,
-        encoding: "ThriftRW",
+        encoding: "thriftrw",
         payload,
     })
 }
@@ -78,11 +78,12 @@ mod tests {
     use cadence_thrift::value::{read_struct, FromThrift};
     use cadence_thrift::Reader;
 
-    fn export_go_decoder_fixture(name: &str, payload: &[u8]) {
+    fn export_go_decoder_fixture(name: &str, message: &AsyncWorkflowMessage) {
         if let Some(path) = std::env::var_os("FRONTEND_ASYNC_WIRE_EVIDENCE") {
             let path = std::path::PathBuf::from(path);
             std::fs::create_dir_all(&path).unwrap();
-            std::fs::write(path.join(name), payload).unwrap();
+            std::fs::write(path.join(name), &message.payload).unwrap();
+            std::fs::write(path.join(format!("{name}.encoding")), message.encoding).unwrap();
         }
     }
 
@@ -121,7 +122,7 @@ mod tests {
         assert_eq!(message.domain, "shop");
         assert_eq!(message.partition_key, "order-17");
         assert_eq!(message.request_type, 0);
-        assert_eq!(message.encoding, "ThriftRW");
+        assert_eq!(message.encoding, "thriftrw");
         assert_eq!(message.headers["x-cadence-trace"], b"trace-1");
 
         assert_eq!(message.payload[0], 0x59);
@@ -131,7 +132,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.request.unwrap().workflow_id, "order-17");
-        export_go_decoder_fixture("start.bin", &message.payload);
+        export_go_decoder_fixture("start.bin", &message);
     }
 
     #[test]
@@ -160,6 +161,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(decoded.request.unwrap().workflow_id, "order-18");
-        export_go_decoder_fixture("signal-with-start.bin", &message.payload);
+        export_go_decoder_fixture("signal-with-start.bin", &message);
     }
 }
