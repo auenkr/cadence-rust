@@ -54,6 +54,7 @@ pub struct ActivityContext {
 }
 
 impl ActivityContext {
+    #[allow(clippy::result_large_err)]
     /// Go `activity.RecordHeartbeat`; also learns about server-side cancellation.
     pub async fn record_heartbeat(&self, details: Option<Vec<u8>>) -> Result<(), tonic::Status> {
         let mut client = self.client.clone();

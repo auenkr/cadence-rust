@@ -1,7 +1,6 @@
 //! Deterministic replay of a workflow history (port of the decision-task
 //! handling in `internal_task_handlers.go` / `internal_event_handlers.go`).
 
-use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
