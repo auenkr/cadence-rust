@@ -10,6 +10,8 @@ Merge resolutions preserve workflow backend/matching/visibility modules plus sch
 
 CI https://github.com/auenkr/cadence-rust/actions/runs/41327276590 tests cadence-frontend with format_all=true at ace9aefd49431bdb709d66be77c036797e5200d9. Authoritative observation at 16:38 UTC: in_progress. This is not evidence of success. Obtain its result, inspect/apply formatting artifact if needed, fix integration failures, then validate Matching and the full workspace as appropriate. All Cargo/Go validation remains CI-only.
 
+Subsequent result: 41327276590 FAILED clippy with E0201 duplicate get_domain/list_domains in matching_domain_metadata.rs (both source branches added SQL read-through). Fixed by retaining one identical implementation pair, and applied CI artifact format-all.patch (no local formatting). Fix head b967e1442cfc431c1d8253df17044755febeb685. New cadence-frontend CI: https://github.com/auenkr/cadence-rust/actions/runs/41327559111, pending result.
+
 ## Assigned independent slices
 
 - Luna medium, serviceTier default: t3/e6c456a1, worktree /home/auenkr/.t3/worktrees/cadence-rust/t3-e6c456a1. Owns synchronous gRPC StartWorkflowExecution and SignalWithStartWorkflowExecution routing through WorkflowApi, plus focused tests. Delegate ae067989-ea62-4e95-bb25-5d5fcc5d3bb7 (command namespace 8fb5dc75-901f-4600-9ec7-e385efe369a5).
@@ -20,6 +22,8 @@ Both launched successfully after earlier parent_not_active errors. Follow comple
 ## Required continuation
 
 Mixed baseline dispatched: https://github.com/auenkr/cadence-rust/actions/runs/41327420652, workflow ref frontend-integration-20261101, pinned rust_ref b59401a49. No other mixed gate was live at dispatch (previous three listed runs were terminal failures). Await actual result; a dispatched run proves no compatibility yet. Workflow uses a fresh target, SHA256 capture, bounded MySQL container and cleanup trap.
+
+Subsequent result: 41327420652 FAILED before build: actions/checkout interpreted abbreviated SHA as branch/tag. No binary or runtime evidence. Use exact full SHA when pinning workflow rust_ref. Run 41327569882 was dispatched with a mistyped full SHA and cancelled immediately; do not use as evidence. A corrected mixed run was dispatched at b967e1442cfc431c1d8253df17044755febeb685; retrieve its URL from workflow run list.
 
 Source-confirmed next slice: launcher.rs Frontend TChannel serve path calls `tchannel::serve(tchannel_addr, tchannel_state)` without Ringpop handler. tchannel.rs rejects service `ringpop` when handler is absent; only Matching serve paths currently accept a Ringpop handler. This supports the earlier mixed-gate join failure report and needs a dedicated Frontend discovery/lifecycle port after a worker slot frees. Preserve advertised role/membership semantics from Go; simply accepting join messages is insufficient.
 
