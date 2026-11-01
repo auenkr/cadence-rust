@@ -2248,11 +2248,13 @@ where
 /// Dispatch one Thrift call; returns the REPLY body struct plus an optional
 /// application error (exception name + details for headers).
 pub async fn dispatch(
-    state: &Arc<AppState>,
+    state: &AppState,
     method: &str,
     body: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    // Admin handlers share the axum `State<Arc<AppState>>` extractor shape.
+    let shared = || Arc::new(state.clone());
     let admin = method.starts_with("AdminService::");
     let name = method.rsplit("::").next().unwrap_or(method);
     let outcome: HandlerResult = match name {
@@ -2279,7 +2281,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::AdminDescribeWorkflowExecutionRequest| {
-                    crate::admin::describe_workflow_execution_admin(State(state.clone()), Json(req))
+                    crate::admin::describe_workflow_execution_admin(State(shared()), Json(req))
                 },
             )
             .await
@@ -2289,7 +2291,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::DescribeHistoryHostRequest| {
-                    crate::admin::describe_history_host(State(state.clone()), Json(req))
+                    crate::admin::describe_history_host(State(shared()), Json(req))
                 },
             )
             .await
@@ -2299,20 +2301,20 @@ pub async fn dispatch(
                 method,
                 body,
                 |_: cadence_api::admin::DescribeShardDistributionRequest| {
-                    crate::admin::describe_shard_distribution(State(state.clone()))
+                    crate::admin::describe_shard_distribution(State(shared()))
                 },
             )
             .await
         }
         "CloseShard" => {
             bridge_void(method, body, |req: cadence_api::admin::CloseShardRequest| {
-                crate::admin::close_shard(State(state.clone()), Json(req))
+                crate::admin::close_shard(State(shared()), Json(req))
             })
             .await
         }
         "RemoveTask" => {
             bridge_void(method, body, |req: cadence_api::admin::RemoveTaskRequest| {
-                crate::admin::remove_task(State(state.clone()), Json(req))
+                crate::admin::remove_task(State(shared()), Json(req))
             })
             .await
         }
@@ -2321,7 +2323,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::ReapplyEventsRequest| {
-                    crate::admin::reapply_events(State(state.clone()), Json(req))
+                    crate::admin::reapply_events(State(shared()), Json(req))
                 },
             )
             .await
@@ -2331,7 +2333,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::MaintainCorruptWorkflowRequest| {
-                    crate::admin::maintain_corrupt_workflow(State(state.clone()), Json(req))
+                    crate::admin::maintain_corrupt_workflow(State(shared()), Json(req))
                 },
             )
             .await
@@ -2341,7 +2343,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |_: cadence_api::admin::GetGlobalIsolationGroupsRequest| {
-                    crate::admin::get_global_isolation_groups(State(state.clone()))
+                    crate::admin::get_global_isolation_groups(State(shared()))
                 },
             )
             .await
@@ -2351,7 +2353,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::UpdateGlobalIsolationGroupsRequest| {
-                    crate::admin::update_global_isolation_groups(State(state.clone()), Json(req))
+                    crate::admin::update_global_isolation_groups(State(shared()), Json(req))
                 },
             )
             .await
@@ -2361,7 +2363,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::GetDomainIsolationGroupsRequest| {
-                    crate::admin::get_domain_isolation_groups(State(state.clone()), Json(req))
+                    crate::admin::get_domain_isolation_groups(State(shared()), Json(req))
                 },
             )
             .await
@@ -2371,7 +2373,7 @@ pub async fn dispatch(
                 method,
                 body,
                 |req: cadence_api::admin::UpdateDomainIsolationGroupsRequest| {
-                    crate::admin::update_domain_isolation_groups(State(state.clone()), Json(req))
+                    crate::admin::update_domain_isolation_groups(State(shared()), Json(req))
                 },
             )
             .await
@@ -2382,7 +2384,7 @@ pub async fn dispatch(
                 body,
                 |req: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest| {
                     crate::admin::get_domain_async_workflow_configuration(
-                        State(state.clone()),
+                        State(shared()),
                         Json(req),
                     )
                 },
@@ -2400,7 +2402,7 @@ pub async fn dispatch(
                 body,
                 |req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest| {
                     crate::admin::update_domain_async_workflow_configuration(
-                        State(state.clone()),
+                        State(shared()),
                         Json(req),
                     )
                 },
