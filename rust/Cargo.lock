@@ -591,6 +591,7 @@ dependencies = [
  "crc32c",
  "crc32fast",
  "hickory-resolver",
+ "http",
  "hyper-util",
  "if-addrs",
  "libc",
