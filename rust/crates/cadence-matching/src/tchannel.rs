@@ -741,6 +741,16 @@ pub async fn serve_matching_with_ringpop_listener(
     )
     .await
 }
+/// Serve Frontend workflow/admin methods and Ringpop JSON methods on the
+/// Frontend's shared TChannel listener. Frontend must not install a Matching
+/// Thrift handler on this endpoint.
+pub async fn serve_frontend_with_ringpop_listener(
+    listener: TcpListener,
+    state: AppState,
+    ringpop: RingpopHandler,
+) -> Result<()> {
+    serve_listener(listener, state, None, Some(ringpop)).await
+}
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
 }

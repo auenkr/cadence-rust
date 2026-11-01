@@ -1174,6 +1174,19 @@ async fn run_with_lifecycle(
                 println!("Cadence gRPC frontend listening on {grpc_addr}");
                 println!("Cadence TChannel frontend listening on {tchannel_addr}");
             }
+            // Reserve the Frontend TChannel endpoint before publishing its
+            // address through Ringpop, and keep the actual bound port for the
+            // provider's named-port labels.
+            let mut frontend_tchannel_listener = if run_frontend {
+                Some(tokio::net::TcpListener::bind(tchannel_addr).await?)
+            } else {
+                None
+            };
+            let tchannel_addr = frontend_tchannel_listener
+                .as_ref()
+                .map(tokio::net::TcpListener::local_addr)
+                .transpose()?
+                .unwrap_or(tchannel_addr);
             let history_rpc = cfg.services.get("history").map(|s| &s.rpc);
             let history_addr = std::net::SocketAddr::from((
                 if history_rpc.is_some_and(|r| r.bind_on_local_host) {
@@ -1298,6 +1311,18 @@ async fn run_with_lifecycle(
                         "cadence-matching",
                         listener.local_addr()?,
                         matching_addr.port(),
+                    )?,
+                ))
+            } else {
+                None
+            };
+            let frontend_ringpop_provider = if let Some(listener) = &frontend_tchannel_listener {
+                Some(std::sync::Arc::new(
+                    crate::matching_ringpop_provider::MatchingRingpopProvider::new(
+                        cfg.ringpop.clone(),
+                        "cadence-frontend",
+                        listener.local_addr()?,
+                        grpc_addr.port(),
                     )?,
                 ))
             } else {
@@ -1931,6 +1956,49 @@ async fn run_with_lifecycle(
                     tchannel_state.workflow_api = Some(api);
                 }
             }
+            // The listener accepts Ringpop JOIN before provider bootstrap
+            // starts. Use the final Frontend state, including its workflow
+            // API hook, and deliberately omit the Matching handler.
+            let mut frontend_tchannel_task = if let (Some(listener), Some(provider)) = (
+                frontend_tchannel_listener.take(),
+                frontend_ringpop_provider.as_ref(),
+            ) {
+                let handler = provider.handler();
+                let ringpop_state = tchannel_state.clone();
+                Some(tokio::spawn(async move {
+                    crate::tchannel::serve_frontend_with_ringpop_listener(
+                        listener,
+                        ringpop_state,
+                        handler,
+                    )
+                    .await
+                }))
+            } else {
+                None
+            };
+            if let Some(provider) = frontend_ringpop_provider.as_ref() {
+                let start = crate::matching_peer_provider::MatchingPeerProvider::start(
+                    provider.as_ref(),
+                )
+                .await;
+                if let Err(start_error) = start {
+                    let cleanup = crate::matching_peer_provider::MatchingPeerProvider::stop(
+                        provider.as_ref(),
+                    )
+                    .await;
+                    if let Some(task) = frontend_tchannel_task.take() {
+                        task.abort();
+                        let _ = task.await;
+                    }
+                    if let Err(cleanup_error) = cleanup {
+                        anyhow::bail!(
+                            "starting Frontend Ringpop failed: {start_error}; cleanup failed: {cleanup_error}"
+                        );
+                    }
+                    return Err(anyhow::Error::new(start_error)
+                        .context("starting Frontend Ringpop membership"));
+                }
+            }
             if run_frontend {
                 serving.spawn(async move {
                     (
@@ -1941,7 +2009,13 @@ async fn run_with_lifecycle(
                 serving.spawn(async move {
                     (
                         "Frontend TChannel",
-                        crate::tchannel::serve(tchannel_addr, tchannel_state).await,
+                        if let Some(task) = frontend_tchannel_task {
+                            task.await
+                                .map_err(anyhow::Error::new)
+                                .and_then(|result| result)
+                        } else {
+                            crate::tchannel::serve(tchannel_addr, tchannel_state).await
+                        },
                     )
                 });
             }
@@ -2100,6 +2174,29 @@ async fn run_with_lifecycle(
                     },
                 )
                 .await;
+                if let Some(provider) = frontend_ringpop_provider.as_ref() {
+                    // Keep the shared listener serving while peers learn the
+                    // Frontend's departure, then stop Ringpop before closing
+                    // its JOIN endpoint.
+                    if let Err(error) =
+                        crate::matching_peer_provider::MatchingPeerProvider::self_evict(
+                            provider.as_ref(),
+                        )
+                        .await
+                    {
+                        serving_shutdown_errors
+                            .push(format!("withdrawing Frontend membership: {error}"));
+                    }
+                    if let Err(error) =
+                        crate::matching_peer_provider::MatchingPeerProvider::stop(
+                            provider.as_ref(),
+                        )
+                        .await
+                    {
+                        serving_shutdown_errors
+                            .push(format!("stopping Frontend membership: {error}"));
+                    }
+                }
                 // `cadence-frontend` is a dedicated Frontend process. Go
                 // calls Resource.Stop immediately after the Frontend drain;
                 // tear down its listener and TChannel resources here, before
@@ -2129,6 +2226,22 @@ async fn run_with_lifecycle(
                 }
             } else {
                 stop_background_workers(&state, snapshot_task, timer_task).await;
+                if let Some(provider) = frontend_ringpop_provider.as_ref() {
+                    let _ =
+                        crate::matching_peer_provider::MatchingPeerProvider::self_evict(
+                            provider.as_ref(),
+                        )
+                        .await;
+                    if let Err(error) =
+                        crate::matching_peer_provider::MatchingPeerProvider::stop(
+                            provider.as_ref(),
+                        )
+                        .await
+                    {
+                        serving_shutdown_errors
+                            .push(format!("stopping Frontend membership: {error}"));
+                    }
+                }
             }
             let mut fatal_writer = serving_result
                 .as_ref()

@@ -849,7 +849,7 @@ mod tests {
                     max_join_duration_nanos: 1_000_000_000,
                     ..Default::default()
                 },
-                "cadence-history",
+                "cadence-frontend",
                 addr_b,
                 7836,
             )
@@ -860,9 +860,9 @@ mod tests {
             crate::grpc_matching::Matching::new(crate::handlers::AppState::default()),
             provider_a.handler(),
         ));
-        let server_b = tokio::spawn(crate::tchannel::serve_matching_with_ringpop_listener(
+        let server_b = tokio::spawn(crate::tchannel::serve_frontend_with_ringpop_listener(
             listener_b,
-            crate::grpc_matching::Matching::new(crate::handlers::AppState::default()),
+            crate::handlers::AppState::default(),
             provider_b.handler(),
         ));
 
@@ -878,7 +878,7 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 if provider_a
-                    .members("cadence-history")
+                    .members("cadence-frontend")
                     .await
                     .is_ok_and(|members| members.len() == 1)
                 {
@@ -888,7 +888,18 @@ mod tests {
             }
         })
         .await
-        .expect("provider A did not observe History role labels");
+        .expect("provider A did not observe Frontend role labels through its TChannel listener");
+        let frontend_members = provider_a.members("cadence-frontend").await.unwrap();
+        assert_eq!(frontend_members.len(), 1);
+        assert_eq!(frontend_members[0].address, addr_b.to_string());
+        assert_eq!(
+            frontend_members[0].named_ports.get("tchannel").copied(),
+            Some(addr_b.port())
+        );
+        assert_eq!(
+            frontend_members[0].named_ports.get("grpc").copied(),
+            Some(7836)
+        );
         let matching_members = provider_a.members("cadence-matching").await.unwrap();
         assert_eq!(matching_members.len(), 1);
         assert_eq!(matching_members[0].address, addr_a.to_string());
