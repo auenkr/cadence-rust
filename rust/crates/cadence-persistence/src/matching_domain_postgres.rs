@@ -37,6 +37,10 @@ impl std::fmt::Debug for PostgresDomainMetadataStore {
 }
 
 impl PostgresDomainMetadataStore {
+    pub(crate) fn history_pool(&self) -> Arc<crate::matching_postgres::PostgresConnectionPool> {
+        self.pool.clone()
+    }
+
     pub fn connect(
         config: &crate::matching_postgres::PostgresTaskStoreConfig,
         active_cluster_name: impl Into<String>,

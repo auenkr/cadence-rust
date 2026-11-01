@@ -2,6 +2,8 @@
 //! zero; protobuf enums reserve zero for INVALID. Time in the current Rust
 //! engine is milliseconds; protobuf Timestamp is seconds plus nanoseconds.
 pub mod decisions;
+pub mod decisions_out;
+pub use decisions_out::decision_out;
 pub mod history;
 
 use cadence_api::{enums as e, schedule as tk_schedule, service_types as st, tasks as tk, types as t};

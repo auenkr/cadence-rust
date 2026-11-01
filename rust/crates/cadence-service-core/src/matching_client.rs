@@ -338,7 +338,7 @@ fn merge_describe(
 }
 
 fn pb_timestamp(v: Option<prost_types::Timestamp>) -> Option<i64> {
-    cv::nanos(v)
+    cv::nanos(v).map(|n| n / 1_000_000)
 }
 
 fn seconds(v: Option<prost_types::Duration>) -> Option<i32> {

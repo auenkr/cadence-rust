@@ -13,6 +13,7 @@ pub mod domains;
 pub mod dynamic_config;
 pub mod executions;
 pub mod history_branch;
+pub mod history_node_reader;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;

@@ -36,6 +36,10 @@ impl std::fmt::Debug for MySqlDomainMetadataStore {
 }
 
 impl MySqlDomainMetadataStore {
+    pub(crate) fn history_pool(&self) -> Arc<crate::matching_mysql::SyncConnectionPool> {
+        self.pool.clone()
+    }
+
     /// Open a reader using the same connection options and pool limits as the
     /// MySQL Matching task store. Schema checks are deferred until reads.
     pub fn connect(
