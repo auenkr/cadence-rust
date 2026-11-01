@@ -1,0 +1,60 @@
+# Frontend Ringpop listener lifecycle slice — 2026-11-01
+
+Integration base: `71c3c273334836a9634cc2c509f4c2cdcf22671c`.
+Implementation commit: `5a04cec034517f8a1669b49f4a3660bda82a0a09` on
+`t3/frontend-ringpop-lifecycle`.
+
+## Source and behavior evidence
+
+- Rust Frontend launcher previously served TChannel with `tchannel::serve`
+  (`rust/crates/cadence-matching/src/launcher.rs`, former line ~1944), which
+  sets no Ringpop handler. `tchannel.rs::handle_call` returns an error for
+  `service == "ringpop"` when the optional handler is absent.
+- Matching already reserves its TChannel listener, creates the
+  role-parameterized `MatchingRingpopProvider` from the bound address, starts
+  the listener before JOIN bootstrap, and stops membership before tearing down
+  the listener. This slice reuses that provider without changing Matching's
+  role or call path.
+- Go Frontend `Service.Start` starts `Resource` before handlers; Go
+  `resource_impl.go::Start` starts the RPC factory and dispatcher before
+  `MembershipResolver.Start`. `Service.Stop` fails health, drains/stops
+  handlers and limiters, then calls `Resource.Stop`.
+- Rust now reserves the Frontend TChannel port before provider construction,
+  advertises `cadence-frontend` with the bound TChannel port and configured
+  gRPC port, starts the final workflow/admin TChannel state plus Ringpop
+  listener before provider bootstrap, and installs no Matching handler on that
+  listener. Shutdown self-evicts and stops the provider before listener abort.
+  Startup errors stop the provider and abort/join the listener task.
+- Focused provider regression coverage now crosses the Frontend listener with
+  a Matching provider JOIN and checks the Frontend role and named TChannel and
+  gRPC ports. This demonstrates Ringpop dispatch and role labeling only; it
+  does not establish Frontend consumer routing parity.
+
+## Validation
+
+- `git diff --check`: passed before commit; no Cargo, rustfmt, or Go commands
+  were run locally.
+- GitHub Actions `rust-ci.yml` run:
+  https://github.com/auenkr/cadence-rust/actions/runs/41328506551
+  dispatched for `cadence-matching` with `format_all=true` at head
+  `5a04cec034517f8a1669b49f4a3660bda82a0a09`. At dispatch, status was
+  `in_progress`; no compile/test/format conclusion is recorded yet. Retrieve
+  the final conclusion and inspect/apply any format artifact before treating
+  this slice as validated.
+- Existing parent run 41328113275 and mixed gate 41327590981 were left
+  untouched. This slice did not start a second mixed gate.
+
+## Remaining discovery and lifecycle gaps
+
+- No Frontend history/visibility/admin client was wired to role-filtered
+  Ringpop snapshots here. JOIN response and `cadence-frontend` labels do not
+  prove remote Frontend routing, load balancing, failure detection, or
+  restart/recovery compatibility.
+- The gRPC named port uses the configured Frontend gRPC bind port; only the
+  TChannel listener is prebound by this slice. Dynamic/ephemeral gRPC port
+  advertisement remains unverified.
+- No mixed Go History/Worker + Rust Matching/Frontend runtime evidence is
+  included. Do not claim Go History bootstrap succeeds until the already-running
+  mixed gate has a terminal successful result against a matching binary SHA.
+- Full Frontend parity, SDK workflows, broader failure/restart recovery, and
+  service-consumer discovery remain incomplete.
