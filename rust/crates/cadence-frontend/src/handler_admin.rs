@@ -206,26 +206,26 @@ impl Handler {
         &self,
         request: Option<&AddSearchAttributeRequest>,
     ) -> Result<AddSearchAttributeResponse, AdminError> {
-        let attrs = request
-            .and_then(|r| r.search_attribute.as_ref())
-            .filter(|attrs| !attrs.is_empty())
-            .ok_or_else(|| {
-                AdminError::BadRequest(BadRequestError::new("SearchAttributes are not provided"))
-            })?;
-        let mut custom = self.custom_search_attributes.lock().expect("admin lock");
-        for (key, value_type) in attrs {
-            if cadence_api::search_attributes::is_system_indexed_key(key) {
-                return Err(AdminError::BadRequest(BadRequestError::new(format!(
-                    "Key [{key}] is reserved by system"
-                ))));
+        let request = request
+            .ok_or_else(|| AdminError::BadRequest(BadRequestError::new("Request is nil.")))?;
+        let admin = cadence_service_core::admin::AdminState {
+            dynamic_config: self.dynamic_config.clone(),
+            custom_search_attributes: self.custom_search_attributes.clone(),
+            ..Default::default()
+        };
+        cadence_service_core::admin::add_search_attribute_core(
+            &admin,
+            &request.security_token,
+            request.search_attribute.as_ref(),
+        )
+        .map_err(|error| match error {
+            cadence_service_core::admin::AddSearchAttributeError::BadRequest(message) => {
+                AdminError::BadRequest(BadRequestError::new(message))
             }
-            if custom.get(key).is_some_and(|old| old != value_type) {
-                return Err(AdminError::BadRequest(BadRequestError::new(format!(
-                    "Key [{key}] is already whitelisted as a different type"
-                ))));
+            cadence_service_core::admin::AddSearchAttributeError::Internal(message) => {
+                AdminError::Internal(InternalServiceError::new(message))
             }
-        }
-        custom.extend(attrs.iter().map(|(k, v)| (k.clone(), *v)));
+        })?;
         Ok(AddSearchAttributeResponse {})
     }
 
@@ -292,11 +292,13 @@ impl Handler {
 
     #[must_use]
     pub fn search_attributes(&self) -> BTreeMap<String, IndexedValueType> {
-        self.custom_search_attributes
-            .lock()
-            .expect("admin lock")
-            .iter()
-            .map(|(name, value)| (name.clone(), *value))
+        let admin = cadence_service_core::admin::AdminState {
+            dynamic_config: self.dynamic_config.clone(),
+            custom_search_attributes: self.custom_search_attributes.clone(),
+            ..Default::default()
+        };
+        cadence_service_core::admin::valid_search_attributes(&admin)
+            .into_iter()
             .collect()
     }
 }
@@ -373,6 +375,71 @@ mod tests {
             handler.search_attributes()["CustomOne"],
             IndexedValueType::String
         );
+    }
+
+    #[test]
+    fn add_search_attribute_follows_go_validation_and_updates_valid_attributes_config() {
+        let handler = Handler::default();
+        let request = |name: &str, token: &str| AddSearchAttributeRequest {
+            search_attribute: Some(std::collections::HashMap::from([(
+                name.to_string(),
+                IndexedValueType::Keyword,
+            )])),
+            security_token: token.to_string(),
+        };
+        // Empty attribute set is rejected before anything else.
+        assert!(matches!(
+            handler.add_search_attributes(Some(&AddSearchAttributeRequest::default())),
+            Err(AdminError::BadRequest(e)) if e.message == "SearchAttributes are not provided"
+        ));
+        // System keys are reserved.
+        assert!(matches!(
+            handler.add_search_attributes(Some(&request("WorkflowID", ""))),
+            Err(AdminError::BadRequest(e)) if e.message == "Key [WorkflowID] is reserved by system"
+        ));
+        handler
+            .add_search_attributes(Some(&request("CustomKw", "")))
+            .unwrap();
+        // The accepted key lands in frontend.validSearchAttributes (Go UpdateValue)
+        // alongside the default indexed keys, and GetSearchAttributes reads it back.
+        let stored = handler
+            .get_dynamic_config("frontend.validSearchAttributes", &[], false)
+            .unwrap()
+            .value
+            .unwrap();
+        let stored: std::collections::HashMap<String, i32> =
+            serde_json::from_slice(&stored.data).unwrap();
+        assert_eq!(stored["CustomKw"], IndexedValueType::Keyword.value());
+        assert!(stored.contains_key("DomainID"));
+        assert_eq!(
+            handler.search_attributes()["CustomKw"],
+            IndexedValueType::Keyword
+        );
+        // Admin protection requires the configured token.
+        let protect = |name: &str, json: &str| {
+            handler
+                .update_dynamic_config(
+                    name,
+                    vec![DynamicConfigValue {
+                        value: Some(cadence_api::types::DataBlob {
+                            encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                            data: json.as_bytes().to_vec(),
+                        }),
+                        filters: vec![],
+                    }],
+                    false,
+                )
+                .unwrap();
+        };
+        protect("history.enableAdminProtection", "true");
+        protect("history.adminOperationToken", "\"secret\"");
+        assert!(matches!(
+            handler.add_search_attributes(Some(&request("Other", "wrong"))),
+            Err(AdminError::BadRequest(e)) if e.message == "No permission to do this operation."
+        ));
+        handler
+            .add_search_attributes(Some(&request("Other", "secret")))
+            .unwrap();
     }
 
     #[test]

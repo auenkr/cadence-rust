@@ -465,19 +465,67 @@ pub async fn refresh_workflow_tasks(
     }
 }
 
-/// Register custom search attributes, mirroring Go admin
-/// `AddSearchAttribute`: system keys and type conflicts are rejected, and
-/// accepted keys join both the custom registry and the live dynamic-config
-/// overlay used by visibility query validation.
-pub async fn add_search_attribute(
-    State(state): State<StdArc<AppState>>,
-    Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
-) -> Response {
-    let overlay = state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin config lock");
+/// Failure of the shared `AddSearchAttribute` implementation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AddSearchAttributeError {
+    BadRequest(String),
+    Internal(String),
+}
+
+const VALID_SEARCH_ATTRIBUTES: &str = "frontend.validSearchAttributes";
+
+/// Go `ValidSearchAttributes` dynamic property: the default indexed keys when
+/// unset, otherwise the configured `key -> IndexedValueType` JSON map.
+fn read_valid_attributes(
+    overlay: &DynamicConfigOverlay,
+) -> Result<std::collections::HashMap<String, i32>, String> {
+    match overlay
+        .get(false, VALID_SEARCH_ATTRIBUTES, &[])
+        .and_then(|value| value.value)
+    {
+        Some(value) => serde_json::from_slice(&value.data).map_err(|error| error.to_string()),
+        None => Ok(cadence_api::search_attributes::default_indexed_keys()
+            .into_iter()
+            .map(|(key, value)| (key, value.value()))
+            .collect()),
+    }
+}
+
+/// Keys returned by `GetSearchAttributes`: Go's `ValidSearchAttributes()` with
+/// unknown value types skipped.
+pub fn valid_search_attributes(
+    admin: &AdminState,
+) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
+    let mut keys = cadence_api::search_attributes::default_indexed_keys();
+    let configured = read_valid_attributes(&admin.dynamic_config.lock().expect("admin config lock"));
+    if let Ok(configured) = configured {
+        keys.extend(configured.into_iter().filter_map(|(key, raw)| {
+            cadence_api::enums::IndexedValueType::from_i32(raw).map(|t| (key, t))
+        }));
+    }
+    keys.extend(
+        admin
+            .custom_search_attributes
+            .lock()
+            .expect("admin lock")
+            .iter()
+            .map(|(key, value_type)| (key.clone(), *value_type)),
+    );
+    keys
+}
+
+/// Go admin `AddSearchAttribute`: permission check, empty check, reject system
+/// keys and type conflicts, then update the live `ValidSearchAttributes`
+/// dynamic config (Go only warns when the config client cannot persist) and the
+/// custom registry. The Elasticsearch mapping update is performed only when
+/// advanced visibility is configured, which this service does not provide.
+pub fn add_search_attribute_core(
+    admin: &AdminState,
+    security_token: &str,
+    attrs: Option<&std::collections::HashMap<String, cadence_api::enums::IndexedValueType>>,
+) -> Result<(), AddSearchAttributeError> {
+    use AddSearchAttributeError::{BadRequest, Internal};
+    let mut overlay = admin.dynamic_config.lock().expect("admin config lock");
     let protection_enabled = cadence_persistence::dynamic_config::boolean(
         overlay.property_values("history.enableAdminProtection"),
         None,
@@ -488,73 +536,35 @@ pub async fn add_search_attribute(
             overlay.property_values("history.adminOperationToken"),
             "",
         );
-        if req.security_token.is_empty() || req.security_token != required_token {
-            return bad_request(BadRequestError::new("No permission to do this operation."));
+        if security_token.is_empty() || security_token != required_token {
+            return Err(BadRequest("No permission to do this operation.".into()));
         }
     }
-    drop(overlay);
-    let attrs = match req.search_attribute {
+    let attrs = match attrs {
         Some(attrs) if !attrs.is_empty() => attrs,
-        _ => {
-            return bad_request(BadRequestError::new("SearchAttributes are not provided"));
-        }
+        _ => return Err(BadRequest("SearchAttributes are not provided".into())),
     };
-    const VALID_ATTRIBUTES: &str = "frontend.validSearchAttributes";
-    let mut overlay = state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin config lock");
-    let mut valid_attributes = match overlay
-        .get(false, VALID_ATTRIBUTES, &[])
-        .and_then(|value| value.value)
-    {
-        Some(value) => {
-            match serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data) {
-                Ok(attributes) => attributes,
-                Err(error) => {
-                    return error_response(
-                        "InternalServiceError",
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to get dynamic config, err: {error}"),
-                    );
-                }
-            }
-        }
-        None => cadence_api::search_attributes::default_indexed_keys()
-            .into_iter()
-            .map(|(key, value)| (key, value.value()))
-            .collect(),
-    };
-    for (key, value_type) in &attrs {
+    let mut valid_attributes = read_valid_attributes(&overlay)
+        .map_err(|error| Internal(format!("Failed to get dynamic config, err: {error}")))?;
+    for (key, value_type) in attrs {
         if cadence_api::search_attributes::is_system_indexed_key(key) {
-            return bad_request(BadRequestError::new(format!(
-                "Key [{key}] is reserved by system"
-            )));
+            return Err(BadRequest(format!("Key [{key}] is reserved by system")));
         }
         if valid_attributes
             .get(key)
             .is_some_and(|existing| *existing != value_type.value())
         {
-            return bad_request(BadRequestError::new(format!(
+            return Err(BadRequest(format!(
                 "Key [{key}] is already whitelisted as a different type"
             )));
         }
         valid_attributes.insert(key.clone(), value_type.value());
     }
-    let encoded = match serde_json::to_vec(&valid_attributes) {
-        Ok(encoded) => encoded,
-        Err(error) => {
-            return error_response(
-                "InternalServiceError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to encode dynamic config, err: {error}"),
-            );
-        }
-    };
+    let encoded = serde_json::to_vec(&valid_attributes)
+        .map_err(|error| Internal(format!("Failed to encode dynamic config, err: {error}")))?;
     overlay.update(
         false,
-        VALID_ATTRIBUTES,
+        VALID_SEARCH_ATTRIBUTES,
         vec![DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
                 encoding_type: Some(cadence_api::enums::EncodingType::JSON),
@@ -564,15 +574,29 @@ pub async fn add_search_attribute(
         }],
     );
     drop(overlay);
-    let mut custom = state
-        .admin
+    admin
         .custom_search_attributes
         .lock()
-        .expect("admin lock");
-    for (key, value_type) in attrs {
-        custom.insert(key, value_type);
+        .expect("admin lock")
+        .extend(attrs.iter().map(|(key, value)| (key.clone(), *value)));
+    Ok(())
+}
+
+/// Register custom search attributes, mirroring Go admin `AddSearchAttribute`.
+pub async fn add_search_attribute(
+    State(state): State<StdArc<AppState>>,
+    Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
+) -> Response {
+    match add_search_attribute_core(&state.admin, &req.security_token, req.search_attribute.as_ref())
+    {
+        Ok(()) => ok_json(cadence_api::admin::AddSearchAttributeResponse {}),
+        Err(AddSearchAttributeError::BadRequest(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
+        Err(AddSearchAttributeError::Internal(message)) => {
+            error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message)
+        }
     }
-    ok_json(cadence_api::admin::AddSearchAttributeResponse {})
 }
 
 /// Read a dynamic-config value, mirroring Go admin `GetDynamicConfig`.

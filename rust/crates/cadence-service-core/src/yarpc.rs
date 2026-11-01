@@ -636,81 +636,17 @@ fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool
 fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::AddSearchAttributeRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    let mut overlay = state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin config lock");
-    if cadence_persistence::dynamic_config::boolean(
-        overlay.property_values("history.enableAdminProtection"),
-        None,
-        false,
-    ) {
-        let token = cadence_persistence::dynamic_config::string(
-            overlay.property_values("history.adminOperationToken"),
-            "",
-        );
-        if req.security_token.is_empty() || req.security_token != token {
-            return Err(AppError::bad_request(
-                "No permission to do this operation.".to_string(),
-            ));
+    crate::admin::add_search_attribute_core(
+        &state.admin,
+        &req.security_token,
+        req.search_attribute.as_ref(),
+    )
+    .map_err(|error| match error {
+        crate::admin::AddSearchAttributeError::BadRequest(message) => {
+            AppError::bad_request(message)
         }
-    }
-    let attrs = req
-        .search_attribute
-        .filter(|attrs| !attrs.is_empty())
-        .ok_or_else(|| AppError::bad_request("SearchAttributes are not provided".to_string()))?;
-    const CONFIG_NAME: &str = "frontend.validSearchAttributes";
-    let mut valid = match overlay
-        .get(false, CONFIG_NAME, &[])
-        .and_then(|value| value.value)
-    {
-        Some(blob) => serde_json::from_slice::<std::collections::HashMap<String, i32>>(&blob.data)
-            .map_err(|error| {
-                AppError::internal(format!("Failed to get dynamic config, err: {error}"))
-            })?,
-        None => cadence_api::search_attributes::default_indexed_keys()
-            .into_iter()
-            .map(|(name, value)| (name, value.value()))
-            .collect(),
-    };
-    for (name, value_type) in &attrs {
-        if cadence_api::search_attributes::is_system_indexed_key(name) {
-            return Err(AppError::bad_request(format!(
-                "Key [{name}] is reserved by system"
-            )));
-        }
-        if valid
-            .get(name)
-            .is_some_and(|existing| *existing != value_type.value())
-        {
-            return Err(AppError::bad_request(format!(
-                "Key [{name}] is already whitelisted as a different type"
-            )));
-        }
-        valid.insert(name.clone(), value_type.value());
-    }
-    let data = serde_json::to_vec(&valid).map_err(|error| {
-        AppError::internal(format!("Failed to encode dynamic config, err: {error}"))
+        crate::admin::AddSearchAttributeError::Internal(message) => AppError::internal(message),
     })?;
-    overlay.update(
-        false,
-        CONFIG_NAME,
-        vec![cadence_api::admin::DynamicConfigValue {
-            value: Some(cadence_api::types::DataBlob {
-                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
-                data,
-            }),
-            filters: Vec::new(),
-        }],
-    );
-    drop(overlay);
-    state
-        .admin
-        .custom_search_attributes
-        .lock()
-        .expect("admin attributes lock")
-        .extend(attrs);
     Ok(Struct { fields: vec![] })
 }
 
