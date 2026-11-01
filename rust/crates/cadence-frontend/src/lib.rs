@@ -7,6 +7,7 @@
 
 pub mod config;
 pub mod handler_admin;
+pub mod handler_admin_history;
 pub mod handler_domain;
 pub mod handler_schedule;
 pub mod handler_workflow;
