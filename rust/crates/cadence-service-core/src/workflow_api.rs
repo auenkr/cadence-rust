@@ -94,16 +94,16 @@ fn encode_cluster_info(v: serde_json::Value) -> Result<Struct, String> {
 }
 
 macro_rules! op {
-    ($req:ty, $resp:ty) => {
-        Codec {
-            decode: decode_req::<$req>,
-            encode: encode_resp::<$resp>,
-        }
-    };
     ($req:ty, void) => {
         Codec {
             decode: decode_req::<$req>,
             encode: encode_void,
+        }
+    };
+    ($req:ty, $resp:ty) => {
+        Codec {
+            decode: decode_req::<$req>,
+            encode: encode_resp::<$resp>,
         }
     };
 }
