@@ -2309,8 +2309,10 @@ mod workflow_hook_tests {
     }
 
     fn frontend(api: Arc<RecordingApi>) -> Frontend {
-        let mut state = crate::handlers::AppState::default();
-        state.workflow_api = Some(api);
+        let state = crate::handlers::AppState {
+            workflow_api: Some(api),
+            ..Default::default()
+        };
         Frontend { state }
     }
 

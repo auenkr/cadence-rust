@@ -23,7 +23,8 @@ Branch: `t3/6e5c5418` (prepared worktree `t3-6e5c5418`). This is a bounded hook-
 
 - No local Cargo, rustfmt, Go test, or Go build commands were run, as required.
 - `git diff --check` passed before commit.
-- CI run `https://github.com/auenkr/cadence-rust/actions/runs/41328219489` tested head `04421156b6d0c7a2aa64a207a2422f9a1d2057ba` and failed in Clippy. It found that new direct unit-test calls to generated tonic trait methods need the `cadence_proto::api::workflow_api_server::WorkflowApi` trait imported into the test module. No formatter patch was produced; format checks passed. Added that trait import locally; this correction is committed separately and requires a rerun before validation is complete.
+- CI run `https://github.com/auenkr/cadence-rust/actions/runs/41328219489` tested head `04421156b6d0c7a2aa64a207a2422f9a1d2057ba` and failed in Clippy on an unrelated-in-tests style lint, `field_reassign_with_default`, in the test fixture helper. It produced no formatter patch; all format checks passed.
+- The follow-up run `https://github.com/auenkr/cadence-rust/actions/runs/41328574097` tested head `9cb4cd9c87476b355542dbb26c6d41ae36a98bbc`; the tonic trait import fixed the compilation errors. Clippy then reported `field_reassign_with_default` for the fixture's `AppState::default()` plus `workflow_api` assignment. The fixture now uses a struct initializer with `..Default::default()`. This follow-up correction is committed separately and needs a CI rerun.
 
 ## Scope limits
 
