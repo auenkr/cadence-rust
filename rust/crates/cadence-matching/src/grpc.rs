@@ -753,7 +753,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         };
         let result = self
             .state
-            .domains
+            .domain_manager
             .describe(&input)
             .map_err(|e| Status::not_found(e.message))?;
         Ok(Response::new(p::DescribeDomainResponse {
@@ -767,7 +767,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         let r = request.into_inner();
         let v = self
             .state
-            .domains
+            .domain_manager
             .list_page(&st::ListDomainsRequest {
                 page_size: r.page_size,
                 next_page_token: r.next_page_token,
