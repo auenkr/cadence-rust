@@ -7,24 +7,18 @@
 use std::time::Duration;
 
 use cadence_api::{
-    enums::{
-        QueryRejectCondition, WorkflowExecutionCloseStatus, WorkflowIDReusePolicy,
-    },
+    enums::{QueryRejectCondition, WorkflowExecutionCloseStatus, WorkflowIDReusePolicy},
     errors::{
         BadRequestError, CadenceError, EntityNotExistsError, InternalServiceError, QueryFailedError,
     },
-    schedule::{
-        CreateScheduleRequest, DescribeScheduleResponse, ScheduleListEntry, ScheduleState,
-    },
+    schedule::{CreateScheduleRequest, DescribeScheduleResponse, ScheduleListEntry, ScheduleState},
     service_types::WorkflowExecutionInfo,
     types::{
-        SearchAttributes, SignalWorkflowExecutionRequest, StartWorkflowExecutionRequest,
-        TaskList, TerminateWorkflowExecutionRequest, WorkflowExecution, WorkflowType,
+        SearchAttributes, SignalWorkflowExecutionRequest, StartWorkflowExecutionRequest, TaskList,
+        TerminateWorkflowExecutionRequest, WorkflowExecution, WorkflowType,
     },
 };
-use cadence_persistence::{
-    InMemoryExecutionStore, QueryError, StartError, WorkflowMutationError,
-};
+use cadence_persistence::{InMemoryExecutionStore, QueryError, StartError, WorkflowMutationError};
 
 use crate::scheduler_wire as wire;
 
@@ -97,12 +91,12 @@ pub fn start_scheduler(
     };
     match store.start(&start) {
         Ok(_) => Ok(request.schedule_id.clone()),
-        Err(StartError::AlreadyStarted(_)) => Err(CadenceError::BadRequest(BadRequestError::new(
-            format!(
+        Err(StartError::AlreadyStarted(_)) => {
+            Err(CadenceError::BadRequest(BadRequestError::new(format!(
                 "schedule {:?} already exists in domain {:?}",
                 request.schedule_id, request.domain
-            ),
-        ))),
+            ))))
+        }
         Err(StartError::InvalidArgument(message)) => {
             Err(CadenceError::BadRequest(BadRequestError::new(message)))
         }
@@ -119,7 +113,10 @@ pub fn signal_scheduler(
 ) -> Result<(), CadenceError> {
     let request = SignalWorkflowExecutionRequest {
         domain: domain.to_string(),
-        workflow_execution: Some(WorkflowExecution::new(workflow_id(schedule_id), String::new())),
+        workflow_execution: Some(WorkflowExecution::new(
+            workflow_id(schedule_id),
+            String::new(),
+        )),
         signal_name: signal_name.to_string(),
         input,
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -136,12 +133,12 @@ pub fn delete_scheduler(
     domain: &str,
     schedule_id: &str,
 ) -> Result<(), CadenceError> {
-    let signal_error = match signal_scheduler(store, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new())
-    {
-        Ok(()) => return Ok(()),
-        Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
-        Err(e) => e,
-    };
+    let signal_error =
+        match signal_scheduler(store, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new()) {
+            Ok(()) => return Ok(()),
+            Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
+            Err(e) => e,
+        };
     if matches!(
         signal_error,
         CadenceError::ServiceBusy(_) | CadenceError::Internal(_)
@@ -151,7 +148,10 @@ pub fn delete_scheduler(
     }
     let terminate = TerminateWorkflowExecutionRequest {
         domain: domain.to_string(),
-        workflow_execution: Some(WorkflowExecution::new(workflow_id(schedule_id), String::new())),
+        workflow_execution: Some(WorkflowExecution::new(
+            workflow_id(schedule_id),
+            String::new(),
+        )),
         reason: "terminated by DeleteSchedule".to_string(),
         ..Default::default()
     };
@@ -221,9 +221,7 @@ async fn describe_once(
             ))
         }
         Err(QueryError::Invalid(e)) => return DescribeOnce::Fail(CadenceError::BadRequest(e)),
-        Err(QueryError::Rejected(status)) => {
-            return closed_outcome(status, schedule_id, domain)
-        }
+        Err(QueryError::Rejected(status)) => return closed_outcome(status, schedule_id, domain),
     };
     let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;
     loop {
@@ -352,7 +350,8 @@ pub fn list_schedulers(
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let total = infos.len();
-    let page: Vec<&WorkflowExecutionInfo> = infos.iter().skip(offset).take(page_size.max(1)).collect();
+    let page: Vec<&WorkflowExecutionInfo> =
+        infos.iter().skip(offset).take(page_size.max(1)).collect();
     let next = offset + page.len();
     let entries = page.into_iter().filter_map(list_entry).collect();
     let token = if next < total {

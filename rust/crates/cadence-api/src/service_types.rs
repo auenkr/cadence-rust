@@ -62,7 +62,11 @@ pub struct FailoverInfo {
     pub failover_expire_timestamp: i64,
     #[serde(rename = "completedShardCount", default)]
     pub completed_shard_count: i32,
-    #[serde(rename = "pendingShards", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "pendingShards",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub pending_shards: Vec<i32>,
 }
 

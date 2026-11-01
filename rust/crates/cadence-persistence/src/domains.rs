@@ -1575,10 +1575,7 @@ impl PersistedFrontendDomainManager {
 
 impl PersistedFrontendDomainManager {
     /// Snapshot of a cached domain as Go's `GetDomainResponse` audit state.
-    fn audit_state(
-        &self,
-        record: &DomainRecord,
-    ) -> Option<crate::domain_audit::DomainAuditState> {
+    fn audit_state(&self, record: &DomainRecord) -> Option<crate::domain_audit::DomainAuditState> {
         let describe = self
             .cache
             .describe(&DescribeDomainRequest {

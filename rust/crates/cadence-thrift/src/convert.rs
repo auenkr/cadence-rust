@@ -1647,8 +1647,10 @@ impl ToThrift for FailoverInfo {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         f.fields.push((10, Value::I64(self.failover_version)));
-        f.fields.push((20, Value::I64(self.failover_start_timestamp)));
-        f.fields.push((30, Value::I64(self.failover_expire_timestamp)));
+        f.fields
+            .push((20, Value::I64(self.failover_start_timestamp)));
+        f.fields
+            .push((30, Value::I64(self.failover_expire_timestamp)));
         f.fields.push((40, Value::I32(self.completed_shard_count)));
         if !self.pending_shards.is_empty() {
             f.fields.push((

@@ -160,8 +160,10 @@ mod tests {
 
     #[test]
     fn domain_bucket_limits_and_isolates_domains() {
-        let policy =
-            TokenBucketPolicy::new(Arc::new(|| 1000.0), Arc::new(|d| if d == "a" { 2.0 } else { 1000.0 }));
+        let policy = TokenBucketPolicy::new(
+            Arc::new(|| 1000.0),
+            Arc::new(|d| if d == "a" { 2.0 } else { 1000.0 }),
+        );
         assert!(policy.allow(&info("a")));
         assert!(policy.allow(&info("a")));
         assert!(!policy.allow(&info("a")));

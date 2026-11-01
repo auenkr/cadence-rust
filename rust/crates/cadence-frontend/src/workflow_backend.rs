@@ -682,7 +682,10 @@ pub fn build_workflow_api(
             ("frontend.visibilityrps", unlimited),
             ("frontend.domainvisibilityrps", unlimited),
         ),
-        policy(("frontend.asyncrps", 10000), ("frontend.domainasyncrps", 10000)),
+        policy(
+            ("frontend.asyncrps", 10000),
+            ("frontend.domainasyncrps", 10000),
+        ),
         std::sync::Arc::new(crate::wrappers::quota_policy::NoBypass),
         std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
     );

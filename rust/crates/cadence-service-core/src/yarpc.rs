@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::Json;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use cadence_api::errors::{BadRequestError, EntityNotExistsError};
 use cadence_api::service_types::{DeleteDomainRequest, DescribeDomainRequest};
 use cadence_thrift::protocol::{Reader, Writer};
@@ -2328,15 +2328,23 @@ pub async fn dispatch_with_headers(
             .await
         }
         "CloseShard" => {
-            bridge_void(method, body, |req: cadence_api::admin::CloseShardRequest| {
-                crate::admin::close_shard(State(shared()), Json(req))
-            })
+            bridge_void(
+                method,
+                body,
+                |req: cadence_api::admin::CloseShardRequest| {
+                    crate::admin::close_shard(State(shared()), Json(req))
+                },
+            )
             .await
         }
         "RemoveTask" => {
-            bridge_void(method, body, |req: cadence_api::admin::RemoveTaskRequest| {
-                crate::admin::remove_task(State(shared()), Json(req))
-            })
+            bridge_void(
+                method,
+                body,
+                |req: cadence_api::admin::RemoveTaskRequest| {
+                    crate::admin::remove_task(State(shared()), Json(req))
+                },
+            )
             .await
         }
         "ReapplyEvents" => {
@@ -2412,24 +2420,19 @@ pub async fn dispatch_with_headers(
             )
             .await
         }
-        "UpdateDomainAsyncWorkflowConfiguraton" => {
-            bridge_value::<
-                _,
-                cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse,
-                _,
-                _,
-            >(
-                method,
-                body,
-                |req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest| {
-                    crate::admin::update_domain_async_workflow_configuration(
-                        State(shared()),
-                        Json(req),
-                    )
-                },
-            )
-            .await
-        }
+        "UpdateDomainAsyncWorkflowConfiguraton" => bridge_value::<
+            _,
+            cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse,
+            _,
+            _,
+        >(
+            method,
+            body,
+            |req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest| {
+                crate::admin::update_domain_async_workflow_configuration(State(shared()), Json(req))
+            },
+        )
+        .await,
         "RegisterDomain" => handle_register(state, body).await,
         "DescribeDomain" => handle_describe_domain(state, body).await,
         "ListDomains" => handle_list_domains(state, body).await,
