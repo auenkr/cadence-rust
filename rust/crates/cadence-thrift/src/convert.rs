@@ -6,19 +6,22 @@
 use cadence_api::admin::{
     AddSearchAttributeRequest, AddSearchAttributeResponse, CloseShardRequest, CloseShardResponse,
     DescribeClusterResponse, DescribeQueueRequest, DescribeQueueResponse, DynamicConfigEntry,
-    DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
+    DynamicConfigFilter, DynamicConfigValue, GetDLQReplicationMessagesRequest,
+    GetDLQReplicationMessagesResponse, GetDomainAsyncWorkflowConfiguratonRequest,
     GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
     GetDomainIsolationGroupsResponse, GetDomainReplicationMessagesRequest,
     GetDomainReplicationMessagesResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
     GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
+    GetReplicationMessagesRequest, GetReplicationMessagesResponse,
     GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
     ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
     MaintainCorruptWorkflowResponse, MembershipInfo, MergeDLQMessagesRequest,
     MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo, PurgeDLQMessagesRequest,
     PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
-    ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
-    RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
+    ReplicationMessages, ReplicationTaskInfo, ReplicationToken, ResetQueueRequest,
+    ResetQueueResponse, RestoreDynamicConfigRequest, RestoreDynamicConfigResponse, RingInfo,
+    SyncShardStatus, UpdateDomainAsyncWorkflowConfiguratonRequest,
     UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
     UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
     UpdateGlobalIsolationGroupsRequest, UpdateGlobalIsolationGroupsResponse,
@@ -1434,17 +1437,17 @@ impl ToThrift for DomainReplicationConfiguration {
 impl ToThrift for DomainTaskAttributes {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
-        f.oenum(10, self.domain_operation);
-        f.sstr(20, &self.id);
-        f.ostruct(30, self.info.as_ref());
-        f.ostruct(40, self.config.as_ref());
-        f.ostruct(50, self.replication_config.as_ref());
+        f.oenum(5, self.domain_operation);
+        f.sstr(10, &self.id);
+        f.ostruct(20, self.info.as_ref());
+        f.ostruct(30, self.config.as_ref());
+        f.ostruct(40, self.replication_config.as_ref());
         // Go's transmission handler always sets these pointer fields, including
         // zero-valued versions, so they must remain present on the wire.
-        f.fields.push((60, Value::I64(self.config_version)));
-        f.fields.push((70, Value::I64(self.failover_version)));
+        f.fields.push((50, Value::I64(self.config_version)));
+        f.fields.push((60, Value::I64(self.failover_version)));
         f.fields
-            .push((80, Value::I64(self.previous_failover_version)));
+            .push((70, Value::I64(self.previous_failover_version)));
         f.finish()
     }
 }
@@ -1455,7 +1458,125 @@ impl ToThrift for ReplicationTask {
         f.oenum(10, self.task_type);
         f.oi64(11, self.source_task_id);
         f.ostruct(20, self.domain_task_attributes.as_ref());
+        f.ostruct(40, self.sync_shard_status_task_attributes.as_ref());
+        f.ostruct(50, self.sync_activity_task_attributes.as_ref());
+        f.ostruct(70, self.history_task_v2_attributes.as_ref());
+        f.ostruct(80, self.failover_marker_attributes.as_ref());
+        f.oi64(90, self.creation_time);
         f.finish()
+    }
+}
+
+impl ToThrift for SyncShardStatusTaskAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostr(10, &self.source_cluster);
+        f.oi64(20, self.shard_id);
+        f.oi64(30, self.timestamp);
+        f.finish()
+    }
+}
+impl FromThrift for SyncShardStatusTaskAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            source_cluster: s.opt_string(10)?,
+            shard_id: s.opt_i64(20)?,
+            timestamp: s.opt_i64(30)?,
+        })
+    }
+}
+impl ToThrift for FailoverMarkerAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostr(10, &self.domain_id);
+        f.oi64(20, self.failover_version);
+        f.oi64(30, self.creation_time);
+        f.finish()
+    }
+}
+impl FromThrift for FailoverMarkerAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_id: s.opt_string(10)?,
+            failover_version: s.opt_i64(20)?,
+            creation_time: s.opt_i64(30)?,
+        })
+    }
+}
+impl ToThrift for HistoryTaskV2Attributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(5, self.task_id);
+        f.ostr(10, &self.domain_id);
+        f.ostr(20, &self.workflow_id);
+        f.ostr(30, &self.run_id);
+        if let Some(items) = &self.version_history_items {
+            f.olist(40, items);
+        }
+        f.ostruct(50, self.events.as_ref());
+        f.ostruct(70, self.new_run_events.as_ref());
+        f.finish()
+    }
+}
+impl FromThrift for HistoryTaskV2Attributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            task_id: s.opt_i64(5)?,
+            domain_id: s.opt_string(10)?,
+            workflow_id: s.opt_string(20)?,
+            run_id: s.opt_string(30)?,
+            version_history_items: s.opt_list(40)?,
+            events: s.opt_struct(50)?,
+            new_run_events: s.opt_struct(70)?,
+        })
+    }
+}
+impl ToThrift for SyncActivityTaskAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostr(10, &self.domain_id);
+        f.ostr(20, &self.workflow_id);
+        f.ostr(30, &self.run_id);
+        f.oi64(40, self.version);
+        f.oi64(50, self.scheduled_id);
+        f.oi64(60, self.scheduled_time);
+        f.oi64(70, self.started_id);
+        f.oi64(80, self.started_time);
+        f.oi64(90, self.last_heartbeat_time);
+        if let Some(v) = &self.details {
+            f.fields.push((100, Value::Bytes(v.clone())))
+        }
+        f.oi32(110, self.attempt);
+        f.ostr(120, &self.last_failure_reason);
+        f.ostr(130, &self.last_worker_identity);
+        if let Some(v) = &self.last_failure_details {
+            f.fields.push((140, Value::Bytes(v.clone())))
+        }
+        f.ostruct(145, self.last_failure_options.as_ref());
+        f.ostruct(150, self.version_history.as_ref());
+        f.finish()
+    }
+}
+impl FromThrift for SyncActivityTaskAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_id: s.opt_string(10)?,
+            workflow_id: s.opt_string(20)?,
+            run_id: s.opt_string(30)?,
+            version: s.opt_i64(40)?,
+            scheduled_id: s.opt_i64(50)?,
+            scheduled_time: s.opt_i64(60)?,
+            started_id: s.opt_i64(70)?,
+            started_time: s.opt_i64(80)?,
+            last_heartbeat_time: s.opt_i64(90)?,
+            details: s.opt_bytes(100)?,
+            attempt: s.opt_i32(110)?,
+            last_failure_reason: s.opt_string(120)?,
+            last_worker_identity: s.opt_string(130)?,
+            last_failure_details: s.opt_bytes(140)?,
+            last_failure_options: s.opt_struct(145)?,
+            version_history: s.opt_struct(150)?,
+        })
     }
 }
 
@@ -1465,9 +1586,10 @@ impl ToThrift for ReplicationMessages {
         f.olist(10, &self.replication_tasks);
         f.fields
             .push((20, Value::I64(self.last_retrieved_message_id)));
-        if self.has_more {
-            f.fields.push((30, Value::Bool(true)));
-        }
+        // Go's FromReplicationMessages always sets this optional pointer, even
+        // when the internal bool is false.
+        f.fields.push((30, Value::Bool(self.has_more)));
+        f.ostruct(40, self.sync_shard_status.as_ref());
         f.finish()
     }
 }
@@ -1478,6 +1600,170 @@ impl FromThrift for ReplicationMessages {
             replication_tasks: s.opt_list(10)?.unwrap_or_default(),
             last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
             has_more: s.opt_bool(30)?.unwrap_or_default(),
+            sync_shard_status: s.opt_struct(40)?,
+        })
+    }
+}
+
+impl ToThrift for SyncShardStatus {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, self.timestamp);
+        f.finish()
+    }
+}
+impl FromThrift for SyncShardStatus {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            timestamp: s.opt_i64(10)?,
+        })
+    }
+}
+impl ToThrift for GetReplicationMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if let Some(messages) = &self.messages_by_shard {
+            f.fields.push((
+                10,
+                Value::Map(
+                    messages
+                        .iter()
+                        .map(|(k, v)| (Value::I32(*k), Value::Struct(v.to_thrift())))
+                        .collect(),
+                ),
+            ));
+        }
+        f.finish()
+    }
+}
+impl ToThrift for GetDLQReplicationMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if let Some(tasks) = &self.replication_tasks {
+            f.olist(10, tasks);
+        }
+        f.finish()
+    }
+}
+impl ToThrift for ReplicationToken {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, Some(self.shard_id));
+        f.oi64(20, Some(self.last_retrieved_message_id));
+        f.oi64(30, Some(self.last_processed_message_id));
+        f.finish()
+    }
+}
+impl FromThrift for ReplicationToken {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
+            last_processed_message_id: s.opt_i64(30)?.unwrap_or_default(),
+        })
+    }
+}
+impl ToThrift for GetReplicationMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.tokens);
+        f.sstr(20, &self.cluster_name);
+        f.finish()
+    }
+}
+impl FromThrift for GetReplicationMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            tokens: s.opt_list(10)?.unwrap_or_default(),
+            cluster_name: s.req_string(20, "")?,
+        })
+    }
+}
+impl ToThrift for GetDLQReplicationMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.task_infos);
+        f.finish()
+    }
+}
+impl FromThrift for GetDLQReplicationMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            task_infos: s.opt_list(10)?.unwrap_or_default(),
+        })
+    }
+}
+impl ToThrift for ReplicationTaskInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain_id);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.fields.push((40, Value::I16(self.task_type)));
+        f.fields.push((50, Value::I64(self.task_id)));
+        f.fields.push((60, Value::I64(self.version)));
+        f.fields.push((70, Value::I64(self.first_event_id)));
+        f.fields.push((80, Value::I64(self.next_event_id)));
+        f.fields.push((90, Value::I64(self.scheduled_id)));
+        f.finish()
+    }
+}
+impl FromThrift for ReplicationTaskInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let task_type = match s.get(40) {
+            None => 0,
+            Some(Value::I16(v)) => *v,
+            Some(v) => {
+                return Err(crate::protocol::Error::Invalid(format!(
+                    "field 40: expected i16, got {v:?}"
+                )))
+            }
+        };
+        Ok(Self {
+            domain_id: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            task_type,
+            task_id: s.opt_i64(50)?.unwrap_or_default(),
+            version: s.opt_i64(60)?.unwrap_or_default(),
+            first_event_id: s.opt_i64(70)?.unwrap_or_default(),
+            next_event_id: s.opt_i64(80)?.unwrap_or_default(),
+            scheduled_id: s.opt_i64(90)?.unwrap_or_default(),
+        })
+    }
+}
+impl FromThrift for GetReplicationMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let mut out = std::collections::HashMap::new();
+        if let Some(value) = s.get(10) {
+            let Value::Map(entries) = value else {
+                return Err(crate::protocol::Error::Invalid(format!(
+                    "field 10: expected map, got {value:?}"
+                )));
+            };
+            for (key, value) in entries {
+                let Value::I32(id) = key else {
+                    return Err(crate::protocol::Error::Invalid(format!(
+                        "messagesByShard key is not i32: {key:?}"
+                    )));
+                };
+                let Value::Struct(messages) = value else {
+                    return Err(crate::protocol::Error::Invalid(format!(
+                        "messagesByShard value is not struct: {value:?}"
+                    )));
+                };
+                out.insert(*id, ReplicationMessages::from_thrift(messages)?);
+            }
+        }
+        Ok(Self {
+            messages_by_shard: s.get(10).map(|_| out),
+        })
+    }
+}
+impl FromThrift for GetDLQReplicationMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            replication_tasks: s.opt_list(10)?,
         })
     }
 }
@@ -1514,6 +1800,11 @@ impl FromThrift for ReplicationTask {
             task_type: s.opt_enum(10)?,
             source_task_id: s.opt_i64(11)?,
             domain_task_attributes: s.opt_struct(20)?,
+            sync_shard_status_task_attributes: s.opt_struct(40)?,
+            sync_activity_task_attributes: s.opt_struct(50)?,
+            history_task_v2_attributes: s.opt_struct(70)?,
+            failover_marker_attributes: s.opt_struct(80)?,
+            creation_time: s.opt_i64(90)?,
         })
     }
 }
@@ -1521,14 +1812,14 @@ impl FromThrift for ReplicationTask {
 impl FromThrift for DomainTaskAttributes {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
-            domain_operation: s.opt_enum(10)?,
-            id: s.req_string(20, "")?,
-            info: s.opt_struct(30)?,
-            config: s.opt_struct(40)?,
-            replication_config: s.opt_struct(50)?,
-            config_version: s.opt_i64(60)?.unwrap_or_default(),
-            failover_version: s.opt_i64(70)?.unwrap_or_default(),
-            previous_failover_version: s.opt_i64(80)?.unwrap_or_default(),
+            domain_operation: s.opt_enum(5)?,
+            id: s.req_string(10, "")?,
+            info: s.opt_struct(20)?,
+            config: s.opt_struct(30)?,
+            replication_config: s.opt_struct(40)?,
+            config_version: s.opt_i64(50)?.unwrap_or_default(),
+            failover_version: s.opt_i64(60)?.unwrap_or_default(),
+            previous_failover_version: s.opt_i64(70)?.unwrap_or_default(),
         })
     }
 }
@@ -6347,13 +6638,14 @@ mod tests {
             domain_task_attributes: Some(DomainTaskAttributes {
                 domain_operation: Some(DomainOperation::Update),
                 id: "domain-uuid".into(),
-                info: None,
-                config: None,
-                replication_config: None,
+                info: Some(DomainInfo::default()),
+                config: Some(DomainConfiguration::default()),
+                replication_config: Some(DomainReplicationConfiguration::default()),
                 config_version: 0,
                 failover_version: 8,
                 previous_failover_version: -1,
             }),
+            ..Default::default()
         };
         let thrift = task.to_thrift();
         assert!(matches!(thrift.get(10), Some(Value::I32(0))));
@@ -6362,11 +6654,14 @@ mod tests {
             Some(Value::Struct(attributes)) => attributes,
             other => panic!("expected domain task attributes, got {other:?}"),
         };
-        assert!(matches!(attributes.get(10), Some(Value::I32(1))));
-        assert!(matches!(attributes.get(20), Some(Value::Bytes(id)) if id == b"domain-uuid"));
-        assert!(matches!(attributes.get(60), Some(Value::I64(0))));
-        assert!(matches!(attributes.get(70), Some(Value::I64(8))));
-        assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
+        assert!(matches!(attributes.get(5), Some(Value::I32(1))));
+        assert!(matches!(attributes.get(10), Some(Value::Bytes(id)) if id == b"domain-uuid"));
+        assert!(matches!(attributes.get(50), Some(Value::I64(0))));
+        assert!(matches!(attributes.get(60), Some(Value::I64(8))));
+        assert!(matches!(attributes.get(70), Some(Value::I64(-1))));
+        assert!(matches!(attributes.get(20), Some(Value::Struct(_))));
+        assert!(matches!(attributes.get(30), Some(Value::Struct(_))));
+        assert!(matches!(attributes.get(40), Some(Value::Struct(_))));
         assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
     }
 
@@ -6984,6 +7279,21 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 mod timeout_wire_tests {
     use super::*;
 
+    fn assert_pinned_binary_fixture<T>(fixture: Struct, expected: &T)
+    where
+        T: ToThrift + FromThrift + PartialEq + std::fmt::Debug,
+    {
+        let mut writer = crate::protocol::Writer::new();
+        crate::value::write_struct(&mut writer, &fixture);
+        let bytes = writer.into_bytes();
+        let mut reader = crate::protocol::Reader::new(&bytes);
+        let decoded = crate::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        assert_eq!(decoded, fixture);
+        assert_eq!(T::from_thrift(&decoded).unwrap(), *expected);
+        assert_eq!(expected.to_thrift(), fixture);
+    }
+
     #[test]
     fn dlq_response_decoder_uses_go_thrift_enum_values() {
         let mut fields = Fields::new();
@@ -7183,5 +7493,443 @@ mod timeout_wire_tests {
             ..Default::default()
         };
         assert_eq!(response.to_thrift().opt_i64(51).unwrap(), Some(0));
+    }
+
+    #[test]
+    fn pinned_domain_task_binary_fixture_uses_go_field_ids_and_keeps_zero_presence() {
+        // Independent Apache Thrift binary fixture from replicator.thrift:
+        // operation=Delete (#5), id="abc" (#10), and version pointers #50-70.
+        let fixture: &[u8] = &[
+            8, 0, 5, 0, 0, 0, 2, 11, 0, 10, 0, 0, 0, 3, b'a', b'b', b'c', 10, 0, 50, 0, 0, 0, 0, 0,
+            0, 0, 0, 10, 0, 60, 0, 0, 0, 0, 0, 0, 0, 8, 10, 0, 70, 255, 255, 255, 255, 255, 255,
+            255, 255, 0,
+        ];
+        let mut reader = crate::protocol::Reader::new(fixture);
+        let wire = crate::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        let attrs = DomainTaskAttributes::from_thrift(&wire).unwrap();
+        assert_eq!(attrs.domain_operation, Some(DomainOperation::Delete));
+        assert_eq!(attrs.id, "abc");
+        assert_eq!(attrs.config_version, 0);
+        assert_eq!(attrs.failover_version, 8);
+        assert_eq!(attrs.previous_failover_version, -1);
+        assert_eq!(wire.get(5), Some(&Value::I32(2)));
+        assert!(matches!(wire.get(50), Some(Value::I64(0))));
+        assert_eq!(attrs.to_thrift(), wire);
+    }
+
+    #[test]
+    fn pinned_replication_task_info_binary_fixture_keeps_all_ids_and_i16_type() {
+        // Fixed wire bytes, not emitted by ToThrift: nextEventID (#80) and
+        // scheduledID (#90) are deliberately distinct populated sentinels.
+        let fixture: &[u8] = &[
+            11, 0, 10, 0, 0, 0, 1, b'd', 11, 0, 20, 0, 0, 0, 2, b'w', b'f', 11, 0, 30, 0, 0, 0, 3,
+            b'r', b'u', b'n', 6, 0, 40, 0, 7, 10, 0, 50, 0, 0, 0, 0, 0, 0, 0, 1, 10, 0, 60, 0, 0,
+            0, 0, 0, 0, 0, 2, 10, 0, 70, 0, 0, 0, 0, 0, 0, 0, 3, 10, 0, 80, 0, 0, 0, 0, 0, 0, 0, 4,
+            10, 0, 90, 0, 0, 0, 0, 0, 0, 0, 5, 0,
+        ];
+        let mut reader = crate::protocol::Reader::new(fixture);
+        let wire = crate::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        let info = ReplicationTaskInfo::from_thrift(&wire).unwrap();
+        assert_eq!(info.domain_id, "d");
+        assert_eq!(info.workflow_id, "wf");
+        assert_eq!(info.run_id, "run");
+        assert_eq!(info.task_type, 7);
+        assert_eq!(info.task_id, 1);
+        assert_eq!(info.version, 2);
+        assert_eq!(info.first_event_id, 3);
+        assert_eq!(info.next_event_id, 4);
+        assert_eq!(info.scheduled_id, 5);
+        assert_eq!(info.to_thrift(), wire);
+    }
+
+    #[test]
+    fn replication_attribute_variants_use_pinned_ids_and_preserve_zero_empty_and_nanos() {
+        let shard = SyncShardStatusTaskAttributes {
+            source_cluster: Some("source".into()),
+            shard_id: Some(0),
+            timestamp: Some(-1),
+        };
+        let shard_wire = shard.to_thrift();
+        assert_eq!(
+            shard_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
+        assert_eq!(shard_wire.opt_i64(20).unwrap(), Some(0));
+        assert_eq!(shard_wire.opt_i64(30).unwrap(), Some(-1));
+        assert_eq!(
+            SyncShardStatusTaskAttributes::from_thrift(&shard_wire).unwrap(),
+            shard
+        );
+        assert_pinned_binary_fixture(
+            Struct {
+                fields: vec![
+                    (10, Value::Bytes(b"source".to_vec())),
+                    (20, Value::I64(0)),
+                    (30, Value::I64(-1)),
+                ],
+            },
+            &shard,
+        );
+
+        let activity = SyncActivityTaskAttributes {
+            domain_id: Some("domain".into()),
+            workflow_id: Some("workflow".into()),
+            run_id: Some("run".into()),
+            version: Some(-4),
+            scheduled_id: Some(0),
+            scheduled_time: Some(-1),
+            started_id: Some(23),
+            started_time: Some(1),
+            last_heartbeat_time: Some(1_700_000_000_000_000_123),
+            details: Some(vec![0, 255]),
+            attempt: Some(0),
+            last_failure_reason: Some("failed".into()),
+            last_worker_identity: Some("worker".into()),
+            last_failure_details: Some(vec![]),
+            last_failure_options: Some(FailureOptions {
+                failure_category: Some(FailureCategory::Fatal),
+                next_retry_interval_seconds: Some(0),
+            }),
+            version_history: Some(VersionHistory {
+                branch_token: vec![0, 255],
+                items: vec![VersionHistoryItem {
+                    event_id: 4,
+                    version: -5,
+                }],
+            }),
+        };
+        let activity_wire = activity.to_thrift();
+        assert_eq!(
+            activity_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 145, 150]
+        );
+        assert_eq!(activity_wire.opt_i64(50).unwrap(), Some(0));
+        assert_eq!(activity_wire.opt_i64(60).unwrap(), Some(-1));
+        assert_eq!(activity_wire.opt_bytes(100).unwrap(), Some(vec![0, 255]));
+        assert_eq!(activity_wire.opt_bytes(140).unwrap(), Some(vec![]));
+        assert_eq!(
+            SyncActivityTaskAttributes::from_thrift(&activity_wire).unwrap(),
+            activity
+        );
+        let activity_fixture = Struct {
+            fields: vec![
+                (10, Value::Bytes(b"domain".to_vec())),
+                (20, Value::Bytes(b"workflow".to_vec())),
+                (30, Value::Bytes(b"run".to_vec())),
+                (40, Value::I64(-4)),
+                (50, Value::I64(0)),
+                (60, Value::I64(-1)),
+                (70, Value::I64(23)),
+                (80, Value::I64(1)),
+                (90, Value::I64(1_700_000_000_000_000_123)),
+                (100, Value::Bytes(vec![0, 255])),
+                (110, Value::I32(0)),
+                (120, Value::Bytes(b"failed".to_vec())),
+                (130, Value::Bytes(b"worker".to_vec())),
+                (140, Value::Bytes(vec![])),
+                (
+                    145,
+                    Value::Struct(Struct {
+                        fields: vec![(10, Value::I32(2)), (20, Value::I32(0))],
+                    }),
+                ),
+                (
+                    150,
+                    Value::Struct(Struct {
+                        fields: vec![
+                            (10, Value::Bytes(vec![0, 255])),
+                            (
+                                20,
+                                Value::List(vec![Value::Struct(Struct {
+                                    fields: vec![(10, Value::I64(4)), (20, Value::I64(-5))],
+                                })]),
+                            ),
+                        ],
+                    }),
+                ),
+            ],
+        };
+        assert_pinned_binary_fixture(activity_fixture.clone(), &activity);
+
+        let history = HistoryTaskV2Attributes {
+            task_id: Some(0),
+            domain_id: Some("d".into()),
+            workflow_id: Some("wf".into()),
+            run_id: Some("run".into()),
+            version_history_items: Some(vec![VersionHistoryItem {
+                event_id: 0,
+                version: -2,
+            }]),
+            events: Some(DataBlob {
+                encoding_type: Some(EncodingType::ThriftRW),
+                data: vec![0, 255],
+            }),
+            new_run_events: Some(DataBlob {
+                encoding_type: Some(EncodingType::JSON),
+                data: vec![],
+            }),
+        };
+        let history_wire = history.to_thrift();
+        assert_eq!(
+            history_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![5, 10, 20, 30, 40, 50, 70]
+        );
+        assert_eq!(history_wire.opt_i64(5).unwrap(), Some(0));
+        assert_eq!(
+            HistoryTaskV2Attributes::from_thrift(&history_wire).unwrap(),
+            history
+        );
+        let history_fixture = Struct {
+            fields: vec![
+                (5, Value::I64(0)),
+                (10, Value::Bytes(b"d".to_vec())),
+                (20, Value::Bytes(b"wf".to_vec())),
+                (30, Value::Bytes(b"run".to_vec())),
+                (
+                    40,
+                    Value::List(vec![Value::Struct(Struct {
+                        fields: vec![(10, Value::I64(0)), (20, Value::I64(-2))],
+                    })]),
+                ),
+                (
+                    50,
+                    Value::Struct(Struct {
+                        fields: vec![(10, Value::I32(0)), (20, Value::Bytes(vec![0, 255]))],
+                    }),
+                ),
+                (
+                    70,
+                    Value::Struct(Struct {
+                        fields: vec![(10, Value::I32(1))],
+                    }),
+                ),
+            ],
+        };
+        assert_pinned_binary_fixture(history_fixture.clone(), &history);
+
+        let marker = FailoverMarkerAttributes {
+            domain_id: Some("d".into()),
+            failover_version: Some(0),
+            creation_time: Some(-7),
+        };
+        let marker_wire = marker.to_thrift();
+        assert_eq!(
+            marker_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10, 20, 30]
+        );
+        assert_eq!(marker_wire.opt_i64(20).unwrap(), Some(0));
+        assert_eq!(
+            FailoverMarkerAttributes::from_thrift(&marker_wire).unwrap(),
+            marker
+        );
+        assert_pinned_binary_fixture(
+            Struct {
+                fields: vec![
+                    (10, Value::Bytes(b"d".to_vec())),
+                    (20, Value::I64(0)),
+                    (30, Value::I64(-7)),
+                ],
+            },
+            &marker,
+        );
+
+        // Thrift permits more than one optional attributes struct. Preserve all
+        // of them; the protobuf oneof representation is not used on this path.
+        let task = ReplicationTask {
+            task_type: Some(ReplicationTaskType::SyncActivity),
+            sync_shard_status_task_attributes: Some(shard),
+            sync_activity_task_attributes: Some(activity),
+            history_task_v2_attributes: Some(history),
+            failover_marker_attributes: Some(marker),
+            creation_time: Some(0),
+            ..Default::default()
+        };
+        let task_wire = task.to_thrift();
+        assert_eq!(
+            task_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10, 40, 50, 70, 80, 90]
+        );
+        assert_eq!(ReplicationTask::from_thrift(&task_wire).unwrap(), task);
+        assert_pinned_binary_fixture(
+            Struct {
+                fields: vec![
+                    (10, Value::I32(3)),
+                    (40, Value::Struct(shard_wire)),
+                    (50, Value::Struct(activity_fixture)),
+                    (70, Value::Struct(history_fixture)),
+                    (80, Value::Struct(marker_wire)),
+                    (90, Value::I64(0)),
+                ],
+            },
+            &task,
+        );
+        for task_type in ReplicationTaskType::values() {
+            let expected = ReplicationTask {
+                task_type: Some(*task_type),
+                ..Default::default()
+            };
+            assert_pinned_binary_fixture(
+                Struct {
+                    fields: vec![(10, Value::I32(task_type.value()))],
+                },
+                &expected,
+            );
+        }
+    }
+
+    #[test]
+    fn replication_request_response_fixtures_and_unrepresentable_values_are_checked() {
+        let info_wire = Struct {
+            fields: vec![
+                (10, Value::Bytes(b"d".to_vec())),
+                (20, Value::Bytes(b"wf".to_vec())),
+                (30, Value::Bytes(b"run".to_vec())),
+                (40, Value::I16(1)),
+                (50, Value::I64(2)),
+                (60, Value::I64(3)),
+                (70, Value::I64(4)),
+                (80, Value::I64(5)),
+                (90, Value::I64(6)),
+            ],
+        };
+        let info = ReplicationTaskInfo::from_thrift(&info_wire).unwrap();
+        assert_eq!(info.next_event_id, 5);
+        assert_eq!(info.scheduled_id, 6);
+        assert!(ReplicationTaskInfo::from_thrift(&Struct {
+            fields: vec![(40, Value::I32(1))]
+        })
+        .is_err());
+        // Thrift allows future enum discriminants. The current API enum is
+        // closed, so reject an unknown task type instead of silently mapping
+        // it to another task (or dropping it).
+        assert!(ReplicationTask::from_thrift(&Struct {
+            fields: vec![(10, Value::I32(99))]
+        })
+        .is_err());
+        assert!(GetReplicationMessagesResponse::from_thrift(&Struct {
+            fields: vec![(10, Value::I32(1))]
+        })
+        .is_err());
+
+        let messages = ReplicationMessages {
+            last_retrieved_message_id: 0,
+            has_more: true,
+            sync_shard_status: Some(SyncShardStatus {
+                timestamp: Some(-1),
+            }),
+            ..Default::default()
+        };
+        let response = GetReplicationMessagesResponse {
+            messages_by_shard: Some([(7, messages)].into_iter().collect()),
+        };
+        let response_wire = response.to_thrift();
+        assert_eq!(
+            response_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        let Value::Map(entries) = response_wire.get(10).unwrap() else {
+            panic!("field 10 must be the shard map");
+        };
+        assert!(matches!(entries[0].0, Value::I32(7)));
+        assert_eq!(
+            GetReplicationMessagesResponse::from_thrift(&response_wire).unwrap(),
+            response
+        );
+        let empty_map = GetReplicationMessagesResponse {
+            messages_by_shard: Some(Default::default()),
+        };
+        assert_eq!(
+            GetReplicationMessagesResponse::from_thrift(&empty_map.to_thrift()).unwrap(),
+            empty_map
+        );
+        let absent_map = GetReplicationMessagesResponse::default();
+        assert_eq!(absent_map.to_thrift().get(10), None);
+        assert_eq!(
+            GetReplicationMessagesResponse::from_thrift(&Struct::default()).unwrap(),
+            absent_map
+        );
+
+        let false_more = ReplicationMessages::default().to_thrift();
+        assert_eq!(false_more.opt_bool(30).unwrap(), Some(false));
+
+        let req = GetReplicationMessagesRequest {
+            tokens: vec![ReplicationToken {
+                shard_id: 0,
+                last_retrieved_message_id: 0,
+                last_processed_message_id: -1,
+            }],
+            cluster_name: "remote".into(),
+        };
+        let req_wire = req.to_thrift();
+        assert_eq!(
+            req_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+        assert_eq!(
+            GetReplicationMessagesRequest::from_thrift(&req_wire).unwrap(),
+            req
+        );
+        let dlq = GetDLQReplicationMessagesRequest {
+            task_infos: vec![info],
+        };
+        let dlq_wire = dlq.to_thrift();
+        assert_eq!(
+            dlq_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        assert_eq!(
+            GetDLQReplicationMessagesRequest::from_thrift(&dlq_wire).unwrap(),
+            dlq
+        );
+        let dlq_response = GetDLQReplicationMessagesResponse {
+            replication_tasks: Some(vec![ReplicationTask::default()]),
+        };
+        let dlq_response_wire = dlq_response.to_thrift();
+        assert_eq!(
+            dlq_response_wire
+                .fields
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        assert_eq!(
+            GetDLQReplicationMessagesResponse::from_thrift(&dlq_response_wire).unwrap(),
+            dlq_response
+        );
     }
 }
