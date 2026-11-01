@@ -615,11 +615,19 @@ pub struct RespondActivityTaskFailedRequest {
 pub struct RecordActivityTaskHeartbeatByIDRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(rename = "workflowID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub workflow_id: String,
     #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
-    #[serde(rename = "activityID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub activity_id: String,
     #[serde(
         rename = "details",
@@ -637,11 +645,19 @@ pub struct RecordActivityTaskHeartbeatByIDRequest {
 pub struct RespondActivityTaskCompletedByIDRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(rename = "workflowID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub workflow_id: String,
     #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
-    #[serde(rename = "activityID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub activity_id: String,
     #[serde(
         rename = "result",
@@ -659,11 +675,19 @@ pub struct RespondActivityTaskCompletedByIDRequest {
 pub struct RespondActivityTaskCanceledByIDRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(rename = "workflowID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub workflow_id: String,
     #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
-    #[serde(rename = "activityID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub activity_id: String,
     #[serde(
         rename = "details",
@@ -681,11 +705,19 @@ pub struct RespondActivityTaskCanceledByIDRequest {
 pub struct RespondActivityTaskFailedByIDRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(rename = "workflowID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub workflow_id: String,
     #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
-    #[serde(rename = "activityID", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub activity_id: String,
     #[serde(rename = "reason", default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

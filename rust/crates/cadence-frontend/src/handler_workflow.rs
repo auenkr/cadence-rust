@@ -1763,8 +1763,16 @@ impl<B: WorkflowBackend> Handler<B> {
             }
             validate_domain(&value)?;
             for (field, alt, message) in [
-                ("workflowID", "workflowId", "WorkflowId is not set on request."),
-                ("activityID", "activityId", "ActivityID is not set on request."),
+                (
+                    "workflowID",
+                    "workflowId",
+                    "WorkflowId is not set on request.",
+                ),
+                (
+                    "activityID",
+                    "activityId",
+                    "ActivityID is not set on request.",
+                ),
             ] {
                 if request_string_any(&value, &[field, alt]).is_empty() {
                     return Err(CadenceError::BadRequest(BadRequestError::new(message)));

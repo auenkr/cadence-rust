@@ -635,11 +635,92 @@ pub fn build_workflow_api(
             )
         })
     };
+    let overlay = ctx.state.admin.dynamic_config.clone();
+    let read_rps = |key: &'static str, default: i64, per_domain: bool| {
+        let overlay = overlay.clone();
+        move |domain: &str| -> f64 {
+            let guard = overlay.lock();
+            guard.map_or(default as f64, |o| {
+                let domain = per_domain.then_some(domain);
+                cadence_persistence::dynamic_config::integer(
+                    o.property_values(key),
+                    domain,
+                    default,
+                ) as f64
+            })
+        }
+    };
+    let policy = |global: (&'static str, i64), domain: (&'static str, i64)| {
+        let global_rps = read_rps(global.0, global.1, false);
+        let domain_rps = read_rps(domain.0, domain.1, true);
+        std::sync::Arc::new(crate::wrappers::quota_policy::TokenBucketPolicy::new(
+            std::sync::Arc::new(move || global_rps("")),
+            std::sync::Arc::new(domain_rps),
+        )) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
+    };
+    let unlimited = crate::wrappers::quota_policy::UNLIMITED_RPS as i64;
+    let max_poll_delay_nanos = {
+        let guard = overlay.lock();
+        guard.map_or(0, |o| {
+            cadence_persistence::dynamic_config::duration(
+                o.property_values("frontend.maxWorkerPollDelay"),
+                None,
+                0,
+            )
+        })
+    };
+    let rate_limit = crate::wrappers::ratelimited::HandlerRateLimit::new(
+        std::sync::Arc::new(crate::wrappers::quota_policy::LookupDomainNames::new(
+            lookup.clone(),
+        )),
+        policy(("frontend.rps", 1200), ("frontend.domainrps", 1200)),
+        policy(
+            ("frontend.workerrps", unlimited),
+            ("frontend.domainworkerrps", unlimited),
+        ),
+        policy(
+            ("frontend.visibilityrps", unlimited),
+            ("frontend.domainvisibilityrps", unlimited),
+        ),
+        policy(("frontend.asyncrps", 10000), ("frontend.domainasyncrps", 10000)),
+        std::sync::Arc::new(crate::wrappers::quota_policy::NoBypass),
+        std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
+    );
     let handler = crate::handler_workflow::Handler::new(backend)
         .with_domain_lookup(lookup)
+        .with_rate_limit_policies(rate_limit)
+        .with_access_control(std::sync::Arc::new(
+            crate::wrappers::accesscontrolled::HandlerAuthorization::new(
+                NopAuthorizer,
+                NopAuthorizationMetrics,
+            ),
+        ))
         .with_version_check(
             version_check_enabled,
             std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
         );
     Ok(std::sync::Arc::new(HandlerApi { handler }))
+}
+
+/// Go's `authorization.NewNopAuthorizer`: used when authorization is not
+/// enabled in the service configuration, allowing every request.
+struct NopAuthorizer;
+
+impl crate::wrappers::accesscontrolled::Authorizer for NopAuthorizer {
+    type Error = std::convert::Infallible;
+
+    fn authorize(
+        &self,
+        _attributes: &crate::wrappers::accesscontrolled::Attributes,
+    ) -> Result<crate::wrappers::accesscontrolled::Decision, Self::Error> {
+        Ok(crate::wrappers::accesscontrolled::Decision::Allow)
+    }
+}
+
+struct NopAuthorizationMetrics;
+
+impl crate::wrappers::accesscontrolled::AuthorizationMetrics for NopAuthorizationMetrics {
+    fn authorization_latency(&self, _elapsed: std::time::Duration) {}
+    fn authorization_failed(&self) {}
+    fn unauthorized(&self) {}
 }

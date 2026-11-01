@@ -1694,7 +1694,6 @@ fn normalize_mysql_error(error: MySqlError) -> StorageError {
     StorageError::Backend { kind, message }
 }
 
-
 impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
     fn select_nodes(
         &self,

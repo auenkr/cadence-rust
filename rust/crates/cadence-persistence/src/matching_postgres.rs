@@ -1155,7 +1155,6 @@ fn normalize_postgres_error(error: postgres::Error) -> StorageError {
     }
 }
 
-
 impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
     fn select_nodes(
         &self,

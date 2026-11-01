@@ -904,7 +904,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
         page_size: usize,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
-        PostgresDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+        PostgresDomainMetadataStore::list_domains(self, page_size, page_token)
+            .map_err(|error| error.to_string())
     }
 
     fn supports_domain_audit_log(&self) -> bool {

@@ -880,7 +880,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
         page_size: usize,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
-        MySqlDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+        MySqlDomainMetadataStore::list_domains(self, page_size, page_token)
+            .map_err(|error| error.to_string())
     }
 
     fn supports_domain_audit_log(&self) -> bool {

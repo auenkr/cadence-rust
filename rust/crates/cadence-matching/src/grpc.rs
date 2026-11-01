@@ -170,9 +170,8 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>,
-    >;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
@@ -194,9 +193,10 @@ where
             .map(|timeout| std::time::Instant::now() + timeout);
         let clone = self.0.clone();
         let mut inner = std::mem::replace(&mut self.0, clone);
-        Box::pin(GRPC_CALLER.scope((headers, deadline), async move {
-            inner.call(request).await
-        }))
+        Box::pin(GRPC_CALLER.scope(
+            (headers, deadline),
+            async move { inner.call(request).await },
+        ))
     }
 }
 
@@ -220,7 +220,10 @@ fn percent_decode(value: &str) -> String {
 
 /// Map a legacy in-process route to the Frontend hook operation name and, for
 /// GET routes, the request JSON built from the query string.
-fn hook_operation(method: &Method, path: &str) -> Option<(&'static str, Option<serde_json::Value>)> {
+fn hook_operation(
+    method: &Method,
+    path: &str,
+) -> Option<(&'static str, Option<serde_json::Value>)> {
     let (route, query) = path.split_once('?').unwrap_or((path, ""));
     let param = |name: &str| {
         query

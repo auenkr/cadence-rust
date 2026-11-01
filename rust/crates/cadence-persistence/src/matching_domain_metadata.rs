@@ -1649,7 +1649,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDoma
         page_size: usize,
         page_token: Option<&[u8]>,
     ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
-        MatchingDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+        MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
+            .map_err(|error| error.to_string())
     }
 
     fn metadata_version(&self) -> Result<i64, String> {
