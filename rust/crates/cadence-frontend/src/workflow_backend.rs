@@ -627,7 +627,7 @@ pub fn build_workflow_api(
     let version_check_enabled = {
         let overlay = ctx.state.admin.dynamic_config.clone();
         let guard = overlay.lock();
-        guard.map_or(false, |overlay| {
+        guard.is_ok_and(|overlay| {
             cadence_persistence::dynamic_config::boolean(
                 overlay.property_values("frontend.enableClientVersionCheck"),
                 None,
