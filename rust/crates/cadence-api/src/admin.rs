@@ -686,6 +686,10 @@ pub struct ReplicationTaskInfo {
     pub version: i64,
     #[serde(rename = "firstEventId", default)]
     pub first_event_id: i64,
+    #[serde(rename = "nextEventId", default)]
+    pub next_event_id: i64,
+    #[serde(rename = "scheduledId", default)]
+    pub scheduled_id: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -728,7 +732,17 @@ pub struct ReplicationMessages {
     pub last_retrieved_message_id: i64,
     #[serde(rename = "hasMore", default, skip_serializing_if = "is_false")]
     pub has_more: bool,
+    #[serde(rename = "syncShardStatus", default, skip_serializing_if = "Option::is_none")]
+    pub sync_shard_status: Option<SyncShardStatus>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncShardStatus { #[serde(default, skip_serializing_if = "Option::is_none")] pub timestamp: Option<i64> }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetReplicationMessagesResponse { #[serde(rename="messagesByShard", default)] pub messages_by_shard: std::collections::HashMap<i32, ReplicationMessages> }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetDLQReplicationMessagesResponse { #[serde(rename="replicationTasks", default)] pub replication_tasks: Vec<crate::types::ReplicationTask> }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetDomainReplicationMessagesResponse {

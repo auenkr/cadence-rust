@@ -630,7 +630,34 @@ pub struct ReplicationTask {
         skip_serializing_if = "Option::is_none"
     )]
     pub domain_task_attributes: Option<DomainTaskAttributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_shard_status_task_attributes: Option<SyncShardStatusTaskAttributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_activity_task_attributes: Option<SyncActivityTaskAttributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_task_v2_attributes: Option<HistoryTaskV2Attributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failover_marker_attributes: Option<FailoverMarkerAttributes>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_time: Option<i64>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncShardStatusTaskAttributes { pub source_cluster: Option<String>, pub shard_id: Option<i64>, pub timestamp: Option<i64> }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncActivityTaskAttributes {
+    pub domain_id: Option<String>, pub workflow_id: Option<String>, pub run_id: Option<String>,
+    pub version: Option<i64>, pub scheduled_id: Option<i64>, pub scheduled_time: Option<i64>,
+    pub started_id: Option<i64>, pub started_time: Option<i64>, pub last_heartbeat_time: Option<i64>,
+    #[serde(default, serialize_with = "crate::b64::serialize_opt_bytes", deserialize_with = "crate::b64::deserialize_opt_bytes")] pub details: Option<Vec<u8>>,
+    pub attempt: Option<i32>, pub last_failure_reason: Option<String>, pub last_worker_identity: Option<String>,
+    #[serde(default, serialize_with = "crate::b64::serialize_opt_bytes", deserialize_with = "crate::b64::deserialize_opt_bytes")] pub last_failure_details: Option<Vec<u8>>,
+    pub last_failure_options: Option<FailureOptions>, pub version_history: Option<VersionHistory>,
+}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryTaskV2Attributes { pub task_id: Option<i64>, pub domain_id: Option<String>, pub workflow_id: Option<String>, pub run_id: Option<String>, pub version_history_items: Option<Vec<VersionHistoryItem>>, pub events: Option<DataBlob>, pub new_run_events: Option<DataBlob> }
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailoverMarkerAttributes { pub domain_id: Option<String>, pub failover_version: Option<i64>, pub creation_time: Option<i64> }
 
 // ---------------------------------------------------------------------------
 // History types
