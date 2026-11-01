@@ -6,6 +6,7 @@
 //! `go/idls/thrift/history.thrift`) and sends them over YARPC/TChannel, which
 //! is how Go Frontend reaches History and Matching with `EnableGRPCOutbound`
 //! off. Replies are decoded with the shared `FromThrift` converters.
+#![allow(clippy::result_large_err)]
 
 use std::future::Future;
 use std::pin::Pin;

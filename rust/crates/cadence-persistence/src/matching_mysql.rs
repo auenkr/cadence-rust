@@ -2220,3 +2220,33 @@ mod tests {
         ));
     }
 }
+
+impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
+    fn select_nodes(
+        &self,
+        shard_id: i32,
+        tree_id: [u8; 16],
+        branch_id: [u8; 16],
+        min_node: i64,
+        max_node: i64,
+        limit: i64,
+    ) -> std::result::Result<Vec<crate::history_reader::HistoryNodeRow>, crate::history_reader::HistoryReadError>
+    {
+        use crate::history_reader::{HistoryNodeRow, HistoryReadError};
+        let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
+        let mut connection = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let discard = connection.discard.clone();
+        let rows: Vec<(i64, i64, Vec<u8>, String)> = connection
+            .exec(
+                "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND node_id >= ? and node_id < ? ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT ? ",
+                (shard_id, tree_id.as_slice(), branch_id.as_slice(), min_node, max_node, limit),
+            )
+            .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
+        Ok(rows
+            .into_iter()
+            .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow { node_id, txn_id, data, encoding })
+            .collect())
+    }
+}

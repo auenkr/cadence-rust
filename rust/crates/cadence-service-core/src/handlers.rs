@@ -117,6 +117,9 @@ pub struct AppState {
     /// manager uses this for domain mutations.
     pub domain_metadata_persistence:
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
+    /// History-node reader for Frontend history reads (SQL stores).
+    pub history_node_store:
+        Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
@@ -155,6 +158,7 @@ impl Default for AppState {
             domains: domains.clone(),
             domain_manager: Arc::new(domains),
             domain_metadata_persistence: None,
+            history_node_store: None,
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
             limits: Limits::cadence_default(),

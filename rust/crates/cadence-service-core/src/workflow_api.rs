@@ -6,6 +6,7 @@
 //! transports then route every workflow operation through it instead of the
 //! legacy in-process engine. The hook speaks Cadence API JSON (camelCase
 //! `cadence_api` serde shapes) so each transport only converts its wire format.
+#![allow(clippy::result_large_err)]
 
 use std::collections::HashMap;
 use std::future::Future;

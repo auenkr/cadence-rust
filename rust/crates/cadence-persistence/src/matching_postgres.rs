@@ -1458,3 +1458,45 @@ mod tests {
         assert!(!tasks.contains("shard_id"));
     }
 }
+
+impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
+    fn select_nodes(
+        &self,
+        shard_id: i32,
+        tree_id: [u8; 16],
+        branch_id: [u8; 16],
+        min_node: i64,
+        max_node: i64,
+        limit: i64,
+    ) -> std::result::Result<Vec<crate::history_reader::HistoryNodeRow>, crate::history_reader::HistoryReadError>
+    {
+        use crate::history_reader::{HistoryNodeRow, HistoryReadError};
+        let index = database_index(shard_id.max(0) as usize, self.use_multiple_databases);
+        let mut client = self.pools[index]
+            .checkout()
+            .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
+        let tree = tree_id.as_slice();
+        let branch = branch_id.as_slice();
+        let params: &[&(dyn ToSql + Sync)] = &[&shard_id, &tree, &branch, &min_node, &max_node, &limit];
+        let rows = client
+            .query(
+                "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 AND node_id >= $4 AND node_id < $5 ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT $6",
+                params,
+            )
+            .map_err(|error| {
+                client.poison_if_closed(&error);
+                HistoryReadError::Internal(format!("{:?}", normalize_postgres_error(error)))
+            })?;
+        rows.into_iter()
+            .map(|row| {
+                let get = |e: postgres::Error| HistoryReadError::Internal(e.to_string());
+                Ok(HistoryNodeRow {
+                    node_id: row.try_get(0).map_err(get)?,
+                    txn_id: row.try_get(1).map_err(get)?,
+                    data: row.try_get(2).map_err(get)?,
+                    encoding: row.try_get(3).map_err(get)?,
+                })
+            })
+            .collect()
+    }
+}

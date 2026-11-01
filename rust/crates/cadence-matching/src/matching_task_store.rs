@@ -56,6 +56,9 @@ pub struct ConfiguredMatchingStores {
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
     pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
+    /// Frontend history reader over the default store's `history_node` table
+    /// (SQL backends only).
+    pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -220,6 +223,7 @@ pub fn open_configured_default_store(
             .with_all_consistency_delete(domain_all_consistency_delete),
         );
         return Ok(ConfiguredMatchingStores {
+            history_node_store: None,
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
             task_store,
@@ -259,6 +263,7 @@ pub fn open_configured_default_store(
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> =
                 metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: None,
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: task_store.clone(),
                 task_store,
@@ -323,6 +328,7 @@ pub fn open_configured_default_store(
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
@@ -385,6 +391,7 @@ pub fn open_configured_default_store(
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
