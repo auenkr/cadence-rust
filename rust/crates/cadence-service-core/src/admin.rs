@@ -1199,8 +1199,7 @@ pub async fn describe_history_host(
         }
     }
     if let Some(channel) = state.history_admin_channel.clone() {
-        let mut client =
-            cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+        let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
         return match client
             .describe_history_host(history_admin_request(
                 cadence_proto::history::DescribeHistoryHostRequest {},
