@@ -784,7 +784,10 @@ mod tests {
                 _: usize,
                 _: Option<&[u8]>,
                 _: std::time::Duration,
-            ) -> Result<crate::matching_domain_cache::DomainMetadataPage, crate::matching_domain_cache::DomainMetadataSourceError> {
+            ) -> Result<
+                crate::matching_domain_cache::DomainMetadataPage,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
                 Ok(crate::matching_domain_cache::DomainMetadataPage {
                     domains: vec![domain_metadata("manager-name")],
                     next_page_token: None,
@@ -795,7 +798,10 @@ mod tests {
                 _: Option<&str>,
                 _: Option<&str>,
                 _: std::time::Duration,
-            ) -> Result<MatchingDomainMetadata, crate::matching_domain_cache::DomainMetadataSourceError> {
+            ) -> Result<
+                MatchingDomainMetadata,
+                crate::matching_domain_cache::DomainMetadataSourceError,
+            > {
                 Ok(domain_metadata("manager-name"))
             }
         }
@@ -829,9 +835,9 @@ mod tests {
             "matching.numTasklistReadPartitions",
             vec![value(b"7")],
         );
-        let bound = timeout_binder(cache.clone(), overlay.clone())(
-            &GoString::from("00000000-0000-0000-0000-000000000001"),
-        )
+        let bound = timeout_binder(cache.clone(), overlay.clone())(&GoString::from(
+            "00000000-0000-0000-0000-000000000001",
+        ))
         .unwrap();
         let task = GoString::from("queue");
         let renamed_id = GoString::from("00000000-0000-0000-0000-000000000002");

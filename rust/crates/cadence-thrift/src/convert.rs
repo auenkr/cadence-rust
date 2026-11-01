@@ -3,6 +3,26 @@
 //! Field IDs come from the IDL (`go/.gen/.../rawIDL`). Each converter maps
 //! between the Rust struct and the generic value model; see `value.rs`.
 
+use cadence_api::admin::{
+    AddSearchAttributeRequest, AddSearchAttributeResponse, CloseShardRequest, CloseShardResponse,
+    DescribeClusterResponse, DescribeQueueRequest, DescribeQueueResponse, DynamicConfigEntry,
+    DynamicConfigFilter, DynamicConfigValue, GetDomainAsyncWorkflowConfiguratonRequest,
+    GetDomainAsyncWorkflowConfiguratonResponse, GetDomainIsolationGroupsRequest,
+    GetDomainIsolationGroupsResponse, GetDomainReplicationMessagesRequest,
+    GetDomainReplicationMessagesResponse, GetDynamicConfigRequest, GetDynamicConfigResponse,
+    GetGlobalIsolationGroupsRequest, GetGlobalIsolationGroupsResponse,
+    GetWorkflowExecutionRawHistoryV2Request, GetWorkflowExecutionRawHistoryV2Response, HostInfo,
+    ListDynamicConfigRequest, ListDynamicConfigResponse, MaintainCorruptWorkflowRequest,
+    MaintainCorruptWorkflowResponse, MembershipInfo, MergeDLQMessagesRequest,
+    MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo, PurgeDLQMessagesRequest,
+    PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
+    ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
+    ReplicationMessages, ResetQueueRequest, ResetQueueResponse, RestoreDynamicConfigRequest,
+    RestoreDynamicConfigResponse, RingInfo, UpdateDomainAsyncWorkflowConfiguratonRequest,
+    UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
+    UpdateDomainIsolationGroupsResponse, UpdateDynamicConfigRequest, UpdateDynamicConfigResponse,
+    UpdateGlobalIsolationGroupsRequest, UpdateGlobalIsolationGroupsResponse,
+};
 use cadence_api::enums::*;
 use cadence_api::errors::*;
 use cadence_api::schedule::*;
@@ -21,6 +41,38 @@ fn millis_to_nanos(value: Option<i64>) -> Option<i64> {
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
+
+impl FromThrift for CloseShardRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for CloseShardResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for RemoveTaskRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            task_type: s.opt_i32(20)?,
+            task_id: s.opt_i64(30)?.unwrap_or_default(),
+            visibility_timestamp: s.opt_i64(40)?,
+            cluster_name: s.req_string(50, "")?,
+        })
+    }
+}
+
+impl ToThrift for RemoveTaskResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
 
 macro_rules! wrap_enum {
     ($($t:ty),*) => {
@@ -63,6 +115,7 @@ wrap_enum!(
     DecisionTaskFailedCause,
     DecisionTaskTimedOutCause,
     DecisionType,
+    DomainOperation,
     DomainStatus,
     EncodingType,
     EventType,
@@ -79,6 +132,7 @@ wrap_enum!(
     QueryRejectCondition,
     QueryResultType,
     QueryTaskCompletedType,
+    ReplicationTaskType,
     ScheduleCatchUpPolicy,
     ScheduleOverlapPolicy,
     SignalExternalWorkflowExecutionFailedCause,
@@ -246,6 +300,510 @@ impl ToThrift for SearchAttributes {
     }
 }
 
+// Admin config and search-attribute RPCs (go/idls/thrift/admin.thrift,
+// config.thrift).
+impl FromThrift for DynamicConfigFilter {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            name: s.req_string(10, "")?,
+            value: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigFilter {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.ostruct(20, self.value.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for DynamicConfigValue {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            value: s.opt_struct(10)?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigValue {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.value.as_ref());
+        f.olist(20, &self.filters);
+        f.finish()
+    }
+}
+
+impl FromThrift for DynamicConfigEntry {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            name: s.req_string(10, "")?,
+            values: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for DynamicConfigEntry {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.olist(20, &self.values);
+        f.finish()
+    }
+}
+
+impl FromThrift for GetDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for GetDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.value.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            config_values: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for UpdateDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for RestoreDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+            filters: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for RestoreDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for ListDynamicConfigRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            config_name: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for ListDynamicConfigResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.entries);
+        f.finish()
+    }
+}
+
+impl FromThrift for AddSearchAttributeRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            search_attribute: s.opt_map_str(10)?,
+            security_token: s.req_string(20, "")?,
+        })
+    }
+}
+
+impl ToThrift for AddSearchAttributeResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for ReadDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_i32(10)?.map(|value| match value {
+                0 => DLQType::Replication,
+                1 => DLQType::Domain,
+                _ => DLQType::Invalid,
+            }),
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+            maximum_page_size: s.opt_i32(50)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(60)?,
+        })
+    }
+}
+
+impl ToThrift for ReadDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.oi32(50, Some(self.maximum_page_size));
+        f.sbytes(60, &self.next_page_token);
+        f.finish()
+    }
+}
+
+fn dlq_type_from_go_thrift(value: i32) -> DLQType {
+    match value {
+        0 => DLQType::Replication,
+        1 => DLQType::Domain,
+        _ => DLQType::Invalid,
+    }
+}
+
+impl ToThrift for ReadDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
+        f.olist(20, &self.replication_tasks);
+        f.sbytes(30, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for ReadDLQMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_i32(10)?.map(dlq_type_from_go_thrift),
+            replication_tasks: s.opt_list(20)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(30)?,
+        })
+    }
+}
+
+impl FromThrift for PurgeDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            dlq_type: s.opt_i32(10)?.map(dlq_type_from_go_thrift),
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+        })
+    }
+}
+
+impl ToThrift for PurgeDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.finish()
+    }
+}
+
+impl ToThrift for PurgeDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for PurgeDLQMessagesResponse {
+    fn from_thrift(_: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl FromThrift for MergeDLQMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let dlq_type = s.opt_i32(10)?.map(dlq_type_from_go_thrift);
+        Ok(Self {
+            dlq_type,
+            shard_id: s.opt_i32(20)?.unwrap_or_default(),
+            source_cluster: s.req_string(30, "")?,
+            inclusive_end_message_id: s.opt_i64(40)?,
+            maximum_page_size: s.opt_i32(50)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(60)?,
+        })
+    }
+}
+
+impl ToThrift for MergeDLQMessagesRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(
+            10,
+            self.dlq_type.map(|value| match value {
+                DLQType::Replication => 0,
+                DLQType::Domain => 1,
+                DLQType::Invalid => -1,
+                _ => -1,
+            }),
+        );
+        f.oi32(20, Some(self.shard_id));
+        f.sstr(30, &self.source_cluster);
+        f.oi64(40, self.inclusive_end_message_id);
+        f.oi32(50, Some(self.maximum_page_size));
+        f.sbytes(60, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl FromThrift for MergeDLQMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            next_page_token: s.bytes_or_empty(10)?,
+        })
+    }
+}
+
+impl ToThrift for MergeDLQMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.next_page_token);
+        f.finish()
+    }
+}
+
+impl ToThrift for SupportedClientVersions {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.go_sdk);
+        f.sstr(20, &self.java_sdk);
+        f.finish()
+    }
+}
+
+impl ToThrift for HostInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.identity);
+        f.finish()
+    }
+}
+
+impl ToThrift for RingInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.role);
+        f.oi32(20, Some(self.member_count));
+        f.olist(30, &self.members);
+        f.finish()
+    }
+}
+
+impl ToThrift for MembershipInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.current_host.as_ref());
+        f.olist(20, &self.reachable_members);
+        f.olist(30, &self.rings);
+        f.finish()
+    }
+}
+
+impl ToThrift for PersistenceFeature {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.key);
+        if self.enabled {
+            f.fields.push((20, crate::value::Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl ToThrift for PersistenceInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.backend);
+        f.olist(30, &self.features);
+        f.finish()
+    }
+}
+
+impl ToThrift for DescribeClusterResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.supported_client_versions.as_ref());
+        f.ostruct(20, self.membership_info.as_ref());
+        f.omap_str_struct(30, &self.persistence_info);
+        f.finish()
+    }
+}
+
+impl FromThrift for ResetQueueRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            cluster_name: s.req_string(20, "")?,
+            task_type: s.opt_i32(30)?,
+        })
+    }
+}
+
+impl ToThrift for ResetQueueResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for DescribeQueueRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            shard_id: s.opt_i32(10)?.unwrap_or_default(),
+            cluster_name: s.req_string(20, "")?,
+            task_type: s.opt_i32(30)?,
+        })
+    }
+}
+
+impl ToThrift for DescribeQueueResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.processing_queue_states);
+        f.finish()
+    }
+}
+
+impl FromThrift for VersionHistoryItem {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            event_id: s.opt_i64(10)?.unwrap_or_default(),
+            version: s.opt_i64(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for VersionHistoryItem {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, Some(self.event_id));
+        f.oi64(20, Some(self.version));
+        f.finish()
+    }
+}
+
+impl FromThrift for VersionHistory {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            branch_token: s.bytes_or_empty(10)?,
+            items: s.opt_list(20)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl ToThrift for VersionHistory {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.branch_token);
+        f.olist(20, &self.items);
+        f.finish()
+    }
+}
+
+impl FromThrift for GetWorkflowExecutionRawHistoryV2Request {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+            start_event_id: s.opt_i64(30)?,
+            start_event_version: s.opt_i64(40)?,
+            end_event_id: s.opt_i64(50)?,
+            end_event_version: s.opt_i64(60)?,
+            maximum_page_size: s.opt_i32(70)?.unwrap_or_default(),
+            next_page_token: s.bytes_or_empty(80)?,
+        })
+    }
+}
+
+impl ToThrift for GetWorkflowExecutionRawHistoryV2Response {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sbytes(10, &self.next_page_token);
+        f.olist(20, &self.history_batches);
+        f.ostruct(30, self.version_history.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::DeleteWorkflowRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DeleteWorkflowResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        if self.history_deleted {
+            f.fields.push((10, crate::value::Value::Bool(true)));
+        }
+        if self.executions_deleted {
+            f.fields.push((20, crate::value::Value::Bool(true)));
+        }
+        if self.visibility_deleted {
+            f.fields.push((30, crate::value::Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::RefreshWorkflowTasksRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            domain_id: String::new(),
+            workflow_execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::RefreshWorkflowTasksResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
 impl FromThrift for RetryPolicy {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
@@ -410,11 +968,13 @@ impl FromThrift for DomainConfiguration {
         Ok(Self {
             workflow_execution_retention_period_in_days: s.opt_i32(10)?.unwrap_or(0),
             emit_metric: s.opt_bool(20)?.unwrap_or(true),
+            isolation_groups: s.opt_struct(60)?,
             bad_binaries: s.opt_struct(70)?,
             history_archival_status: s.opt_enum(80)?,
             history_archival_uri: s.req_string(90, "")?,
             visibility_archival_status: s.opt_enum(100)?,
             visibility_archival_uri: s.req_string(110, "")?,
+            async_workflow_config: s.opt_struct(120)?,
         })
     }
 }
@@ -431,11 +991,13 @@ impl ToThrift for DomainConfiguration {
         // IDL default is `emitMetric = true`: Go readers apply the default
         // when absent, so always write to preserve an explicit false.
         f.fields.push((20, Value::Bool(self.emit_metric)));
+        f.ostruct(60, self.isolation_groups.as_ref());
         f.ostruct(70, self.bad_binaries.as_ref());
         f.oenum(80, self.history_archival_status);
         f.sstr(90, &self.history_archival_uri);
         f.oenum(100, self.visibility_archival_status);
         f.sstr(110, &self.visibility_archival_uri);
+        f.ostruct(120, self.async_workflow_config.as_ref());
         f.finish()
     }
 }
@@ -521,11 +1083,28 @@ impl FromThrift for cadence_api::types::IsolationGroupPartition {
     }
 }
 
+impl ToThrift for cadence_api::types::IsolationGroupPartition {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.name);
+        f.oenum(20, self.state);
+        f.finish()
+    }
+}
+
 impl FromThrift for IsolationGroupConfiguration {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             isolation_groups: s.opt_list(10)?.unwrap_or_default(),
         })
+    }
+}
+
+impl ToThrift for IsolationGroupConfiguration {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.isolation_groups);
+        f.finish()
     }
 }
 
@@ -537,6 +1116,296 @@ impl FromThrift for AsyncWorkflowConfiguration {
             queue_type: s.opt_string(30)?.unwrap_or_default(),
             queue_config: s.opt_struct(40)?,
         })
+    }
+}
+
+impl ToThrift for AsyncWorkflowConfiguration {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.obool(10, self.enabled);
+        f.sstr(20, &self.predefined_queue_name);
+        f.sstr(30, &self.queue_type);
+        f.ostruct(40, self.queue_config.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for GetGlobalIsolationGroupsRequest {
+    fn from_thrift(_: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
+    }
+}
+
+impl ToThrift for GetGlobalIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl ToThrift for GetGlobalIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateGlobalIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            isolation_groups: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl ToThrift for UpdateGlobalIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for UpdateGlobalIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for GetDomainIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for GetDomainIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.finish()
+    }
+}
+
+impl ToThrift for GetDomainIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDomainIsolationGroupsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            isolation_groups: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for UpdateDomainIsolationGroupsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.isolation_groups.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for UpdateDomainIsolationGroupsResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for GetDomainAsyncWorkflowConfiguratonRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+        })
+    }
+}
+
+impl ToThrift for GetDomainAsyncWorkflowConfiguratonRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.finish()
+    }
+}
+
+impl ToThrift for GetDomainAsyncWorkflowConfiguratonResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.configuration.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            configuration: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.configuration.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for UpdateDomainAsyncWorkflowConfiguratonResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for ReapplyEventsRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_execution: s.opt_struct(20)?,
+            events: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for ReapplyEventsRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.workflow_execution.as_ref());
+        f.ostruct(30, self.events.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for ReapplyEventsResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
+    }
+}
+
+impl FromThrift for MaintainCorruptWorkflowRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for MaintainCorruptWorkflowRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.ostruct(20, self.execution.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for MaintainCorruptWorkflowResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.obool(10, self.history_deleted);
+        f.obool(20, self.executions_deleted);
+        f.obool(30, self.visibility_deleted);
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            execution: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
+    fn to_thrift(&self) -> Struct {
+        // The admin IDL declares shardId as a string.
+        let mut f = Fields::new();
+        f.sstr(10, &self.shard_id.to_string());
+        f.sstr(20, &self.history_addr);
+        f.sstr(40, &self.mutable_state_in_cache);
+        f.sstr(50, &self.mutable_state_in_database);
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::DescribeHistoryHostRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            host_address: s.opt_string(10)?,
+            shard_id_for_host: s.opt_i32(20)?,
+            execution_for_host: s.opt_struct(30)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DomainCacheInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi64(10, Some(self.num_of_items_in_cache_by_id));
+        f.oi64(20, Some(self.num_of_items_in_cache_by_name));
+        f.finish()
+    }
+}
+
+impl ToThrift for cadence_api::admin::DescribeHistoryHostResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, Some(self.number_of_shards));
+        if !self.shard_ids.is_empty() {
+            f.fields.push((
+                20,
+                Value::List(self.shard_ids.iter().map(|id| Value::I32(*id)).collect()),
+            ));
+        }
+        f.ostruct(30, self.domain_cache.as_ref());
+        f.sstr(40, &self.shard_controller_status);
+        f.sstr(50, &self.address);
+        f.finish()
+    }
+}
+
+impl FromThrift for cadence_api::admin::DescribeShardDistributionRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            page_size: s.opt_i32(10)?,
+            page_id: s.opt_i32(20)?,
+        })
+    }
+}
+
+impl ToThrift for cadence_api::admin::DescribeShardDistributionResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oi32(10, Some(self.number_of_shards));
+        if let Some(shards) = &self.shards {
+            let mut items: Vec<_> = shards.iter().collect();
+            items.sort_by_key(|(id, _)| **id);
+            f.fields.push((
+                20,
+                Value::Map(
+                    items
+                        .into_iter()
+                        .map(|(id, addr)| (Value::I32(*id), Value::Bytes(addr.as_bytes().to_vec())))
+                        .collect(),
+                ),
+            ));
+        }
+        f.finish()
     }
 }
 
@@ -559,6 +1428,108 @@ impl ToThrift for DomainReplicationConfiguration {
         f.olist(20, &self.clusters);
         f.ostruct(30, self.active_clusters.as_ref());
         f.finish()
+    }
+}
+
+impl ToThrift for DomainTaskAttributes {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.domain_operation);
+        f.sstr(20, &self.id);
+        f.ostruct(30, self.info.as_ref());
+        f.ostruct(40, self.config.as_ref());
+        f.ostruct(50, self.replication_config.as_ref());
+        // Go's transmission handler always sets these pointer fields, including
+        // zero-valued versions, so they must remain present on the wire.
+        f.fields.push((60, Value::I64(self.config_version)));
+        f.fields.push((70, Value::I64(self.failover_version)));
+        f.fields
+            .push((80, Value::I64(self.previous_failover_version)));
+        f.finish()
+    }
+}
+
+impl ToThrift for ReplicationTask {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.oenum(10, self.task_type);
+        f.oi64(11, self.source_task_id);
+        f.ostruct(20, self.domain_task_attributes.as_ref());
+        f.finish()
+    }
+}
+
+impl ToThrift for ReplicationMessages {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.olist(10, &self.replication_tasks);
+        f.fields
+            .push((20, Value::I64(self.last_retrieved_message_id)));
+        if self.has_more {
+            f.fields.push((30, Value::Bool(true)));
+        }
+        f.finish()
+    }
+}
+
+impl FromThrift for ReplicationMessages {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            replication_tasks: s.opt_list(10)?.unwrap_or_default(),
+            last_retrieved_message_id: s.opt_i64(20)?.unwrap_or_default(),
+            has_more: s.opt_bool(30)?.unwrap_or_default(),
+        })
+    }
+}
+
+impl FromThrift for GetDomainReplicationMessagesRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            last_retrieved_message_id: s.opt_i64(10)?,
+            last_processed_message_id: s.opt_i64(20)?,
+            cluster_name: s.req_string(30, "")?,
+        })
+    }
+}
+
+impl ToThrift for GetDomainReplicationMessagesResponse {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.ostruct(10, self.messages.as_ref());
+        f.finish()
+    }
+}
+
+impl FromThrift for GetDomainReplicationMessagesResponse {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            messages: s.opt_struct(10)?,
+        })
+    }
+}
+
+impl FromThrift for ReplicationTask {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            task_type: s.opt_enum(10)?,
+            source_task_id: s.opt_i64(11)?,
+            domain_task_attributes: s.opt_struct(20)?,
+        })
+    }
+}
+
+impl FromThrift for DomainTaskAttributes {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_operation: s.opt_enum(10)?,
+            id: s.req_string(20, "")?,
+            info: s.opt_struct(30)?,
+            config: s.opt_struct(40)?,
+            replication_config: s.opt_struct(50)?,
+            config_version: s.opt_i64(60)?.unwrap_or_default(),
+            failover_version: s.opt_i64(70)?.unwrap_or_default(),
+            previous_failover_version: s.opt_i64(80)?.unwrap_or_default(),
+        })
     }
 }
 
@@ -645,7 +1616,49 @@ impl FromThrift for DescribeDomainResponse {
             replication_configuration: s.opt_struct(30)?,
             failover_version: s.opt_i64(40)?.unwrap_or(0),
             is_global_domain: s.opt_bool(50)?.unwrap_or(false),
+            failover_info: s.opt_struct(60)?,
         })
+    }
+}
+
+impl FromThrift for FailoverInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let pending_shards = match s.get(50) {
+            Some(Value::List(items)) => items
+                .iter()
+                .filter_map(|v| match v {
+                    Value::I32(n) => Some(*n),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        Ok(Self {
+            failover_version: s.opt_i64(10)?.unwrap_or(0),
+            failover_start_timestamp: s.opt_i64(20)?.unwrap_or(0),
+            failover_expire_timestamp: s.opt_i64(30)?.unwrap_or(0),
+            completed_shard_count: s.opt_i32(40)?.unwrap_or(0),
+            pending_shards,
+        })
+    }
+}
+
+impl ToThrift for FailoverInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::I64(self.failover_version)));
+        f.fields
+            .push((20, Value::I64(self.failover_start_timestamp)));
+        f.fields
+            .push((30, Value::I64(self.failover_expire_timestamp)));
+        f.fields.push((40, Value::I32(self.completed_shard_count)));
+        if !self.pending_shards.is_empty() {
+            f.fields.push((
+                50,
+                Value::List(self.pending_shards.iter().map(|n| Value::I32(*n)).collect()),
+            ));
+        }
+        f.finish()
     }
 }
 
@@ -659,6 +1672,7 @@ impl ToThrift for DescribeDomainResponse {
             f.fields.push((40, Value::I64(self.failover_version)));
         }
         f.obool(50, self.is_global_domain);
+        f.ostruct(60, self.failover_info.as_ref());
         f.finish()
     }
 }
@@ -3192,6 +4206,116 @@ impl ToThrift for RespondActivityTaskCanceledRequest {
     }
 }
 
+impl FromThrift for RecordActivityTaskHeartbeatByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            details: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RecordActivityTaskHeartbeatByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.details);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskCompletedByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            result: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskCompletedByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.result);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskCanceledByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            details: s.bytes_or_empty(50)?,
+            identity: s.req_string(60, "")?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskCanceledByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.sbytes(50, &self.details);
+        f.sstr(60, &self.identity);
+        f.finish()
+    }
+}
+
+impl FromThrift for RespondActivityTaskFailedByIDRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            activity_id: s.req_string(40, "")?,
+            reason: s.opt_string(50)?,
+            details: s.bytes_or_empty(60)?,
+            failure_options: s.opt_struct(65)?,
+            identity: s.req_string(70, "")?,
+            heartbeat_details: s.bytes_or_empty(80)?,
+        })
+    }
+}
+
+impl ToThrift for RespondActivityTaskFailedByIDRequest {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.sstr(10, &self.domain);
+        f.sstr(20, &self.workflow_id);
+        f.sstr(30, &self.run_id);
+        f.sstr(40, &self.activity_id);
+        f.ostr(50, &self.reason);
+        f.sbytes(60, &self.details);
+        f.ostruct(65, self.failure_options.as_ref());
+        f.sstr(70, &self.identity);
+        f.sbytes(80, &self.heartbeat_details);
+        f.finish()
+    }
+}
+
 impl FromThrift for RecordActivityTaskHeartbeatRequest {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
@@ -5171,6 +6295,99 @@ mod tests {
     }
 
     #[test]
+    fn admin_isolation_and_async_configuration_requests_round_trip() {
+        let groups = IsolationGroupConfiguration {
+            isolation_groups: vec![IsolationGroupPartition {
+                name: "maintenance".into(),
+                state: Some(IsolationGroupState::Drained),
+            }],
+        };
+        round_trip(&groups);
+        round_trip(&cadence_api::admin::GetGlobalIsolationGroupsRequest {});
+        round_trip(&UpdateGlobalIsolationGroupsRequest {
+            isolation_groups: Some(groups.clone()),
+        });
+        round_trip(&GetDomainIsolationGroupsRequest {
+            domain: "payments".into(),
+        });
+        round_trip(&UpdateDomainIsolationGroupsRequest {
+            domain: "payments".into(),
+            isolation_groups: Some(groups),
+        });
+        round_trip(&GetDomainAsyncWorkflowConfiguratonRequest {
+            domain: "payments".into(),
+        });
+        round_trip(&UpdateDomainAsyncWorkflowConfiguratonRequest {
+            domain: "payments".into(),
+            configuration: Some(AsyncWorkflowConfiguration {
+                enabled: true,
+                predefined_queue_name: "async-payments".into(),
+                queue_type: "FIFO".into(),
+                queue_config: Some(DataBlob::new(EncodingType::JSON, b"{}".to_vec())),
+            }),
+        });
+        round_trip(&ReapplyEventsRequest {
+            domain: "payments".into(),
+            workflow_execution: Some(WorkflowExecution::new("wf", "run")),
+            events: Some(DataBlob::new(EncodingType::ThriftRW, vec![0x59])),
+        });
+        round_trip(&MaintainCorruptWorkflowRequest {
+            domain: "payments".into(),
+            execution: Some(WorkflowExecution::new("wf", "run")),
+        });
+    }
+
+    #[test]
+    fn domain_replication_task_uses_go_wire_field_ids() {
+        let task = ReplicationTask {
+            task_type: Some(ReplicationTaskType::Domain),
+            source_task_id: Some(42),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(DomainOperation::Update),
+                id: "domain-uuid".into(),
+                info: None,
+                config: None,
+                replication_config: None,
+                config_version: 0,
+                failover_version: 8,
+                previous_failover_version: -1,
+            }),
+        };
+        let thrift = task.to_thrift();
+        assert!(matches!(thrift.get(10), Some(Value::I32(0))));
+        assert!(matches!(thrift.get(11), Some(Value::I64(42))));
+        let attributes = match thrift.get(20) {
+            Some(Value::Struct(attributes)) => attributes,
+            other => panic!("expected domain task attributes, got {other:?}"),
+        };
+        assert!(matches!(attributes.get(10), Some(Value::I32(1))));
+        assert!(matches!(attributes.get(20), Some(Value::Bytes(id)) if id == b"domain-uuid"));
+        assert!(matches!(attributes.get(60), Some(Value::I64(0))));
+        assert!(matches!(attributes.get(70), Some(Value::I64(8))));
+        assert!(matches!(attributes.get(80), Some(Value::I64(-1))));
+        assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
+    }
+
+    #[test]
+    fn get_domain_replication_messages_request_uses_go_wire_field_ids() {
+        let request = GetDomainReplicationMessagesRequest {
+            last_retrieved_message_id: Some(13),
+            last_processed_message_id: Some(11),
+            cluster_name: "active-west".into(),
+        };
+        let mut thrift = Struct::default();
+        thrift.fields.extend([
+            (10, Value::I64(13)),
+            (20, Value::I64(11)),
+            (30, Value::Bytes(b"active-west".to_vec())),
+        ]);
+        assert_eq!(
+            GetDomainReplicationMessagesRequest::from_thrift(&thrift).unwrap(),
+            request
+        );
+    }
+
+    #[test]
     fn query_task_completed_round_trip() {
         round_trip(&RespondQueryTaskCompletedRequest {
             task_token: b"token".to_vec(),
@@ -5764,6 +6981,114 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 #[cfg(test)]
 mod timeout_wire_tests {
     use super::*;
+
+    #[test]
+    fn dlq_response_decoder_uses_go_thrift_enum_values() {
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(0));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Replication));
+
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(1));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Domain));
+
+        let mut fields = Fields::new();
+        fields.oi32(10, Some(99));
+        let response = ReadDLQMessagesResponse::from_thrift(&fields.finish()).unwrap();
+        assert_eq!(response.dlq_type, Some(DLQType::Invalid));
+    }
+
+    #[test]
+    fn dlq_read_and_purge_use_replicator_idl_field_ids() {
+        let request = ReadDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 4,
+            source_cluster: "cluster-a".into(),
+            inclusive_end_message_id: Some(123),
+            maximum_page_size: 8,
+            next_page_token: vec![5, 6],
+        };
+        let encoded = request.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(4));
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
+        assert_eq!(encoded.opt_i32(50).unwrap(), Some(8));
+        assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![5, 6]);
+        assert_eq!(
+            ReadDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            request
+        );
+
+        let response = ReadDLQMessagesResponse {
+            dlq_type: Some(DLQType::Domain),
+            replication_tasks: vec![ReplicationTask {
+                task_type: Some(ReplicationTaskType::Domain),
+                source_task_id: Some(11),
+                ..Default::default()
+            }],
+            next_page_token: vec![8, 9],
+        };
+        let encoded = response.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.bytes_or_empty(30).unwrap(), vec![8, 9]);
+        assert_eq!(
+            ReadDLQMessagesResponse::from_thrift(&encoded).unwrap(),
+            response
+        );
+
+        let purge = PurgeDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 4,
+            source_cluster: "cluster-a".into(),
+            inclusive_end_message_id: Some(123),
+        };
+        let encoded = purge.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(4));
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(123));
+        assert_eq!(
+            PurgeDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            purge
+        );
+    }
+
+    #[test]
+    fn merge_dlq_uses_replicator_idl_field_ids_and_enum_values() {
+        let request = MergeDLQMessagesRequest {
+            dlq_type: Some(DLQType::Domain),
+            shard_id: 7,
+            source_cluster: "cluster-b".into(),
+            inclusive_end_message_id: Some(99),
+            maximum_page_size: 12,
+            next_page_token: vec![0, 255],
+        };
+        let encoded = request.to_thrift();
+        assert_eq!(encoded.opt_i32(10).unwrap(), Some(1));
+        assert_eq!(encoded.opt_i32(20).unwrap(), Some(7));
+        assert_eq!(
+            encoded.opt_string(30).unwrap().as_deref(),
+            Some("cluster-b")
+        );
+        assert_eq!(encoded.opt_i64(40).unwrap(), Some(99));
+        assert_eq!(encoded.opt_i32(50).unwrap(), Some(12));
+        assert_eq!(encoded.bytes_or_empty(60).unwrap(), vec![0, 255]);
+        assert_eq!(
+            MergeDLQMessagesRequest::from_thrift(&encoded).unwrap(),
+            request
+        );
+
+        let response = MergeDLQMessagesResponse {
+            next_page_token: vec![1, 2, 3],
+        };
+        let encoded = response.to_thrift();
+        assert_eq!(encoded.bytes_or_empty(10).unwrap(), vec![1, 2, 3]);
+        assert_eq!(
+            MergeDLQMessagesResponse::from_thrift(&encoded).unwrap(),
+            response
+        );
+    }
 
     #[test]
     fn timeout_attributes_preserve_pinned_thrift_fields_and_opaque_bytes() {

@@ -90,7 +90,9 @@ async fn start_starting_history() -> String {
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(h::history_api_server::HistoryApiServer::new(StartingHistory))
+            .add_service(h::history_api_server::HistoryApiServer::new(
+                StartingHistory,
+            ))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await
             .unwrap();
@@ -235,8 +237,7 @@ async fn forwarded_decision_poll_failure_delivers_later_local_add() {
         })
         .await;
         let history = start_starting_history().await;
-        let (_dir, matching, domain) =
-            fixture(&history, membership(CHILD, Some(PARENT), &address));
+        let (_dir, matching, domain) = fixture(&history, membership(CHILD, Some(PARENT), &address));
 
         let worker = matching.clone();
         let poll_domain = domain.clone();
@@ -259,7 +260,10 @@ async fn forwarded_decision_poll_failure_delivers_later_local_add() {
             .unwrap()
             .unwrap()
             .into_inner();
-        assert_eq!(response.started_event_id, 92, "{code:?}: local task delivered");
+        assert_eq!(
+            response.started_event_id, 92,
+            "{code:?}: local task delivered"
+        );
         assert_eq!(
             polls.load(Ordering::SeqCst),
             1,
@@ -296,7 +300,8 @@ async fn root_and_sticky_decision_polls_never_call_parent() {
     assert_eq!(polls.load(Ordering::SeqCst), 0, "root never forwards");
 
     // Sticky: the child partition is local and its parent is remote, yet sticky never forwards.
-    let (_sticky_dir, sticky, domain) = fixture(&history, membership(CHILD, Some(PARENT), &address));
+    let (_sticky_dir, sticky, domain) =
+        fixture(&history, membership(CHILD, Some(PARENT), &address));
     let response = sticky
         .poll_for_decision_task(decision_poll(
             &domain,

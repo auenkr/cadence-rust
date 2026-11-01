@@ -60,8 +60,7 @@ pub struct NativeMatchingService<C> {
 /// Opt-in, bounded stage tracing for the first native Matching RPC in mixed
 /// service gates. Keep identifiers and request contents out of this trace.
 pub(crate) fn trace_list_partitions_stage(stage: &str) {
-    static TRACE_COUNT: std::sync::atomic::AtomicUsize =
-        std::sync::atomic::AtomicUsize::new(0);
+    static TRACE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     if std::env::var_os("CADENCE_MATCHING_LIST_PARTITIONS_TRACE").is_some()
         && TRACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 32
     {

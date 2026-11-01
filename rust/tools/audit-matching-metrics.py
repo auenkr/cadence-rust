@@ -52,7 +52,7 @@ def main():
             definitions.append((ident, name, metric_type.group(1) if metric_type else "Counter", rollup.group(1) if rollup else None))
 
     go_rollups = {name: rollup for _, name, _, rollup in definitions if rollup}
-    rust_rollup_map = dict(re.findall(r'"([a-z0-9_]+)"\s*=>\s*Some\("([a-z0-9_]+)"\)', rust_rollups))
+    rust_rollup_map = dict(re.findall(r'"([a-z0-9_]+)"\s*=>\s*\{?\s*Some\(\s*"([a-z0-9_]+)"\s*,?\s*\)', rust_rollups))
     missing_rollups = {name: value for name, value in go_rollups.items() if rust_rollup_map.get(name) != value}
     extra_rollups = {name: value for name, value in rust_rollup_map.items() if go_rollups.get(name) != value}
     print(f"Matching root rollups: Go={len(go_rollups)} Rust={len(rust_rollup_map)} missing/changed={missing_rollups} extra/changed={extra_rollups}")

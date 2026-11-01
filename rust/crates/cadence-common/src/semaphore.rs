@@ -52,9 +52,7 @@ pub fn parse_owner(owner_id: &str) -> Result<Owner, String> {
     // The declared length must fit in rest, with a byte to spare for the
     // separator. Lengths near usize::MAX must not wrap past this guard.
     if length.saturating_add(1) > rest.len() {
-        return err(format!(
-            "is shorter than its length prefix {length} claims"
-        ));
+        return err(format!("is shorter than its length prefix {length} claims"));
     }
     let workflow_id = rest[..length].to_string();
     let tail = &rest[length..];

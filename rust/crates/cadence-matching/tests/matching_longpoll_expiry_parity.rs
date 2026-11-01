@@ -60,12 +60,14 @@ impl h::history_api_server::HistoryApi for SlowStartingHistory {
         tokio::time::sleep(self.delay).await;
         Ok(Response::new(h::RecordActivityTaskStartedResponse {
             scheduled_event: Some(p::HistoryEvent {
-                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    p::ActivityTaskScheduledEventAttributes {
-                        activity_id: request.schedule_id.to_string(),
-                        ..Default::default()
-                    },
-                )),
+                attributes: Some(
+                    p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                        p::ActivityTaskScheduledEventAttributes {
+                            activity_id: request.schedule_id.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             }),
             ..Default::default()
@@ -151,8 +153,8 @@ fn fixture(
         4 * 1024 * 1024,
     );
     let queues = QueueRegistry::new(store, history, NonZeroU32::new(100).unwrap());
-    let matching = Matching::with_durable_queues(state, queues, poll_expiration)
-        .with_membership(membership);
+    let matching =
+        Matching::with_durable_queues(state, queues, poll_expiration).with_membership(membership);
     (dir, matching, domain)
 }
 

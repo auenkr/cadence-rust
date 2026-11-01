@@ -20,7 +20,12 @@ pub struct Cli {
     #[arg(long, short = 'e', global = true, env = "CADENCE_ENVIRONMENT")]
     pub env: Option<String>,
     /// Zone layer (`<env>_<zone>.yaml`), Go `--zone`/`--az`, `CADENCE_AVAILABILITY_ZONE`.
-    #[arg(long, visible_alias = "az", global = true, env = "CADENCE_AVAILABILITY_ZONE")]
+    #[arg(
+        long,
+        visible_alias = "az",
+        global = true,
+        env = "CADENCE_AVAILABILITY_ZONE"
+    )]
     pub zone: Option<String>,
     #[command(subcommand)]
     pub command: Command,

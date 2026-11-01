@@ -44,7 +44,10 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Notify;
-use tonic::{metadata::{Ascii, MetadataValue}, Code, Request};
+use tonic::{
+    metadata::{Ascii, MetadataValue},
+    Code, Request,
+};
 use uuid::Uuid;
 
 const DOMAIN: &str = "test-domain";
@@ -243,12 +246,11 @@ fn install_store(state: &mut AppState, store: &Arc<SemaphoreStore>) {
 fn semaphore_state(store: &Arc<SemaphoreStore>, enabled: bool) -> AppState {
     let mut state = AppState::default();
     add_domain(&state, DOMAIN, domain_id());
-    state
-        .admin
-        .dynamic_config
-        .lock()
-        .unwrap()
-        .update(false, ENABLE_SEMAPHORE, vec![bool_config(enabled, Some(DOMAIN))]);
+    state.admin.dynamic_config.lock().unwrap().update(
+        false,
+        ENABLE_SEMAPHORE,
+        vec![bool_config(enabled, Some(DOMAIN))],
+    );
     install_store(&mut state, store);
     state
 }
@@ -298,7 +300,10 @@ async fn get_or_create_semaphore_manager_starts_unstarted_registered_manager() {
         registry.get_or_create(identifier(0)),
     )
     .await;
-    assert!(cut_off.is_err(), "the first request must be cut off mid-load");
+    assert!(
+        cut_off.is_err(),
+        "the first request must be cut off mid-load"
+    );
     store.release_hold();
 
     let got = registry.get_or_create(identifier(0)).await.unwrap();
@@ -316,13 +321,15 @@ async fn get_or_create_semaphore_manager_refused_while_engine_shuts_down() {
     // No new buckets: loading one now would scan a partition this host is about to stop
     // serving.
     let store = SemaphoreStore::new();
-    let mut runtime = MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
+    let mut runtime =
+        MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
     runtime.drain().await.unwrap();
     assert!(runtime.is_shutting_down());
 
-    let status = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(0, &owner_id()))
-        .await
-        .unwrap_err();
+    let status =
+        MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(0, &owner_id()))
+            .await
+            .unwrap_err();
 
     assert_eq!(status.code(), Code::Aborted);
     assert!(
@@ -330,7 +337,11 @@ async fn get_or_create_semaphore_manager_refused_while_engine_shuts_down() {
         "the next owner is not settled yet: {}",
         status.message()
     );
-    assert_eq!(store.scan_count(), 0, "no bucket may load while the engine shuts down");
+    assert_eq!(
+        store.scan_count(),
+        0,
+        "no bucket may load while the engine shuts down"
+    );
 }
 
 #[tokio::test]
@@ -349,7 +360,11 @@ async fn get_or_create_semaphore_manager_domain_has_semaphores_disabled() {
         status.message(),
         "distributed semaphore is not enabled for this domain"
     );
-    assert_eq!(store.scan_count(), 0, "no bucket may load for a disabled domain");
+    assert_eq!(
+        store.scan_count(),
+        0,
+        "no bucket may load for a disabled domain"
+    );
 }
 
 #[tokio::test]
@@ -371,13 +386,15 @@ async fn get_or_create_semaphore_manager_bucket_is_owned_by_another_host() {
 
     assert_eq!(status.code(), Code::Aborted);
     assert!(
-        status
-            .message()
-            .contains("OwnedBy: remote, Me: local"),
+        status.message().contains("OwnedBy: remote, Me: local"),
         "the error must name the owning host: {}",
         status.message()
     );
-    assert_eq!(store.scan_count(), 0, "a bucket owned elsewhere must not load here");
+    assert_eq!(
+        store.scan_count(),
+        0,
+        "a bucket owned elsewhere must not load here"
+    );
 }
 
 #[tokio::test]
@@ -431,12 +448,8 @@ async fn get_or_create_semaphore_manager_load_runs_outside_creation_lock() {
     let store = SemaphoreStore::holding(0);
     let registry = Registry::new(store.clone());
     let slow_registry = registry.clone();
-    let slow = tokio::spawn(async move {
-        slow_registry
-            .get_or_create(identifier(0))
-            .await
-            .map(|_| ())
-    });
+    let slow =
+        tokio::spawn(async move { slow_registry.get_or_create(identifier(0)).await.map(|_| ()) });
     // Wait until the slow load is in flight, so the second creation really
     // overlaps it rather than slipping in first by luck.
     store.wait_scan_started().await;
@@ -477,7 +490,10 @@ async fn unload_semaphore_manager_stops_it_and_next_request_builds_fresh() {
     );
 
     let fresh = registry.get_or_create(identifier(0)).await.unwrap();
-    assert!(!Arc::ptr_eq(&mgr, &fresh), "the next request must build a new manager");
+    assert!(
+        !Arc::ptr_eq(&mgr, &fresh),
+        "the next request must build a new manager"
+    );
     assert_eq!(store.scan_count(), 2);
 }
 
@@ -493,13 +509,20 @@ async fn stop_semaphore_managers_stops_every_bucket_on_engine_stop() {
     for _ in 0..3 {
         store.push_scan(Ok(free_tokens(3)));
     }
-    let mut runtime = MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
+    let mut runtime =
+        MatchingRuntime::in_memory(semaphore_state(&store, true), Arc::new(|| Duration::ZERO));
     for bucket in 0..3 {
-        let granted = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(bucket, &owner_id()))
-            .await
-            .unwrap()
-            .into_inner();
-        assert_eq!(granted.outcome, 1, "bucket {bucket} starts with a granted slot");
+        let granted = MatchingApi::acquire_semaphore(
+            runtime.matching(),
+            acquire_request(bucket, &owner_id()),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(
+            granted.outcome, 1,
+            "bucket {bucket} starts with a granted slot"
+        );
     }
 
     runtime.shutdown().await.unwrap();
@@ -507,10 +530,17 @@ async fn stop_semaphore_managers_stops_every_bucket_on_engine_stop() {
     // Refusing to serve is the only thing Stop is observable through: a stopped bucket is
     // not in the registry, so the next request is refused rather than granted.
     for bucket in 0..3 {
-        let status = MatchingApi::acquire_semaphore(runtime.matching(), acquire_request(bucket, &owner_id()))
-            .await
-            .unwrap_err();
-        assert_eq!(status.code(), Code::Aborted, "bucket {bucket} was left running");
+        let status = MatchingApi::acquire_semaphore(
+            runtime.matching(),
+            acquire_request(bucket, &owner_id()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            status.code(),
+            Code::Aborted,
+            "bucket {bucket} was left running"
+        );
     }
 }
 
@@ -585,9 +615,7 @@ async fn acquire_semaphore_request_during_load_gives_up_at_its_own_deadline() {
 
     // The second request carries a 20ms gRPC deadline and must not wait on the load.
     let mut request = acquire_request(0, &owner_id());
-    let timeout = "20m"
-        .parse::<MetadataValue<Ascii>>()
-        .unwrap();
+    let timeout = "20m".parse::<MetadataValue<Ascii>>().unwrap();
     request.metadata_mut().insert("grpc-timeout", timeout);
     let status = tokio::time::timeout(
         Duration::from_secs(5),

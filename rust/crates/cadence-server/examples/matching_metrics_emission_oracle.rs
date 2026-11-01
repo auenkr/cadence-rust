@@ -3,9 +3,7 @@ use cadence_service_core::matching_metrics::{
     record_persistence_response_rows, InboundMetricContext, MatchingMetrics, MetricEvent,
     MetricKind, MetricSink, PollMetricContext, RecordingMetricSink,
 };
-use cadence_service_core::matching_metrics_migration::{
-    MigrationMetricSink, MigrationPolicy,
-};
+use cadence_service_core::matching_metrics_migration::{MigrationMetricSink, MigrationPolicy};
 use serde::Serialize;
 use std::{collections::BTreeMap, env, sync::Arc, time::Duration};
 
@@ -32,13 +30,20 @@ fn main() {
         policy.histograms.default = "both".into();
     }
     if mode == "name-on" {
-        policy.histograms.names.insert("syncmatch_latency_per_tl_ns".into(), true);
+        policy
+            .histograms
+            .names
+            .insert("syncmatch_latency_per_tl_ns".into(), true);
     }
     if mode == "name-off" {
-        policy.histograms.names.insert("syncmatch_latency_per_tl_ns".into(), false);
+        policy
+            .histograms
+            .names
+            .insert("syncmatch_latency_per_tl_ns".into(), false);
     }
     let recording = Arc::new(RecordingMetricSink::default());
-    let migration: Arc<dyn MetricSink> = Arc::new(MigrationMetricSink::new(recording.clone(), policy));
+    let migration: Arc<dyn MetricSink> =
+        Arc::new(MigrationMetricSink::new(recording.clone(), policy));
     let metrics = MatchingMetrics::new(migration.clone());
     let context = PollMetricContext {
         domain: "domain-a".into(),
@@ -66,12 +71,22 @@ fn main() {
     metrics.sync_forward_throttled(&context);
     metrics.poller_count(&context, 2);
     metrics.sync_match_latency(&context, false, Duration::from_millis(5));
-    metrics.add_task_request("domain-a", "queue/a", 0, false, "decision_task", "matching-test");
+    metrics.add_task_request(
+        "domain-a",
+        "queue/a",
+        0,
+        false,
+        "decision_task",
+        "matching-test",
+    );
     metrics.handler_sync_match_latency(
         "AddDecisionTask",
         Some("domain-a"),
         Some(("queue/a", Some(0))),
-        Some(InboundMetricContext { caller: Some("history".into()), transport: Some("grpc".into()) }),
+        Some(InboundMetricContext {
+            caller: Some("history".into()),
+            transport: Some("grpc".into()),
+        }),
         Duration::from_millis(5),
     );
 
@@ -81,11 +96,15 @@ fn main() {
     record_persistence_response_rows(migration.as_ref(), "GetTasks", 3);
     record_persistence_response_payload(migration.as_ref(), "GetTasks", 4096);
 
-    let mut rows: Vec<Row> = recording.events().into_iter().map(|event: MetricEvent| Row {
-        name: event.name,
-        kind: kind_name(event.kind),
-        tags: event.tags,
-    }).collect();
+    let mut rows: Vec<Row> = recording
+        .events()
+        .into_iter()
+        .map(|event: MetricEvent| Row {
+            name: event.name,
+            kind: kind_name(event.kind),
+            tags: event.tags,
+        })
+        .collect();
     rows.sort();
     rows.dedup();
     serde_json::to_writer(std::io::stdout(), &rows).expect("serialize emitted metric series");

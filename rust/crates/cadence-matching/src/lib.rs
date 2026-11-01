@@ -20,12 +20,9 @@ pub mod launcher;
 pub mod grpc;
 #[allow(clippy::result_large_err)]
 pub mod grpc_admin;
-#[allow(clippy::result_large_err)]
-mod grpc_convert;
-#[allow(clippy::result_large_err)]
-mod grpc_decisions;
-#[allow(clippy::result_large_err)]
-mod grpc_history;
+// Converters moved to cadence-proto so Frontend can share them.
+pub(crate) use cadence_proto::convert as grpc_convert;
+pub(crate) use cadence_proto::convert::{decisions as grpc_decisions, history as grpc_history};
 #[allow(clippy::result_large_err)]
 pub mod grpc_internal;
 #[allow(clippy::result_large_err)]

@@ -135,7 +135,10 @@ mod tests {
 
     impl FeatureProvider for NoopProvider {
         fn resolve(&self, _flag: &str, default: FlagValue, _ctx: &FlattenedContext) -> Resolution {
-            Resolution { value: default, error: None }
+            Resolution {
+                value: default,
+                error: None,
+            }
         }
     }
 

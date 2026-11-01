@@ -40,14 +40,16 @@ fn data_blob_out(v: cadence_api::types::DataBlob) -> cadence_proto::api::DataBlo
 
 fn data_blob_in(v: Option<cadence_proto::api::DataBlob>) -> Option<cadence_api::types::DataBlob> {
     v.map(|b| cadence_api::types::DataBlob {
-        encoding_type: match b.encoding_type { 1 => Some(cadence_api::enums::EncodingType::ThriftRW), 2 => Some(cadence_api::enums::EncodingType::JSON), _ => None },
+        encoding_type: match b.encoding_type {
+            1 => Some(cadence_api::enums::EncodingType::ThriftRW),
+            2 => Some(cadence_api::enums::EncodingType::JSON),
+            _ => None,
+        },
         data: b.data,
     })
 }
 
-fn filters_in(
-    v: Vec<a::DynamicConfigFilter>,
-) -> Vec<cadence_api::admin::DynamicConfigFilter> {
+fn filters_in(v: Vec<a::DynamicConfigFilter>) -> Vec<cadence_api::admin::DynamicConfigFilter> {
     v.into_iter()
         .map(|f| cadence_api::admin::DynamicConfigFilter {
             name: f.name,
@@ -56,9 +58,7 @@ fn filters_in(
         .collect()
 }
 
-fn filters_out(
-    v: Vec<cadence_api::admin::DynamicConfigFilter>,
-) -> Vec<a::DynamicConfigFilter> {
+fn filters_out(v: Vec<cadence_api::admin::DynamicConfigFilter>) -> Vec<a::DynamicConfigFilter> {
     v.into_iter()
         .map(|f| a::DynamicConfigFilter {
             name: f.name,
@@ -67,9 +67,7 @@ fn filters_out(
         .collect()
 }
 
-fn values_in(
-    v: Vec<a::DynamicConfigValue>,
-) -> Vec<cadence_api::admin::DynamicConfigValue> {
+fn values_in(v: Vec<a::DynamicConfigValue>) -> Vec<cadence_api::admin::DynamicConfigValue> {
     v.into_iter()
         .map(|c| cadence_api::admin::DynamicConfigValue {
             value: data_blob_in(c.value),
@@ -78,9 +76,7 @@ fn values_in(
         .collect()
 }
 
-fn values_out(
-    v: Vec<cadence_api::admin::DynamicConfigValue>,
-) -> Vec<a::DynamicConfigValue> {
+fn values_out(v: Vec<cadence_api::admin::DynamicConfigValue>) -> Vec<a::DynamicConfigValue> {
     v.into_iter()
         .map(|c| a::DynamicConfigValue {
             value: c.value.map(data_blob_out),
@@ -117,8 +113,7 @@ impl a::admin_api_server::AdminApi for Admin {
         &self,
         _request: Request<a::DescribeClusterRequest>,
     ) -> Result<Response<a::DescribeClusterResponse>, Status> {
-        let hostname =
-            std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
         let v = crate::admin::describe_cluster_response(&hostname);
         Ok(Response::new(a::DescribeClusterResponse {
             supported_client_versions: v.supported_client_versions.map(|s| {
@@ -188,8 +183,9 @@ impl a::admin_api_server::AdminApi for Admin {
                 }
             }),
         };
-        let _: cadence_api::admin::RefreshWorkflowTasksResponse =
-            self.call("/api/v1/admin/workflows/refresh-tasks", &input).await?;
+        let _: cadence_api::admin::RefreshWorkflowTasksResponse = self
+            .call("/api/v1/admin/workflows/refresh-tasks", &input)
+            .await?;
         Ok(Response::new(a::RefreshWorkflowTasksResponse {}))
     }
 
@@ -207,9 +203,8 @@ impl a::admin_api_server::AdminApi for Admin {
                 }
             }),
         };
-        let v: cadence_api::admin::DeleteWorkflowResponse = self
-            .call("/api/v1/admin/workflows/delete", &input)
-            .await?;
+        let v: cadence_api::admin::DeleteWorkflowResponse =
+            self.call("/api/v1/admin/workflows/delete", &input).await?;
         Ok(Response::new(a::DeleteWorkflowResponse {
             history_deleted: v.history_deleted,
             executions_deleted: v.executions_deleted,
@@ -394,9 +389,8 @@ impl a::admin_api_server::AdminApi for Admin {
             )
             .await?;
         Ok(Response::new(a::GetGlobalIsolationGroupsResponse {
-            isolation_groups: v
-                .isolation_groups
-                .map(|c| cadence_proto::api::IsolationGroupConfiguration {
+            isolation_groups: v.isolation_groups.map(|c| {
+                cadence_proto::api::IsolationGroupConfiguration {
                     isolation_groups: c
                         .isolation_groups
                         .into_iter()
@@ -405,7 +399,8 @@ impl a::admin_api_server::AdminApi for Admin {
                             state: g.state.map_or(0, |s| s as i32 + 1),
                         })
                         .collect(),
-                }),
+                }
+            }),
         }))
     }
 
@@ -503,15 +498,16 @@ impl a::admin_api_server::AdminApi for Admin {
         if r.domain.is_empty() {
             return Err(Status::invalid_argument("Domain is not set."));
         }
-        let input = cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest {
-            domain: r.domain,
-        };
+        let input =
+            cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest { domain: r.domain };
         let v: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonResponse = self
             .call("/api/v1/admin/async-workflow-config/get", &input)
             .await?;
-        Ok(Response::new(a::GetDomainAsyncWorkflowConfiguratonResponse {
-            configuration: async_config_out(v.configuration),
-        }))
+        Ok(Response::new(
+            a::GetDomainAsyncWorkflowConfiguratonResponse {
+                configuration: async_config_out(v.configuration),
+            },
+        ))
     }
 
     async fn update_domain_async_workflow_configuraton(
@@ -529,7 +525,9 @@ impl a::admin_api_server::AdminApi for Admin {
         let _: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse = self
             .call("/api/v1/admin/async-workflow-config/update", &input)
             .await?;
-        Ok(Response::new(a::UpdateDomainAsyncWorkflowConfiguratonResponse {}))
+        Ok(Response::new(
+            a::UpdateDomainAsyncWorkflowConfiguratonResponse {},
+        ))
     }
 
     async fn update_task_list_partition_config(
@@ -565,15 +563,23 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn describe_history_host(
         &self,
-        _request: Request<a::DescribeHistoryHostRequest>,
+        request: Request<a::DescribeHistoryHostRequest>,
     ) -> Result<Response<a::DescribeHistoryHostResponse>, Status> {
-        // Single host owns every shard and execution, so all oneof selectors
-        // (host address, shard ID, workflow execution) resolve here.
+        use a::describe_history_host_request::DescribeBy;
+        let mut input = cadence_api::admin::DescribeHistoryHostRequest::default();
+        match request.into_inner().describe_by {
+            Some(DescribeBy::HostAddress(address)) => input.host_address = Some(address),
+            Some(DescribeBy::ShardId(id)) => input.shard_id_for_host = Some(id),
+            Some(DescribeBy::WorkflowExecution(execution)) => {
+                input.execution_for_host = Some(cadence_api::types::WorkflowExecution {
+                    workflow_id: execution.workflow_id,
+                    run_id: execution.run_id,
+                });
+            }
+            None => {}
+        }
         let v: cadence_api::admin::DescribeHistoryHostResponse = self
-            .call(
-                "/api/v1/admin/history-host/describe",
-                &serde_json::json!({}),
-            )
+            .call("/api/v1/admin/history-host/describe", &input)
             .await?;
         Ok(Response::new(a::DescribeHistoryHostResponse {
             number_of_shards: v.number_of_shards,
@@ -612,9 +618,8 @@ impl a::admin_api_server::AdminApi for Admin {
         let input = cadence_api::admin::CloseShardRequest {
             shard_id: r.shard_id,
         };
-        let _: cadence_api::admin::CloseShardResponse = self
-            .call("/api/v1/admin/shards/close", &input)
-            .await?;
+        let _: cadence_api::admin::CloseShardResponse =
+            self.call("/api/v1/admin/shards/close", &input).await?;
         Ok(Response::new(a::CloseShardResponse {}))
     }
 
@@ -628,14 +633,14 @@ impl a::admin_api_server::AdminApi for Admin {
             task_type: Some(r.task_type),
             task_id: r.task_id,
             visibility_timestamp: r.visibility_time.map(|t| {
-                t.seconds.saturating_mul(1_000_000_000)
+                t.seconds
+                    .saturating_mul(1_000_000_000)
                     .saturating_add(i64::from(t.nanos))
             }),
             cluster_name: r.cluster_name,
         };
-        let _: cadence_api::admin::RemoveTaskResponse = self
-            .call("/api/v1/admin/tasks/remove", &input)
-            .await?;
+        let _: cadence_api::admin::RemoveTaskResponse =
+            self.call("/api/v1/admin/tasks/remove", &input).await?;
         Ok(Response::new(a::RemoveTaskResponse {}))
     }
 
@@ -649,9 +654,8 @@ impl a::admin_api_server::AdminApi for Admin {
             cluster_name: r.cluster_name,
             task_type: Some(r.task_type),
         };
-        let _: cadence_api::admin::ResetQueueResponse = self
-            .call("/api/v1/admin/queues/reset", &input)
-            .await?;
+        let _: cadence_api::admin::ResetQueueResponse =
+            self.call("/api/v1/admin/queues/reset", &input).await?;
         Ok(Response::new(a::ResetQueueResponse {}))
     }
 
@@ -665,9 +669,8 @@ impl a::admin_api_server::AdminApi for Admin {
             cluster_name: r.cluster_name,
             task_type: Some(r.task_type),
         };
-        let v: cadence_api::admin::DescribeQueueResponse = self
-            .call("/api/v1/admin/queues/describe", &input)
-            .await?;
+        let v: cadence_api::admin::DescribeQueueResponse =
+            self.call("/api/v1/admin/queues/describe", &input).await?;
         Ok(Response::new(a::DescribeQueueResponse {
             processing_queue_states: v.processing_queue_states,
         }))
@@ -680,12 +683,12 @@ impl a::admin_api_server::AdminApi for Admin {
         let r = request.into_inner();
         let input = cadence_api::admin::GetWorkflowExecutionRawHistoryV2Request {
             domain: r.domain,
-            execution: r.workflow_execution.map(|e| {
-                cadence_api::types::WorkflowExecution {
+            execution: r
+                .workflow_execution
+                .map(|e| cadence_api::types::WorkflowExecution {
                     workflow_id: e.workflow_id,
                     run_id: e.run_id,
-                }
-            }),
+                }),
             start_event_id: r.start_event.as_ref().map(|e| e.event_id),
             start_event_version: r.start_event.as_ref().map(|e| e.version),
             end_event_id: r.end_event.as_ref().map(|e| e.event_id),
@@ -693,14 +696,14 @@ impl a::admin_api_server::AdminApi for Admin {
             maximum_page_size: r.page_size,
             next_page_token: r.next_page_token,
         };
-        if input.execution.as_ref().is_none_or(|e| e.workflow_id.is_empty()) {
-            return Err(Status::invalid_argument("Invalid WorkflowID."));
-        }
         if input
             .execution
             .as_ref()
-            .is_none_or(|e| e.run_id.is_empty())
+            .is_none_or(|e| e.workflow_id.is_empty())
         {
+            return Err(Status::invalid_argument("Invalid WorkflowID."));
+        }
+        if input.execution.as_ref().is_none_or(|e| e.run_id.is_empty()) {
             return Err(Status::invalid_argument("Invalid RunID."));
         }
         if input.maximum_page_size <= 0 {
@@ -736,17 +739,21 @@ impl a::admin_api_server::AdminApi for Admin {
         let r = request.into_inner();
         let input = cadence_api::admin::AdminDescribeWorkflowExecutionRequest {
             domain: r.domain,
-            execution: r.workflow_execution.map(|e| {
-                cadence_api::types::WorkflowExecution {
+            execution: r
+                .workflow_execution
+                .map(|e| cadence_api::types::WorkflowExecution {
                     workflow_id: e.workflow_id,
                     run_id: e.run_id,
-                }
-            }),
+                }),
         };
         if input.domain.is_empty() {
             return Err(Status::invalid_argument("Domain is not set."));
         }
-        if input.execution.as_ref().is_none_or(|e| e.workflow_id.is_empty()) {
+        if input
+            .execution
+            .as_ref()
+            .is_none_or(|e| e.workflow_id.is_empty())
+        {
             return Err(Status::invalid_argument("Execution is not set on request."));
         }
         let v: cadence_api::admin::AdminDescribeWorkflowExecutionResponse = self
@@ -767,17 +774,21 @@ impl a::admin_api_server::AdminApi for Admin {
         let r = request.into_inner();
         let input = cadence_api::admin::MaintainCorruptWorkflowRequest {
             domain: r.domain,
-            execution: r.workflow_execution.map(|e| {
-                cadence_api::types::WorkflowExecution {
+            execution: r
+                .workflow_execution
+                .map(|e| cadence_api::types::WorkflowExecution {
                     workflow_id: e.workflow_id,
                     run_id: e.run_id,
-                }
-            }),
+                }),
         };
         if input.domain.is_empty() {
             return Err(Status::invalid_argument("Domain is not set."));
         }
-        if input.execution.as_ref().is_none_or(|e| e.workflow_id.is_empty()) {
+        if input
+            .execution
+            .as_ref()
+            .is_none_or(|e| e.workflow_id.is_empty())
+        {
             return Err(Status::invalid_argument("Execution is missing"));
         }
         let v: cadence_api::admin::MaintainCorruptWorkflowResponse = self
@@ -800,9 +811,13 @@ impl a::admin_api_server::AdminApi for Admin {
         }
         let execution = r.workflow_execution.unwrap_or_default();
         if execution.workflow_id.is_empty() {
-            return Err(Status::invalid_argument("WorkflowID is not set on request."));
+            return Err(Status::invalid_argument(
+                "WorkflowID is not set on request.",
+            ));
         }
-        let events = r.events.ok_or_else(|| Status::invalid_argument("WorkflowID is not set on request."))?;
+        let events = r
+            .events
+            .ok_or_else(|| Status::invalid_argument("WorkflowID is not set on request."))?;
         let input = cadence_api::admin::ReapplyEventsRequest {
             domain: r.domain,
             workflow_execution: Some(cadence_api::types::WorkflowExecution {

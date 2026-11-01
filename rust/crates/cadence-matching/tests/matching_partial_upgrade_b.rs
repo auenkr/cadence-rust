@@ -15,7 +15,8 @@ use cadence_api::{
 };
 use cadence_common::poller::{HistoricalInfo, Info, Manager as PollerManager};
 use cadence_matching::{
-    grpc_matching::Matching, matching_history::MatchingHistoryClient, matching_registry::QueueRegistry,
+    grpc_matching::Matching, matching_history::MatchingHistoryClient,
+    matching_registry::QueueRegistry,
 };
 use cadence_persistence::{
     matching_blob::BlobEncoding,
@@ -24,7 +25,13 @@ use cadence_persistence::{
 use cadence_proto::{api as p, history as h, matching as m};
 use cadence_service_core::handlers::AppState;
 use m::matching_api_server::MatchingApi;
-use std::{collections::HashMap, num::NonZeroU32, sync::Arc, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
+use std::{
+    collections::HashMap,
+    num::NonZeroU32,
+    sync::atomic::{AtomicUsize, Ordering},
+    sync::Arc,
+    time::Duration,
+};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
@@ -34,12 +41,20 @@ const MINUTE: i64 = 60 * SECOND;
 const GROUP: &str = "the group";
 
 fn quota_config(value: i64, domain: Option<&str>) -> DynamicConfigValue {
-    let blob = |value: serde_json::Value| Some(DataBlob::new(EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+    let blob = |value: serde_json::Value| {
+        Some(DataBlob::new(
+            EncodingType::JSON,
+            serde_json::to_vec(&value).unwrap(),
+        ))
+    };
     DynamicConfigValue {
         value: blob(serde_json::json!(value)),
         filters: domain
             .into_iter()
-            .map(|name| DynamicConfigFilter { name: "domainName".into(), value: blob(serde_json::json!(name)) })
+            .map(|name| DynamicConfigFilter {
+                name: "domainName".into(),
+                value: blob(serde_json::json!(name)),
+            })
             .collect(),
     }
 }
@@ -49,7 +64,11 @@ fn domain_state(domain_id: Uuid) -> AppState {
     state
         .domains
         .create(
-            DomainInfo { name: "quota-domain".into(), uuid: domain_id.to_string(), ..Default::default() },
+            DomainInfo {
+                name: "quota-domain".into(),
+                uuid: domain_id.to_string(),
+                ..Default::default()
+            },
             Default::default(),
             Default::default(),
             false,
@@ -66,9 +85,17 @@ fn denied_state(domain_id: Uuid) -> AppState {
     {
         let mut config = state.admin.dynamic_config.lock().unwrap();
         config.update(false, "matching.rps", vec![quota_config(100, None)]);
-        config.update(false, "matching.domainrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(
+            false,
+            "matching.domainrps",
+            vec![quota_config(1, Some("quota-domain"))],
+        );
         config.update(false, "matching.workerrps", vec![quota_config(100, None)]);
-        config.update(false, "matching.domainworkerrps", vec![quota_config(1, Some("quota-domain"))]);
+        config.update(
+            false,
+            "matching.domainworkerrps",
+            vec![quota_config(1, Some("quota-domain"))],
+        );
     }
     state
 }
@@ -77,11 +104,18 @@ fn durable(state: AppState) -> (tempfile::TempDir, Arc<SqliteTaskStore>, Matchin
     durable_with_history(state, "http://127.0.0.1:1")
 }
 
-fn durable_with_history(state: AppState, history_url: &str) -> (tempfile::TempDir, Arc<SqliteTaskStore>, Matching) {
+fn durable_with_history(
+    state: AppState,
+    history_url: &str,
+) -> (tempfile::TempDir, Arc<SqliteTaskStore>, Matching) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(SqliteTaskStore::create(dir.path().join("queue.db"), BlobEncoding::ThriftRW).unwrap());
+    let store = Arc::new(
+        SqliteTaskStore::create(dir.path().join("queue.db"), BlobEncoding::ThriftRW).unwrap(),
+    );
     let history = MatchingHistoryClient::new(
-        tonic::transport::Endpoint::from_shared(history_url.to_string()).unwrap().connect_lazy(),
+        tonic::transport::Endpoint::from_shared(history_url.to_string())
+            .unwrap()
+            .connect_lazy(),
         Duration::from_secs(1),
         4 * 1024 * 1024,
     );
@@ -93,15 +127,25 @@ fn durable_with_history(state: AppState, history_url: &str) -> (tempfile::TempDi
 fn assert_host_busy(status: tonic::Status) {
     assert_eq!(status.code(), Code::ResourceExhausted);
     assert_eq!(status.message(), "Matching host rps exceeded");
-    assert!(!status.details().is_empty(), "Go-compatible ServiceBusyError detail is required");
+    assert!(
+        !status.details().is_empty(),
+        "Go-compatible ServiceBusyError detail is required"
+    );
 }
 
 fn queue_key(domain_id: Uuid, task_type: i32) -> TaskListKey {
-    TaskListKey { domain_id, name: "queue".into(), task_type }
+    TaskListKey {
+        domain_id,
+        name: "queue".into(),
+        task_type,
+    }
 }
 
 fn task_list() -> Option<p::TaskList> {
-    Some(p::TaskList { name: "queue".into(), ..Default::default() })
+    Some(p::TaskList {
+        name: "queue".into(),
+        ..Default::default()
+    })
 }
 
 fn execution() -> Option<p::WorkflowExecution> {
@@ -119,7 +163,10 @@ fn activity_add(domain_id: Uuid) -> Request<m::AddActivityTaskRequest> {
         workflow_execution: execution(),
         schedule_id: 10,
         // Without a schedule-to-start timeout the task expires at creation and polls skip it.
-        schedule_to_start_timeout: Some(prost_types::Duration { seconds: 3, nanos: 0 }),
+        schedule_to_start_timeout: Some(prost_types::Duration {
+            seconds: 3,
+            nanos: 0,
+        }),
         ..Default::default()
     })
 }
@@ -130,7 +177,10 @@ fn decision_add(domain_id: Uuid) -> Request<m::AddDecisionTaskRequest> {
         workflow_execution: execution(),
         task_list: task_list(),
         schedule_id: 42,
-        schedule_to_start_timeout: Some(prost_types::Duration { seconds: 3, nanos: 0 }),
+        schedule_to_start_timeout: Some(prost_types::Duration {
+            seconds: 3,
+            nanos: 0,
+        }),
         ..Default::default()
     })
 }
@@ -138,7 +188,10 @@ fn decision_add(domain_id: Uuid) -> Request<m::AddDecisionTaskRequest> {
 fn activity_poll(domain_id: Uuid, timeout: Duration) -> Request<m::PollForActivityTaskRequest> {
     let mut request = Request::new(m::PollForActivityTaskRequest {
         domain_id: domain_id.to_string(),
-        request: Some(p::PollForActivityTaskRequest { task_list: task_list(), ..Default::default() }),
+        request: Some(p::PollForActivityTaskRequest {
+            task_list: task_list(),
+            ..Default::default()
+        }),
         ..Default::default()
     });
     request.set_timeout(timeout);
@@ -148,7 +201,10 @@ fn activity_poll(domain_id: Uuid, timeout: Duration) -> Request<m::PollForActivi
 fn decision_poll(domain_id: Uuid, timeout: Duration) -> Request<m::PollForDecisionTaskRequest> {
     let mut request = Request::new(m::PollForDecisionTaskRequest {
         domain_id: domain_id.to_string(),
-        request: Some(p::PollForDecisionTaskRequest { task_list: task_list(), ..Default::default() }),
+        request: Some(p::PollForDecisionTaskRequest {
+            task_list: task_list(),
+            ..Default::default()
+        }),
         ..Default::default()
     });
     request.set_timeout(timeout);
@@ -162,9 +218,23 @@ fn decision_poll(domain_id: Uuid, timeout: Duration) -> Request<m::PollForDecisi
 async fn go_handler_add_activity_task_rate_limited_returns_service_busy() {
     let domain_id = Uuid::from_u128(9201);
     let (_dir, store, matching) = durable(denied_state(domain_id));
-    matching.add_activity_task(activity_add(domain_id)).await.unwrap();
-    assert_host_busy(matching.add_activity_task(activity_add(domain_id)).await.unwrap_err());
-    assert_eq!(store.get_tasks(&queue_key(domain_id, 1), 0, i64::MAX, 10).unwrap().len(), 1);
+    matching
+        .add_activity_task(activity_add(domain_id))
+        .await
+        .unwrap();
+    assert_host_busy(
+        matching
+            .add_activity_task(activity_add(domain_id))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(
+        store
+            .get_tasks(&queue_key(domain_id, 1), 0, i64::MAX, 10)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 // Go TestAddDecisionTask, "Error case - rate limiter not allowed".
@@ -172,9 +242,23 @@ async fn go_handler_add_activity_task_rate_limited_returns_service_busy() {
 async fn go_handler_add_decision_task_rate_limited_returns_service_busy() {
     let domain_id = Uuid::from_u128(9202);
     let (_dir, store, matching) = durable(denied_state(domain_id));
-    matching.add_decision_task(decision_add(domain_id)).await.unwrap();
-    assert_host_busy(matching.add_decision_task(decision_add(domain_id)).await.unwrap_err());
-    assert_eq!(store.get_tasks(&queue_key(domain_id, 0), 0, i64::MAX, 10).unwrap().len(), 1);
+    matching
+        .add_decision_task(decision_add(domain_id))
+        .await
+        .unwrap();
+    assert_host_busy(
+        matching
+            .add_decision_task(decision_add(domain_id))
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(
+        store
+            .get_tasks(&queue_key(domain_id, 0), 0, i64::MAX, 10)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 // Go TestPollForActivityTask, "Error case - rate limiter not allowed". The first poll consumes the
@@ -183,7 +267,9 @@ async fn go_handler_add_decision_task_rate_limited_returns_service_busy() {
 async fn go_handler_poll_for_activity_task_rate_limited_returns_service_busy() {
     let domain_id = Uuid::from_u128(9203);
     let (_dir, _store, matching) = durable(denied_state(domain_id));
-    let _ = matching.poll_for_activity_task(activity_poll(domain_id, Duration::from_millis(50))).await;
+    let _ = matching
+        .poll_for_activity_task(activity_poll(domain_id, Duration::from_millis(50)))
+        .await;
     assert_host_busy(
         matching
             .poll_for_activity_task(activity_poll(domain_id, Duration::from_millis(50)))
@@ -197,7 +283,9 @@ async fn go_handler_poll_for_activity_task_rate_limited_returns_service_busy() {
 async fn go_handler_poll_for_decision_task_rate_limited_returns_service_busy() {
     let domain_id = Uuid::from_u128(9204);
     let (_dir, _store, matching) = durable(denied_state(domain_id));
-    let _ = matching.poll_for_decision_task(decision_poll(domain_id, Duration::from_millis(50))).await;
+    let _ = matching
+        .poll_for_decision_task(decision_poll(domain_id, Duration::from_millis(50)))
+        .await;
     assert_host_busy(
         matching
             .poll_for_decision_task(decision_poll(domain_id, Duration::from_millis(50)))
@@ -242,9 +330,14 @@ impl h::history_api_server::HistoryApi for StartedHistory {
         let r = request.into_inner();
         Ok(Response::new(h::RecordActivityTaskStartedResponse {
             scheduled_event: Some(p::HistoryEvent {
-                attributes: Some(p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
-                    p::ActivityTaskScheduledEventAttributes { activity_id: r.schedule_id.to_string(), ..Default::default() },
-                )),
+                attributes: Some(
+                    p::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+                        p::ActivityTaskScheduledEventAttributes {
+                            activity_id: r.schedule_id.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             }),
             ..Default::default()
@@ -275,15 +368,31 @@ async fn go_handler_poll_for_activity_task_returns_added_task_token() {
     let starts = history.starts.clone();
     let url = start_history(history).await;
     let (_dir, store, matching) = durable_with_history(domain_state(domain_id), &url);
-    matching.add_activity_task(activity_add(domain_id)).await.unwrap();
-    assert_eq!(store.get_tasks(&queue_key(domain_id, 1), 0, i64::MAX, 10).unwrap().len(), 1);
+    matching
+        .add_activity_task(activity_add(domain_id))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_tasks(&queue_key(domain_id, 1), 0, i64::MAX, 10)
+            .unwrap()
+            .len(),
+        1
+    );
     let response = matching
         .poll_for_activity_task(activity_poll(domain_id, Duration::from_secs(2)))
         .await
         .unwrap()
         .into_inner();
-    assert_eq!(starts.load(Ordering::SeqCst), 1, "delivery must start the claimed task on History exactly once");
-    assert!(!response.task_token.is_empty(), "the added activity task must be delivered");
+    assert_eq!(
+        starts.load(Ordering::SeqCst),
+        1,
+        "delivery must start the claimed task on History exactly once"
+    );
+    assert!(
+        !response.task_token.is_empty(),
+        "the added activity task must be delivered"
+    );
 }
 
 // Poller manager: a Go-style "Require identity" start records no history. Go's history callback
@@ -291,7 +400,15 @@ async fn go_handler_poll_for_activity_task_returns_added_task_token() {
 #[test]
 fn poller_start_without_identity_records_no_history() {
     let mut manager = PollerManager::default();
-    manager.start("b", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.start(
+        "b",
+        Info {
+            identity: String::new(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     assert_eq!(manager.count(), 0);
     assert!(manager.list(START).is_empty());
 }
@@ -305,12 +422,28 @@ fn poller_history_callback_fires_on_start_and_end_with_identity() {
     manager.set_history_callback(Arc::new(move || {
         seen.fetch_add(1, Ordering::SeqCst);
     }));
-    manager.start("a", Info { identity: "a".into(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.start(
+        "a",
+        Info {
+            identity: "a".into(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     manager.end("a", START);
     assert_eq!(counter.load(Ordering::SeqCst), 2);
     // No identity: neither start nor end touches history.
-    manager.start("b", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.start(
+        "b",
+        Info {
+            identity: String::new(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     manager.end("b", START);
     assert_eq!(counter.load(Ordering::SeqCst), 2);
 }
@@ -322,16 +455,38 @@ fn poller_cancel_invokes_registered_callback_per_poll() {
     let mut manager = PollerManager::default();
     let cancelled = Arc::new(AtomicUsize::new(0));
     let other = Arc::new(AtomicUsize::new(0));
-    manager.start("a", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.start(
+        "a",
+        Info {
+            identity: String::new(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     let counter = cancelled.clone();
-    manager.set_cancel("a", Arc::new(move || {
-        counter.fetch_add(1, Ordering::SeqCst);
-    }));
-    manager.start("b", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.set_cancel(
+        "a",
+        Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    manager.start(
+        "b",
+        Info {
+            identity: String::new(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     let counter = other.clone();
-    manager.set_cancel("b", Arc::new(move || {
-        counter.fetch_add(1, Ordering::SeqCst);
-    }));
+    manager.set_cancel(
+        "b",
+        Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
 
     // happy path: one cancel runs the callback once.
     manager.cancel("a");
@@ -350,7 +505,15 @@ fn poller_cancel_invokes_registered_callback_per_poll() {
 #[test]
 fn poller_cancel_reports_whether_the_poll_is_known() {
     let mut manager = PollerManager::default();
-    manager.start("a", Info { identity: String::new(), rate_per_second: 0.0, isolation_group: String::new() }, START);
+    manager.start(
+        "a",
+        Info {
+            identity: String::new(),
+            rate_per_second: 0.0,
+            isolation_group: String::new(),
+        },
+        START,
+    );
     manager.set_cancel("a", Arc::new(|| {}));
     assert!(manager.cancel("a"));
     assert!(manager.cancel("a"));
@@ -360,7 +523,11 @@ fn poller_cancel_reports_whether_the_poll_is_known() {
 type Setup = fn(&mut PollerManager);
 
 fn info(identity: &str, group: &str) -> Info {
-    Info { identity: identity.into(), rate_per_second: 0.0, isolation_group: group.into() }
+    Info {
+        identity: identity.into(),
+        rate_per_second: 0.0,
+        isolation_group: group.into(),
+    }
 }
 
 // Go TestManager_HasPollerFromIsolationGroupAfter (manager_test.go:103), all six cases with the
@@ -368,24 +535,49 @@ fn info(identity: &str, group: &str) -> Info {
 #[test]
 fn poller_has_group_after_matches_go_cases() {
     let cases: Vec<(&str, Setup, i64, bool)> = vec![
-        ("outstanding poller", |m: &mut PollerManager| m.start("a", info("", GROUP), START), START, true),
-        ("recent poller", |m: &mut PollerManager| {
-            m.start("a", info("", GROUP), START);
-            m.end("a", START + SECOND);
-        }, START, true),
-        ("boundary condition poller", |m: &mut PollerManager| {
-            m.start("a", info("", GROUP), START);
-            m.end("a", START + 1);
-        }, START + 1, false),
-        ("expired poller", |m: &mut PollerManager| {
-            m.start("a", info("", GROUP), START);
-            m.end("a", START);
-        }, START + MINUTE, false),
+        (
+            "outstanding poller",
+            |m: &mut PollerManager| m.start("a", info("", GROUP), START),
+            START,
+            true,
+        ),
+        (
+            "recent poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", GROUP), START);
+                m.end("a", START + SECOND);
+            },
+            START,
+            true,
+        ),
+        (
+            "boundary condition poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", GROUP), START);
+                m.end("a", START + 1);
+            },
+            START + 1,
+            false,
+        ),
+        (
+            "expired poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", GROUP), START);
+                m.end("a", START);
+            },
+            START + MINUTE,
+            false,
+        ),
         ("never polled", |_m: &mut PollerManager| {}, START, false),
-        ("unrelated poller", |m: &mut PollerManager| {
-            m.start("a", info("", "other"), START);
-            m.end("a", START + SECOND);
-        }, START, false),
+        (
+            "unrelated poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", "other"), START);
+                m.end("a", START + SECOND);
+            },
+            START,
+            false,
+        ),
     ];
     for (name, setup, after, expected) in cases {
         let mut manager = PollerManager::default();
@@ -399,19 +591,39 @@ fn poller_has_group_after_matches_go_cases() {
 #[test]
 fn poller_has_after_matches_go_cases() {
     let cases: Vec<(&str, Setup, i64, bool)> = vec![
-        ("outstanding poller", |m: &mut PollerManager| m.start("a", info("", ""), START), START, true),
-        ("recent poller", |m: &mut PollerManager| {
-            m.start("a", info("", ""), START);
-            m.end("a", START + SECOND);
-        }, START, true),
-        ("boundary condition poller", |m: &mut PollerManager| {
-            m.start("a", info("", ""), START);
-            m.end("a", START + 1);
-        }, START + 1, false),
-        ("expired poller", |m: &mut PollerManager| {
-            m.start("a", info("", ""), START);
-            m.end("a", START);
-        }, START + MINUTE, false),
+        (
+            "outstanding poller",
+            |m: &mut PollerManager| m.start("a", info("", ""), START),
+            START,
+            true,
+        ),
+        (
+            "recent poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", ""), START);
+                m.end("a", START + SECOND);
+            },
+            START,
+            true,
+        ),
+        (
+            "boundary condition poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", ""), START);
+                m.end("a", START + 1);
+            },
+            START + 1,
+            false,
+        ),
+        (
+            "expired poller",
+            |m: &mut PollerManager| {
+                m.start("a", info("", ""), START);
+                m.end("a", START);
+            },
+            START + MINUTE,
+            false,
+        ),
         ("never polled", |_m: &mut PollerManager| {}, START, false),
     ];
     for (name, setup, after, expected) in cases {
@@ -437,7 +649,11 @@ fn poller_count_keeps_expired_entries_like_go_size() {
 }
 
 fn listed(identity: &str, rate_per_second: f64, last_access_time: i64) -> HistoricalInfo {
-    HistoricalInfo { identity: identity.into(), rate_per_second, last_access_time }
+    HistoricalInfo {
+        identity: identity.into(),
+        rate_per_second,
+        last_access_time,
+    }
 }
 
 // Go TestManager_ListInfo (manager_test.go:257), all three cases. Results are newest first, poll
@@ -450,7 +666,15 @@ fn poller_list_info_matches_go_cases() {
     manager.end("a", START);
     manager.start("b", info("bIdent", ""), START);
     manager.end("b", START + MINUTE);
-    manager.start("c", Info { identity: "cIdent".into(), rate_per_second: 1.0, isolation_group: String::new() }, START + 2 * MINUTE);
+    manager.start(
+        "c",
+        Info {
+            identity: "cIdent".into(),
+            rate_per_second: 1.0,
+            isolation_group: String::new(),
+        },
+        START + 2 * MINUTE,
+    );
     manager.end("c", START + 2 * MINUTE);
     manager.start("d", info("dIdent", ""), START + 2 * MINUTE);
     assert_eq!(
@@ -479,7 +703,11 @@ fn poller_list_info_matches_go_cases() {
 #[test]
 fn poller_count_by_group_matches_go_cases() {
     fn grouped(identity: &str, group: &str, rate_per_second: f64) -> Info {
-        Info { identity: identity.into(), rate_per_second, isolation_group: group.into() }
+        Info {
+            identity: identity.into(),
+            rate_per_second,
+            isolation_group: group.into(),
+        }
     }
     let happy = |manager: &mut PollerManager| {
         manager.start("a", grouped("aIdent", "groupA", 0.0), START);
@@ -516,5 +744,8 @@ fn poller_count_by_group_matches_go_cases() {
     // include pollers with no pollerID
     let mut manager = PollerManager::default();
     manager.start("", grouped("aIdent", "groupA", 0.0), START);
-    assert_eq!(manager.count_by_group(START, START - 1), HashMap::from([("groupA".to_string(), 1)]));
+    assert_eq!(
+        manager.count_by_group(START, START - 1),
+        HashMap::from([("groupA".to_string(), 1)])
+    );
 }

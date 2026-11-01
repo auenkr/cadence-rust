@@ -14,13 +14,14 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use cadence_api::enums::DomainStatus;
 use cadence_api::errors::{
-    BadRequestError, DomainAlreadyExistsError, EntityNotExistsError,
-    WorkflowExecutionAlreadyCompletedError, WorkflowExecutionAlreadyStartedError,
+    BadRequestError, EntityNotExistsError, WorkflowExecutionAlreadyCompletedError,
+    WorkflowExecutionAlreadyStartedError,
 };
 use cadence_api::service_types::{
     DeleteDomainRequest, DeprecateDomainRequest, DescribeDomainRequest,
@@ -34,6 +35,16 @@ use cadence_persistence::{
     InMemoryDomainStore, InMemoryExecutionStore, TaskError, WorkflowMutationError,
 };
 use serde::Deserialize;
+use std::future::Future;
+use std::pin::Pin;
+
+/// A Frontend owned global quota collection. Go calls `OnStop` on each of its
+/// seven collections before opening the request drain window.
+pub trait FrontendLimiterCollection: Send + Sync + std::fmt::Debug {
+    fn name(&self) -> &'static str;
+    fn on_start(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
+    fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>>;
+}
 
 /// Recently seen pollers: (task-list, identity, kind) -> poll record.
 /// Mirrors the poller list Go's matching service reports.
@@ -73,8 +84,43 @@ pub struct AppState {
     pub semaphore_enabled: bool,
     pub current_cluster_name: String,
     pub cluster_metadata: cadence_common::cluster::Metadata,
+    /// Outbound History API channel used by Frontend Admin operations. The
+    /// configured Go History service remains the source of queue state.
+    pub history_admin_channel: Option<tonic::transport::Channel>,
     pub grpc_max_message_size: usize,
+    /// Frontend readiness and admission state are split so shutdown can first
+    /// fail health checks, wait for discovery, and only then reject new RPCs.
+    pub frontend_ready: Arc<std::sync::atomic::AtomicBool>,
+    /// Prevents the Go-compatible warmup timer from marking a stopping
+    /// Frontend healthy while shutdown is waiting for discovery/drain.
+    pub frontend_shutting_down: Arc<std::sync::atomic::AtomicBool>,
+    /// Go `Service.Stop` uses an atomic status transition so only one caller
+    /// runs the ordered drain and resource teardown sequence.
+    pub frontend_shutdown_started: Arc<std::sync::atomic::AtomicBool>,
+    pub frontend_accepting: Arc<std::sync::atomic::AtomicBool>,
+    /// Stop signal for AdminHandler-owned background workers (for example,
+    /// the Go domain DLQ and failover watchers). This is separate from the
+    /// API admission gate stopped by WorkflowHandler.Stop.
+    pub frontend_admin_shutdown: tokio::sync::watch::Sender<bool>,
+    /// Global limiter collections are service owned and stop between handler
+    /// admission shutdown and the final request drain, as in Go Service.Stop.
+    pub frontend_limiters: Arc<std::sync::Mutex<Vec<Arc<dyn FrontendLimiterCollection>>>>,
+    /// Go Frontend's `stopC`, used by service-owned timer and snapshot workers.
+    /// The launcher signals this only after request draining has completed.
+    pub background_shutdown: tokio::sync::watch::Sender<bool>,
     pub domains: InMemoryDomainStore,
+    /// Frontend's persistence-facing domain API. Matching retains the shared
+    /// in-memory cache above; production Frontend injects a manager backed by
+    /// the configured Go defaultStore and sharing that cache.
+    pub domain_manager: Arc<dyn cadence_persistence::FrontendDomainManager>,
+    /// Configured SQL writer shared with the metadata reader. The durable
+    /// manager uses this for domain mutations.
+    pub domain_metadata_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
+    /// History-node reader for Frontend history reads (SQL stores).
+    pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
+    /// `executions_visibility` reader for Frontend list operations (SQL stores).
+    pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
@@ -84,12 +130,15 @@ pub struct AppState {
     pub pollers: Arc<std::sync::Mutex<PollerMap>>,
     /// Shard-distributor namespaces and ownership. Memory-only like Go's
     /// cached coordination state; namespaces appear on first heartbeat.
-    pub shard_distributor:
-        Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
+    pub shard_distributor: Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
+    /// Production WorkflowService installed by the Frontend; when set, the
+    /// Thrift and gRPC transports route workflow operations through it.
+    pub workflow_api: Option<crate::workflow_api::SharedWorkflowApi>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
+        let domains = InMemoryDomainStore::new();
         Self {
             matching_http_isolated: false,
             admin: crate::admin::AdminState::default(),
@@ -98,8 +147,20 @@ impl Default for AppState {
             semaphore_enabled: false,
             current_cluster_name: "cluster0".to_string(),
             cluster_metadata: cadence_common::cluster::Metadata::default(),
+            history_admin_channel: None,
             grpc_max_message_size: 4 * 1024 * 1024,
-            domains: InMemoryDomainStore::new(),
+            frontend_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_shutting_down: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            frontend_shutdown_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            frontend_accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            frontend_admin_shutdown: tokio::sync::watch::channel(false).0,
+            frontend_limiters: Arc::new(std::sync::Mutex::new(Vec::new())),
+            background_shutdown: tokio::sync::watch::channel(false).0,
+            domains: domains.clone(),
+            domain_manager: Arc::new(domains),
+            domain_metadata_persistence: None,
+            history_node_store: None,
+            visibility_store: None,
             executions: InMemoryExecutionStore::new(),
             semaphore_persistence: None,
             limits: Limits::cadence_default(),
@@ -107,19 +168,118 @@ impl Default for AppState {
             shard_distributor: Arc::new(std::sync::Mutex::new(
                 crate::grpc_shard::ShardDistributorState::default(),
             )),
+            workflow_api: None,
         }
     }
 }
 
 impl AppState {
+    /// Begin Go Frontend's idempotent `Service.Stop` transition.
+    pub fn begin_frontend_shutdown(&self) -> bool {
+        self.frontend_shutdown_started
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    /// Stop accepting API requests, matching Go's WorkflowHandler.Stop.
+    pub fn stop_frontend_handler(&self) {
+        self.frontend_accepting
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Stop AdminHandler-owned background workers before request draining.
+    /// Admin modules subscribe when they own a long-lived task.
+    pub fn stop_frontend_admin_handler(&self) {
+        self.frontend_admin_shutdown.send_replace(true);
+    }
+
+    /// Register a collection when the Frontend dependency graph constructs it.
+    pub fn register_frontend_limiter(&self, limiter: Arc<dyn FrontendLimiterCollection>) {
+        self.frontend_limiters
+            .lock()
+            .expect("frontend limiter registry lock")
+            .push(limiter);
+    }
+
+    /// Start every service-owned global quota collection with the shared
+    /// one-second deadline used by Go Frontend `Service.Start`.
+    pub async fn start_frontend_limiters(&self) -> anyhow::Result<()> {
+        use anyhow::Context;
+
+        let limiters = self
+            .frontend_limiters
+            .lock()
+            .expect("frontend limiter registry lock")
+            .clone();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        for limiter in limiters {
+            match tokio::time::timeout_at(deadline, limiter.on_start()).await {
+                Ok(result) => result.with_context(|| {
+                    format!(
+                        "starting Frontend global rate limiter collection {}",
+                        limiter.name()
+                    )
+                })?,
+                Err(_) => anyhow::bail!(
+                    "timed out starting Frontend global rate limiter collection {}",
+                    limiter.name()
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    /// Stop all constructed global limiter collections with Go's shared
+    /// one-second deadline. Failures are logged independently so one broken
+    /// collection cannot prevent the remaining owners from stopping.
+    pub async fn stop_frontend_limiters(&self) {
+        let limiters = std::mem::take(
+            &mut *self
+                .frontend_limiters
+                .lock()
+                .expect("frontend limiter registry lock"),
+        );
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+        for limiter in limiters {
+            match tokio::time::timeout_at(deadline, limiter.on_stop()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!(
+                    "failed to stop Frontend global rate limiter collection {}: {error}",
+                    limiter.name()
+                ),
+                Err(_) => eprintln!(
+                    "timed out stopping Frontend global rate limiter collection {}",
+                    limiter.name()
+                ),
+            }
+        }
+    }
+
+    /// Stop service-owned background loops, matching Go Frontend's `close(s.stopC)`.
+    pub fn stop_background_workers(&self) {
+        self.background_shutdown.send_replace(true);
+    }
+
     pub fn semaphore_store_for_domain(
         &self,
         domain: &str,
-    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError> {
-        let metadata = self.domains.describe(&cadence_api::service_types::DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
-        })?;
-        let domain_id = metadata.domain_info.map(|info| info.uuid).unwrap_or_default();
+    ) -> Result<(Arc<dyn cadence_persistence::SemaphorePersistence>, String), EntityNotExistsError>
+    {
+        let metadata =
+            self.domain_manager
+                .describe(&cadence_api::service_types::DescribeDomainRequest {
+                    name: Some(domain.to_string()),
+                    uuid: None,
+                })?;
+        let domain_id = metadata
+            .domain_info
+            .map(|info| info.uuid)
+            .unwrap_or_default();
         if let Some(store) = &self.semaphore_persistence {
             // Preserve the frontend metadata lookup before calling persistence.
             self.execution_store(domain)?;
@@ -133,23 +293,54 @@ impl AppState {
         let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
         let defaults = DomainPolicy::default();
         DomainPolicy {
-            cooldown_nanos: dynamic_config::duration(overlay.property_values("frontend.failoverCoolDown"), Some(domain), defaults.cooldown_nanos),
-            min_retention_days: dynamic_config::integer(overlay.property_values("system.minRetentionDays"), None, i64::from(defaults.min_retention_days)) as i32,
-            max_bad_binaries: dynamic_config::integer(overlay.property_values("frontend.maxBadBinaries"), Some(domain), defaults.max_bad_binaries),
-            history_limit: dynamic_config::integer(overlay.property_values("frontend.failoverHistoryMaxSize"), Some(domain), defaults.history_limit),
+            cooldown_nanos: dynamic_config::duration(
+                overlay.property_values("frontend.failoverCoolDown"),
+                Some(domain),
+                defaults.cooldown_nanos,
+            ),
+            min_retention_days: dynamic_config::integer(
+                overlay.property_values("system.minRetentionDays"),
+                None,
+                i64::from(defaults.min_retention_days),
+            ) as i32,
+            max_bad_binaries: dynamic_config::integer(
+                overlay.property_values("frontend.maxBadBinaries"),
+                Some(domain),
+                defaults.max_bad_binaries,
+            ),
+            history_limit: dynamic_config::integer(
+                overlay.property_values("frontend.failoverHistoryMaxSize"),
+                Some(domain),
+                defaults.history_limit,
+            ),
         }
+    }
+
+    /// Read the scheduler gate through the same per-domain dynamic-config
+    /// overlay used by Frontend property readers and Admin updates.
+    pub fn scheduler_enabled_for_domain(&self, domain: &str) -> bool {
+        let overlay = self.admin.dynamic_config.lock().expect("admin config lock");
+        cadence_persistence::dynamic_config::boolean(
+            overlay.property_values("worker.enableScheduler"),
+            Some(domain),
+            self.scheduler_enabled,
+        )
     }
 
     pub fn execution_store(
         &self,
         domain: &str,
     ) -> Result<InMemoryExecutionStore, EntityNotExistsError> {
-        let metadata = self.domains.describe(&DescribeDomainRequest {
-            name: Some(domain.to_string()), uuid: None,
+        let metadata = self.domain_manager.describe(&DescribeDomainRequest {
+            name: Some(domain.to_string()),
+            uuid: None,
         })?;
         let id = metadata.domain_info.unwrap_or_default().uuid;
-        let version = if metadata.is_global_domain { metadata.failover_version }
-            else { cadence_persistence::version_history::EMPTY_VERSION };
+        let version = if metadata.is_global_domain {
+            metadata.failover_version
+        } else {
+            cadence_persistence::version_history::EMPTY_VERSION
+        };
         self.executions.set_domain_version(&id, version);
         Ok(self.executions.with_domain_id(&id))
     }
@@ -174,17 +365,27 @@ pub fn domain_replication(
         req.clusters.clone()
     };
     let active_clusters = cadence_persistence::domain_replication::registration_attributes(
-        &state.cluster_metadata, req.is_global_domain, req.active_clusters.as_ref())?;
+        &state.cluster_metadata,
+        req.is_global_domain,
+        req.active_clusters.as_ref(),
+    )?;
     let replication = cadence_api::types::DomainReplicationConfiguration {
-        active_cluster_name, clusters, active_clusters,
+        active_cluster_name,
+        clusters,
+        active_clusters,
     };
     if req.is_global_domain {
-        cadence_persistence::domain_replication::validate_global(&state.cluster_metadata, &replication)?;
+        cadence_persistence::domain_replication::validate_global(
+            &state.cluster_metadata,
+            &replication,
+        )?;
     } else {
         if replication.active_cluster_name != state.current_cluster_name {
             return Err(BadRequestError::new("Invalid local domain active cluster"));
         }
-        if replication.clusters.len() != 1 || replication.clusters[0].cluster_name != replication.active_cluster_name {
+        if replication.clusters.len() != 1
+            || replication.clusters[0].cluster_name != replication.active_cluster_name
+        {
             return Err(BadRequestError::new("Invalid local domain clusters"));
         }
     }
@@ -209,7 +410,11 @@ pub fn poller_rate(
     worker_rate: Option<f64>,
 ) -> f64 {
     let override_rate = {
-        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        let overlay = state
+            .admin
+            .dynamic_config
+            .lock()
+            .expect("admin config lock");
         cadence_persistence::dynamic_config::task_list_float(
             overlay.property_values("matching.overrideTaskListRps"),
             Some(domain),
@@ -223,7 +428,8 @@ pub fn poller_rate(
     } else {
         worker_rate
     };
-    rate.filter(|rate| *rate >= 0.0).unwrap_or(TASK_DISPATCH_RPS)
+    rate.filter(|rate| *rate >= 0.0)
+        .unwrap_or(TASK_DISPATCH_RPS)
 }
 
 /// Go `StartPoll`: records the identity's poll as outstanding. Dropping the
@@ -327,6 +533,37 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({"ok": true}))
 }
 
+async fn frontend_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let ok = state
+        .frontend_ready
+        .load(std::sync::atomic::Ordering::Acquire);
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(serde_json::json!({"ok": ok})))
+}
+
+async fn reject_frontend_during_shutdown(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if request.uri().path() != "/health"
+        && !state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return error_response(
+            "InternalServiceError",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Frontend is shutting down.".to_string(),
+        );
+    }
+    next.run(request).await
+}
+
 // ---------------------------------------------------------------------------
 // Domains
 // ---------------------------------------------------------------------------
@@ -336,14 +573,25 @@ async fn register_domain(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterDomainRequest>,
 ) -> Response {
+    // Go checks primary-cluster ownership before inspecting the requested
+    // name, so preserve that error precedence for global-domain registration.
+    if req.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return bad_request(BadRequestError::new(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.",
+        ));
+    }
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
     if req.name.len() > state.limits.ids.domain_max {
         return bad_request(BadRequestError::new("Domain length exceeds limit."));
     }
-    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
-        return bad_request(BadRequestError::new("A valid retention period is not set on request."));
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
+        return bad_request(BadRequestError::new(
+            "A valid retention period is not set on request.",
+        ));
     }
     let info = cadence_api::types::DomainInfo {
         name: req.name.clone(),
@@ -351,7 +599,7 @@ async fn register_domain(
         description: req.description.clone(),
         owner_email: req.owner_email.clone(),
         data: req.data.clone(),
-        uuid: uuid::Uuid::new_v4().to_string(),
+        uuid: uuid::Uuid::now_v7().to_string(),
     };
     let configuration = cadence_api::types::DomainConfiguration {
         workflow_execution_retention_period_in_days: req
@@ -368,28 +616,48 @@ async fn register_domain(
         Err(e) => return bad_request(e),
     };
     let failover_version = if req.is_global_domain {
-        match state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false) {
+        match state.cluster_metadata.next_failover_version(
+            &replication.active_cluster_name,
+            0,
+            false,
+        ) {
             Ok(version) => version,
             Err(e) => return bad_request(BadRequestError::new(e)),
         }
-    } else { cadence_persistence::version_history::EMPTY_VERSION };
-    match state
-        .domains
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    } else {
+        cadence_persistence::version_history::EMPTY_VERSION
+    };
+    match state.domain_manager.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(resp) => {
             state.executions.register_domain(
                 &req.name,
                 &state
-                    .domains
+                    .domain_manager
                     .domain_id(&req.name)
                     .expect("registered domain"),
             );
             (StatusCode::OK, Json(resp)).into_response()
         }
-        Err(DomainAlreadyExistsError { message }) => {
+        Err(cadence_persistence::FrontendDomainError::AlreadyExists(error)) => {
+            let message = error.message;
             error_response("DomainAlreadyExistsError", StatusCode::CONFLICT, message)
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -406,7 +674,7 @@ async fn describe_domain(
     if q.name.is_none() && q.uuid.is_none() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.describe(&DescribeDomainRequest {
+    match state.domain_manager.describe(&DescribeDomainRequest {
         name: q.name,
         uuid: q.uuid,
     }) {
@@ -419,7 +687,7 @@ async fn list_domains(
     State(state): State<Arc<AppState>>,
     Query(request): Query<cadence_api::service_types::ListDomainsRequest>,
 ) -> Response {
-    match state.domains.list_page(&request) {
+    match state.domain_manager.list_page(&request) {
         Ok(v) => Json(v).into_response(),
         Err(e) => bad_request(e),
     }
@@ -447,12 +715,15 @@ async fn create_semaphore(
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
-    match semaphores.create_semaphore(
-        &domain_id,
-        &req.semaphore_name,
-        req.capacity,
-        req.bucket_capacity,
-    ).await {
+    match semaphores
+        .create_semaphore(
+            &domain_id,
+            &req.semaphore_name,
+            req.capacity,
+            req.bucket_capacity,
+        )
+        .await
+    {
         Ok(meta) => (
             StatusCode::OK,
             Json(cadence_api::types::CreateSemaphoreResponse {
@@ -482,11 +753,13 @@ async fn create_semaphore(
         ),
         Err(cadence_persistence::SemaphoreError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::SemaphoreError::Internal(message)) => error_response(
-            "InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message,
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
         ),
-        Err(cadence_persistence::SemaphoreError::Throttled(message)) => error_response(
-            "ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message,
-        ),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
     }
 }
 
@@ -499,16 +772,30 @@ async fn failover_domain(
     if let Err(e) = validation::validate_failover_domain_request(Some(&req)) {
         return bad_request(e);
     }
-    match state
-        .domains
-        .failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name))
-    {
+    match state.domain_manager.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -536,7 +823,7 @@ async fn list_failover_history(
         .map(|p| p.next_page_token.clone())
         .unwrap_or_default();
     match state
-        .domains
+        .domain_manager
         .failover_history(&domain_id, page_size, &page_token)
     {
         Ok((events, next_page_token)) => (
@@ -547,7 +834,12 @@ async fn list_failover_history(
             }),
         )
             .into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -558,11 +850,29 @@ async fn update_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => entity_not_exists(e),
-        Err(cadence_persistence::FailoverError::Busy(message)) => error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => bad_request(BadRequestError::new(message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            error_response("ServiceBusyError", StatusCode::SERVICE_UNAVAILABLE, message)
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            bad_request(BadRequestError::new(message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -573,9 +883,26 @@ async fn deprecate_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.deprecate(&req) {
+    let current = match state.domain_manager.describe(&DescribeDomainRequest {
+        name: Some(req.name.clone()),
+        uuid: None,
+    }) {
+        Ok(domain) => domain,
+        Err(error) => return entity_not_exists(error),
+    };
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return bad_request(BadRequestError::new(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.",
+        ));
+    }
+    match state.domain_manager.deprecate(&req) {
         Ok(()) => StatusCode::OK.into_response(),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -587,7 +914,11 @@ pub async fn require_domain(state: &AppState, domain: &str) -> Option<Response> 
     if domain.is_empty() {
         return Some(bad_request(validation::err_domain_not_set()));
     }
-    state.domains.domain_id(domain).err().map(entity_not_exists)
+    state
+        .domain_manager
+        .domain_id(domain)
+        .err()
+        .map(entity_not_exists)
 }
 
 fn require_task_domain(state: &AppState, bytes: &[u8]) -> Option<Response> {
@@ -903,14 +1234,17 @@ pub fn health_router() -> Router {
 pub fn router(state: AppState) -> Router {
     let shared = Arc::new(state);
     Router::new()
-        .route("/health", get(health))
+        .route("/health", get(frontend_health))
         .route("/api/v1/tasks/reset-sticky", post(reset_sticky_task_list))
         .route("/api/v1/domains/register", post(register_domain))
         .route("/api/v1/domains/describe", get(describe_domain))
         .route("/api/v1/domains/list", get(list_domains))
         .route("/api/v1/domains/update", put(update_domain))
         .route("/api/v1/domains/failover", post(failover_domain))
-        .route("/api/v1/domains/failover-history", post(list_failover_history))
+        .route(
+            "/api/v1/domains/failover-history",
+            post(list_failover_history),
+        )
         .route("/api/v1/semaphores/create", post(create_semaphore))
         .route("/api/v1/domains/deprecate", post(deprecate_domain))
         .route("/api/v1/workflows/start", post(start_workflow))
@@ -923,7 +1257,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/workflows/terminate", post(terminate_workflow))
         .route("/api/v1/workflows/restart", post(restart_workflow))
         .route("/api/v1/workflows/reset", post(reset_workflow))
-        .route("/api/v1/workflows/refresh-tasks", post(refresh_workflow_tasks))
+        .route(
+            "/api/v1/workflows/refresh-tasks",
+            post(refresh_workflow_tasks),
+        )
         .route("/api/v1/workflows/diagnose", post(diagnose_workflow))
         .route("/api/v1/workflows/start-async", post(start_workflow_async))
         .route(
@@ -987,8 +1324,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/schedules/update", post(update_schedule))
         .route("/api/v1/search-attributes", get(get_search_attributes))
         .route("/api/v1/workflows/count", get(count_workflows))
-        .route("/api/v1/admin/cluster/describe", get(crate::admin::describe_cluster))
-        .route("/api/v1/admin/workflows/delete", post(crate::admin::delete_workflow))
+        .route(
+            "/api/v1/admin/cluster/describe",
+            get(crate::admin::describe_cluster),
+        )
+        .route(
+            "/api/v1/admin/workflows/delete",
+            post(crate::admin::delete_workflow),
+        )
         .route(
             "/api/v1/admin/workflows/refresh-tasks",
             post(crate::admin::refresh_workflow_tasks),
@@ -1061,9 +1404,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/admin/shards/describe-distribution",
             get(crate::admin::describe_shard_distribution),
         )
-        .route("/api/v1/admin/shards/close", post(crate::admin::close_shard))
-        .route("/api/v1/admin/tasks/remove", post(crate::admin::remove_task))
-        .route("/api/v1/admin/queues/reset", post(crate::admin::reset_queue))
+        .route(
+            "/api/v1/admin/shards/close",
+            post(crate::admin::close_shard),
+        )
+        .route(
+            "/api/v1/admin/tasks/remove",
+            post(crate::admin::remove_task),
+        )
+        .route(
+            "/api/v1/admin/queues/reset",
+            post(crate::admin::reset_queue),
+        )
         .route(
             "/api/v1/admin/queues/describe",
             post(crate::admin::describe_queue),
@@ -1127,6 +1479,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/workflows/archived", post(list_archived_workflows))
         .route("/", post(crate::yarpc::yarpc_handler))
         .route("/{*rest}", post(crate::yarpc::yarpc_handler))
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            reject_frontend_during_shutdown,
+        ))
         .with_state(shared)
 }
 
@@ -1265,7 +1621,13 @@ async fn poll_activity_task(
         .task_list_metadata
         .as_ref()
         .and_then(|metadata| metadata.max_tasks_per_second);
-    let rate = poller_rate(&state, &req.domain, &task_list, ACTIVITY_TASK_TYPE, worker_rate);
+    let rate = poller_rate(
+        &state,
+        &req.domain,
+        &task_list,
+        ACTIVITY_TASK_TYPE,
+        worker_rate,
+    );
     let _poller = note_poller(
         &state,
         executions.namespace_id().expect("scoped domain"),
@@ -1515,9 +1877,10 @@ async fn diagnose_workflow(
             StatusCode::OK,
             Json(cadence_api::types::DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, resp.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    resp.run_id,
+                )),
             }),
         )
             .into_response(),
@@ -1525,9 +1888,10 @@ async fn diagnose_workflow(
             StatusCode::OK,
             Json(cadence_api::types::DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, e.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    e.run_id,
+                )),
             }),
         )
             .into_response(),
@@ -1718,9 +2082,9 @@ async fn respond_query_task_completed(
             .into_response(),
         Err(cadence_persistence::QueryError::NotFound(e)) => entity_not_exists(e),
         Err(cadence_persistence::QueryError::Invalid(e)) => bad_request(e),
-        Err(cadence_persistence::QueryError::Rejected(_)) => bad_request(BadRequestError::new(
-            "Query task was rejected.",
-        )),
+        Err(cadence_persistence::QueryError::Rejected(_)) => {
+            bad_request(BadRequestError::new("Query task was rejected."))
+        }
     }
 }
 
@@ -1731,12 +2095,29 @@ async fn delete_domain(
     if req.name.is_empty() {
         return bad_request(validation::err_domain_not_set());
     }
-    match state.domains.delete(&req.name) {
+    let current = match state.domain_manager.describe(&DescribeDomainRequest {
+        name: Some(req.name.clone()),
+        uuid: None,
+    }) {
+        Ok(domain) => domain,
+        Err(error) => return entity_not_exists(error),
+    };
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return bad_request(BadRequestError::new(
+            "Cluster is not primary cluster, cannot do domain registration or domain update.",
+        ));
+    }
+    match state.domain_manager.delete(&req.name) {
         Ok(()) => {
             state.executions.unregister_domain(&req.name);
             StatusCode::OK.into_response()
         }
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.to_string(),
+        ),
     }
 }
 
@@ -1751,7 +2132,7 @@ pub enum DescribeTaskListError {
 /// Reject schedule APIs when the scheduler is disabled, mirroring Go's
 /// `EnableScheduler` gate with its exact message.
 fn require_scheduler(state: &AppState, domain: &str) -> Option<Response> {
-    if state.scheduler_enabled {
+    if state.scheduler_enabled_for_domain(domain) {
         return None;
     }
     Some(error_response(
@@ -1763,13 +2144,32 @@ fn require_scheduler(state: &AppState, domain: &str) -> Option<Response> {
     ))
 }
 
-fn schedule_not_found(e: cadence_persistence::ScheduleError) -> Response {
-    use cadence_persistence::ScheduleError;
+fn cadence_error_response(e: cadence_api::errors::CadenceError) -> Response {
+    use cadence_api::errors::CadenceError;
     match e {
-        ScheduleError::NotFound(e) => entity_not_exists(e),
-        ScheduleError::Invalid(message) | ScheduleError::Exists(message) => {
-            error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
+        CadenceError::BadRequest(b) => bad_request(b),
+        CadenceError::EntityNotExists(n) => entity_not_exists(n),
+        CadenceError::WorkflowAlreadyCompleted(c) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::CONFLICT,
+            c.message,
+        ),
+        CadenceError::WorkflowAlreadyStarted(a) => error_response(
+            "WorkflowExecutionAlreadyStartedError",
+            StatusCode::CONFLICT,
+            a.message,
+        ),
+        CadenceError::QueryFailed(q) => {
+            error_response("QueryFailedError", StatusCode::BAD_REQUEST, q.message)
         }
+        CadenceError::ServiceBusy(b) => {
+            error_response("ServiceBusyError", StatusCode::TOO_MANY_REQUESTS, b.message)
+        }
+        other => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            other.to_string(),
+        ),
     }
 }
 
@@ -1837,13 +2237,13 @@ async fn create_schedule(
     {
         return bad_request(e);
     }
-    match executions.create_schedule(&req.domain, &req) {
+    match crate::schedule_flow::start_scheduler(&executions, &req) {
         Ok(id) => (
             StatusCode::OK,
             Json(cadence_api::schedule::CreateScheduleResponse { schedule_id: id }),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -1877,9 +2277,10 @@ async fn describe_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.describe_schedule(&req.domain, &req.schedule_id) {
+    match crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id).await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -1900,9 +2301,17 @@ async fn list_schedules(
         Ok(store) => store,
         Err(error) => return entity_not_exists(error),
     };
-    let page_size = if req.page_size <= 0 { 10 } else { req.page_size as usize };
-    let (schedules, next_page_token) =
-        executions.list_schedules(&req.domain, page_size, &req.next_page_token);
+    let page_size = if req.page_size <= 0 {
+        crate::schedule_flow::DEFAULT_LIST_PAGE_SIZE
+    } else {
+        req.page_size as usize
+    };
+    let (schedules, next_page_token) = crate::schedule_flow::list_schedulers(
+        &executions,
+        &req.domain,
+        page_size,
+        &req.next_page_token,
+    );
     (
         StatusCode::OK,
         Json(cadence_api::schedule::ListSchedulesResponse {
@@ -1933,13 +2342,13 @@ async fn delete_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.delete_schedule(&req.domain, &req.schedule_id) {
+    match crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::DeleteScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -1963,20 +2372,19 @@ async fn pause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    // Go derives the actor from identity headers; the JSON surface carries it
-    // in the request identity field.
-    let actor = if req.identity.is_empty() {
-        "unknown".to_string()
-    } else {
-        req.identity.clone()
-    };
-    match executions.pause_schedule(&req.domain, &req.schedule_id, &req.reason, &actor) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_PAUSE,
+        crate::scheduler_wire::pause_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::PauseScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2000,13 +2408,19 @@ async fn unpause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.unpause_schedule(&req.domain, &req.schedule_id, req.catch_up_policy) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_UNPAUSE,
+        crate::scheduler_wire::unpause_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UnpauseScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2052,25 +2466,20 @@ async fn backfill_schedule(
             "EndTime must be after StartTime.".to_string(),
         );
     }
-    let backfill_id = if req.backfill_id.trim().is_empty() {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        req.backfill_id.trim().to_string()
-    };
-    match executions.backfill_schedule(
+    let backfill_id = crate::schedule_flow::resolve_backfill_id(&req.backfill_id);
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
         &req.domain,
         &req.schedule_id,
-        start,
-        end,
-        req.overlap_policy,
-        &backfill_id,
+        crate::scheduler_wire::SIGNAL_BACKFILL,
+        crate::scheduler_wire::backfill_signal(&req, &backfill_id),
     ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::BackfillScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2128,13 +2537,19 @@ async fn update_schedule(
     {
         return bad_request(e);
     }
-    match executions.update_schedule(&req) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_UPDATE,
+        crate::scheduler_wire::update_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UpdateScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2177,7 +2592,11 @@ pub fn describe_task_list_response(
     // Go `DescribeTaskList` counts pollers per configured isolation group,
     // over outstanding polls and polls seen within the poller window.
     let (groups, window) = if req.include_task_list_status {
-        let overlay = state.admin.dynamic_config.lock().expect("admin config lock");
+        let overlay = state
+            .admin
+            .dynamic_config
+            .lock()
+            .expect("admin config lock");
         (
             cadence_persistence::dynamic_config::string_list(
                 overlay.property_values("system.allIsolationGroups"),
@@ -2222,7 +2641,9 @@ pub fn describe_task_list_response(
                 && !record.isolation_group.is_empty()
                 && (record.outstanding || record.seen_millis > window_start)
             {
-                *poller_counts.entry(record.isolation_group.clone()).or_default() += 1;
+                *poller_counts
+                    .entry(record.isolation_group.clone())
+                    .or_default() += 1;
             }
         }
         let isolation_group_metrics = groups
@@ -2384,13 +2805,247 @@ async fn list_task_list_partitions(
         .into_response()
 }
 
-pub fn search_attributes() -> cadence_api::tasks::GetSearchAttributesResponse {
-    cadence_api::tasks::GetSearchAttributesResponse {
-        keys: Some(cadence_api::search_attributes::default_indexed_keys()),
+pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttributesResponse {
+    let mut keys = cadence_api::search_attributes::default_indexed_keys();
+    if let Some(value) = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .get(false, "frontend.validSearchAttributes", &[])
+        .and_then(|entry| entry.value)
+    {
+        if let Ok(configured) =
+            serde_json::from_slice::<std::collections::HashMap<String, i32>>(&value.data)
+        {
+            keys.extend(configured.into_iter().filter_map(|(key, raw_type)| {
+                cadence_api::enums::IndexedValueType::from_i32(raw_type)
+                    .map(|value_type| (key, value_type))
+            }));
+        }
+    }
+    keys.extend(
+        state
+            .admin
+            .custom_search_attributes
+            .lock()
+            .expect("admin lock")
+            .iter()
+            .map(|(key, value_type)| (key.clone(), *value_type)),
+    );
+    cadence_api::tasks::GetSearchAttributesResponse { keys: Some(keys) }
+}
+
+#[cfg(test)]
+mod frontend_drain_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tower::ServiceExt;
+
+    #[derive(Debug)]
+    struct TestLimiter(Arc<AtomicUsize>);
+
+    impl FrontendLimiterCollection for TestLimiter {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+
+        fn on_start(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn on_stop(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_background_workers_broadcasts_the_go_stop_signal() {
+        let state = AppState::default();
+        let mut shutdown = state.background_shutdown.subscribe();
+        assert!(!*shutdown.borrow());
+
+        state.stop_background_workers();
+        shutdown.changed().await.unwrap();
+
+        assert!(*shutdown.borrow());
+    }
+
+    #[tokio::test]
+    async fn frontend_handler_stop_hooks_are_independent() {
+        let state = AppState::default();
+        let mut admin_shutdown = state.frontend_admin_shutdown.subscribe();
+        assert!(state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+
+        state.stop_frontend_handler();
+        assert!(!state
+            .frontend_accepting
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(!*admin_shutdown.borrow());
+
+        state.stop_frontend_admin_handler();
+        admin_shutdown.changed().await.unwrap();
+        assert!(*admin_shutdown.borrow());
+    }
+
+    #[test]
+    fn frontend_shutdown_transition_runs_once_like_go_service_stop() {
+        let state = AppState::default();
+        assert!(state.begin_frontend_shutdown());
+        assert!(!state.begin_frontend_shutdown());
+    }
+
+    #[tokio::test]
+    async fn frontend_stop_invokes_registered_limiter_owners_once() {
+        let state = AppState::default();
+        let stopped = Arc::new(AtomicUsize::new(0));
+        state.register_frontend_limiter(Arc::new(TestLimiter(stopped.clone())));
+
+        state.stop_frontend_limiters().await;
+        state.stop_frontend_limiters().await;
+
+        assert_eq!(stopped.load(Ordering::SeqCst), 1);
+        assert!(state.frontend_limiters.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn frontend_start_invokes_registered_limiter_owners() {
+        let state = AppState::default();
+        let started = Arc::new(AtomicUsize::new(0));
+        state.register_frontend_limiter(Arc::new(TestLimiter(started.clone())));
+
+        state.start_frontend_limiters().await.unwrap();
+
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        assert_eq!(state.frontend_limiters.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn scheduler_gate_reads_domain_filtered_dynamic_config_updates() {
+        use cadence_api::{
+            admin::{DynamicConfigFilter, DynamicConfigValue},
+            enums::EncodingType,
+            types::DataBlob,
+        };
+
+        let state = AppState::default();
+        let domain_filter = DynamicConfigFilter {
+            name: "domainName".into(),
+            value: Some(DataBlob {
+                encoding_type: Some(EncodingType::JSON),
+                data: br#""payments""#.to_vec(),
+            }),
+        };
+        state.admin.dynamic_config.lock().unwrap().update(
+            false,
+            "worker.enableScheduler",
+            vec![DynamicConfigValue {
+                value: Some(DataBlob {
+                    encoding_type: Some(EncodingType::JSON),
+                    data: b"true".to_vec(),
+                }),
+                filters: vec![domain_filter],
+            }],
+        );
+
+        assert!(state.scheduler_enabled_for_domain("payments"));
+        assert!(!state.scheduler_enabled_for_domain("billing"));
+    }
+
+    #[test]
+    fn default_frontend_domain_manager_keeps_matching_cache_shared() {
+        let state = AppState::default();
+        state
+            .domain_manager
+            .create_with_version(
+                cadence_api::types::DomainInfo {
+                    name: "shared-domain".into(),
+                    uuid: "shared-id".into(),
+                    ..Default::default()
+                },
+                cadence_api::types::DomainConfiguration::default(),
+                cadence_api::types::DomainReplicationConfiguration::default(),
+                false,
+                cadence_persistence::version_history::EMPTY_VERSION,
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.domains.domain_id("shared-domain").unwrap(),
+            "shared-id"
+        );
+    }
+
+    #[tokio::test]
+    async fn frontend_health_fails_before_admission_closes() {
+        let state = AppState::default();
+        let ready = state.frontend_ready.clone();
+        let accepting = state.frontend_accepting.clone();
+        let app = router(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        ready.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // Requests continue while peers discover the unhealthy state; the
+        // admission gate closes only after that interval.
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        accepting.store(false, std::sync::atomic::Ordering::Release);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/domains/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }
-async fn get_search_attributes() -> impl IntoResponse {
-    Json(search_attributes())
+
+async fn get_search_attributes(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(search_attributes(&state))
 }
 
 #[derive(Debug, Deserialize)]

@@ -37,7 +37,8 @@ pub struct SemaphoreCallContext {
 
 impl SemaphoreCallContext {
     pub fn ended(&self) -> bool {
-        self.deadline.is_some_and(|d| tokio::time::Instant::now() >= d)
+        self.deadline
+            .is_some_and(|d| tokio::time::Instant::now() >= d)
             || self.cancelled.as_ref().is_some_and(|c| *c.borrow())
             || self.dropped.as_ref().is_some_and(|c| *c.borrow())
     }
@@ -50,7 +51,9 @@ impl SemaphoreCallContext {
                         break;
                     }
                 }
-                if *receiver.borrow() { return; }
+                if *receiver.borrow() {
+                    return;
+                }
             }
             std::future::pending::<()>().await;
         }
@@ -109,16 +112,27 @@ pub trait SemaphorePersistenceBytes: std::fmt::Debug + Send + Sync {
     /// Context-aware adapters may return a cancellation error, or success if
     /// the operation completed despite cancellation. Never discard that result.
     async fn confirm_with_context(
-        &self, domain: &GoString, name: &GoString, bucket: i32, token_id: i32,
+        &self,
+        domain: &GoString,
+        name: &GoString,
+        bucket: i32,
+        token_id: i32,
         _context: &SemaphoreCallContext,
     ) -> Result<GoString, AcquireError> {
-        self.get_semaphore_ownership_by_token(domain, name, bucket, token_id).await
+        self.get_semaphore_ownership_by_token(domain, name, bucket, token_id)
+            .await
     }
     async fn grant_with_context(
-        &self, domain: &GoString, name: &GoString, bucket: i32, token_id: i32,
-        owner_id: &GoString, _context: &SemaphoreCallContext,
+        &self,
+        domain: &GoString,
+        name: &GoString,
+        bucket: i32,
+        token_id: i32,
+        owner_id: &GoString,
+        _context: &SemaphoreCallContext,
     ) -> Result<GrantOutcome, AcquireError> {
-        self.grant_semaphore_token(domain, name, bucket, token_id, owner_id).await
+        self.grant_semaphore_token(domain, name, bucket, token_id, owner_id)
+            .await
     }
     async fn release_semaphore_token(
         &self,

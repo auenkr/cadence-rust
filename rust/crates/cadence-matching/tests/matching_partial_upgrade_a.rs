@@ -41,16 +41,26 @@ fn go_new_config_readers_return_go_test_values() {
     set(&mut overlay, "matching.enableSyncMatch", json!(true));
     set(&mut overlay, "matching.maxTasklistIdleTime", json!("10ns"));
     set(&mut overlay, "matching.semaphoreIdleTime", json!("44ns"));
-    set(&mut overlay, "matching.activityTaskSyncMatchWaitTime", json!("24ns"));
+    set(
+        &mut overlay,
+        "matching.activityTaskSyncMatchWaitTime",
+        json!("24ns"),
+    );
 
     assert_eq!(cfg::user_rps(overlay.property_values("matching.rps")), 3);
-    assert_eq!(cfg::worker_rps(overlay.property_values("matching.workerrps")), 4);
+    assert_eq!(
+        cfg::worker_rps(overlay.property_values("matching.workerrps")),
+        4
+    );
     assert_eq!(
         cfg::domain_user_rps(overlay.property_values("matching.domainrps"), "domain"),
         5
     );
     assert_eq!(
-        cfg::domain_worker_rps(overlay.property_values("matching.domainworkerrps"), "domain"),
+        cfg::domain_worker_rps(
+            overlay.property_values("matching.domainworkerrps"),
+            "domain"
+        ),
         6
     );
     assert!(cfg::enable_sync_match(
@@ -69,7 +79,10 @@ fn go_new_config_readers_return_go_test_values() {
         10
     );
     assert_eq!(
-        cfg::semaphore_idle_time(overlay.property_values("matching.semaphoreIdleTime"), "domain"),
+        cfg::semaphore_idle_time(
+            overlay.property_values("matching.semaphoreIdleTime"),
+            "domain"
+        ),
         44
     );
     assert_eq!(

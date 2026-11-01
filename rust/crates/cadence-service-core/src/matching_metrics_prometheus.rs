@@ -444,7 +444,10 @@ impl MetricSink for PrometheusMetricSink {
                         Some(bounds),
                     ))
                 }
-                Some(spec @ (HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize)) => {
+                Some(
+                    spec
+                    @ (HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize),
+                ) => {
                     let bounds = crate::matching_metrics::go_value_histogram_bounds(spec)
                         .unwrap_or_default();
                     Aggregate::Histogram(HistogramAggregate::new(

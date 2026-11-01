@@ -413,7 +413,9 @@ pub fn validate_schedule_spec(
     };
     match (spec.start_time_nano, spec.end_time_nano) {
         (Some(start), Some(end)) if end <= start => {
-            return Err(BadRequestError::new("Spec.EndTime must be after Spec.StartTime."))
+            return Err(BadRequestError::new(
+                "Spec.EndTime must be after Spec.StartTime.",
+            ))
         }
         _ => {}
     }
@@ -638,7 +640,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            validate_create_semaphore_request(Some(&no_name)).unwrap_err().message,
+            validate_create_semaphore_request(Some(&no_name))
+                .unwrap_err()
+                .message,
             "SemaphoreName is not set on request."
         );
         let bad_capacity = CreateSemaphoreRequest {
@@ -647,7 +651,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            validate_create_semaphore_request(Some(&bad_capacity)).unwrap_err().message,
+            validate_create_semaphore_request(Some(&bad_capacity))
+                .unwrap_err()
+                .message,
             "Capacity must be positive, got 0."
         );
         let bad_bucket = CreateSemaphoreRequest {
@@ -657,7 +663,9 @@ mod tests {
             bucket_capacity: 251,
         };
         assert_eq!(
-            validate_create_semaphore_request(Some(&bad_bucket)).unwrap_err().message,
+            validate_create_semaphore_request(Some(&bad_bucket))
+                .unwrap_err()
+                .message,
             "BucketCapacity must be between 0 and 250, got 251."
         );
     }
@@ -689,7 +697,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            validate_list_archived_request(Some(&too_big)).unwrap_err().message,
+            validate_list_archived_request(Some(&too_big))
+                .unwrap_err()
+                .message,
             "Pagesize is larger than allowed 10000"
         );
     }
@@ -722,7 +732,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            validate_failover_domain_request(Some(&bad_timeout)).unwrap_err().message,
+            validate_failover_domain_request(Some(&bad_timeout))
+                .unwrap_err()
+                .message,
             "FailoverTimeoutInSeconds must be positive"
         );
         let ok = FailoverDomainRequest {

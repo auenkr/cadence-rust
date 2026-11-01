@@ -12,3 +12,18 @@ All workers cancelled; their work is pushed on branches below (NOT merged to mas
 Integration plan: `frontend-domain-admin` is the Frontend integration branch (already merged core2 + workflow-api once); merge later commits of the others into it, get package CI green, then merge to master.
 Per-branch handoff files: memory/frontend-domain-admin-*.md, frontend-core2-*.md, frontend-workflow-api-*.md, worker-core-*.md (on each branch).
 Not done: durable domain store/replication queue, Admin DLQ/membership, schedule wiring, typed backend for all workflow methods, wrapper chain in registered service, remaining Worker modules, mixed Go/Rust gates (Rust Frontend + Go History + Rust Matching), SDK/failure/restart evidence, parity audits. Haiku workers (claude-haiku-5-5) stop after one chunk; re-send "continue with next gap" or use luna for hard design work.
+
+## Integration branch consolidation — 2026-11-01
+`frontend-domain-admin` is now the single Frontend integration branch: merged
+origin/frontend-core2, origin/t3/frontend-workflow-api and origin/master with no
+textual conflicts. Fixed a latent compile error (`uuid::Uuid::now_v7` needs the
+`v7` feature in cadence-service-core; it only passed in workspace builds via
+feature unification) — commit "service-core: enable uuid v7 feature".
+CI (rust-ci.yml, clippy + tests):
+- cadence-frontend: https://github.com/auenkr/cadence-rust/actions/runs/41312002581 head a1573d540 — success
+- cadence-matching (pre-fix): run 41312418696 — failure (now_v7 feature)
+- cadence-matching (post-fix): https://github.com/auenkr/cadence-rust/actions/runs/41312675691 — success
+Note: concurrent dispatches on one ref cancel each other (concurrency group); run sequentially.
+Remaining gaps (unchanged): register handler_workflow::Handler as production
+WorkflowService (gRPC+Thrift, see "Registration audit"), typed History/Matching
+WorkflowBackend, ~20 Admin methods, scheduler wiring, mixed gate with SHA256.

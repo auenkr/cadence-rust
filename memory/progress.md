@@ -1,5 +1,23 @@
 # Progress log
 
+- **2026-10-31 — Frontend Rust bootstrap skeleton.** Added the
+  `cadence-frontend` executable, Frontend handler/config/validator/lifecycle
+  boundaries and wrapper module layout. The executable reuses the shared
+  Matching launcher while the generic transport/runtime is extracted. A fresh
+  CI target at head `996486568b4931a16013d09ba38f1adccf07a459` passed package
+  Clippy, formatting and tests, and a runtime smoke started using Go's
+  `go/config/development.yaml`, returned healthy status and search attributes.
+  This is a skeleton only; full handler, validator, transport extraction and
+  mixed-service parity gaps are listed in `memory/frontend-core-20261031.md`.
+- **2026-10-31 — Frontend Domain/Admin/Schedule implementation started.**
+  Branch `frontend-domain-admin` adds domain validation and archival
+  transitions, Admin dynamic-config/search attribute operations, and schedule
+  create validation/ID helpers under the Frontend crate. CI run 41172959808 was
+  dispatched before the core rebase and later handler additions, so it is stale
+  and has no recorded conclusion. See
+  `memory/frontend-domain-admin-2026-10-31.md` for scope, evidence and open
+  parity gaps. Frontend remains incomplete.
+
 - **2026-10-25 — Matching evidence checkpoint.** Active-offer mixed gate
   40157002080 succeeded on `b1fda7fbff558f7f58b5c98cce9a563c93e9ecd9`; Rust
   Matching binary SHA256
@@ -1848,3 +1866,174 @@ passed 9/10 (one pre-existing Go-database interop test is intentionally ignored)
 cache-focused tests passed 14/14, and locked strict workspace Clippy passed.
 See `memory/evidence/matching-domain-cache/`; production wiring and mixed-service
 validation remain outstanding.
+
+## 2026-10-31: Frontend core continuation
+
+Branch `frontend-core2` started from `origin/frontend-core`. Ported all 16 Go
+request-validator entry points, including default page-size mutation, filter
+validation, permission/failover checks and live reads through the shared dynamic
+overlay seam. Replaced channel-only History/Matching constructors with typed
+generated gRPC clients and TLS peer dialing. Corrected update-domain failover
+classification to match Go pointer presence. CI run
+https://github.com/auenkr/cadence-rust/actions/runs/41174450063 at head
+`e268cf3c5ed7e1160e5df74a2e663b6f6dd144fd` was still running at save time; it
+predates the subsequent dynamic-config and failover corrections. No local Cargo
+command was run. Remaining Frontend work is listed in
+`frontend-core2-20261031.md`; this slice is not a service parity claim.
+- Frontend continuation: ported Go `frontend.warmupDuration` readiness transition and shutdown suppression; fresh exact-head Frontend CI passed at `3682a3f69d0c1abd47b20b0db0191b0f6010de91` (run 41187035454). Durable Frontend managers and actual quota/admin worker owners remain open; see `frontend-core2-20261031.md`.
+- Frontend core2 continuation: production default-store opening now uses the shared persistence role selector for task, semaphore, SQLite option and domain/metadata manager setup while preserving Matching startup diagnostics. Frontend CI passed at `bcea3b3d176d326f3d1f6e4fb88de3118e97f80c` (run 41205927809), and Matching CI passed at `e159c0f1a7d10b3bbd5f78923bfb14f39b9e7702` (run 41206289856), which differs only by this evidence update. This does not add Visibility, History or Execution managers or instantiate Go's quota/admin lifecycle owners. See `frontend-core2-20261031.md`.
+# 2026-10-31 — Frontend core2 continuation
+
+- Added and CI-validated centralized Go-compatible `defaultStore` and optional
+  `visibilityStore` selection helpers, keeping advanced visibility separate.
+  This is config groundwork only; it does not add the missing visibility,
+  history, or execution persistence managers.
+- Exact-head Frontend CI passed at
+  https://github.com/auenkr/cadence-rust/actions/runs/41203159629 for head
+  `f94256cc23ec2da40eee4e47d35f638efffe442b` (formatting, Clippy, tests).
+  Runtime smoke was skipped. Full scope and remaining gaps are in
+  `frontend-core2-20261031.md`.
+
+## 2026-10-31: Frontend domain/admin/schedule handler continuation
+
+On `frontend-domain-admin`, added Go-compatible domain update request
+classification (including mixed config/failover rejection and local-domain
+replication-field presence checks) and schedule create/update validation
+helpers. Schedule behavior now distinguishes a missing action from an
+incomplete StartWorkflow action, validates update no-op and field replacement
+rules, and checks cron/time range, policies, and reserved search attributes.
+Changes are in `handler_domain.rs` and `handler_schedule.rs`; exact Go RPC
+runtime wiring, most Admin operations, mixed service validation, and current
+CI verification remain open. See `memory/frontend-domain-admin-2026-10-31.md`.
+
+The same checkpoint adds the Go-shaped `DescribeCluster` response builder in
+`handler_admin.rs`; live membership collection and transport wiring are not
+included in this helper-level slice.
+
+Package CI run 41173547050 caught the schedule module's undeclared direct
+`cadence-common` dependency. The crate manifest and workspace lockfile now
+declare it; run 41173868530 is validating the corrected head on Actions.
+
+## Frontend domain/admin continuation — 2026-10-31
+
+Rebased `frontend-domain-admin` onto `frontend-core2` (`be0432cc7`, containing
+`frontend-core` at `4fe22ee2a`). Rebase preserved core2 clients/validator and
+continued domain/admin source. Exact-head CI has not yet been dispatched. Audit
+found the handler `dispatch` methods remain stubs, Admin DLQ/replication queues
+return empty single-host behavior, schedules use execution-store state rather
+than scheduler workflows, and domain metadata is in-memory without replication
+publication. See `memory/frontend-domain-admin-2026-10-31.md` for detailed
+status. No Cargo ran locally; Frontend parity remains incomplete.
+
+## 2026-10-31: Frontend workflow API continuation
+
+On `t3/frontend-workflow-api`, corrected Go event-blob limit scope and memo map
+size accounting, and added open-visibility request mapping coverage. Package CI
+run https://github.com/auenkr/cadence-rust/actions/runs/41187401382 passed at
+source SHA `d78e835134d307733706b480f21b82821cdb896d` (Clippy, formatting, 83
+Frontend unit tests). Current branch head after the evidence update is
+`1a0926f0c770b2b052baac7b5f867b88b6c938c6`. No local Cargo command was run.
+Workflow method behavior and wrappers remain incomplete: the handler is not
+wired into production WorkflowService transport, history/archive/poll/respond
+transformations and the concrete History/Matching/visibility backend remain
+open. See `frontend-workflow-api-20261031.md`.
+- Frontend core2 continuation merged at `54c2e54c45141b5499ee4d896dad9a639631ff27`: shared frontend lifecycle drain/warmup, validator matrix and dynamic required-domain-data mapping, Matching gRPC admission/runtime, and read-only persistence metadata updates. Fresh package/runtime validation is required on the merge.
+
+## Frontend integration sync — 2026-10-31
+
+- Merged current `origin/frontend-core2` into `origin/frontend-domain-admin` at
+  `ede64c6650f782d1fc0febeef86d3a71f09bca58`. Workflow-api and master were
+  already ancestors. Kept core2 durable YARPC domain-manager calls and limiter
+  startup while retaining global-domain primary checks and shared Matching
+  cache behavior.
+- Exact-head CI run 41210257837 failed at the changed runtime rustfmt check
+  before Cargo. Corrected Go DLQ page-size behavior: Read defaults to 1000 and
+  Merge passes the requested maximum through. Exact-head CI for this source is
+  pending. Durable failover audit, History-backed Admin calls, scheduler
+  workflow routing, live membership, and mixed Go/Rust acceptance remain open.
+
+## Frontend integration sync and CI repair — 2026-10-31
+
+Merged current `frontend-core2` with the workflow API and master ancestry into
+`frontend-domain-admin` at `fc8a59227914d58b977dc7e2395e13d0c3b2bf70`. Package CI
+41214814048 exposed two YARPC compile gaps: the durable domain delete error
+mapping and MergeDLQ Thrift conversions. Both were repaired; fresh package CI is
+pending. Domain audit durability, History-backed Admin operations, scheduler
+workflow routing, and real membership remain open. See
+`memory/frontend-domain-admin-2026-10-31.md`.
+
+Frontend admin YARPC follow-up CI 41215148796 passed format/oracle stages and
+found one non-exhaustive enum match in MergeDLQ's outbound Thrift converter.
+Added the wildcard invalid-value mapping; exact-head package CI is pending.
+
+# Frontend integration checkpoint — 2026-10-31
+
+- `frontend-domain-admin` is integrated with `origin/frontend-core2`,
+  `origin/t3/frontend-workflow-api`, and `origin/master` at
+  `3a1f1cd231c526e8ff0e631d762fcdd51330c13e`.
+- Exact-head package CI
+  [41215408566](https://github.com/auenkr/cadence-rust/actions/runs/41215408566)
+  passed: Go source oracles, formatting, Clippy, Frontend package tests, and
+  Frontend runtime smoke. No local Cargo command ran.
+- Frontend parity remains incomplete. See
+  `memory/frontend-domain-admin-2026-10-31.md` for the remaining Domain,
+  Admin, Schedule and mixed-cluster blockers.
+
+The Thrift/YARPC `ResetQueue` and `DescribeQueue` routes now delegate to the
+configured History client, matching the JSON paths and Go Admin behavior. Exact
+package CI is pending for this source change.
+
+Merged the latest `origin/frontend-core2` update at `271fdab4e` into the
+integration branch, preserving its shutdown idempotency change. The current
+integration head requires fresh package CI.
+
+Exact-head CI 41215905318 passed formatting and found two borrowed-string
+arguments in the new YARPC History client error paths. Fixed both; the run did
+not reach tests and a fresh package CI run is required.
+
+The correction at `860cdc04e899be244a54290bce1582c537c45904` passed exact-head
+Frontend package CI [41216176446](https://github.com/auenkr/cadence-rust/actions/runs/41216176446),
+including Clippy, tests, and runtime smoke. The YARPC raw-history implementation
+still needs the JSON path's UUID canonicalization and cursor validation.
+
+Ported those two checks into the YARPC raw-history path. Exact-head package CI
+is pending; full History-backed branch pagination remains open.
+
+Exact-head package CI [41216594378](https://github.com/auenkr/cadence-rust/actions/runs/41216594378)
+passed at `5da2b0b9fc3e483aac3742735882305af0ed1420`. This validates the Thrift
+raw-history UUID normalization and malformed persistence cursor rejection.
+
+Added YARPC `GetDomainReplicationMessages` by delegating to the shared durable
+domain queue helper, including its cursor and ack semantics. Package CI is
+pending for this change.
+
+Merged latest `origin/frontend-core2` (`3592ec588`) into the Frontend
+integration branch; workflow-api and master are already ancestors. Repaired
+the Thrift DLQ response enum decoder using Go wire values and wired Cassandra
+domain metadata reads through the configured Frontend persistence adapter
+(commit `26f9cc542`). CI run [41218696029](https://github.com/auenkr/cadence-rust/actions/runs/41218696029)
+failed at the existing Admin rustfmt gate before Cargo. Formatter-enabled run
+[41218965957](https://github.com/auenkr/cadence-rust/actions/runs/41218965957)
+is collecting the CI formatting patch; exact-head validation remains pending.
+See `memory/frontend-domain-admin-2026-10-31.md`.
+
+Merged current `origin/frontend-core2` documentation update and confirmed the
+workflow-api and master refs remain ancestors. Applied the CI-uploaded
+Frontend formatting patch against source SHA `26f9cc54249f8a289f99714099be25b0afe35026`;
+fresh exact-head package validation is required. See
+`memory/frontend-domain-admin-2026-10-31.md`.
+Run [41219254213](https://github.com/auenkr/cadence-rust/actions/runs/41219254213)
+failed at Clippy on a redundant `&str.clone()` in the merged Matching adapter;
+removed it and recorded the repair in the Frontend integration log.
+Then merged current `origin/frontend-core2` (`ce13c6b89`) and `origin/master`
+(`51260ba6a`); the workflow-api ref remains an ancestor. Existing run
+[41219576105](https://github.com/auenkr/cadence-rust/actions/runs/41219576105)
+was cancelled at old source SHA `ce2aab17b49ec6a55e8d3f6eb646969ba6bf407a`
+when superseded by a fresh exact-head package run. See
+`memory/frontend-domain-admin-2026-10-31.md`.
+Fresh run [41219703865](https://github.com/auenkr/cadence-rust/actions/runs/41219703865)
+targets `834ee549388110ab1ab00de08a5c74a4179abfa4`; last observed status is
+in progress, with no conclusion yet. Run 41219576105 was cancelled.
+During handoff merged documentation-only tips `origin/frontend-core2`
+(`9dc7d51a4`) and `origin/t3/frontend-workflow-api` (`04e5fcf98`); run
+41219703865 still covers unchanged Rust source SHA `834ee549388110ab1ab00de08a5c74a4179abfa4`.

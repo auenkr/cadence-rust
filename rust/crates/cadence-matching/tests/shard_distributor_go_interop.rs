@@ -1,13 +1,13 @@
 //! Ignored mixed-language gate against the pinned Go shard-manager handlers.
 //! Run through tests/run-shard-distributor-go-interop.sh after validation is
 //! authorized; it is source-only during the current review lane.
+use cadence_matching::matching_shard_distributor::{
+    BoxFuture, ShardDistributorExecutor, ShardProcessor, ShardProcessorFactory, ShardReport,
+    TonicExecutorRpc, TonicSpectator,
+};
 use cadence_proto::sharddistributor as sd;
-use cadence_service_core::config::{ShardDistributorMatchingConfig, ShardDistributorNamespaceConfig};
-use cadence_matching::{
-    matching_shard_distributor::{
-        BoxFuture, ShardDistributorExecutor, ShardProcessor, ShardProcessorFactory, ShardReport,
-        TonicExecutorRpc, TonicSpectator,
-    },
+use cadence_service_core::config::{
+    ShardDistributorMatchingConfig, ShardDistributorNamespaceConfig,
 };
 use std::{
     collections::HashMap,

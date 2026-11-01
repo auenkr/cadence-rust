@@ -683,9 +683,7 @@ mod mode_matrix_tests {
 #[cfg(test)]
 mod production_matching_metric_tests {
     use super::*;
-    use crate::matching_metrics::{
-        InboundMetricContext, MatchingMetrics, RecordingMetricSink,
-    };
+    use crate::matching_metrics::{InboundMetricContext, MatchingMetrics, RecordingMetricSink};
     use std::time::Duration;
 
     #[test]
@@ -769,7 +767,10 @@ mod production_matching_metric_tests {
         both.counters.default = "both".into();
 
         for name in HISTOGRAM_MIGRATION_NAMES {
-            assert!(default.histograms.emit(name, false), "default timer: {name}");
+            assert!(
+                default.histograms.emit(name, false),
+                "default timer: {name}"
+            );
             assert!(
                 !default.histograms.emit(name, true),
                 "default histogram: {name}"

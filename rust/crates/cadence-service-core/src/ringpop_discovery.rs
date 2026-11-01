@@ -767,12 +767,9 @@ mod tests {
     use std::io::Write;
     use std::sync::Mutex;
 
-    type HostResponseMap =
-        HashMap<String, VecDeque<Result<Vec<String>, DnsLookupError>>>;
-    type SrvResponseMap = HashMap<
-        (String, String, String),
-        VecDeque<Result<Vec<SrvRecord>, DnsLookupError>>,
-    >;
+    type HostResponseMap = HashMap<String, VecDeque<Result<Vec<String>, DnsLookupError>>>;
+    type SrvResponseMap =
+        HashMap<(String, String, String), VecDeque<Result<Vec<SrvRecord>, DnsLookupError>>>;
 
     #[derive(Default)]
     struct FakeDnsResolver {

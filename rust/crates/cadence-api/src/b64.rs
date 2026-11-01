@@ -5,6 +5,11 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
+/// Encode a byte slice using Go `encoding/json`'s standard base64 spelling.
+pub fn encode_bytes(value: &[u8]) -> String {
+    B64.encode(value)
+}
+
 pub fn serialize_bytes<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&B64.encode(v))
 }
@@ -23,9 +28,12 @@ pub fn serialize_opt_bytes<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S
 
 #[allow(dead_code)]
 pub fn deserialize_opt_bytes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
-    Option::<String>::deserialize(d)?.map(|text| {
-        B64.decode(text.as_bytes()).map_err(serde::de::Error::custom)
-    }).transpose()
+    Option::<String>::deserialize(d)?
+        .map(|text| {
+            B64.decode(text.as_bytes())
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
 }
 
 pub fn serialize_b64_map<S: Serializer>(

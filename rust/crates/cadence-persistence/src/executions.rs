@@ -7,9 +7,11 @@
 //! `history_length` and `GetWorkflowExecutionHistory` behave like the Go
 //! implementation for these operations.
 
-use crate::version_history::{VersionHistoryExt, VersionHistoriesExt, EMPTY_VERSION};
+use crate::version_history::{VersionHistoriesExt, VersionHistoryExt, EMPTY_VERSION};
 
-fn empty_version() -> i64 { EMPTY_VERSION }
+fn empty_version() -> i64 {
+    EMPTY_VERSION
+}
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -445,9 +447,11 @@ impl ExecutionRecord {
     }
 
     fn rebuild_version_history(&mut self, branch_token: Vec<u8>) {
-        let items: Vec<_> = self.history.iter().map(|event| {
-            crate::version_history::new_item(event.event_id, event.version)
-        }).collect();
+        let items: Vec<_> = self
+            .history
+            .iter()
+            .map(|event| crate::version_history::new_item(event.event_id, event.version))
+            .collect();
         self.version_histories = Some(cadence_api::types::VersionHistories {
             current_version_history_index: 0,
             histories: vec![crate::version_history::new_history(branch_token, &items)],
@@ -456,7 +460,8 @@ impl ExecutionRecord {
 
     fn record_version(&mut self, event_id: i64, version: i64) {
         if self.version_histories.is_none() {
-            let token = crate::history_branch::new_token(&self.execution.run_id, &self.execution.run_id);
+            let token =
+                crate::history_branch::new_token(&self.execution.run_id, &self.execution.run_id);
             self.rebuild_version_history(token);
         }
         let histories = self.version_histories.as_mut().unwrap();
@@ -618,7 +623,8 @@ pub(crate) struct Inner {
     /// (domain namespace, semaphore name) -> metadata.
     pub(crate) semaphores: HashMap<(String, String), crate::semaphores::SemaphoreMetadata>,
     /// (domain namespace, semaphore name, bucket) -> granted holds.
-    pub(crate) semaphore_holds: HashMap<(String, String, i32), Vec<crate::semaphores::SemaphoreHold>>,
+    pub(crate) semaphore_holds:
+        HashMap<(String, String, i32), Vec<crate::semaphores::SemaphoreHold>>,
     /// (domain namespace, task list, task-list type) -> partition config.
     pub(crate) partition_configs: HashMap<(String, String, i32), StoredPartitionConfig>,
     /// Per-manager cache; unlike root partition metadata this is not persisted.
@@ -660,7 +666,11 @@ impl InMemoryExecutionStore {
         }
     }
     pub fn set_domain_version(&self, id: &str, version: i64) {
-        self.inner.write().expect("execution store lock").domain_versions.insert(id.to_string(), version);
+        self.inner
+            .write()
+            .expect("execution store lock")
+            .domain_versions
+            .insert(id.to_string(), version);
     }
 
     pub fn namespace_id(&self) -> Option<&str> {
@@ -727,19 +737,22 @@ impl InMemoryExecutionStore {
         first_decision_task_backoff_seconds: i32,
     ) -> Result<(), EntityNotExistsError> {
         let mut inner = self.inner.write().expect("execution store lock");
-        let key = (domain.to_string(), execution.workflow_id.clone(), execution.run_id.clone());
-        let record = inner
-            .by_run
-            .get_mut(&key)
-            .ok_or_else(|| EntityNotExistsError::new("Workflow execution does not exist.".to_string()))?;
+        let key = (
+            domain.to_string(),
+            execution.workflow_id.clone(),
+            execution.run_id.clone(),
+        );
+        let record = inner.by_run.get_mut(&key).ok_or_else(|| {
+            EntityNotExistsError::new("Workflow execution does not exist.".to_string())
+        })?;
         record.attempt = attempt;
         if let Some(expiration) = expiration_time_nanos {
             record.expiration_time_nanos = Some(expiration);
         }
         if first_decision_task_backoff_seconds > 0 {
             record.first_decision_task_backoff_seconds = first_decision_task_backoff_seconds;
-            let backoff_millis = i64::from(record.first_decision_task_backoff_seconds.max(0))
-                .saturating_mul(1000);
+            let backoff_millis =
+                i64::from(record.first_decision_task_backoff_seconds.max(0)).saturating_mul(1000);
             if backoff_millis > 0 {
                 record.first_decision_due_millis = Some(record.start_time_millis + backoff_millis);
             }
@@ -820,7 +833,10 @@ impl InMemoryExecutionStore {
     pub fn requeue_async_request(&self, mut request: AsyncRequest) {
         request.attempts += 1;
         if request.attempts >= AsyncRequest::MAX_ATTEMPTS {
-            eprintln!("warning: dropping async request after {} attempts", request.attempts);
+            eprintln!(
+                "warning: dropping async request after {} attempts",
+                request.attempts
+            );
             return;
         }
         let mut inner = self.inner.write().expect("execution store lock");
@@ -852,20 +868,14 @@ impl InMemoryExecutionStore {
                 .get(&(domain.to_string(), execution.workflow_id.clone()))
                 .and_then(|runs| runs.last().cloned())
                 .ok_or_else(|| {
-                    StartError::InvalidArgument(
-                        "Workflow execution does not exist.".to_string(),
-                    )
+                    StartError::InvalidArgument("Workflow execution does not exist.".to_string())
                 })?
         } else {
             execution.run_id.clone()
         };
         let started = inner
             .by_run
-            .get(&(
-                domain.to_string(),
-                execution.workflow_id.clone(),
-                run_id,
-            ))
+            .get(&(domain.to_string(), execution.workflow_id.clone(), run_id))
             .and_then(|record| {
                 record
                     .history
@@ -1004,11 +1014,18 @@ impl InMemoryExecutionStore {
             start_time_millis: start_millis,
             close_time_millis: None,
             history: Vec::new(),
-            current_version: inner.domain_versions.get(&req.domain).copied().unwrap_or(EMPTY_VERSION),
+            current_version: inner
+                .domain_versions
+                .get(&req.domain)
+                .copied()
+                .unwrap_or(EMPTY_VERSION),
             version_histories: Some(cadence_api::types::VersionHistories {
                 current_version_history_index: 0,
                 histories: vec![cadence_api::types::VersionHistory {
-                    branch_token: crate::history_branch::new_token(&run_id, &uuid::Uuid::new_v4().to_string()),
+                    branch_token: crate::history_branch::new_token(
+                        &run_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ),
                     items: Vec::new(),
                 }],
             }),
@@ -1433,9 +1450,11 @@ impl InMemoryExecutionStore {
             ))
         })?;
         // Go requires at least one scheduled decision task.
-        if !base.history.iter().any(|e| {
-            e.event_type == Some(EventType::DecisionTaskScheduled)
-        }) {
+        if !base
+            .history
+            .iter()
+            .any(|e| e.event_type == Some(EventType::DecisionTaskScheduled))
+        {
             return Err(ResetError::Invalid(
                 "Cannot reset workflow without a decision task schedule.".to_string(),
             ));
@@ -1487,11 +1506,9 @@ impl InMemoryExecutionStore {
             }
         }
         // Snapshot the replay prefix and later signals before mutating.
-        let prefix: Vec<HistoryEvent> = base.history
-            [..req.decision_finish_event_id as usize]
-            .to_vec();
-        let mut signals: Vec<HistoryEvent> = base.history
-            [req.decision_finish_event_id as usize..]
+        let prefix: Vec<HistoryEvent> =
+            base.history[..req.decision_finish_event_id as usize].to_vec();
+        let mut signals: Vec<HistoryEvent> = base.history[req.decision_finish_event_id as usize..]
             .iter()
             .filter(|e| e.event_type == Some(EventType::WorkflowExecutionSignaled))
             .cloned()
@@ -1542,10 +1559,7 @@ impl InMemoryExecutionStore {
         let reset_run_id = uuid::Uuid::new_v4().to_string();
         let mut record = ExecutionRecord {
             domain: domain.to_string(),
-            execution: WorkflowExecution::new(
-                execution.workflow_id.clone(),
-                reset_run_id.clone(),
-            ),
+            execution: WorkflowExecution::new(execution.workflow_id.clone(), reset_run_id.clone()),
             workflow_type: base_record.workflow_type.clone(),
             task_list: base_record.task_list.clone(),
             execution_start_to_close_timeout_seconds: base_record
@@ -1557,7 +1571,12 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: prefix,
-            current_version: inner.domain_versions.get(domain).copied().unwrap_or(base_record.current_version).max(base_record.current_version),
+            current_version: inner
+                .domain_versions
+                .get(domain)
+                .copied()
+                .unwrap_or(base_record.current_version)
+                .max(base_record.current_version),
             version_histories: None,
             buffered_events: Vec::new(),
             buffer_event_sequence: 0,
@@ -1578,14 +1597,22 @@ impl InMemoryExecutionStore {
             jitter_start_seconds: 0,
             attempt: 0,
         };
-        let source_branch = base_record.version_histories.as_ref()
+        let source_branch = base_record
+            .version_histories
+            .as_ref()
             .and_then(|histories| histories.current_history().ok())
             .and_then(|history| crate::history_branch::decode(&history.branch_token).ok())
             .unwrap_or(cadence_api::types::HistoryBranch {
-                tree_id: base_run_id.clone(), branch_id: base_run_id.clone(), ancestors: Vec::new(),
+                tree_id: base_run_id.clone(),
+                branch_id: base_run_id.clone(),
+                ancestors: Vec::new(),
             });
-        let fork = crate::history_branch::fork(&source_branch, record.next_event_id(), &uuid::Uuid::new_v4().to_string())
-            .map_err(|e| ResetError::Invalid(e.message))?;
+        let fork = crate::history_branch::fork(
+            &source_branch,
+            record.next_event_id(),
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .map_err(|e| ResetError::Invalid(e.message))?;
         record.rebuild_version_history(crate::history_branch::encode(&fork));
         // Rebuild signal dedup state from the forked prefix.
         for event in record.history.iter() {
@@ -1601,10 +1628,7 @@ impl InMemoryExecutionStore {
         // Reapply later signals unless skipped, like Go's signal reapply.
         if !req.skip_signal_reapply {
             for signal in signals {
-                if let Some(attrs) = signal
-                    .workflow_execution_signaled_event_attributes
-                    .clone()
-                {
+                if let Some(attrs) = signal.workflow_execution_signaled_event_attributes.clone() {
                     let id = attrs.request_id.clone();
                     if !id.is_empty() && record.signal_request_ids.contains(&id) {
                         continue;
@@ -1661,11 +1685,7 @@ impl InMemoryExecutionStore {
         let domain = domain_key.as_str();
         let key = if execution.run_id.is_empty() {
             match self.open_run_id(&inner, domain, &execution.workflow_id) {
-                Some(run_id) => (
-                    domain.to_string(),
-                    execution.workflow_id.clone(),
-                    run_id,
-                ),
+                Some(run_id) => (domain.to_string(), execution.workflow_id.clone(), run_id),
                 None => {
                     // Closed or unknown: Go still refreshes close tasks, which
                     // are already locked in; report unknown runs as not found.
@@ -1674,11 +1694,9 @@ impl InMemoryExecutionStore {
                         .get(&(domain.to_string(), execution.workflow_id.clone()))
                         .is_none_or(|runs| runs.is_empty())
                     {
-                        return Err(WorkflowMutationError::NotFound(
-                            EntityNotExistsError::new(
-                                "Workflow execution does not exist.".to_string(),
-                            ),
-                        ));
+                        return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                            "Workflow execution does not exist.".to_string(),
+                        )));
                     }
                     return Ok(());
                 }
@@ -1709,9 +1727,10 @@ impl InMemoryExecutionStore {
                 .decision_queues
                 .entry((domain.to_string(), task_list))
                 .or_default();
-            if !queue.iter().any(|(w, r)| {
-                w == &execution.workflow_id && r == &key.2
-            }) {
+            if !queue
+                .iter()
+                .any(|(w, r)| w == &execution.workflow_id && r == &key.2)
+            {
                 queue.push_back((execution.workflow_id.clone(), key.2.clone()));
             }
         }
@@ -1733,9 +1752,10 @@ impl InMemoryExecutionStore {
                 .activity_queues
                 .entry((domain.to_string(), task_list))
                 .or_default();
-            if !queue.iter().any(|(w, r, s)| {
-                w == &execution.workflow_id && r == &key.2 && *s == schedule_id
-            }) {
+            if !queue
+                .iter()
+                .any(|(w, r, s)| w == &execution.workflow_id && r == &key.2 && *s == schedule_id)
+            {
                 queue.push_back((execution.workflow_id.clone(), key.2.clone(), schedule_id));
             }
         }
@@ -1779,8 +1799,7 @@ impl InMemoryExecutionStore {
             EntityNotExistsError::new("Workflow execution does not exist.".to_string())
         })?;
         let state_json = serde_json::to_string(record).unwrap_or_default();
-        let hostname =
-            std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
         Ok((0, hostname, state_json))
     }
 
@@ -1838,15 +1857,11 @@ impl InMemoryExecutionStore {
         // Execution store history is sorted by event id; read only events in
         // (lower, upper) to mirror Go ReadRawHistoryBranch exclusive-exclusive.
         let mut range_start = 0usize;
-        while range_start < record.history.len()
-            && record.history[range_start].event_id <= lower
-        {
+        while range_start < record.history.len() && record.history[range_start].event_id <= lower {
             range_start += 1;
         }
         let mut range_end = range_start;
-        while range_end < record.history.len()
-            && record.history[range_end].event_id < upper
-        {
+        while range_end < record.history.len() && record.history[range_end].event_id < upper {
             range_end += 1;
         }
         let range_len = range_end.saturating_sub(range_start);
@@ -1886,16 +1901,12 @@ impl InMemoryExecutionStore {
             let domain = domain_key.as_str();
             let key = if execution.run_id.is_empty() {
                 match self.open_run_id(&inner, domain, &execution.workflow_id) {
-                    Some(run_id) => (
-                        domain.to_string(),
-                        execution.workflow_id.clone(),
-                        run_id,
-                    ),
-                    None => return Err(WorkflowMutationError::NotFound(
-                        EntityNotExistsError::new(
+                    Some(run_id) => (domain.to_string(), execution.workflow_id.clone(), run_id),
+                    None => {
+                        return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
                             "Workflow execution does not exist.".to_string(),
-                        ),
-                    )),
+                        )))
+                    }
                 }
             } else {
                 (
@@ -1910,9 +1921,10 @@ impl InMemoryExecutionStore {
                 ))
             })?;
             // "unable to get workflow start event"
-            let missing_start = record.history.first().is_none_or(|e| {
-                e.event_type != Some(EventType::WorkflowExecutionStarted)
-            });
+            let missing_start = record
+                .history
+                .first()
+                .is_none_or(|e| e.event_type != Some(EventType::WorkflowExecutionStarted));
             // "unable to get activity scheduled event": started/completed
             // activities referencing unknown schedule IDs.
             let scheduled: std::collections::HashSet<i64> = record
@@ -1998,11 +2010,7 @@ impl InMemoryExecutionStore {
             let domain_key = self.domain_id(&inner, domain);
             let domain = domain_key.as_str();
             match self.open_run_id(&inner, domain, workflow_id) {
-                Some(run_id) => (
-                    domain.to_string(),
-                    workflow_id.to_string(),
-                    run_id,
-                ),
+                Some(run_id) => (domain.to_string(), workflow_id.to_string(), run_id),
                 None => {
                     // Mirror Go: reset the finished run to its last decision
                     // boundary so it can accept the reapplied signals.
@@ -2014,11 +2022,14 @@ impl InMemoryExecutionStore {
                                 "Workflow execution does not exist.".to_string(),
                             ))
                         })?;
-                    let base_run = runs.last().ok_or_else(|| {
-                        WorkflowMutationError::NotFound(EntityNotExistsError::new(
-                            "Workflow execution does not exist.".to_string(),
-                        ))
-                    })?.clone();
+                    let base_run = runs
+                        .last()
+                        .ok_or_else(|| {
+                            WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                                "Workflow execution does not exist.".to_string(),
+                            ))
+                        })?
+                        .clone();
                     let boundary = inner
                         .by_run
                         .get(&(
@@ -2027,23 +2038,28 @@ impl InMemoryExecutionStore {
                             base_run.clone(),
                         ))
                         .and_then(|record| {
-                            record.history.iter().rev().find(|e| {
-                                matches!(
-                                    e.event_type,
-                                    Some(
-                                        EventType::DecisionTaskCompleted
-                                            | EventType::DecisionTaskStarted
-                                            | EventType::DecisionTaskFailed
-                                            | EventType::DecisionTaskTimedOut
+                            record
+                                .history
+                                .iter()
+                                .rev()
+                                .find(|e| {
+                                    matches!(
+                                        e.event_type,
+                                        Some(
+                                            EventType::DecisionTaskCompleted
+                                                | EventType::DecisionTaskStarted
+                                                | EventType::DecisionTaskFailed
+                                                | EventType::DecisionTaskTimedOut
+                                        )
                                     )
-                                )
-                            }).map(|e| e.event_id)
+                                })
+                                .map(|e| e.event_id)
                         });
                     match boundary {
                         Some(id) => {
                             drop(inner);
-                            let reset = self.reset(
-                                &cadence_api::types::ResetWorkflowExecutionRequest {
+                            let reset = self
+                                .reset(&cadence_api::types::ResetWorkflowExecutionRequest {
                                     domain: domain.to_string(),
                                     workflow_execution: Some(WorkflowExecution::new(
                                         workflow_id.to_string(),
@@ -2053,22 +2069,18 @@ impl InMemoryExecutionStore {
                                     decision_finish_event_id: id,
                                     request_id: uuid::Uuid::new_v4().to_string(),
                                     skip_signal_reapply: true,
-                                },
-                            ).map_err(|e| match e {
-                                crate::ResetError::NotFound(inner) => {
-                                    WorkflowMutationError::NotFound(inner)
-                                }
-                                crate::ResetError::Invalid(message) => {
-                                    WorkflowMutationError::NotFound(EntityNotExistsError::new(
-                                        message,
-                                    ))
-                                }
-                            })?;
-                            (
-                                domain.to_string(),
-                                workflow_id.to_string(),
-                                reset.run_id,
-                            )
+                                })
+                                .map_err(|e| match e {
+                                    crate::ResetError::NotFound(inner) => {
+                                        WorkflowMutationError::NotFound(inner)
+                                    }
+                                    crate::ResetError::Invalid(message) => {
+                                        WorkflowMutationError::NotFound(EntityNotExistsError::new(
+                                            message,
+                                        ))
+                                    }
+                                })?;
+                            (domain.to_string(), workflow_id.to_string(), reset.run_id)
                         }
                         // No decision boundary (e.g. never scheduled): Go
                         // skips reapply as a no-op in this case.
@@ -2207,11 +2219,7 @@ impl InMemoryExecutionStore {
         }
         if let Some(started) = pending.started_event_id {
             if pending.request_id == request_id {
-                return Ok(RecordedDecision::from_pending(
-                    record,
-                    &pending,
-                    started,
-                ));
+                return Ok(RecordedDecision::from_pending(record, &pending, started));
             }
             return Err(RecordError::AlreadyStarted(
                 "Decision task already started.".to_string(),
@@ -2223,13 +2231,11 @@ impl InMemoryExecutionStore {
         let started_event_id = record.push_event(
             EventType::DecisionTaskStarted,
             HistoryEvent {
-                decision_task_started_event_attributes: Some(
-                    DecisionTaskStartedEventAttributes {
-                        scheduled_event_id: pending.scheduled_event_id,
-                        identity: pending.identity.clone(),
-                        request_id: pending.request_id.clone(),
-                    },
-                ),
+                decision_task_started_event_attributes: Some(DecisionTaskStartedEventAttributes {
+                    scheduled_event_id: pending.scheduled_event_id,
+                    identity: pending.identity.clone(),
+                    request_id: pending.request_id.clone(),
+                }),
                 ..Default::default()
             },
         );
@@ -2319,7 +2325,9 @@ impl InMemoryExecutionStore {
                 "Encountered stale mutable state.".to_string(),
             ));
         }
-        let event_type = completion_event.event_type.unwrap_or(EventType::WorkflowExecutionCompleted);
+        let event_type = completion_event
+            .event_type
+            .unwrap_or(EventType::WorkflowExecutionCompleted);
         let mut event = completion_event.clone();
         // Stamp the parent-link IDs like Go's AddChildWorkflowExecution*
         // event constructors do.
@@ -2402,11 +2410,15 @@ impl InMemoryExecutionStore {
                 "Activity task not found.".to_string(),
             )));
         }
-        let pending = record.pending_activities.get(&schedule_id).cloned().ok_or_else(|| {
-            RecordError::NotFound(EntityNotExistsError::new(
-                "Activity task not found.".to_string(),
-            ))
-        })?;
+        let pending = record
+            .pending_activities
+            .get(&schedule_id)
+            .cloned()
+            .ok_or_else(|| {
+                RecordError::NotFound(EntityNotExistsError::new(
+                    "Activity task not found.".to_string(),
+                ))
+            })?;
         if let Some(started) = pending.started_event_id {
             return Ok(RecordedActivity::from_pending(record, &pending, started));
         }
@@ -2415,17 +2427,15 @@ impl InMemoryExecutionStore {
         let started_event_id = record.push_event(
             EventType::ActivityTaskStarted,
             HistoryEvent {
-                activity_task_started_event_attributes: Some(
-                    ActivityTaskStartedEventAttributes {
-                        scheduled_event_id: schedule_id,
-                        identity: identity.to_string(),
-                        request_id: request_id.clone(),
-                        attempt: pending.attempt,
-                        last_failure_reason: pending.last_failure_reason.clone(),
-                        last_failure_details: pending.last_failure_details.clone(),
-                        last_failure_options: pending.last_failure_options.clone(),
-                    },
-                ),
+                activity_task_started_event_attributes: Some(ActivityTaskStartedEventAttributes {
+                    scheduled_event_id: schedule_id,
+                    identity: identity.to_string(),
+                    request_id: request_id.clone(),
+                    attempt: pending.attempt,
+                    last_failure_reason: pending.last_failure_reason.clone(),
+                    last_failure_details: pending.last_failure_details.clone(),
+                    last_failure_options: pending.last_failure_options.clone(),
+                }),
                 ..Default::default()
             },
         );
@@ -2434,8 +2444,16 @@ impl InMemoryExecutionStore {
             p.started_time_millis = Some(started_time);
             p.started_identity = identity.to_string();
         }
-        let pending = record.pending_activities.get(&schedule_id).cloned().expect("pending exists");
-        Ok(RecordedActivity::from_pending(record, &pending, started_event_id))
+        let pending = record
+            .pending_activities
+            .get(&schedule_id)
+            .cloned()
+            .expect("pending exists");
+        Ok(RecordedActivity::from_pending(
+            record,
+            &pending,
+            started_event_id,
+        ))
     }
 
     /// Schedule a decision task on an open run without duplicating an
@@ -2451,11 +2469,7 @@ impl InMemoryExecutionStore {
         let domain = domain_key.as_str();
         let key = if execution.run_id.is_empty() {
             match self.open_run_id(&inner, domain, &execution.workflow_id) {
-                Some(run_id) => (
-                    domain.to_string(),
-                    execution.workflow_id.clone(),
-                    run_id,
-                ),
+                Some(run_id) => (domain.to_string(), execution.workflow_id.clone(), run_id),
                 None => {
                     return Err(WorkflowMutationError::NotFound(EntityNotExistsError::new(
                         "Workflow execution does not exist.".to_string(),
@@ -2586,18 +2600,12 @@ impl InMemoryExecutionStore {
         {
             runs.retain(|r| r != &run_id);
         }
-        inner
-            .by_request_id
-            .retain(|_, r| r != &run_id);
+        inner.by_request_id.retain(|_, r| r != &run_id);
         for queue in inner.decision_queues.values_mut() {
-            queue.retain(|(w, r)| {
-                w != &execution.workflow_id || r != &run_id
-            });
+            queue.retain(|(w, r)| w != &execution.workflow_id || r != &run_id);
         }
         for queue in inner.activity_queues.values_mut() {
-            queue.retain(|(w, r, _)| {
-                w != &execution.workflow_id || r != &run_id
-            });
+            queue.retain(|(w, r, _)| w != &execution.workflow_id || r != &run_id);
         }
         inner.children.remove(&key);
         Ok((true, true, true))
@@ -4174,11 +4182,18 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
-            current_version: inner.domain_versions.get(domain).copied().unwrap_or_else(|| inner.by_run[&old_key].current_version),
+            current_version: inner
+                .domain_versions
+                .get(domain)
+                .copied()
+                .unwrap_or_else(|| inner.by_run[&old_key].current_version),
             version_histories: Some(cadence_api::types::VersionHistories {
                 current_version_history_index: 0,
                 histories: vec![cadence_api::types::VersionHistory {
-                    branch_token: crate::history_branch::new_token(&new_run_id, &uuid::Uuid::new_v4().to_string()),
+                    branch_token: crate::history_branch::new_token(
+                        &new_run_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ),
                     items: Vec::new(),
                 }],
             }),
@@ -4371,11 +4386,18 @@ impl InMemoryExecutionStore {
             start_time_millis: now_millis(),
             close_time_millis: None,
             history: Vec::new(),
-            current_version: inner.domain_versions.get(&child_domain).copied().unwrap_or(EMPTY_VERSION),
+            current_version: inner
+                .domain_versions
+                .get(&child_domain)
+                .copied()
+                .unwrap_or(EMPTY_VERSION),
             version_histories: Some(cadence_api::types::VersionHistories {
                 current_version_history_index: 0,
                 histories: vec![cadence_api::types::VersionHistory {
-                    branch_token: crate::history_branch::new_token(&child_run_id, &uuid::Uuid::new_v4().to_string()),
+                    branch_token: crate::history_branch::new_token(
+                        &child_run_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ),
                     items: Vec::new(),
                 }],
             }),
@@ -6311,8 +6333,8 @@ impl InMemoryExecutionStore {
         req: &cadence_api::tasks::RespondQueryTaskCompletedRequest,
     ) -> Result<(), QueryError> {
         use cadence_api::enums::{QueryResultType, QueryTaskCompletedType};
-        let token = JsonTaskTokenSerializer::deserialize_query_token(&req.task_token)
-            .map_err(|_| {
+        let token =
+            JsonTaskTokenSerializer::deserialize_query_token(&req.task_token).map_err(|_| {
                 QueryError::Invalid(BadRequestError::new("Invalid TaskToken.".to_string()))
             })?;
         if token.domain_id.is_empty() || token.task_list.is_empty() || token.task_id.is_empty() {
@@ -6351,7 +6373,10 @@ impl InMemoryExecutionStore {
                 "query task not found, or already expired".to_string(),
             )));
         }
-        match req.completed_type.unwrap_or(QueryTaskCompletedType::Completed) {
+        match req
+            .completed_type
+            .unwrap_or(QueryTaskCompletedType::Completed)
+        {
             QueryTaskCompletedType::Completed => {
                 query.answered = Some(WorkflowQueryResult {
                     result_type: Some(QueryResultType::Answered),
@@ -6979,11 +7004,14 @@ impl InMemoryExecutionStore {
                 ),
             ));
         }
-        let invalid = |message: String| TaskError::InvalidToken(
-            cadence_api::errors::BadRequestError::new(message));
+        let invalid = |message: String| {
+            TaskError::InvalidToken(cadence_api::errors::BadRequestError::new(message))
+        };
         let name = cadence_common::task_list::TaskListName::parse(task_list).map_err(invalid)?;
         if !name.is_root() {
-            return Err(invalid("Only root partition's partition config can be updated.".into()));
+            return Err(invalid(
+                "Only root partition's partition config can be updated.".into(),
+            ));
         }
         if config.read_partitions.is_empty() {
             return Err(invalid("read partitions < 1".into()));
@@ -6992,25 +7020,36 @@ impl InMemoryExecutionStore {
             return Err(invalid("write partitions < 1".into()));
         }
         if config.read_partitions.len() < config.write_partitions.len() {
-            return Err(invalid(format!("read partitions ({}) < write partitions ({})",
-                config.read_partitions.len(), config.write_partitions.len())));
+            return Err(invalid(format!(
+                "read partitions ({}) < write partitions ({})",
+                config.read_partitions.len(),
+                config.write_partitions.len()
+            )));
         }
         if !config.read_partitions.contains_key(&0) {
-            return Err(invalid("the root partition must always be in read partitions".into()));
+            return Err(invalid(
+                "the root partition must always be in read partitions".into(),
+            ));
         }
         if !config.write_partitions.contains_key(&0) {
-            return Err(invalid("the root partition must always be in write partitions".into()));
+            return Err(invalid(
+                "the root partition must always be in write partitions".into(),
+            ));
         }
         for id in config.write_partitions.keys() {
             if !config.read_partitions.contains_key(id) {
-                return Err(invalid(format!("partition {id} included in write but not read")));
+                return Err(invalid(format!(
+                    "partition {id} included in write but not read"
+                )));
             }
         }
         let mut inner = self.inner.write().expect("execution store lock");
         let namespace = inner.domain_id(domain);
         let key = (namespace, task_list.to_string(), task_list_type);
         let version = if let Some(old) = inner.partition_configs.get(&key) {
-            if old.read_partitions == config.read_partitions && old.write_partitions == config.write_partitions {
+            if old.read_partitions == config.read_partitions
+                && old.write_partitions == config.write_partitions
+            {
                 return Ok(());
             }
             old.version
@@ -7024,8 +7063,10 @@ impl InMemoryExecutionStore {
         config.version = version.wrapping_add(1);
         // In this process, deliver the same version-gated notification Go sends
         // to existing non-root managers. Cross-host delivery remains separate.
-        for ((cached_domain, cached_name, cached_type), cached) in &mut inner.partition_config_cache {
-            if cached_domain == &key.0 && *cached_type == task_list_type
+        for ((cached_domain, cached_name, cached_type), cached) in &mut inner.partition_config_cache
+        {
+            if cached_domain == &key.0
+                && *cached_type == task_list_type
                 && cadence_common::task_list::TaskListName::parse(cached_name)
                     .is_ok_and(|name| name.root() == task_list)
                 && cached.version < config.version
@@ -7056,11 +7097,14 @@ impl InMemoryExecutionStore {
         task_list_type: i32,
         pushed: Option<StoredPartitionConfig>,
     ) -> Result<(), TaskError> {
-        let invalid = |message: String| TaskError::InvalidToken(
-            cadence_api::errors::BadRequestError::new(message));
+        let invalid = |message: String| {
+            TaskError::InvalidToken(cadence_api::errors::BadRequestError::new(message))
+        };
         let name = cadence_common::task_list::TaskListName::parse(task_list).map_err(invalid)?;
         if name.is_root() && pushed.is_some() {
-            return Err(invalid("PartitionConfig must be nil for root partition.".into()));
+            return Err(invalid(
+                "PartitionConfig must be nil for root partition.".into(),
+            ));
         }
         let mut inner = self.inner.write().expect("execution store lock");
         let namespace = inner.domain_id(domain);
@@ -7071,14 +7115,25 @@ impl InMemoryExecutionStore {
         }
         let key = (namespace.clone(), task_list.to_owned(), task_list_type);
         if let Some(config) = pushed {
-            if inner.partition_config_cache.get(&key).is_none_or(|old| old.version < config.version) {
+            if inner
+                .partition_config_cache
+                .get(&key)
+                .is_none_or(|old| old.version < config.version)
+            {
                 inner.partition_config_cache.insert(key, config);
             }
         } else {
-            let persisted = inner.partition_configs.get(&(namespace, name.root().to_owned(), task_list_type)).cloned();
+            let persisted = inner
+                .partition_configs
+                .get(&(namespace, name.root().to_owned(), task_list_type))
+                .cloned();
             match persisted {
-                Some(config) => { inner.partition_config_cache.insert(key, config); }
-                None => { inner.partition_config_cache.remove(&key); }
+                Some(config) => {
+                    inner.partition_config_cache.insert(key, config);
+                }
+                None => {
+                    inner.partition_config_cache.remove(&key);
+                }
             }
         }
         Ok(())
@@ -7095,11 +7150,18 @@ impl InMemoryExecutionStore {
         let namespace = inner.domain_id(domain);
         let name = cadence_common::task_list::TaskListName::parse(task_list).ok()?;
         if !name.is_root() {
-            if let Some(config) = inner.partition_config_cache.get(&(namespace.clone(), task_list.to_owned(), task_list_type)) {
+            if let Some(config) = inner.partition_config_cache.get(&(
+                namespace.clone(),
+                task_list.to_owned(),
+                task_list_type,
+            )) {
                 return Some(config.clone());
             }
         }
-        inner.partition_configs.get(&(namespace, name.root().to_owned(), task_list_type)).cloned()
+        inner
+            .partition_configs
+            .get(&(namespace, name.root().to_owned(), task_list_type))
+            .cloned()
     }
 
     /// Requeue a scheduled-but-unstarted decision task, mirroring Go
@@ -7148,10 +7210,7 @@ impl InMemoryExecutionStore {
             .decision_queues
             .entry((domain.to_string(), task_list))
             .or_default();
-        if !queue
-            .iter()
-            .any(|(w, r)| w == workflow_id && r == run_id)
-        {
+        if !queue.iter().any(|(w, r)| w == workflow_id && r == run_id) {
             queue.push_back((workflow_id.to_string(), run_id.to_string()));
         }
         Ok(())
@@ -7497,8 +7556,15 @@ impl InMemoryExecutionStore {
             if record.version_histories.is_none() {
                 // Older Rust snapshots emitted version zero. Preserve their
                 // recorded stream instead of retroactively rewriting versions.
-                record.current_version = record.history.last().map(|e| e.version).unwrap_or(EMPTY_VERSION);
-                let token = crate::history_branch::new_token(&record.execution.run_id, &record.execution.run_id);
+                record.current_version = record
+                    .history
+                    .last()
+                    .map(|e| e.version)
+                    .unwrap_or(EMPTY_VERSION);
+                let token = crate::history_branch::new_token(
+                    &record.execution.run_id,
+                    &record.execution.run_id,
+                );
                 record.rebuild_version_history(token);
             }
             if let Some(task) = record.pending_decision.as_mut() {
@@ -8397,7 +8463,8 @@ mod advanced_tests {
     }
 
     #[test]
-    fn query_on_closed_execution_rejects() {        let store = InMemoryExecutionStore::new();
+    fn query_on_closed_execution_rejects() {
+        let store = InMemoryExecutionStore::new();
         let started = store.start(&start_req("d", "w", "req-1")).unwrap();
         let exec = WorkflowExecution::new("w", started.run_id);
         store
@@ -8436,10 +8503,14 @@ mod advanced_tests {
         let task = store.poll_decision("d", "tl", "worker").unwrap();
         assert_eq!(task.workflow_execution.unwrap().run_id, started.run_id);
         // Unknown schedule IDs and runs are EntityNotExists.
-        assert!(store.requeue_decision_task("d", "w", &started.run_id, 99).is_err());
+        assert!(store
+            .requeue_decision_task("d", "w", &started.run_id, 99)
+            .is_err());
         assert!(store.requeue_decision_task("d", "w", "nope", 2).is_err());
         // Started tasks cannot be requeued.
-        assert!(store.requeue_decision_task("d", "w", &started.run_id, 2).is_err());
+        assert!(store
+            .requeue_decision_task("d", "w", &started.run_id, 2)
+            .is_err());
     }
 
     #[test]
@@ -8686,7 +8757,10 @@ mod advanced_tests {
             request_id: "r".to_string(),
             ..Default::default()
         };
-        assert!(matches!(store.reset(&bad_type), Err(ResetError::Invalid(_))));
+        assert!(matches!(
+            store.reset(&bad_type),
+            Err(ResetError::Invalid(_))
+        ));
         // Out of range.
         let bad_range = ResetWorkflowExecutionRequest {
             domain: "d".to_string(),
@@ -8695,7 +8769,10 @@ mod advanced_tests {
             request_id: "r".to_string(),
             ..Default::default()
         };
-        assert!(matches!(store.reset(&bad_range), Err(ResetError::Invalid(_))));
+        assert!(matches!(
+            store.reset(&bad_range),
+            Err(ResetError::Invalid(_))
+        ));
     }
 
     #[test]
@@ -8782,31 +8859,63 @@ mod advanced_tests {
             read_partitions: (0..count).map(|id| (id, vec![])).collect(),
             write_partitions: [(0, vec![])].into_iter().collect(),
         };
-        store.update_partition_config("d", "tl", 0, true, config(90, 2)).unwrap();
+        store
+            .update_partition_config("d", "tl", 0, true, config(90, 2))
+            .unwrap();
         let child = "/__cadence_sys/tl/1";
-        store.refresh_partition_config_with("d", child, 0, Some(config(8, 3))).unwrap();
-        store.refresh_partition_config_with("d", child, 0, Some(config(7, 4))).unwrap();
-        store.refresh_partition_config_with("d", child, 0, Some(config(8, 5))).unwrap();
-        assert_eq!(store.partition_config("d", child, 0).unwrap().read_partitions.len(), 3);
+        store
+            .refresh_partition_config_with("d", child, 0, Some(config(8, 3)))
+            .unwrap();
+        store
+            .refresh_partition_config_with("d", child, 0, Some(config(7, 4)))
+            .unwrap();
+        store
+            .refresh_partition_config_with("d", child, 0, Some(config(8, 5)))
+            .unwrap();
+        assert_eq!(
+            store
+                .partition_config("d", child, 0)
+                .unwrap()
+                .read_partitions
+                .len(),
+            3
+        );
         assert_eq!(store.partition_config("d", "tl", 0).unwrap().version, 1);
         assert!(store.partition_config("d", child, 1).is_none());
         store.refresh_partition_config("d", child, 0).unwrap();
         assert_eq!(store.partition_config("d", child, 0).unwrap().version, 1);
-        store.update_partition_config("d", "tl", 0, true, config(90, 4)).unwrap();
+        store
+            .update_partition_config("d", "tl", 0, true, config(90, 4))
+            .unwrap();
         assert_eq!(store.partition_config("d", child, 0).unwrap().version, 2);
-        store.refresh_partition_config_with("d", child, 0, Some(config(9, 3))).unwrap();
+        store
+            .refresh_partition_config_with("d", child, 0, Some(config(9, 3)))
+            .unwrap();
         let recovered = InMemoryExecutionStore::restore(store.snapshot());
-        assert_eq!(recovered.partition_config("d", child, 0).unwrap().version, 2);
-        assert!(store.refresh_partition_config_with("d", "tl", 0, Some(config(10, 2))).is_err());
+        assert_eq!(
+            recovered.partition_config("d", child, 0).unwrap().version,
+            2
+        );
+        assert!(store
+            .refresh_partition_config_with("d", "tl", 0, Some(config(10, 2)))
+            .is_err());
     }
 
     #[test]
     fn matching_partition_go_fixtures() {
-        let cases: serde_json::Value = serde_json::from_str(include_str!("../../../../tests/fixtures/matching-partitions.json")).unwrap();
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/matching-partitions.json"
+        ))
+        .unwrap();
         for case in cases.as_array().unwrap() {
             let store = InMemoryExecutionStore::new();
             store.register_domain_name("d");
-            for (update, expected) in case["updates"].as_array().unwrap().iter().zip(case["results"].as_array().unwrap()) {
+            for (update, expected) in case["updates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["results"].as_array().unwrap())
+            {
                 let config: StoredPartitionConfig = serde_json::from_value(update.clone()).unwrap();
                 let error = match store.update_partition_config("d", "tl", 0, true, config) {
                     Ok(()) => String::new(),
@@ -8819,8 +8928,10 @@ mod advanced_tests {
             }
             // Partition state is retained across development snapshot recovery.
             let recovered = InMemoryExecutionStore::restore(store.snapshot());
-            assert_eq!(serde_json::to_value(recovered.partition_config("d", "tl", 0)).unwrap(),
-                       serde_json::to_value(store.partition_config("d", "tl", 0)).unwrap());
+            assert_eq!(
+                serde_json::to_value(recovered.partition_config("d", "tl", 0)).unwrap(),
+                serde_json::to_value(store.partition_config("d", "tl", 0)).unwrap()
+            );
         }
     }
 
@@ -8844,13 +8955,7 @@ mod advanced_tests {
         store.refresh_partition_config("d", "tl", 1).unwrap();
         // Non-normal kinds are rejected like Go.
         assert!(store
-            .update_partition_config(
-                "d",
-                "tl",
-                1,
-                false,
-                StoredPartitionConfig::default()
-            )
+            .update_partition_config("d", "tl", 1, false, StoredPartitionConfig::default())
             .is_err());
         // Unknown lists simply have no stored config.
         assert!(store.partition_config("d", "other", 1).is_none());
@@ -8884,7 +8989,9 @@ mod advanced_tests {
         let (page, token) = store.raw_history("d", &exec, None, None, 1, &[]).unwrap();
         assert_eq!(page.len(), 1);
         assert!(!token.is_empty());
-        let (rest, token2) = store.raw_history("d", &exec, None, None, 10, &token).unwrap();
+        let (rest, token2) = store
+            .raw_history("d", &exec, None, None, 10, &token)
+            .unwrap();
         assert_eq!(rest.len(), 1);
         assert!(token2.is_empty());
         // Raw history is exclusive-exclusive: bounds (2, 2) produce no events.
@@ -8898,7 +9005,14 @@ mod advanced_tests {
             .unwrap();
         assert_eq!(bounded.len(), 1);
         assert!(store
-            .raw_history("d", &WorkflowExecution::new("w", "nope"), None, None, 10, &[])
+            .raw_history(
+                "d",
+                &WorkflowExecution::new("w", "nope"),
+                None,
+                None,
+                10,
+                &[]
+            )
             .is_err());
     }
 
@@ -9090,7 +9204,11 @@ mod advanced_tests {
             &store,
             "d",
             "tl",
-            vec![start_child_decision("d", "child", ParentClosePolicy::Abandon)],
+            vec![start_child_decision(
+                "d",
+                "child",
+                ParentClosePolicy::Abandon,
+            )],
         );
         let (initiated, child_exec) = {
             let inner = store.inner.read().expect("execution store lock");
@@ -9146,13 +9264,25 @@ mod advanced_tests {
             )
             .is_err());
         store
-            .record_child_completed("d", &parent_exec, initiated, &child_exec, &completed_event())
+            .record_child_completed(
+                "d",
+                &parent_exec,
+                initiated,
+                &child_exec,
+                &completed_event(),
+            )
             .unwrap();
         let kinds = event_kinds(&store, "d", &parent_exec);
         assert!(kinds.contains(&EventType::ChildWorkflowExecutionCompleted));
         // The link is consumed; a second completion is not found.
         assert!(store
-            .record_child_completed("d", &parent_exec, initiated, &child_exec, &completed_event())
+            .record_child_completed(
+                "d",
+                &parent_exec,
+                initiated,
+                &child_exec,
+                &completed_event()
+            )
             .is_err());
     }
 

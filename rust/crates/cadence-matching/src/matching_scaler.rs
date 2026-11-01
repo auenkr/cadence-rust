@@ -107,23 +107,25 @@ pub fn write_partition_count(
     now: i64,
 ) -> i64 {
     let upscale_threshold = current as f64 * config.upscale_rps;
-    let downscale_threshold = (current - 1).max(0) as f64 * config.upscale_rps * config.downscale_factor;
+    let downscale_threshold =
+        (current - 1).max(0) as f64 * config.upscale_rps * config.downscale_factor;
     let min_write = config.min_write_partitions.max(1);
     let mut result = current.max(min_write);
     if over.check_and_reset(now, qps > upscale_threshold, config.upscale_sustain_nanos) {
         result = number_of_partitions(qps, config.upscale_rps, min_write);
     }
-    if under.check_and_reset(now, qps < downscale_threshold, config.downscale_sustain_nanos) {
+    if under.check_and_reset(
+        now,
+        qps < downscale_threshold,
+        config.downscale_sustain_nanos,
+    ) {
         result = number_of_partitions(qps, config.upscale_rps, min_write);
     }
     result
 }
 
 /// Go `adjustWritePartitions`: dense `0..target`, preserving entries.
-pub fn adjust_write_partitions(
-    current: &PartitionMap,
-    target: usize,
-) -> (PartitionMap, bool) {
+pub fn adjust_write_partitions(current: &PartitionMap, target: usize) -> (PartitionMap, bool) {
     if current.len() == target {
         return (current.clone(), false);
     }
@@ -187,15 +189,14 @@ where
     let mut fetched: HashMap<i32, Option<PartitionMetrics>> = HashMap::new();
     loop {
         let mut missing = None;
-        let outcome = adjust_read_partitions(metrics, old_read, new_write, |id| {
-            match fetched.get(&id) {
+        let outcome =
+            adjust_read_partitions(metrics, old_read, new_write, |id| match fetched.get(&id) {
                 Some(entry) => entry.clone(),
                 None => {
                     missing = Some(id);
                     None
                 }
-            }
-        });
+            });
         match missing {
             Some(id) if !fetched.contains_key(&id) => {
                 let entry = describe(id).await;
@@ -232,12 +233,17 @@ impl ScalerDaemon {
     }
     pub fn stop(&self) {
         let mut status = self.status.lock().expect("Matching scaler lock");
-        if let DaemonStatus::Started(handle) = std::mem::replace(&mut *status, DaemonStatus::Stopped) {
+        if let DaemonStatus::Started(handle) =
+            std::mem::replace(&mut *status, DaemonStatus::Stopped)
+        {
             handle.abort();
         }
     }
     pub fn is_started(&self) -> bool {
-        matches!(*self.status.lock().expect("Matching scaler lock"), DaemonStatus::Started(_))
+        matches!(
+            *self.status.lock().expect("Matching scaler lock"),
+            DaemonStatus::Started(_)
+        )
     }
 }
 
@@ -314,7 +320,9 @@ impl IsolationBalancer {
         if assignable == 0 {
             return 0;
         }
-        ((write_count * self.min_groups_per_partition(config, assignable)) as f64 / assignable as f64).ceil() as i64
+        ((write_count * self.min_groups_per_partition(config, assignable)) as f64
+            / assignable as f64)
+            .ceil() as i64
     }
     /// Go `adjustWritePartitions` on the balancer. Record sustain inputs even
     /// with a single partition so a later upscale reacts immediately.
@@ -347,11 +355,19 @@ impl IsolationBalancer {
     ) -> HashMap<String, i64> {
         let mut assignable = 0;
         for (group, state) in self.groups.iter_mut() {
-            let has = metrics.has_pollers_by_group.get(group).copied().unwrap_or(false);
+            let has = metrics
+                .has_pollers_by_group
+                .get(group)
+                .copied()
+                .unwrap_or(false);
             let sustained_pollers =
-                state.has_pollers.check_and_reset(now, has, config.group_has_pollers_sustain_nanos);
+                state
+                    .has_pollers
+                    .check_and_reset(now, has, config.group_has_pollers_sustain_nanos);
             let sustained_no =
-                state.no_pollers.check_and_reset(now, !has, config.group_no_pollers_sustain_nanos);
+                state
+                    .no_pollers
+                    .check_and_reset(now, !has, config.group_no_pollers_sustain_nanos);
             if state.assignable {
                 if sustained_no {
                     state.assignable = false;
@@ -379,8 +395,16 @@ impl IsolationBalancer {
             let upscale_threshold = current.max(1) as f64 * upscale_rps;
             let downscale_threshold =
                 (current - 1).max(0) as f64 * upscale_rps * config.downscale_factor;
-            let sustained_over = state.over_load.check(now, group_qps > upscale_threshold, config.group_upscale_sustain_nanos);
-            let sustained_under = state.under_load.check(now, group_qps < downscale_threshold, config.group_downscale_sustain_nanos);
+            let sustained_over = state.over_load.check(
+                now,
+                group_qps > upscale_threshold,
+                config.group_upscale_sustain_nanos,
+            );
+            let sustained_under = state.under_load.check(
+                now,
+                group_qps < downscale_threshold,
+                config.group_downscale_sustain_nanos,
+            );
             let ideal = number_of_partitions(group_qps, upscale_rps, 1);
             let target = ideal.clamp(min_partitions, write_count.max(min_partitions));
             if (sustained_over || sustained_under || current == 0) && target != current {
@@ -409,12 +433,14 @@ impl IsolationBalancer {
             if state.assignable {
                 assignable += 1;
             }
-            let change = goal.get(group).copied().unwrap_or(0) - counts.get(group).copied().unwrap_or(0);
+            let change =
+                goal.get(group).copied().unwrap_or(0) - counts.get(group).copied().unwrap_or(0);
             let goal_partitions = goal.get(group).copied().unwrap_or(0);
             if goal_partitions > 0 {
                 sizes.insert(
                     group.clone(),
-                    metrics.qps_by_group.get(group).copied().unwrap_or(0.0) / goal_partitions as f64,
+                    metrics.qps_by_group.get(group).copied().unwrap_or(0.0)
+                        / goal_partitions as f64,
                 );
             }
             for _ in 0..change {
@@ -449,7 +475,9 @@ impl IsolationBalancer {
 }
 
 fn partition_size(sizes: &HashMap<String, f64>, set: &std::collections::HashSet<String>) -> f64 {
-    set.iter().map(|group| sizes.get(group).copied().unwrap_or(0.0)).sum()
+    set.iter()
+        .map(|group| sizes.get(group).copied().unwrap_or(0.0))
+        .sum()
 }
 fn find_max_with(
     group: &str,
@@ -620,7 +648,10 @@ pub struct Scaler {
     over: Sustain,
     under: Sustain,
     balancer: IsolationBalancer,
-    telemetry: Option<(crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
+    telemetry: Option<(
+        crate::matching_metrics::MatchingMetrics,
+        crate::matching_metrics::PollMetricContext,
+    )>,
 }
 impl Scaler {
     pub fn new() -> Self {
@@ -860,15 +891,30 @@ mod tests {
         let config = config();
         let (mut over, mut under) = (Sustain::default(), Sustain::default());
         // 250 > 1*200 upscale threshold, but not yet sustained.
-        assert_eq!(write_partition_count(250.0, 1, &config, &mut over, &mut under, 0), 1);
-        assert_eq!(write_partition_count(250.0, 1, &config, &mut over, &mut under, MIN), 2);
+        assert_eq!(
+            write_partition_count(250.0, 1, &config, &mut over, &mut under, 0),
+            1
+        );
+        assert_eq!(
+            write_partition_count(250.0, 1, &config, &mut over, &mut under, MIN),
+            2
+        );
         // 100 < (2-1)*200*0.75 downscale threshold, sustained after 2 minutes.
         let (mut over, mut under) = (Sustain::default(), Sustain::default());
-        assert_eq!(write_partition_count(100.0, 2, &config, &mut over, &mut under, 0), 2);
-        assert_eq!(write_partition_count(100.0, 2, &config, &mut over, &mut under, 2 * MIN), 1);
+        assert_eq!(
+            write_partition_count(100.0, 2, &config, &mut over, &mut under, 0),
+            2
+        );
+        assert_eq!(
+            write_partition_count(100.0, 2, &config, &mut over, &mut under, 2 * MIN),
+            1
+        );
         // Between thresholds never moves.
         let (mut over, mut under) = (Sustain::default(), Sustain::default());
-        assert_eq!(write_partition_count(175.0, 1, &config, &mut over, &mut under, 10 * MIN), 1);
+        assert_eq!(
+            write_partition_count(175.0, 1, &config, &mut over, &mut under, 10 * MIN),
+            1
+        );
         // Minimum write partitions always win.
         assert_eq!(number_of_partitions(0.0, 200.0, 3), 3);
         assert_eq!(number_of_partitions(401.0, 200.0, 1), 3);
@@ -901,8 +947,22 @@ mod tests {
         let new = HashMap::from([(0, vec![])]);
         let metrics = AggregateMetrics {
             by_partition: HashMap::from([
-                (2, PartitionMetrics { qps: 0.0, read_only: true, empty: true }),
-                (1, PartitionMetrics { qps: 5.0, read_only: true, empty: false }),
+                (
+                    2,
+                    PartitionMetrics {
+                        qps: 0.0,
+                        read_only: true,
+                        empty: true,
+                    },
+                ),
+                (
+                    1,
+                    PartitionMetrics {
+                        qps: 5.0,
+                        read_only: true,
+                        empty: false,
+                    },
+                ),
             ]),
             ..AggregateMetrics::default()
         };
@@ -927,8 +987,14 @@ mod tests {
     }
     fn group_metrics(groups: &[&str], qps: f64) -> AggregateMetrics {
         AggregateMetrics {
-            qps_by_group: groups.iter().map(|group| (group.to_string(), qps)).collect(),
-            has_pollers_by_group: groups.iter().map(|group| (group.to_string(), true)).collect(),
+            qps_by_group: groups
+                .iter()
+                .map(|group| (group.to_string(), qps))
+                .collect(),
+            has_pollers_by_group: groups
+                .iter()
+                .map(|group| (group.to_string(), true))
+                .collect(),
             isolation_enabled: true,
             ..AggregateMetrics::default()
         }
@@ -937,8 +1003,12 @@ mod tests {
     fn matching_scaler_single_partition_with_groups_resets_assignments() {
         let mut balancer = IsolationBalancer::default();
         let write = HashMap::from([(0, vec!["a".to_string()])]);
-        let (map, changed) =
-            balancer.adjust_write_partitions(&immediate_config(), 0, &group_metrics(&["a"], 10.0), &write);
+        let (map, changed) = balancer.adjust_write_partitions(
+            &immediate_config(),
+            0,
+            &group_metrics(&["a"], 10.0),
+            &write,
+        );
         assert!(changed);
         assert_eq!(map, HashMap::from([(0, Vec::new())]));
     }
@@ -946,14 +1016,25 @@ mod tests {
     fn matching_scaler_new_group_spreads_across_partitions() {
         let mut balancer = IsolationBalancer::default();
         let write = HashMap::from([(0, Vec::new()), (1, Vec::new())]);
-        let (map, changed) =
-            balancer.adjust_write_partitions(&immediate_config(), 0, &group_metrics(&["a"], 10.0), &write);
+        let (map, changed) = balancer.adjust_write_partitions(
+            &immediate_config(),
+            0,
+            &group_metrics(&["a"], 10.0),
+            &write,
+        );
         // One group over 2 partitions: min 2 per group, goal 2, added to both.
         assert!(changed);
-        assert_eq!(map, HashMap::from([(0, vec!["a".to_string()]), (1, vec!["a".to_string()])]));
+        assert_eq!(
+            map,
+            HashMap::from([(0, vec!["a".to_string()]), (1, vec!["a".to_string()])])
+        );
         // Steady state afterwards: no further moves.
-        let (same, changed) =
-            balancer.adjust_write_partitions(&immediate_config(), 1, &group_metrics(&["a"], 10.0), &map);
+        let (same, changed) = balancer.adjust_write_partitions(
+            &immediate_config(),
+            1,
+            &group_metrics(&["a"], 10.0),
+            &map,
+        );
         assert!(!changed);
         assert_eq!(same, map);
     }

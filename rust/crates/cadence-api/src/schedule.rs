@@ -127,13 +127,13 @@ pub struct SchedulePolicies {
 pub struct SchedulePauseInfo {
     #[serde(rename = "reason", default, skip_serializing_if = "String::is_empty")]
     pub reason: String,
-    #[serde(rename = "pausedTime", default, skip_serializing_if = "Option::is_none")]
-    pub paused_time_nano: Option<i64>,
     #[serde(
-        rename = "pausedBy",
+        rename = "pausedTime",
         default,
-        skip_serializing_if = "String::is_empty"
+        skip_serializing_if = "Option::is_none"
     )]
+    pub paused_time_nano: Option<i64>,
+    #[serde(rename = "pausedBy", default, skip_serializing_if = "String::is_empty")]
     pub paused_by: String,
 }
 
@@ -153,11 +153,7 @@ pub struct BackfillInfo {
         skip_serializing_if = "String::is_empty"
     )]
     pub backfill_id: String,
-    #[serde(
-        rename = "startTime",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "startTime", default, skip_serializing_if = "Option::is_none")]
     pub start_time_nano: Option<i64>,
     #[serde(rename = "endTime", default, skip_serializing_if = "Option::is_none")]
     pub end_time_nano: Option<i64>,
@@ -183,7 +179,11 @@ pub struct ScheduleInfo {
     pub next_run_time_nano: Option<i64>,
     #[serde(rename = "totalRuns", default)]
     pub total_runs: i64,
-    #[serde(rename = "createTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "createTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub create_time_nano: Option<i64>,
     #[serde(
         rename = "lastUpdateTime",
@@ -257,11 +257,7 @@ pub struct CreateScheduleRequest {
     pub spec: Option<ScheduleSpec>,
     #[serde(rename = "action", default, skip_serializing_if = "Option::is_none")]
     pub action: Option<ScheduleAction>,
-    #[serde(
-        rename = "policies",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "policies", default, skip_serializing_if = "Option::is_none")]
     pub policies: Option<SchedulePolicies>,
     #[serde(rename = "memo", default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<Memo>,
@@ -303,11 +299,7 @@ pub struct DescribeScheduleResponse {
     pub spec: Option<ScheduleSpec>,
     #[serde(rename = "action", default, skip_serializing_if = "Option::is_none")]
     pub action: Option<ScheduleAction>,
-    #[serde(
-        rename = "policies",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "policies", default, skip_serializing_if = "Option::is_none")]
     pub policies: Option<SchedulePolicies>,
     #[serde(rename = "state", default, skip_serializing_if = "Option::is_none")]
     pub state: Option<ScheduleState>,
@@ -380,11 +372,7 @@ pub struct PauseScheduleRequest {
     pub schedule_id: String,
     #[serde(rename = "reason", default, skip_serializing_if = "String::is_empty")]
     pub reason: String,
-    #[serde(
-        rename = "identity",
-        default,
-        skip_serializing_if = "String::is_empty"
-    )]
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
     pub identity: String,
 }
 
@@ -424,11 +412,7 @@ pub struct BackfillScheduleRequest {
         skip_serializing_if = "String::is_empty"
     )]
     pub schedule_id: String,
-    #[serde(
-        rename = "startTime",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "startTime", default, skip_serializing_if = "Option::is_none")]
     pub start_time_nano: Option<i64>,
     #[serde(rename = "endTime", default, skip_serializing_if = "Option::is_none")]
     pub end_time_nano: Option<i64>,
@@ -463,11 +447,7 @@ pub struct UpdateScheduleRequest {
     pub spec: Option<ScheduleSpec>,
     #[serde(rename = "action", default, skip_serializing_if = "Option::is_none")]
     pub action: Option<ScheduleAction>,
-    #[serde(
-        rename = "policies",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "policies", default, skip_serializing_if = "Option::is_none")]
     pub policies: Option<SchedulePolicies>,
     #[serde(
         rename = "searchAttributes",

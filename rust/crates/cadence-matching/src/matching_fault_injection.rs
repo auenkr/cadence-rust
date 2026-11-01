@@ -135,7 +135,12 @@ impl InjectingTaskStore {
         started: Instant,
         sink: ErrorSink,
     ) -> Self {
-        Self { store, rate, started, sink }
+        Self {
+            store,
+            rate,
+            started,
+            sink,
+        }
     }
 
     fn run<T>(
@@ -235,7 +240,9 @@ impl MatchingTaskStore for InjectingTaskStore {
         })
     }
     fn delete_task_list(&self, key: &TaskListKey, range: i64) -> TaskResult<()> {
-        self.run("delete-task-list", || self.store.delete_task_list(key, range))
+        self.run("delete-task-list", || {
+            self.store.delete_task_list(key, range)
+        })
     }
 }
 
@@ -296,7 +303,10 @@ mod tests {
         assert_eq!(generate_fake_error(0.5, 0.49, 2), Some(FakeError::Timeout));
         assert_eq!(generate_fake_error(0.5, 0.5, 2), None);
         assert_eq!(generate_fake_error(0.0, 0.0, 0), None);
-        assert_eq!(generate_fake_error(1.0, 0.99, 0), Some(FakeError::ServiceBusy));
+        assert_eq!(
+            generate_fake_error(1.0, 0.99, 0),
+            Some(FakeError::ServiceBusy)
+        );
         assert!(should_forward_call(None, false));
         assert!(!should_forward_call(Some(FakeError::ServiceBusy), true));
         assert!(!should_forward_call(Some(FakeError::InternalService), true));
@@ -307,7 +317,9 @@ mod tests {
     #[test]
     fn persistence_errors_map_to_retry_classes() {
         assert!(FakeError::ServiceBusy.to_task_store_error().is_transient());
-        assert!(FakeError::InternalService.to_task_store_error().is_transient());
+        assert!(FakeError::InternalService
+            .to_task_store_error()
+            .is_transient());
         assert!(FakeError::Timeout.to_task_store_error().is_transient());
         assert!(!FakeError::Unhandled.to_task_store_error().is_transient());
     }
@@ -320,13 +332,31 @@ mod tests {
         fn lease(&self, _: &TaskListKey, _: i16, _: i64, _: i64) -> TaskResult<TaskListRecord> {
             unreachable!()
         }
-        fn update_task_list(&self, _: &TaskListKey, _: i64, _: TaskListData, _: i64) -> TaskResult<()> {
+        fn update_task_list(
+            &self,
+            _: &TaskListKey,
+            _: i64,
+            _: TaskListData,
+            _: i64,
+        ) -> TaskResult<()> {
             unreachable!()
         }
-        fn create_tasks_with_domains(&self, _: &TaskListKey, _: i64, _: i64, _: &[(Uuid, &AllocatedTask)]) -> TaskResult<()> {
+        fn create_tasks_with_domains(
+            &self,
+            _: &TaskListKey,
+            _: i64,
+            _: i64,
+            _: &[(Uuid, &AllocatedTask)],
+        ) -> TaskResult<()> {
             unreachable!()
         }
-        fn get_tasks(&self, _: &TaskListKey, _: i64, _: i64, _: i64) -> TaskResult<Vec<AllocatedTask>> {
+        fn get_tasks(
+            &self,
+            _: &TaskListKey,
+            _: i64,
+            _: i64,
+            _: i64,
+        ) -> TaskResult<Vec<AllocatedTask>> {
             unreachable!()
         }
         fn task_list_size(&self, _: &TaskListKey, _: i64) -> TaskResult<i64> {
@@ -364,7 +394,8 @@ mod tests {
         let lines = Arc::new(Mutex::new(Vec::<String>::new()));
         let sink_lines = lines.clone();
         let sink: ErrorSink = Arc::new(move |line| sink_lines.lock().unwrap().push(line.into()));
-        let grace = InjectingTaskStore::with_start(inner.clone(), 1.0, Instant::now(), sink.clone());
+        let grace =
+            InjectingTaskStore::with_start(inner.clone(), 1.0, Instant::now(), sink.clone());
         grace.complete_task(&key(), 1).unwrap();
         assert_eq!(*inner.0.lock().unwrap(), 2);
         assert!(lines.lock().unwrap().is_empty());

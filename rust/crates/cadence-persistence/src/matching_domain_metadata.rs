@@ -110,10 +110,20 @@ pub enum MatchingDomainMetadataError {
 ///
 /// Go's SQL backend stores UUIDs as 16-byte BLOBs, uses shard 54321 for domain
 /// rows, and pages by `id > token ORDER BY id LIMIT page_size`.
+#[derive(Clone)]
 pub struct MatchingDomainMetadataStore {
-    connection: Mutex<Connection>,
+    connection: std::sync::Arc<Mutex<Connection>>,
     active_cluster_name: String,
     busy_timeout: Duration,
+}
+
+impl std::fmt::Debug for MatchingDomainMetadataStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MatchingDomainMetadataStore")
+            .field("active_cluster_name", &self.active_cluster_name)
+            .field("busy_timeout", &self.busy_timeout)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +131,180 @@ pub struct MatchingDomainPage {
     pub domains: Vec<MatchingDomainMetadata>,
     /// Go returns the last row's raw UUID whenever rows.len() >= page_size.
     pub next_page_token: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReplicationQueueMessage {
+    pub id: i64,
+    pub payload: Vec<u8>,
+}
+
+/// A durable domain task stored in Go's domain replication DLQ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainReplicationDlqMessage {
+    pub id: i64,
+    pub payload: Vec<u8>,
+}
+
+/// Go SQL domain and singleton metadata persistence operations. Matching's
+/// cache and Frontend's domain manager share the same Go schema; keeping this
+/// contract beside the wire-compatible metadata type lets both services use
+/// one backend implementation without inventing another table layout.
+pub trait GoSqlDomainPersistence: Send + Sync {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError>;
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError>;
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError>;
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError>;
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError>;
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError>;
+}
+
+/// Frontend's Go-compatible domain mutation boundary. The manager reads the
+/// current metadata version before staging cache changes and supplies it to
+/// update so SQL backends can preserve the original compare-and-set fence.
+pub trait DomainMetadataPersistence: std::fmt::Debug + Send + Sync {
+    fn metadata_version(&self) -> Result<i64, String>;
+
+    /// Read a Go-compatible domain row to hydrate Frontend's cache after a
+    /// process restart. Backends that implement `GoSqlDomainPersistence`
+    /// should delegate to that shared read path.
+    fn get_domain(
+        &self,
+        _name: Option<&str>,
+        _id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        Err("domain reads are unavailable for this persistence backend".into())
+    }
+
+    /// List Go-compatible domain rows for paginated Frontend reads.
+    fn list_domains(
+        &self,
+        _page_size: usize,
+        _page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, String> {
+        Err("domain listing is unavailable for this persistence backend".into())
+    }
+
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String>;
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String>;
+    fn delete_domain(&self, id: &str) -> Result<(), String>;
+
+    /// Append a Go-compatible ThriftRW task to the configured domain
+    /// replication queue. Backends without the shared queue schema report it
+    /// as unavailable instead of accepting a non-durable write.
+    fn enqueue_domain_replication_message(&self, _payload: Vec<u8>) -> Result<i64, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn read_domain_replication_messages(
+        &self,
+        _last_message_id: i64,
+        _max_count: usize,
+    ) -> Result<Vec<DomainReplicationQueueMessage>, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn get_domain_replication_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn update_domain_replication_ack_level(
+        &self,
+        _cluster_name: String,
+        _message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication queue is unavailable for this persistence backend".into())
+    }
+
+    fn read_domain_replication_dlq(
+        &self,
+        _first_message_id: i64,
+        _last_message_id: i64,
+        _max_count: usize,
+    ) -> Result<Vec<DomainReplicationDlqMessage>, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn delete_domain_replication_dlq_range(
+        &self,
+        _first_message_id: i64,
+        _last_message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn domain_replication_dlq_size(&self) -> Result<i64, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn get_domain_replication_dlq_ack_levels(
+        &self,
+    ) -> Result<std::collections::HashMap<String, i64>, String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    fn update_domain_replication_dlq_ack_level(
+        &self,
+        _cluster_name: String,
+        _message_id: i64,
+    ) -> Result<(), String> {
+        Err("domain replication DLQ is unavailable for this persistence backend".into())
+    }
+
+    /// Whether this backend writes Go's `domain_audit_log`. Frontend keeps
+    /// failover history in the cache for backends that report `false`.
+    fn supports_domain_audit_log(&self) -> bool {
+        false
+    }
+
+    fn create_domain_audit_log(
+        &self,
+        _log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), String> {
+        Err("domain audit log is unavailable for this persistence backend".into())
+    }
+
+    /// Read failover-type audit rows newest first, using Go's
+    /// `created_time >= min` window and `(created_time, event_id)` cursor.
+    fn get_domain_audit_logs(
+        &self,
+        _domain_id: &str,
+        _operation_type: i32,
+        _page_size: usize,
+        _page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        Err("domain audit log is unavailable for this persistence backend".into())
+    }
 }
 
 /// Convert Cassandra's nested domain/config/replication UDTs through the same
@@ -232,9 +416,340 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
 }
 
 /// Read-only Matching view over Go's Cassandra `domains_by_name_v2` tables.
+#[derive(Clone)]
 pub struct CassandraDomainMetadataStore {
     driver: std::sync::Arc<crate::cassandra::CassandraBlockingSession>,
     current_cluster: String,
+}
+
+/// Read/write Frontend domain persistence for Go's Cassandra schema. The Go
+/// plugin writes the UUID lookup and name-index rows separately, with a
+/// conditional batch that advances the shared notification version. This
+/// adapter retains those row shapes and compare-and-set boundaries.
+#[derive(Clone)]
+pub struct CassandraFrontendDomainPersistence {
+    metadata: CassandraDomainMetadataStore,
+    all_consistency_delete: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+impl CassandraFrontendDomainPersistence {
+    #[must_use]
+    pub fn new(metadata: CassandraDomainMetadataStore) -> Self {
+        Self {
+            metadata,
+            all_consistency_delete: std::sync::Arc::new(|| false),
+        }
+    }
+
+    #[must_use]
+    pub fn with_all_consistency_delete(
+        mut self,
+        enabled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        self.all_consistency_delete = enabled;
+        self
+    }
+
+    fn cql_error(error: impl std::fmt::Display) -> MatchingDomainMetadataError {
+        MatchingDomainMetadataError::Cassandra(error.to_string())
+    }
+
+    fn domain_udts(
+        metadata: &MatchingDomainMetadata,
+    ) -> (
+        crate::cassandra::CassandraDomainUdt,
+        crate::cassandra::CassandraDomainConfigUdt,
+        crate::cassandra::CassandraDomainReplicationConfigUdt,
+    ) {
+        use crate::cassandra::{
+            CassandraClusterReplicationConfigUdt, CassandraDomainConfigUdt,
+            CassandraDomainReplicationConfigUdt, CassandraDomainUdt,
+        };
+        let info = CassandraDomainUdt {
+            id: uuid::Uuid::parse_str(&metadata.info.uuid).unwrap_or_default(),
+            name: metadata.info.name.clone(),
+            status: metadata.status_raw,
+            description: Some(metadata.info.description.clone()),
+            data: metadata.info.data.clone(),
+            owner_email: Some(metadata.info.owner_email.clone()),
+        };
+        let config = CassandraDomainConfigUdt {
+            retention: metadata
+                .configuration
+                .workflow_execution_retention_period_in_days,
+            emit_metric: metadata.configuration.emit_metric,
+            archival_bucket: Some(metadata.archival_bucket.clone()),
+            archival_status: Some(i32::from(metadata.archival_status_raw)),
+            history_archival_status: Some(i32::from(metadata.history_archival_status_raw)),
+            history_archival_uri: Some(metadata.configuration.history_archival_uri.clone()),
+            visibility_archival_status: Some(i32::from(metadata.visibility_archival_status_raw)),
+            visibility_archival_uri: Some(metadata.configuration.visibility_archival_uri.clone()),
+            bad_binaries: metadata.bad_binaries.as_ref().map(|blob| blob.data.clone()),
+            bad_binaries_encoding: metadata
+                .bad_binaries
+                .as_ref()
+                .map(|blob| blob.encoding.as_bytes().to_vec()),
+            isolation_groups: metadata
+                .isolation_groups
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            isolation_groups_encoding: metadata
+                .isolation_groups
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+            async_workflow_config: metadata
+                .async_workflow_config
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            async_workflow_config_encoding: metadata
+                .async_workflow_config
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+        };
+        let replication = CassandraDomainReplicationConfigUdt {
+            active_cluster_name: Some(metadata.replication.active_cluster_name.clone()),
+            clusters: Some(
+                metadata
+                    .replication
+                    .clusters
+                    .iter()
+                    .map(|cluster| CassandraClusterReplicationConfigUdt {
+                        cluster_name: Some(cluster.cluster_name.clone()),
+                    })
+                    .collect(),
+            ),
+            active_clusters_config: metadata
+                .active_clusters_config
+                .as_ref()
+                .map(|blob| blob.data.clone()),
+            active_clusters_config_encoding: metadata
+                .active_clusters_config
+                .as_ref()
+                .map(|blob| blob.encoding.clone()),
+        };
+        (info, config, replication)
+    }
+
+    fn applied(
+        result: scylla::response::query_result::QueryResult,
+    ) -> Result<bool, MatchingDomainMetadataError> {
+        let rows = result.into_rows_result().map_err(Self::cql_error)?;
+        let mut columns = rows.rows::<(bool,)>().map_err(Self::cql_error)?;
+        columns
+            .next()
+            .transpose()
+            .map_err(Self::cql_error)?
+            .map(|(applied,)| applied)
+            .ok_or_else(|| Self::cql_error("Cassandra LWT response did not include [applied]"))
+    }
+
+    fn executor(&self) -> crate::matching_cassandra_exec::ScyllaExecutor {
+        crate::matching_cassandra_exec::ScyllaExecutor::new(self.metadata.driver.clone())
+    }
+
+    fn delete_with_consistency_all(
+        &self,
+        statement: &crate::matching_cassandra_exec::CqlStatement,
+        values: impl Fn() -> crate::matching_cassandra_exec::BoundValues,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{CqlExecutor, CqlStatement};
+        use scylla::frame::types::Consistency;
+        let executor = self.executor();
+        if !(self.all_consistency_delete)() {
+            return executor.exec(statement, values()).map_err(Self::cql_error);
+        }
+        let all = CqlStatement::with_consistency(statement.text.clone(), Consistency::All);
+        match executor.exec(&all, values()) {
+            Ok(()) => Ok(()),
+            Err(error) if error.is_unavailable() => {
+                let fallback = CqlStatement::with_consistency(
+                    statement.text.clone(),
+                    Consistency::LocalQuorum,
+                );
+                executor.exec(&fallback, values()).map_err(Self::cql_error)
+            }
+            Err(error) => Err(Self::cql_error(error)),
+        }
+    }
+}
+
+impl GoSqlDomainPersistence for CassandraFrontendDomainPersistence {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        use chrono::Utc;
+        let id = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let driver = &self.metadata.driver;
+        let session = driver.session();
+        let id_applied = driver
+            .run(session.query_unpaged(
+                "INSERT INTO domains (id, domain, created_time) VALUES (?, {name: ?}, ?) IF NOT EXISTS",
+                (id, metadata.info.name.as_str(), Utc::now()),
+            ))
+            .map_err(Self::cql_error)?;
+        if !Self::applied(id_applied)? {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "CreateDomain operation failed because of UUID collision: {id}"
+            )));
+        }
+
+        let notification_version = self.metadata.metadata_version()?;
+        let (info, config, replication) = Self::domain_udts(metadata);
+        let name = metadata.info.name.clone();
+        let insert = CqlStatement::new(
+            "INSERT INTO domains_by_name_v2 (domains_partition, name, domain, config, replication_config, is_global_domain, config_version, failover_version, failover_notification_version, previous_failover_version, failover_end_time, last_updated_time, notification_version, created_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS",
+        );
+        let update_metadata = CqlStatement::new(
+            "UPDATE domains_by_name_v2 SET notification_version = ? WHERE domains_partition = ? AND name = ? IF notification_version = ?",
+        );
+        let end_time = metadata.failover_end_time_nanos.unwrap_or_default();
+        let executor = self.executor();
+        let outcome = executor
+            .batch_lwt(
+                &[insert, update_metadata],
+                vec![
+                    vec![
+                        bound(0_i32),
+                        bound(name.clone()),
+                        bound(info),
+                        bound(config),
+                        bound(replication),
+                        bound(metadata.is_global_domain),
+                        bound(metadata.config_version),
+                        bound(metadata.failover_version),
+                        bound(metadata.failover_notification_version),
+                        bound(metadata.previous_failover_version),
+                        bound(end_time),
+                        bound(metadata.last_updated_time_nanos),
+                        bound(notification_version),
+                        bound(Utc::now()),
+                    ],
+                    vec![
+                        bound(if notification_version > 0 {
+                            notification_version + 1
+                        } else {
+                            1
+                        }),
+                        bound(0_i32),
+                        bound("cadence-domain-metadata".to_string()),
+                        bound((notification_version > 0).then_some(notification_version)),
+                    ],
+                ],
+            )
+            .map_err(Self::cql_error)?;
+        if !outcome.applied {
+            let _ = executor.exec(
+                &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+                vec![bound(id)],
+            );
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "Domain {} already exists or domain metadata changed",
+                metadata.info.name
+            )));
+        }
+        Ok(notification_version)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlExecutor, CqlStatement};
+        let (info, config, replication) = Self::domain_udts(metadata);
+        let executor = self.executor();
+        let outcome = executor
+            .batch_lwt(
+                &[
+                    CqlStatement::new(
+                        "UPDATE domains_by_name_v2 SET domain = ?, config = ?, replication_config = ?, is_global_domain = ?, config_version = ?, failover_version = ?, failover_notification_version = ?, previous_failover_version = ?, failover_end_time = ?, last_updated_time = ?, notification_version = ? WHERE domains_partition = ? AND name = ?",
+                    ),
+                    CqlStatement::new(
+                        "UPDATE domains_by_name_v2 SET notification_version = ? WHERE domains_partition = ? AND name = ? IF notification_version = ?",
+                    ),
+                ],
+                vec![
+                    vec![
+                        bound(info),
+                        bound(config),
+                        bound(replication),
+                        bound(metadata.is_global_domain),
+                        bound(metadata.config_version),
+                        bound(metadata.failover_version),
+                        bound(metadata.failover_notification_version),
+                        bound(metadata.previous_failover_version),
+                        bound(metadata.failover_end_time_nanos.unwrap_or_default()),
+                        bound(metadata.last_updated_time_nanos),
+                        bound(expected_notification_version),
+                        bound(0_i32),
+                        bound(metadata.info.name.clone()),
+                    ],
+                    vec![
+                        bound(if expected_notification_version > 0 {
+                            expected_notification_version + 1
+                        } else {
+                            1
+                        }),
+                        bound(0_i32),
+                        bound("cadence-domain-metadata".to_string()),
+                        bound((expected_notification_version > 0)
+                            .then_some(expected_notification_version)),
+                    ],
+                ],
+            )
+            .map_err(Self::cql_error)?;
+        if outcome.applied {
+            Ok(())
+        } else {
+            Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_notification_version}"
+            )))
+        }
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        use crate::matching_cassandra_exec::{bound, CqlStatement};
+        let metadata = self.metadata.get_domain(None, Some(domain_id))?;
+        let id = uuid::Uuid::parse_str(domain_id)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        // Match Cassandra's Go DomainStore.DeleteDomain ordering: remove the
+        // name index first, then the UUID lookup row. If the second write
+        // fails, Go leaves an unindexed UUID row; deleting the UUID first
+        // would instead leave an index entry pointing at a missing domain.
+        self.delete_with_consistency_all(
+            &CqlStatement::new(
+                "DELETE FROM domains_by_name_v2 WHERE domains_partition = ? AND name = ?",
+            ),
+            || vec![bound(0_i32), bound(metadata.info.name.clone())],
+        )?;
+        self.delete_with_consistency_all(
+            &CqlStatement::new("DELETE FROM domains WHERE id = ?"),
+            || vec![bound(id)],
+        )
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        self.metadata.metadata_version()
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        self.metadata.get_domain(name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        self.metadata.list_domains(page_size, page_token)
+    }
 }
 
 impl CassandraDomainMetadataStore {
@@ -253,7 +768,8 @@ impl CassandraDomainMetadataStore {
         name: &str,
     ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
+            CassandraNullableDomainUdt,
         };
         let session = self.driver.session();
         let result = self.driver.run(session.query_unpaged(
@@ -353,7 +869,8 @@ impl CassandraDomainMetadataStore {
         next_page_token: Option<&[u8]>,
     ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
         use crate::cassandra::{
-            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt, CassandraNullableDomainUdt,
+            CassandraDomainConfigUdt, CassandraDomainReplicationConfigUdt,
+            CassandraNullableDomainUdt,
         };
         use scylla::{response::PagingState, statement::Statement};
         if page_size == 0 {
@@ -572,6 +1089,57 @@ impl MatchingDomainMetadataStore {
         ))
     }
 
+    /// Open the existing Go SQLite schema with the configured read/write mode.
+    /// This is used by Frontend's transactional domain+metadata manager; it
+    /// never creates schema objects or migrates the Cadence database.
+    pub fn open_read_write_with_options(
+        path: impl AsRef<Path>,
+        active_cluster_name: impl Into<String>,
+        mode: &str,
+        busy_timeout: Duration,
+    ) -> Result<Self, MatchingDomainMetadataError> {
+        let flags = match mode {
+            "rw" => {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_URI
+            }
+            "rwc" => {
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_CREATE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_URI
+            }
+            "ro" => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    "Frontend domain manager requires a writable SQLite mode".into(),
+                ));
+            }
+            "memory" => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    "mode=memory is not supported by the Frontend domain manager".into(),
+                ));
+            }
+            _ => {
+                return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                    format!("unsupported URI mode {mode:?}"),
+                ));
+            }
+        };
+        let path = path.as_ref().to_string_lossy();
+        if path.contains('?') {
+            return Err(MatchingDomainMetadataError::InvalidSqliteConfiguration(
+                "SQLite databaseName containing URI query attributes is not supported".into(),
+            ));
+        }
+        let connection = Connection::open_with_flags(format!("file:{path}?mode={mode}"), flags)?;
+        Ok(Self::from_connection_with_busy_timeout(
+            connection,
+            active_cluster_name,
+            busy_timeout,
+        ))
+    }
+
     /// Wrap an existing read-only connection. Primarily useful to callers that
     /// manage connection lifecycle outside this metadata reader.
     pub fn from_connection(connection: Connection, active_cluster_name: impl Into<String>) -> Self {
@@ -588,7 +1156,7 @@ impl MatchingDomainMetadataStore {
         busy_timeout: Duration,
     ) -> Self {
         Self {
-            connection: Mutex::new(connection),
+            connection: std::sync::Arc::new(Mutex::new(connection)),
             active_cluster_name: active_cluster_name.into(),
             busy_timeout,
         }
@@ -724,6 +1292,46 @@ impl MatchingDomainMetadataStore {
         })
     }
 
+    fn create_domain_at_version(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let mut metadata = metadata.clone();
+        metadata.notification_version = expected_version;
+        let blob = encode_go_sql_domain_metadata(&metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice(), metadata.info.name, metadata.is_global_domain, blob, ENCODING_THRIFT_RW],
+        )?;
+        let current: i64 = transaction.query_row(
+            "SELECT notification_version FROM domain_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        if current != expected_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_version}, found {current}"
+            )));
+        }
+        let changed = transaction.execute(
+            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
+            params![expected_version + 1, expected_version],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(expected_version)
+    }
+
     fn read_one(
         &self,
         selector: &str,
@@ -760,6 +1368,343 @@ impl MatchingDomainMetadataStore {
     }
 }
 
+impl GoSqlDomainPersistence for MatchingDomainMetadataStore {
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+    ) -> Result<i64, MatchingDomainMetadataError> {
+        let expected_version = self.get_metadata_version()?;
+        self.create_domain_at_version(metadata, expected_version)
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_notification_version: i64,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        let blob = encode_go_sql_domain_metadata(metadata)?;
+        let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        let changed = transaction.execute(
+            "UPDATE domains SET name = ?1, data = ?2, data_encoding = ?3 WHERE shard_id = ?4 AND id = ?5",
+            params![metadata.info.name, blob, ENCODING_THRIFT_RW, GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice()],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::NotFound(
+                metadata.info.uuid.clone(),
+            ));
+        }
+        let current: i64 = transaction.query_row(
+            "SELECT notification_version FROM domain_metadata",
+            [],
+            |row| row.get(0),
+        )?;
+        if current != expected_notification_version {
+            return Err(MatchingDomainMetadataError::InvalidBlob(format!(
+                "domain metadata notification version changed: expected {expected_notification_version}, found {current}"
+            )));
+        }
+        let changed = transaction.execute(
+            "UPDATE domain_metadata SET notification_version = ?1 WHERE notification_version = ?2",
+            params![
+                expected_notification_version + 1,
+                expected_notification_version
+            ],
+        )?;
+        if changed != 1 {
+            return Err(MatchingDomainMetadataError::InvalidBlob(
+                "Failed to update domain metadata. <>1 rows affected.".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn delete_domain(&self, domain_id: &str) -> Result<(), MatchingDomainMetadataError> {
+        let uuid = uuid::Uuid::parse_str(domain_id)
+            .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
+        let (mut connection, _) = self.lock_connection(Duration::from_secs(3))?;
+        connection.busy_timeout(self.busy_timeout)?;
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM domains WHERE shard_id = ?1 AND id = ?2",
+            params![GO_DEFAULT_SHARD_ID, uuid.as_bytes().as_slice()],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn get_metadata_version(&self) -> Result<i64, MatchingDomainMetadataError> {
+        self.get_metadata_version_with_timeout(Duration::from_secs(3))
+    }
+
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, MatchingDomainMetadataError> {
+        MatchingDomainMetadataStore::get_domain(self, name, id)
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<MatchingDomainPage, MatchingDomainMetadataError> {
+        MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
+    }
+}
+
+impl MatchingDomainMetadataStore {
+    /// Insert one Go `domain_audit_log` row with Go's SQLite DATETIME format.
+    fn insert_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), MatchingDomainMetadataError> {
+        use crate::domain_audit::format_sqlite_datetime;
+        let created = format_sqlite_datetime(log.created_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let updated = format_sqlite_datetime(log.last_updated_time_nanos)
+            .map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let (connection, deadline) = self.lock_connection(Duration::from_secs(3))?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
+        connection
+            .execute(
+                "INSERT INTO domain_audit_log (domain_id, event_id, state_before, \
+                 state_before_encoding, state_after, state_after_encoding, operation_type, \
+                 created_time, last_updated_time, identity, identity_type, comment) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    log.domain_id,
+                    log.event_id,
+                    log.state_before.data,
+                    log.state_before.encoding,
+                    log.state_after.data,
+                    log.state_after.encoding,
+                    log.operation_type,
+                    created,
+                    updated,
+                    log.identity,
+                    log.identity_type,
+                    log.comment,
+                ],
+            )
+            .map_err(|error| sqlite_operation_error(error, deadline))?;
+        Ok(())
+    }
+
+    /// Read a Go-compatible audit page. The window and cursor follow Go's
+    /// `GetDomainAuditLogs`: first page is `created_time < now`, later pages
+    /// resume after `(created_time, event_id)` from the token.
+    fn select_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
+        use crate::domain_audit::{
+            decode_page_token, encode_page_token, format_sqlite_datetime, parse_sqlite_datetime,
+            DomainAuditLog, DomainAuditLogPage,
+        };
+        type AuditRow = (
+            String,
+            String,
+            Vec<u8>,
+            String,
+            Vec<u8>,
+            String,
+            i32,
+            String,
+            String,
+            String,
+            String,
+            String,
+        );
+        if page_size == 0 {
+            return Err(MatchingDomainMetadataError::InvalidPageSize);
+        }
+        let limit =
+            i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+        let now_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| i64::try_from(elapsed.as_nanos()).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        let (max_nanos, min_event_id) = match page_token {
+            Some(token) => {
+                decode_page_token(token).map_err(MatchingDomainMetadataError::InvalidBlob)?
+            }
+            None => (
+                now_nanos,
+                "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+            ),
+        };
+        let max =
+            format_sqlite_datetime(max_nanos).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let min = format_sqlite_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let (connection, deadline) = self.lock_connection(Duration::from_secs(3))?;
+        let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
+        let rows: Vec<AuditRow> = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT event_id, domain_id, state_before, state_before_encoding, state_after, \
+                     state_after_encoding, operation_type, created_time, last_updated_time, \
+                     identity, identity_type, comment FROM domain_audit_log \
+                     WHERE domain_id = ?1 AND operation_type = ?2 AND created_time >= ?3 \
+                     AND (created_time < ?4 OR (created_time = ?4 AND event_id > ?5)) \
+                     ORDER BY created_time DESC, event_id ASC LIMIT ?6",
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            let mapped = statement
+                .query_map(
+                    params![domain_id, operation_type, min, max, min_event_id, limit],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                            row.get(10)?,
+                            row.get(11)?,
+                        ))
+                    },
+                )
+                .map_err(|error| sqlite_operation_error(error, deadline))?;
+            mapped
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| sqlite_operation_error(error, deadline))?
+        };
+        let mut logs = Vec::with_capacity(rows.len());
+        for (
+            event_id,
+            domain_id,
+            sb,
+            sbe,
+            sa,
+            sae,
+            op,
+            created,
+            updated,
+            identity,
+            id_type,
+            comment,
+        ) in rows
+        {
+            logs.push(DomainAuditLog {
+                event_id,
+                domain_id,
+                operation_type: op,
+                created_time_nanos: parse_sqlite_datetime(&created)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                last_updated_time_nanos: parse_sqlite_datetime(&updated)
+                    .map_err(MatchingDomainMetadataError::InvalidBlob)?,
+                identity,
+                identity_type: id_type,
+                comment,
+                state_before: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sb,
+                    encoding: sbe,
+                },
+                state_after: crate::matching_domain_metadata::GoDomainBlob {
+                    data: sa,
+                    encoding: sae,
+                },
+            });
+        }
+        // Go emits a token only when the page is full; the token points at the
+        // last returned row even if the next page turns out to be empty.
+        let next_page_token = if logs.len() >= page_size {
+            logs.last()
+                .map(|log| encode_page_token(log.created_time_nanos, &log.event_id))
+        } else {
+            None
+        };
+        Ok(DomainAuditLogPage {
+            logs,
+            next_page_token,
+        })
+    }
+}
+
+impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDomainMetadataStore {
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        MatchingDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+        MatchingDomainMetadataStore::list_domains(self, page_size, page_token)
+            .map_err(|error| error.to_string())
+    }
+
+    fn metadata_version(&self) -> Result<i64, String> {
+        self.get_metadata_version()
+            .map_err(|error| error.to_string())
+    }
+
+    fn create_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        self.create_domain_at_version(metadata, expected_version)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_domain(
+        &self,
+        metadata: &MatchingDomainMetadata,
+        expected_version: i64,
+    ) -> Result<(), String> {
+        GoSqlDomainPersistence::update_domain(self, metadata, expected_version)
+            .map_err(|error| error.to_string())
+    }
+
+    fn delete_domain(&self, id: &str) -> Result<(), String> {
+        GoSqlDomainPersistence::delete_domain(self, id).map_err(|error| error.to_string())
+    }
+
+    fn supports_domain_audit_log(&self) -> bool {
+        true
+    }
+
+    fn create_domain_audit_log(
+        &self,
+        log: &crate::domain_audit::DomainAuditLog,
+    ) -> Result<(), String> {
+        self.insert_domain_audit_log(log)
+            .map_err(|error| error.to_string())
+    }
+
+    fn get_domain_audit_logs(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::domain_audit::DomainAuditLogPage, String> {
+        self.select_domain_audit_logs(domain_id, operation_type, page_size, page_token)
+            .map_err(|error| error.to_string())
+    }
+}
+
 /// Shared conversion used by SQLite and MySQL readers so both expose the same
 /// Go UUID, ThriftRW, blob encoding, and current-cluster semantics.
 pub(crate) fn decode_go_sql_domain_metadata(
@@ -785,6 +1730,98 @@ pub(crate) fn decode_go_sql_domain_metadata(
         },
         current_cluster,
     )
+}
+
+/// Encode the SQL `domains.data` payload written by Go's `sqlDomainStore`.
+/// This is the flattened `sqlblobs.DomainInfo` ThriftRW struct; unlike nested
+/// persistence DataBlobs, it has no `0x59` version prefix.
+pub fn encode_go_sql_domain_metadata(
+    metadata: &MatchingDomainMetadata,
+) -> Result<Vec<u8>, MatchingDomainMetadataError> {
+    use cadence_thrift::protocol::Writer;
+    use cadence_thrift::value::write_struct;
+
+    let mut thrift = Struct::default();
+    let mut put = |id, value| thrift.fields.push((id, value));
+    let text = |value: &str| Value::Bytes(value.as_bytes().to_vec());
+    put(10, text(&metadata.info.name));
+    put(12, text(&metadata.info.description));
+    put(14, text(&metadata.info.owner_email));
+    put(16, Value::I32(metadata.status_raw));
+    put(
+        18,
+        Value::I16(
+            metadata
+                .configuration
+                .workflow_execution_retention_period_in_days as i16,
+        ),
+    );
+    put(20, Value::Bool(metadata.configuration.emit_metric));
+    put(22, text(&metadata.archival_bucket));
+    put(24, Value::I16(metadata.archival_status_raw));
+    put(26, Value::I64(metadata.config_version));
+    put(28, Value::I64(metadata.notification_version));
+    put(30, Value::I64(metadata.failover_notification_version));
+    put(32, Value::I64(metadata.failover_version));
+    put(34, text(&metadata.replication.active_cluster_name));
+    put(
+        36,
+        Value::List(
+            metadata
+                .replication
+                .clusters
+                .iter()
+                .map(|cluster| text(&cluster.cluster_name))
+                .collect(),
+        ),
+    );
+    put(
+        38,
+        Value::Map(
+            metadata
+                .info
+                .data
+                .as_ref()
+                .into_iter()
+                .flat_map(|data| data.iter())
+                .map(|(key, value)| (text(key), text(value)))
+                .collect(),
+        ),
+    );
+    put(44, text(&metadata.configuration.history_archival_uri));
+    put(42, Value::I16(metadata.history_archival_status_raw));
+    put(48, text(&metadata.configuration.visibility_archival_uri));
+    put(46, Value::I16(metadata.visibility_archival_status_raw));
+    put(
+        50,
+        Value::I64(
+            metadata
+                .failover_end_time_nanos
+                .unwrap_or(GO_ZERO_TIME_NANOS),
+        ),
+    );
+    put(52, Value::I64(metadata.previous_failover_version));
+    put(54, Value::I64(metadata.last_updated_time_nanos));
+    if let Some(blob) = &metadata.bad_binaries {
+        put(39, Value::Bytes(blob.data.clone()));
+        put(40, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.isolation_groups {
+        put(56, Value::Bytes(blob.data.clone()));
+        put(58, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.async_workflow_config {
+        put(60, Value::Bytes(blob.data.clone()));
+        put(62, text(&blob.encoding));
+    }
+    if let Some(blob) = &metadata.active_clusters_config {
+        put(64, Value::Bytes(blob.data.clone()));
+        put(66, text(&blob.encoding));
+    }
+
+    let mut writer = Writer::new();
+    write_struct(&mut writer, &thrift);
+    Ok(writer.into_bytes())
 }
 
 struct SqlDomainRow {
@@ -1006,6 +2043,8 @@ fn thrift_to_metadata(
             .map_err(protocol_error)?
             .unwrap_or_default(),
         bad_binaries: decoded_bad_binaries.clone(),
+        isolation_groups: decoded_isolation_groups.clone(),
+        async_workflow_config: decoded_async_workflow_config.clone(),
     };
     let replication = DomainReplicationConfiguration {
         active_cluster_name,
@@ -1162,6 +2201,186 @@ mod tests {
     use super::*;
     use cadence_thrift::protocol::Writer;
     use cadence_thrift::value::write_struct;
+
+    #[test]
+    fn go_sql_domain_metadata_encoder_round_trips_the_domain_row() {
+        let uuid = uuid::Uuid::from_u128(17);
+        let metadata = MatchingDomainMetadata {
+            info: DomainInfo {
+                name: "sql-domain".into(),
+                status: Some(DomainStatus::Registered),
+                description: "description".into(),
+                owner_email: "owner@example.test".into(),
+                data: Some([("key".into(), "value".into())].into()),
+                uuid: uuid.to_string(),
+            },
+            configuration: DomainConfiguration {
+                workflow_execution_retention_period_in_days: 11,
+                emit_metric: true,
+                history_archival_status: Some(ArchivalStatus::Enabled),
+                history_archival_uri: "history://archive".into(),
+                visibility_archival_status: Some(ArchivalStatus::Disabled),
+                visibility_archival_uri: "visibility://archive".into(),
+                bad_binaries: None,
+                ..Default::default()
+            },
+            replication: DomainReplicationConfiguration {
+                active_cluster_name: "cluster-a".into(),
+                clusters: vec![cadence_api::types::ClusterReplicationConfiguration {
+                    cluster_name: "cluster-a".into(),
+                }],
+                active_clusters: None,
+            },
+            is_global_domain: true,
+            archival_bucket: "bucket".into(),
+            status_raw: 0,
+            archival_status_raw: 0,
+            history_archival_status_raw: 1,
+            visibility_archival_status_raw: 0,
+            config_version: 2,
+            notification_version: 3,
+            failover_notification_version: 4,
+            failover_version: 5,
+            previous_failover_version: 4,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 6,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+        let data = encode_go_sql_domain_metadata(&metadata).unwrap();
+        let decoded = decode_go_sql_domain_metadata(
+            uuid.as_bytes().to_vec(),
+            metadata.info.name.clone(),
+            metadata.is_global_domain,
+            data,
+            ENCODING_THRIFT_RW.into(),
+            "cluster-a",
+        )
+        .unwrap();
+        assert_eq!(decoded.info, metadata.info);
+        assert_eq!(decoded.configuration, metadata.configuration);
+        assert_eq!(decoded.replication, metadata.replication);
+        assert_eq!(decoded.archival_bucket, metadata.archival_bucket);
+        assert_eq!(decoded.config_version, metadata.config_version);
+        assert_eq!(decoded.notification_version, metadata.notification_version);
+        assert_eq!(
+            decoded.failover_notification_version,
+            metadata.failover_notification_version
+        );
+        assert_eq!(decoded.failover_version, metadata.failover_version);
+        assert_eq!(
+            decoded.previous_failover_version,
+            metadata.previous_failover_version
+        );
+        assert_eq!(
+            decoded.last_updated_time_nanos,
+            metadata.last_updated_time_nanos
+        );
+    }
+
+    #[test]
+    fn sqlite_domain_transactions_create_update_delete_and_advance_metadata() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let store = MatchingDomainMetadataStore::from_connection(connection, "cluster-a");
+        let uuid = uuid::Uuid::from_u128(0x1234);
+        let metadata = MatchingDomainMetadata {
+            info: DomainInfo {
+                name: "persisted-domain".into(),
+                uuid: uuid.to_string(),
+                status: Some(DomainStatus::Registered),
+                ..Default::default()
+            },
+            configuration: DomainConfiguration::default(),
+            replication: DomainReplicationConfiguration::default(),
+            is_global_domain: false,
+            archival_bucket: String::new(),
+            status_raw: DomainStatus::Registered as i32,
+            archival_status_raw: 0,
+            history_archival_status_raw: 0,
+            visibility_archival_status_raw: 0,
+            config_version: 0,
+            notification_version: 0,
+            failover_notification_version: 0,
+            failover_version: 0,
+            previous_failover_version: -1,
+            failover_end_time_nanos: None,
+            last_updated_time_nanos: 1,
+            bad_binaries: None,
+            isolation_groups: None,
+            async_workflow_config: None,
+            active_clusters_config: None,
+            decoded_bad_binaries: None,
+            decoded_isolation_groups: None,
+            decoded_async_workflow_config: None,
+            config_decode_error: None,
+        };
+
+        crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
+            &store, &metadata, 7,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::metadata_version(&store)
+                .unwrap(),
+            8
+        );
+        let stale_uuid = uuid::Uuid::from_u128(0x5678);
+        let mut stale = metadata.clone();
+        stale.info.name = "stale-domain".into();
+        stale.info.uuid = stale_uuid.to_string();
+        assert!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
+                &store, &stale, 7,
+            )
+            .is_err()
+        );
+        assert!(matches!(
+            store.get_domain(None, Some(&stale_uuid.to_string())),
+            Err(MatchingDomainMetadataError::NotFound(_))
+        ));
+        let mut persisted = store.get_domain(None, Some(&uuid.to_string())).unwrap();
+        persisted.info.description = "updated".into();
+        persisted.notification_version = 8;
+        crate::matching_domain_metadata::DomainMetadataPersistence::update_domain(
+            &store, &persisted, 8,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::metadata_version(&store)
+                .unwrap(),
+            9
+        );
+        assert_eq!(
+            store
+                .get_domain(Some("persisted-domain"), None)
+                .unwrap()
+                .info
+                .description,
+            "updated"
+        );
+        crate::matching_domain_metadata::DomainMetadataPersistence::delete_domain(
+            &store,
+            &uuid.to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            store.get_domain(None, Some(&uuid.to_string())),
+            Err(MatchingDomainMetadataError::NotFound(_))
+        ));
+    }
 
     #[test]
     fn cassandra_domain_udts_follow_go_domain_metadata_conversion() {

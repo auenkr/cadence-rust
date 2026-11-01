@@ -180,6 +180,39 @@ async fn shutdown_signal() -> anyhow::Result<()> {
     }
 }
 
+async fn persist_frontend_snapshot(
+    domains: cadence_persistence::InMemoryDomainStore,
+    executions: cadence_persistence::InMemoryExecutionStore,
+    domains_path: std::path::PathBuf,
+    executions_path: std::path::PathBuf,
+) {
+    if let Err(error) = tokio::task::spawn_blocking(move || {
+        if let Err(error) = domains.save_to_file(domains_path) {
+            eprintln!("warning: snapshot domains failed: {error}");
+        }
+        if let Err(error) = executions.save_to_file(executions_path) {
+            eprintln!("warning: snapshot executions failed: {error}");
+        }
+    })
+    .await
+    {
+        eprintln!("warning: snapshot task failed: {error}");
+    }
+}
+
+async fn stop_background_workers(
+    state: &handlers::AppState,
+    snapshot_task: Option<tokio::task::JoinHandle<()>>,
+    timer_task: tokio::task::JoinHandle<()>,
+) {
+    state.stop_background_workers();
+    for task in [snapshot_task, Some(timer_task)].into_iter().flatten() {
+        if let Err(error) = task.await {
+            eprintln!("stopping Frontend background worker failed: {error}");
+        }
+    }
+}
+
 async fn matching_http_tls(
     http: &config::HttpConfig,
 ) -> anyhow::Result<Option<axum_server::tls_rustls::RustlsConfig>> {
@@ -522,6 +555,47 @@ pub async fn run(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
 ) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, false, None).await
+}
+
+/// Run the shared launcher with Go Frontend's readiness and request-drain
+/// sequence enabled. Other service binaries keep their own shutdown contract.
+pub async fn run_frontend(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, true, None).await
+}
+
+/// Inputs the Frontend gets when it builds its production WorkflowService.
+pub struct FrontendHookContext {
+    pub state: handlers::AppState,
+    pub config: cadence_service_core::config::Config,
+}
+
+pub type FrontendHookFactory = Box<
+    dyn FnOnce(
+            FrontendHookContext,
+        ) -> anyhow::Result<cadence_service_core::workflow_api::SharedWorkflowApi>
+        + Send,
+>;
+
+/// Like `run_frontend`, installing the production WorkflowService built by
+/// `factory` into the gRPC and TChannel transports.
+pub async fn run_frontend_with_hook(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+    factory: FrontendHookFactory,
+) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, true, Some(factory)).await
+}
+
+async fn run_with_lifecycle(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+    frontend_lifecycle: bool,
+    mut frontend_hook: Option<FrontendHookFactory>,
+) -> anyhow::Result<()> {
     crate::grpc_tls::install_tls_crypto_provider();
     let cli = Cli::parse_as(bin_name);
     let (config, env, zone, root) = (cli.config, cli.env, cli.zone, cli.root);
@@ -743,6 +817,25 @@ pub async fn run(
                 num_history_shards,
                 ..Default::default()
             };
+            // Frontend Admin queue operations delegate to the History service,
+            // as the Go handler does. Keep the channel lazy so startup does not
+            // require History to be reachable yet.
+            if let Some(history) = cfg.services.get("history") {
+                let host = if history.rpc.host.is_empty() {
+                    "127.0.0.1"
+                } else {
+                    history.rpc.host.as_str()
+                };
+                let port = if history.rpc.grpc_port == 0 {
+                    7834
+                } else {
+                    history.rpc.grpc_port
+                };
+                let peer = format!("http://{host}:{port}");
+                let tls = crate::grpc_tls::client_tls(&history.rpc.tls)?;
+                state.history_admin_channel =
+                    Some(crate::grpc_tls::endpoint_channel(&peer, tls.as_ref())?);
+            }
             // Keep the registration alive through listener and Matching
             // shutdown. Drop runs on every normal/error return from this
             // command arm, mirroring the Go fx OnStop hook.
@@ -876,6 +969,11 @@ pub async fn run(
             {
                 state.grpc_max_message_size = limit;
             }
+            if wanted.contains(&service::ServiceName::Frontend) {
+                // Go starts all Frontend global quota collections before
+                // starting the workflow and admin handlers.
+                state.start_frontend_limiters().await?;
+            }
             // Optional file durability: load snapshots, then persist every
             // 5 seconds. Crash losses are bounded by the interval.
             let snapshot_paths: Option<(std::path::PathBuf, std::path::PathBuf)> =
@@ -891,7 +989,16 @@ pub async fn run(
                 }
                 if domains_path.exists() {
                     match cadence_persistence::InMemoryDomainStore::load_from_file(domains_path) {
-                        Ok(loaded) => state.domains = loaded,
+                        Ok(loaded) => {
+                            state.domains = loaded.clone();
+                            // AppState's persistence-facing manager normally
+                            // shares the same in-memory store. Rebind it when
+                            // replacing that store from the durable snapshot,
+                            // or Frontend RPCs would keep reading the empty
+                            // pre-load instance while the snapshot loop writes
+                            // the loaded state back to disk.
+                            state.domain_manager = std::sync::Arc::new(loaded);
+                        }
                         Err(e) => eprintln!("warning: ignoring {domains_path:?}: {e}"),
                     }
                 }
@@ -919,41 +1026,61 @@ pub async fn run(
             // Go's timer queue must keep advancing while development snapshots
             // serialize or write large histories. Never block an async RPC worker
             // with snapshot CPU or filesystem work.
-            if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
-                let snapshot_store = state.executions.clone();
-                let snapshot_domains = state.domains.clone();
-                tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    loop {
-                        interval.tick().await;
-                        let store = snapshot_store.clone();
-                        let domains = snapshot_domains.clone();
-                        let domains_path = domains_path.clone();
-                        let executions_path = executions_path.clone();
-                        // Await one write so snapshots cannot overlap or race
-                        // their atomic temporary-file rename.
-                        if let Err(error) = tokio::task::spawn_blocking(move || {
-                            if let Err(error) = domains.save_to_file(domains_path) {
-                                eprintln!("warning: snapshot domains failed: {error}");
+            let snapshot_task =
+                if let Some((domains_path, executions_path)) = snapshot_paths.clone() {
+                    let snapshot_store = state.executions.clone();
+                    let snapshot_domains = state.domains.clone();
+                    let mut shutdown = state.background_shutdown.subscribe();
+                    Some(tokio::spawn(async move {
+                        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        loop {
+                            tokio::select! {
+                                biased;
+                                changed = shutdown.changed() => {
+                                    if changed.is_err() || *shutdown.borrow() {
+                                        // Go Resource.Stop runs after the drain;
+                                        // flush development snapshots at that boundary.
+                                        persist_frontend_snapshot(
+                                            snapshot_domains,
+                                            snapshot_store,
+                                            domains_path,
+                                            executions_path,
+                                        ).await;
+                                        break;
+                                    }
+                                }
+                                _ = interval.tick() => {
+                                    // Await one write so snapshots cannot overlap
+                                    // or race their atomic temporary-file rename.
+                                    persist_frontend_snapshot(
+                                        snapshot_domains.clone(),
+                                        snapshot_store.clone(),
+                                        domains_path.clone(),
+                                        executions_path.clone(),
+                                    ).await;
+                                }
                             }
-                            if let Err(error) = store.save_to_file(executions_path) {
-                                eprintln!("warning: snapshot executions failed: {error}");
-                            }
-                        })
-                        .await
-                        {
-                            eprintln!("warning: snapshot task failed: {error}");
                         }
-                    }
-                });
-            }
+                    }))
+                } else {
+                    None
+                };
             let timer_store = state.executions.clone();
-            tokio::spawn(async move {
+            let mut shutdown = state.background_shutdown.subscribe();
+            let timer_task = tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
-                    interval.tick().await;
+                    tokio::select! {
+                        biased;
+                        changed = shutdown.changed() => {
+                            if changed.is_err() || *shutdown.borrow() {
+                                break;
+                            }
+                        }
+                        _ = interval.tick() => {}
+                    }
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as i64)
@@ -980,6 +1107,31 @@ pub async fn run(
             let history_state = state.clone();
             let tchannel_state = state.clone();
             let run_frontend = wanted.contains(&service::ServiceName::Frontend);
+            if run_frontend {
+                state
+                    .frontend_ready
+                    .store(false, std::sync::atomic::Ordering::Release);
+                let warmup_duration = {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    std::time::Duration::from_nanos(
+                        cadence_persistence::dynamic_config::duration(
+                            overlay.property_values("frontend.warmupDuration"),
+                            None,
+                            std::time::Duration::from_secs(30).as_nanos() as i64,
+                        )
+                        .max(0) as u64,
+                    )
+                };
+                let ready = state.frontend_ready.clone();
+                let shutting_down = state.frontend_shutting_down.clone();
+                let shutdown = state.background_shutdown.subscribe();
+                tokio::spawn(cadence_service_core::frontend_lifecycle::warmup(
+                    warmup_duration,
+                    ready,
+                    shutting_down,
+                    shutdown,
+                ));
+            }
             let app = if run_frontend {
                 handlers::router(state.clone())
             } else {
@@ -1258,7 +1410,22 @@ pub async fn run(
             } else {
                 None
             };
-            let configured_matching_stores = if run_matching && !embedded_development {
+            // Frontend opens the same configured default datastore as Go's
+            // persistence factory. The shared Matching adapters provide the
+            // native SQL/Cassandra pools and read-compatible domain metadata
+            // source; keep the handles alive for the process lifetime.
+            let serialization_encoding_config = state.admin.dynamic_config.clone();
+            let serialization_encoding: std::sync::Arc<dyn Fn() -> String + Send + Sync> =
+                std::sync::Arc::new(move || {
+                    let overlay = serialization_encoding_config.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::string(
+                        overlay.property_values("history.serializationEncoding"),
+                        "thriftrw",
+                    )
+                });
+            let configured_matching_stores = if (run_matching || run_frontend)
+                && !embedded_development
+            {
                 let persistence = cfg.persistence.clone();
                 let cluster_name = state.current_cluster_name.clone();
                 let dynamic_config = state.admin.dynamic_config.clone();
@@ -1272,22 +1439,14 @@ pub async fn run(
                             false,
                         )
                     });
-                let serialization_encoding_config = state.admin.dynamic_config.clone();
-                let serialization_encoding: std::sync::Arc<dyn Fn() -> String + Send + Sync> =
-                    std::sync::Arc::new(move || {
-                        let overlay = serialization_encoding_config.lock().expect("admin lock");
-                        cadence_persistence::dynamic_config::string(
-                            overlay.property_values("history.serializationEncoding"),
-                            "thriftrw",
-                        )
-                    });
+                let task_store_serialization_encoding = serialization_encoding.clone();
                 eprintln!("Matching startup: opening configured stores");
                 let mut stores = tokio::task::spawn_blocking(move || {
                     crate::matching_task_store::open_configured_default_store(
                         &persistence,
                         &cluster_name,
                         all_consistency_delete,
-                        serialization_encoding,
+                        task_store_serialization_encoding,
                     )
                 })
                 .await
@@ -1321,6 +1480,64 @@ pub async fn run(
             } else {
                 None
             };
+            state.history_node_store = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.history_node_store.clone());
+            state.visibility_store = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.visibility_store.clone());
+            state.domain_metadata_persistence = configured_matching_stores
+                .as_ref()
+                .and_then(|stores| stores.domain_metadata_persistence.clone());
+            if run_frontend {
+                if let Some(source) = configured_matching_stores
+                    .as_ref()
+                    .and_then(|stores| stores.domain_metadata_source.as_ref())
+                {
+                    let mut token: Option<Vec<u8>> = None;
+                    let mut domains = Vec::new();
+                    loop {
+                        match source.list_domains(
+                            crate::matching_domain_cache::DOMAIN_CACHE_REFRESH_PAGE_SIZE,
+                            token.as_deref(),
+                            crate::matching_domain_cache::DOMAIN_CACHE_PERSISTENCE_TIMEOUT,
+                        ) {
+                            Ok(page) => {
+                                domains.extend(page.domains);
+                                token = page.next_page_token;
+                                if token.is_none() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!(
+                                    "warning: loading configured Go domain metadata: {}",
+                                    error.message
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    state.domains.sync_matching_metadata(&domains);
+                    state.executions.sync_domains(
+                        &state
+                            .domains
+                            .list()
+                            .domains
+                            .into_iter()
+                            .filter_map(|desc| desc.domain_info.map(|info| (info.name, info.uuid)))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
+            if let Some(persistence) = state.domain_metadata_persistence.clone() {
+                state.domain_manager =
+                    std::sync::Arc::new(cadence_persistence::PersistedFrontendDomainManager::new(
+                        state.domains.clone(),
+                        persistence,
+                        serialization_encoding,
+                    ));
+            }
             let matching_domain_cache = if run_matching && !embedded_development {
                 let stores = configured_matching_stores
                     .as_ref()
@@ -1703,6 +1920,17 @@ pub async fn run(
                     )
                 });
             }
+            let (mut grpc_state, mut tchannel_state) = (grpc_state, tchannel_state);
+            if run_frontend {
+                if let Some(factory) = frontend_hook.take() {
+                    let api = factory(FrontendHookContext {
+                        state: state.clone(),
+                        config: cfg.clone(),
+                    })?;
+                    grpc_state.workflow_api = Some(api.clone());
+                    tchannel_state.workflow_api = Some(api);
+                }
+            }
             if run_frontend {
                 serving.spawn(async move {
                     (
@@ -1823,11 +2051,85 @@ pub async fn run(
                     (Some(Err(fatal.into_error())), None)
                 },
             };
+            let mut serving_shutdown_errors = Vec::new();
+            let mut frontend_resources_stopped = false;
             shutdown_trace(&format!(
                 "stop trigger received signal={} listener_or_fatal={}",
                 signal_result.is_some(),
                 serving_result.is_some()
             ));
+            if frontend_lifecycle && run_frontend && state.begin_frontend_shutdown() {
+                // Go Frontend changes RPC health before waiting for Ringpop/YARPC
+                // failure detection, then rejects new calls and leaves the
+                // final (at most one second) window for in-flight requests.
+                let shutdown_drain = {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    let nanos = cadence_persistence::dynamic_config::duration(
+                        overlay.property_values("frontend.shutdownDrainDuration"),
+                        None,
+                        0,
+                    );
+                    std::time::Duration::from_nanos(nanos.max(0) as u64)
+                };
+                let health_state = state.clone();
+                let handler_state = state.clone();
+                let limiter_state = state.clone();
+                let resource_state = state.clone();
+                cadence_service_core::frontend_lifecycle::shutdown(
+                    shutdown_drain,
+                    move || async move {
+                        health_state
+                            .frontend_shutting_down
+                            .store(true, std::sync::atomic::Ordering::Release);
+                        health_state
+                            .frontend_ready
+                            .store(false, std::sync::atomic::Ordering::Release);
+                    },
+                    move || async move {
+                        handler_state.stop_frontend_handler();
+                        handler_state.stop_frontend_admin_handler();
+                    },
+                    move || async move {
+                        limiter_state.stop_frontend_limiters().await;
+                    },
+                    move || async move {
+                        // Go closes the Frontend stop channel and stops its
+                        // resource-owned timer/admin workers after the final
+                        // request-drain window.
+                        stop_background_workers(&resource_state, snapshot_task, timer_task).await;
+                    },
+                )
+                .await;
+                // `cadence-frontend` is a dedicated Frontend process. Go
+                // calls Resource.Stop immediately after the Frontend drain;
+                // tear down its listener and TChannel resources here, before
+                // any remaining shared-runtime membership cleanup.
+                if !run_matching {
+                    shutdown_trace("Frontend resource stop begin");
+                    serving.abort_all();
+                    while let Some(result) = serving.join_next().await {
+                        match result {
+                            Ok((name, Ok(()))) => serving_shutdown_errors.push(format!(
+                                "{name} listener stopped unexpectedly during Frontend shutdown"
+                            )),
+                            Ok((name, Err(error))) => serving_shutdown_errors.push(format!(
+                                "{name} listener failed during Frontend shutdown: {error:#}"
+                            )),
+                            Err(error) if error.is_cancelled() => {}
+                            Err(error) => serving_shutdown_errors
+                                .push(format!("joining Frontend listener task: {error}")),
+                        }
+                    }
+                    if let Some(task) = matching_tchannel_task.take() {
+                        task.abort();
+                        let _ = task.await;
+                    }
+                    shutdown_trace("Frontend resource stop complete");
+                    frontend_resources_stopped = true;
+                }
+            } else {
+                stop_background_workers(&state, snapshot_task, timer_task).await;
+            }
             let mut fatal_writer = serving_result
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
@@ -1874,29 +2176,30 @@ pub async fn run(
                 } else {
                     Ok(())
                 };
-            let mut serving_shutdown_errors = Vec::new();
-            shutdown_trace("listener abort begin");
-            serving.abort_all();
-            while let Some(result) = serving.join_next().await {
-                match result {
-                    Ok((name, Ok(()))) => serving_shutdown_errors
-                        .push(format!("{name} listener stopped unexpectedly during drain")),
-                    Ok((name, Err(error))) => {
-                        serving_shutdown_errors
-                            .push(format!("{name} listener failed during drain: {error:#}"));
-                    }
-                    Err(error) if error.is_cancelled() => {}
-                    Err(error) => {
-                        serving_shutdown_errors.push(format!("joining listener task: {error}"))
+            if !frontend_resources_stopped {
+                shutdown_trace("listener abort begin");
+                serving.abort_all();
+                while let Some(result) = serving.join_next().await {
+                    match result {
+                        Ok((name, Ok(()))) => serving_shutdown_errors
+                            .push(format!("{name} listener stopped unexpectedly during drain")),
+                        Ok((name, Err(error))) => {
+                            serving_shutdown_errors
+                                .push(format!("{name} listener failed during drain: {error:#}"));
+                        }
+                        Err(error) if error.is_cancelled() => {}
+                        Err(error) => {
+                            serving_shutdown_errors.push(format!("joining listener task: {error}"))
+                        }
                     }
                 }
+                shutdown_trace("listener join complete");
+                if let Some(task) = matching_tchannel_task.take() {
+                    task.abort();
+                    let _ = task.await;
+                }
+                shutdown_trace("tchannel abort complete");
             }
-            shutdown_trace("listener join complete");
-            if let Some(task) = matching_tchannel_task.take() {
-                task.abort();
-                let _ = task.await;
-            }
-            shutdown_trace("tchannel abort complete");
             // Runtime shutdown joins every writer actor after stopping its
             // owners, so no SQL fatal notification can arrive after this
             // final sample. Keep the sample after listener teardown to catch

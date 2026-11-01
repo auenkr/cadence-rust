@@ -210,7 +210,9 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
 use cadence_common::go_string::GoString;
 use cadence_persistence::{
     semaphores::{AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata},
-    semaphores_native::{SemaphoreBucketPageBytes, SemaphoreCallContext, SemaphorePersistenceBytes},
+    semaphores_native::{
+        SemaphoreBucketPageBytes, SemaphoreCallContext, SemaphorePersistenceBytes,
+    },
 };
 
 pub fn limit_semaphore_store_bytes(
@@ -349,7 +351,9 @@ impl SemaphorePersistenceBytes for RateLimitedSemaphoreStoreBytes {
         context: &SemaphoreCallContext,
     ) -> Result<GoString, AcquireError> {
         self.permit_acquire("GetSemaphoreOwnershipByToken", domain_id)?;
-        self.store.confirm_with_context(domain_id, name, bucket, token_id, context).await
+        self.store
+            .confirm_with_context(domain_id, name, bucket, token_id, context)
+            .await
     }
     async fn grant_with_context(
         &self,
@@ -361,7 +365,9 @@ impl SemaphorePersistenceBytes for RateLimitedSemaphoreStoreBytes {
         context: &SemaphoreCallContext,
     ) -> Result<GrantOutcome, AcquireError> {
         self.permit_acquire("GrantSemaphoreToken", domain_id)?;
-        self.store.grant_with_context(domain_id, name, bucket, token_id, owner_id, context).await
+        self.store
+            .grant_with_context(domain_id, name, bucket, token_id, owner_id, context)
+            .await
     }
     async fn release_semaphore_token(
         &self,

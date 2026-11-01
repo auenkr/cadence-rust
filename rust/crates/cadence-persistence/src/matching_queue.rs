@@ -221,7 +221,10 @@ impl DurableTaskQueue {
     /// `true` means the retry operation obtained a lease; a failed renewal is
     /// reported once after its retry policy terminates.
     pub fn set_lease_observer(&self, observer: LeaseObserver) {
-        *self.lease_observer.lock().expect("matching lease observer lock") = Some(observer);
+        *self
+            .lease_observer
+            .lock()
+            .expect("matching lease observer lock") = Some(observer);
     }
     fn observe_lease(&self, success: bool) {
         if let Some(observer) = self
@@ -364,7 +367,11 @@ impl DurableTaskQueue {
         let _writer = self.writer.lock().expect("matching writer gate");
         self.append_serialized(data, now, None)
     }
-    pub fn append_pending(&self, pending: &[PendingTask], now_nanos: i64) -> Result<Vec<AllocatedTask>> {
+    pub fn append_pending(
+        &self,
+        pending: &[PendingTask],
+        now_nanos: i64,
+    ) -> Result<Vec<AllocatedTask>> {
         let data = pending
             .iter()
             .map(|task| (task.source_domain, task.data.clone()))
@@ -855,7 +862,8 @@ mod tests {
     // the store after acking, under the size threshold (batch 2) and the time threshold (1ns).
     #[test]
     fn matching_queue_gc_thresholds_drive_stored_row_counts() {
-        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 1000).unwrap().len();
+        let rows =
+            |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 1000).unwrap().len();
         let finish = |queue: &DurableTaskQueue, count: usize, now: i64| {
             queue.append(&vec![data(); count], now).unwrap();
             let batch = queue.read_batch(100, n(100), now + 1).unwrap();
@@ -865,24 +873,42 @@ mod tests {
         };
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
-            SqliteTaskStore::create(directory.path().join("gc-thresholds.db"), BlobEncoding::ThriftRW)
-                .unwrap(),
+            SqliteTaskStore::create(
+                directory.path().join("gc-thresholds.db"),
+                BlobEncoding::ThriftRW,
+            )
+            .unwrap(),
         );
         let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(100), 1).unwrap();
         // Size threshold: backlog 4 >= batch 2, deletes despite a one minute interval.
         finish(&queue, 4, 2);
         assert_eq!(rows(&store), 4);
         let minute = std::time::Duration::from_secs(60);
-        assert_eq!(queue.run_garbage_collection_with(false, n(2), minute).unwrap(), 4);
+        assert_eq!(
+            queue
+                .run_garbage_collection_with(false, n(2), minute)
+                .unwrap(),
+            4
+        );
         assert_eq!(rows(&store), 0);
         // Below both thresholds (backlog 1 < batch 100, interval not elapsed): nothing deleted.
         finish(&queue, 1, 10);
-        assert_eq!(queue.run_garbage_collection_with(false, n(100), minute).unwrap(), 0);
+        assert_eq!(
+            queue
+                .run_garbage_collection_with(false, n(100), minute)
+                .unwrap(),
+            0
+        );
         assert_eq!(rows(&store), 1);
         // Time threshold: 1ns interval has elapsed, so a small backlog is deleted.
         std::thread::sleep(std::time::Duration::from_millis(2));
         let nano = std::time::Duration::from_nanos(1);
-        assert_eq!(queue.run_garbage_collection_with(false, n(100), nano).unwrap(), 1);
+        assert_eq!(
+            queue
+                .run_garbage_collection_with(false, n(100), nano)
+                .unwrap(),
+            1
+        );
         assert_eq!(rows(&store), 0);
     }
     #[test]
@@ -1172,7 +1198,8 @@ mod tests {
             SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
                 .unwrap(),
         );
-        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
+        let rows =
+            |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
         let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
         queue.append(&vec![data(); 1200], 2).unwrap();
         assert_eq!(rows(&store), 1200);
@@ -1206,7 +1233,8 @@ mod tests {
             SqliteTaskStore::create(directory.path().join("tasks.db"), BlobEncoding::ThriftRW)
                 .unwrap(),
         );
-        let rows = |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
+        let rows =
+            |store: &SqliteTaskStore| store.get_tasks(&key(), 0, i64::MAX, 2000).unwrap().len();
         let queue = DurableTaskQueue::open(store.clone(), key(), 0, n(10), 1).unwrap();
         let tasks: Vec<TaskData> = (0..20)
             .map(|i| TaskData {

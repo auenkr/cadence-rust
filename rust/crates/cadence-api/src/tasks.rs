@@ -611,6 +611,142 @@ pub struct RespondActivityTaskFailedRequest {
     pub heartbeat_details: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordActivityTaskHeartbeatByIDRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub workflow_id: String,
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub activity_id: String,
+    #[serde(
+        rename = "details",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub details: Vec<u8>,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondActivityTaskCompletedByIDRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub workflow_id: String,
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub activity_id: String,
+    #[serde(
+        rename = "result",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub result: Vec<u8>,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondActivityTaskCanceledByIDRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub workflow_id: String,
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub activity_id: String,
+    #[serde(
+        rename = "details",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub details: Vec<u8>,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RespondActivityTaskFailedByIDRequest {
+    #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(
+        rename = "workflowID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub workflow_id: String,
+    #[serde(rename = "runID", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
+    #[serde(
+        rename = "activityID",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub activity_id: String,
+    #[serde(rename = "reason", default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(
+        rename = "details",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub details: Vec<u8>,
+    #[serde(
+        rename = "failureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub failure_options: Option<FailureOptions>,
+    #[serde(rename = "identity", default, skip_serializing_if = "String::is_empty")]
+    pub identity: String,
+    #[serde(
+        rename = "heartbeatDetails",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub heartbeat_details: Vec<u8>,
+}
+
 // ---------------------------------------------------------------------------
 // Task event attributes
 // ---------------------------------------------------------------------------

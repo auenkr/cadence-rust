@@ -14,7 +14,7 @@ pub fn validate_request(request: &Request) -> Result<()> {
     if execution.is_none_or(|e| e.workflow_id.is_empty()) {
         return Err(BadRequestError::new("Invalid WorkflowID."));
     }
-    if execution.is_none_or(|e| uuid::Uuid::parse_str(&e.run_id).is_err()) {
+    if execution.is_none_or(|e| !is_google_uuid(&e.run_id)) {
         return Err(BadRequestError::new("Invalid RunID."));
     }
     if request.maximum_page_size <= 0 {
@@ -31,6 +31,43 @@ pub fn validate_request(request: &Request) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Go's `google/uuid.Parse` accepts canonical, compact, braced and URN forms.
+fn is_google_uuid(value: &str) -> bool {
+    let value = value.strip_prefix("urn:uuid:").unwrap_or(value);
+    let value = value
+        .strip_prefix('{')
+        .and_then(|v| v.strip_suffix('}'))
+        .unwrap_or(value);
+    uuid::Uuid::parse_str(value).is_ok()
+}
+
+/// Normalize every spelling accepted by Go's `google/uuid.Parse` before a
+/// persistence lookup. The request and its pagination token keep the original
+/// string; only the execution-store key is canonicalized.
+pub fn canonical_run_id(value: &str) -> String {
+    uuid::Uuid::parse_str(value)
+        .map(|id| id.to_string())
+        .unwrap_or_else(|_| value.to_string())
+}
+
+/// Validate the in-memory execution store's opaque continuation cursor before
+/// it reaches the read path. A bad cursor must not silently restart at offset
+/// zero, which would return duplicate history pages.
+pub fn validate_persistence_token(token: &[u8]) -> Result<()> {
+    if token.is_empty() {
+        return Ok(());
+    }
+    let valid = std::str::from_utf8(token)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some();
+    if valid {
+        Ok(())
+    } else {
+        Err(BadRequestError::new("Invalid pagination token."))
+    }
 }
 
 pub fn select_history<'a>(
@@ -114,7 +151,9 @@ impl RawHistoryToken {
             .map_err(|_| cadence_api::errors::BadRequestError::new("Invalid pagination token."))
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> std::result::Result<Self, cadence_api::errors::BadRequestError> {
+    pub fn from_bytes(
+        bytes: &[u8],
+    ) -> std::result::Result<Self, cadence_api::errors::BadRequestError> {
         serde_json::from_slice(bytes)
             .map_err(|_| cadence_api::errors::BadRequestError::new("Invalid pagination token."))
     }
@@ -132,5 +171,53 @@ impl RawHistoryToken {
             return Err(BadRequestError::new("Invalid pagination token."));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadence_api::types::WorkflowExecution;
+
+    #[test]
+    fn raw_history_run_id_accepts_google_uuid_spellings() {
+        for run_id in [
+            "123e4567-e89b-12d3-a456-426614174000",
+            "123e4567e89b12d3a456426614174000",
+            "{123e4567-e89b-12d3-a456-426614174000}",
+            "urn:uuid:123e4567-e89b-12d3-a456-426614174000",
+        ] {
+            let request = Request {
+                execution: Some(WorkflowExecution::new("workflow", run_id)),
+                maximum_page_size: 1,
+                ..Default::default()
+            };
+            assert!(validate_request(&request).is_ok(), "{run_id}");
+            assert_eq!(
+                canonical_run_id(run_id),
+                "123e4567-e89b-12d3-a456-426614174000"
+            );
+        }
+        let invalid = Request {
+            execution: Some(WorkflowExecution::new("workflow", "not-a-uuid")),
+            maximum_page_size: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_request(&invalid).unwrap_err().message,
+            "Invalid RunID."
+        );
+    }
+
+    #[test]
+    fn raw_history_rejects_invalid_persistence_cursors_instead_of_restarting() {
+        assert!(validate_persistence_token(b"").is_ok());
+        assert!(validate_persistence_token(b"12").is_ok());
+        for token in [b"offset".as_slice(), b"-1", &[0xff]] {
+            assert_eq!(
+                validate_persistence_token(token).unwrap_err().message,
+                "Invalid pagination token."
+            );
+        }
     }
 }

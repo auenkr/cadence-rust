@@ -37,7 +37,9 @@ impl Manager {
         self.history_callback = Some(callback);
     }
     fn notify_history(&self) {
-        if let Some(callback) = &self.history_callback { callback(); }
+        if let Some(callback) = &self.history_callback {
+            callback();
+        }
     }
     fn put(&mut self, info: Info, now: i64, outstanding: bool) {
         let identity = info.identity.clone();
@@ -73,11 +75,15 @@ impl Manager {
         }
     }
     pub fn set_cancel(&mut self, id: &str, cancel: std::sync::Arc<dyn Fn() + Send + Sync>) {
-        if !id.is_empty() { self.cancellations.insert(id.into(), cancel); }
+        if !id.is_empty() {
+            self.cancellations.insert(id.into(), cancel);
+        }
     }
     /// Go CancelPoll: true when the poll is outstanding (its cancel callback, if set, runs).
     pub fn cancel(&self, id: &str) -> bool {
-        if let Some(cancel) = self.cancellations.get(id) { cancel(); }
+        if let Some(cancel) = self.cancellations.get(id) {
+            cancel();
+        }
         self.outstanding.contains_key(id)
     }
     pub fn end(&mut self, id: &str, now: i64) {

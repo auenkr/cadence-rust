@@ -15,8 +15,8 @@ use cadence_api::{
     types::{DataBlob, DomainInfo},
 };
 use cadence_matching::{
-    grpc_matching::Matching, matching_history::MatchingHistoryClient,
-    matching_query::QueryOutcome, matching_registry::QueueRegistry,
+    grpc_matching::Matching, matching_history::MatchingHistoryClient, matching_query::QueryOutcome,
+    matching_registry::QueueRegistry,
     matching_shard_routing::task_list_excluded_from_shard_distributor,
 };
 use cadence_persistence::{
@@ -152,7 +152,11 @@ async fn describe_loaded_lists(all_kinds: bool) -> m::GetTaskListsByDomainRespon
     add_domain(&state, DOMAIN, domain_id());
     add_domain(&state, OTHER_DOMAIN, other_domain_id());
     if all_kinds {
-        set_config(&state, "matching.matchingReturnAllTaskListKinds", json!(true));
+        set_config(
+            &state,
+            "matching.matchingReturnAllTaskListKinds",
+            json!(true),
+        );
     }
     let durable = durable(state);
     let now = now_nanos();
@@ -256,7 +260,10 @@ async fn list_task_list_partitions_success_returns_root_then_write_partitions() 
         .unwrap()
         .into_inner();
     let keys = |partitions: &[p::TaskListPartitionMetadata]| {
-        partitions.iter().map(|partition| partition.key.clone()).collect::<Vec<_>>()
+        partitions
+            .iter()
+            .map(|partition| partition.key.clone())
+            .collect::<Vec<_>>()
     };
     let expected = vec![
         TASK_LIST.to_string(),
@@ -280,11 +287,23 @@ async fn list_task_list_partitions_success_owner_hosts_match_go_lookups() {
         .await
         .unwrap()
         .into_inner();
-    assert_eq!(resp.decision_task_list_partitions[0].owner_host_name, "addr0");
+    assert_eq!(
+        resp.decision_task_list_partitions[0].owner_host_name,
+        "addr0"
+    );
     assert_eq!(resp.decision_task_list_partitions[1].owner_host_name, "");
-    assert_eq!(resp.decision_task_list_partitions[2].owner_host_name, "addr1");
-    assert_eq!(resp.activity_task_list_partitions[0].owner_host_name, "addr2");
-    assert_eq!(resp.activity_task_list_partitions[2].owner_host_name, "addr3");
+    assert_eq!(
+        resp.decision_task_list_partitions[2].owner_host_name,
+        "addr1"
+    );
+    assert_eq!(
+        resp.activity_task_list_partitions[0].owner_host_name,
+        "addr2"
+    );
+    assert_eq!(
+        resp.activity_task_list_partitions[2].owner_host_name,
+        "addr3"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -346,10 +365,25 @@ fn is_excluded_from_shard_distributor_go_cases() {
     // Go pins percentage onboarded at 100, so the short-lived flag and a UUID in the name decide.
     let cases = [
         ("flag disabled, uuid name", UUID_TASK_LIST, false, false),
-        ("flag enabled, no uuid in name", "my-regular-tasklist", true, false),
+        (
+            "flag enabled, no uuid in name",
+            "my-regular-tasklist",
+            true,
+            false,
+        ),
         ("flag enabled, uuid in name", UUID_TASK_LIST, true, true),
-        ("flag enabled, uuid-only name", UUID_ONLY_TASK_LIST, true, true),
-        ("flag disabled, no uuid in name", "my-regular-tasklist", false, false),
+        (
+            "flag enabled, uuid-only name",
+            UUID_ONLY_TASK_LIST,
+            true,
+            true,
+        ),
+        (
+            "flag disabled, no uuid in name",
+            "my-regular-tasklist",
+            false,
+            false,
+        ),
     ];
     for (name, task_list, flag_enabled, want) in cases {
         assert_eq!(

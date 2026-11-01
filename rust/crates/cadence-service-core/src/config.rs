@@ -200,7 +200,11 @@ pub struct DynamicConfigConfig {
 pub struct DynamicConfigClientConfig {
     #[serde(default)]
     pub filepath: String,
-    #[serde(default, rename = "pollInterval", deserialize_with = "de_duration_string")]
+    #[serde(
+        default,
+        rename = "pollInterval",
+        deserialize_with = "de_duration_string"
+    )]
     pub poll_interval: String,
 }
 
@@ -296,13 +300,13 @@ impl Config {
                 .as_ref()
                 .map_or(DynamicConfigProvider::Nop, DynamicConfigProvider::FileBased),
             "filebased" => DynamicConfigProvider::FileBased(&modern.file_based),
-            "configstore" => DynamicConfigProvider::ConfigStore(
-                if modern.config_store.validate().is_ok() {
+            "configstore" => {
+                DynamicConfigProvider::ConfigStore(if modern.config_store.validate().is_ok() {
                     modern.config_store.clone()
                 } else {
                     ConfigStoreClientConfig::go_defaults()
-                },
-            ),
+                })
+            }
             "openfeature" => DynamicConfigProvider::OpenFeature(&modern.open_feature),
             _ => DynamicConfigProvider::Nop,
         }
@@ -560,6 +564,56 @@ pub struct ShardedNosqlConfig {
 }
 
 impl PersistenceConfig {
+    /// Resolve the datastore name used by Go's persistence client for a
+    /// manager role. Workflow execution, history, domains, and metadata use
+    /// `defaultStore`; the database visibility manager exists only when
+    /// `visibilityStore` is configured. Advanced visibility is a distinct
+    /// manager and is not a SQL/Cassandra visibility store.
+    ///
+    /// Keeping this selection in one place prevents a service from silently
+    /// routing visibility writes to the default store when the deployment
+    /// configured a separate visibility database.
+    pub fn store_name_for(&self, role: PersistenceStoreRole) -> Result<Option<&str>, String> {
+        let configured = match role {
+            PersistenceStoreRole::Default
+            | PersistenceStoreRole::Domain
+            | PersistenceStoreRole::Metadata
+            | PersistenceStoreRole::History
+            | PersistenceStoreRole::Execution => self.default_store.as_str(),
+            PersistenceStoreRole::Visibility => self.visibility_store.as_str(),
+        };
+        if configured.is_empty() {
+            return match role {
+                PersistenceStoreRole::Default
+                | PersistenceStoreRole::Domain
+                | PersistenceStoreRole::Metadata
+                | PersistenceStoreRole::History
+                | PersistenceStoreRole::Execution => {
+                    Err("Frontend persistence requires persistence.defaultStore".into())
+                }
+                PersistenceStoreRole::Visibility => Ok(None),
+            };
+        }
+        if !self.datastores.contains_key(configured) {
+            return Err(format!(
+                "Frontend persistence store {configured:?} is not present in persistence.datastores"
+            ));
+        }
+        Ok(Some(configured))
+    }
+
+    /// Resolve the backend selected for a manager role using Go's literal
+    /// datastore key lookup semantics.
+    pub fn datastore_for(
+        &self,
+        role: PersistenceStoreRole,
+    ) -> Result<Option<&DatastoreConfig>, String> {
+        let Some(name) = self.store_name_for(role)? else {
+            return Ok(None);
+        };
+        Ok(self.datastores.get(name))
+    }
+
     /// Go `Persistence.FillDefaults` (`common/config/persistence.go:46-72`)
     /// for the fields this model carries.
     pub fn fill_defaults(&mut self) {
@@ -597,15 +651,19 @@ impl PersistenceConfig {
         let mut advanced_only = false;
         if self.datastores.contains_key(&self.visibility_store) {
             keys.push(self.visibility_store.as_str());
-        } else if !self.datastores.contains_key(&self.advanced_visibility_store) {
+        } else if !self
+            .datastores
+            .contains_key(&self.advanced_visibility_store)
+        {
             return Err("must provide one of VisibilityStore and AdvancedVisibilityStore".into());
         } else {
             advanced_only = true;
         }
         for key in keys {
-            let ds = self.datastores.get(key).ok_or_else(|| {
-                format!("persistence config: missing config for datastore {key}")
-            })?;
+            let ds = self
+                .datastores
+                .get(key)
+                .ok_or_else(|| format!("persistence config: missing config for datastore {key}"))?;
             if ds.cassandra.is_some() && ds.nosql.is_some() && ds.cassandra != ds.nosql {
                 return Err(format!(
                     "persistence config: datastore {key}: only one of Cassandra or NoSQL can be specified"
@@ -638,6 +696,18 @@ impl PersistenceConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceStoreRole {
+    Default,
+    /// Go's domain and metadata managers use persistence.defaultStore.
+    Domain,
+    Metadata,
+    /// Workflow execution and history managers use persistence.defaultStore.
+    History,
+    Execution,
+    Visibility,
+}
+
 fn validate_sql(sql: &SqlConfig, advanced_only: bool) -> Result<(), String> {
     if sql.use_multiple_databases {
         if !advanced_only {
@@ -660,10 +730,16 @@ fn validate_sql(sql: &SqlConfig, advanced_only: bool) -> Result<(), String> {
         }
         for entry in &sql.multiple_databases_config {
             if entry.database_name.is_empty() {
-                return Err("sql multipleDatabasesConfig persistence config: databaseName can not be empty".into());
+                return Err(
+                    "sql multipleDatabasesConfig persistence config: databaseName can not be empty"
+                        .into(),
+                );
             }
             if entry.connect_addr.is_empty() {
-                return Err("sql multipleDatabasesConfig persistence config: connectAddr can not be empty".into());
+                return Err(
+                    "sql multipleDatabasesConfig persistence config: connectAddr can not be empty"
+                        .into(),
+                );
             }
         }
     } else if sql.plugin_name != "sqlite" {
@@ -934,7 +1010,10 @@ impl Config {
         if !zone.is_empty() {
             candidates.push(Path::new(dir).join(format!("{env}_{zone}.yaml")));
         }
-        let files: Vec<_> = candidates.into_iter().filter(|path| path.exists()).collect();
+        let files: Vec<_> = candidates
+            .into_iter()
+            .filter(|path| path.exists())
+            .collect();
         if files.is_empty() {
             anyhow::bail!("unable to get config files: no config files found within {dir}");
         }
@@ -1159,7 +1238,9 @@ mod tests {
         assert_eq!(expand("p: ${MISSING:a:b}").unwrap(), "p: a:b");
         assert_eq!(expand("p: ${MISSING:\"\"}").unwrap(), "p: ");
         // Unset with no/empty default is an error, as in Go.
-        assert!(expand("p: ${MISSING}").unwrap_err().contains("default is empty"));
+        assert!(expand("p: ${MISSING}")
+            .unwrap_err()
+            .contains("default is empty"));
         assert!(expand("p: ${MISSING:}").is_err());
         assert!(expand("p: $MISSING").is_err());
         // `$$` is a literal dollar; non-name characters after `$` are copied.
@@ -1225,7 +1306,10 @@ mod tests {
     #[test]
     fn dynamic_config_provider_selection_matches_dynamicconfigfx() {
         let cfg = |yaml: &str| Config::from_yaml(yaml).unwrap();
-        assert_eq!(cfg("{}").dynamic_config_provider(), DynamicConfigProvider::Nop);
+        assert_eq!(
+            cfg("{}").dynamic_config_provider(),
+            DynamicConfigProvider::Nop
+        );
         // Names are matched exactly; anything else is the no-op client.
         assert_eq!(
             cfg("dynamicconfig: {client: FileBased}").dynamic_config_provider(),
@@ -1258,8 +1342,18 @@ mod tests {
             bad.dynamic_config_provider(),
             DynamicConfigProvider::ConfigStore(ConfigStoreClientConfig::go_defaults())
         );
-        assert!(ConfigStoreClientConfig { update_retry_attempts: -1, ..ConfigStoreClientConfig::go_defaults() }.validate().is_err());
-        assert!(ConfigStoreClientConfig { fetch_timeout_nanos: 0, ..ConfigStoreClientConfig::go_defaults() }.validate().is_err());
+        assert!(ConfigStoreClientConfig {
+            update_retry_attempts: -1,
+            ..ConfigStoreClientConfig::go_defaults()
+        }
+        .validate()
+        .is_err());
+        assert!(ConfigStoreClientConfig {
+            fetch_timeout_nanos: 0,
+            ..ConfigStoreClientConfig::go_defaults()
+        }
+        .validate()
+        .is_err());
         let feature = cfg("dynamicconfig: {client: openfeature, openfeature: {providerName: unleash, provider: {url: u}}}");
         assert!(matches!(
             feature.dynamic_config_provider(),
@@ -1281,28 +1375,52 @@ mod tests {
         };
         assert!(check("numHistoryShards: 4", "numHistoryShards: 0").contains("NumHistoryShards"));
         assert!(check("defaultStore: d", "defaultStore: ''").contains("DefaultStore"));
-        assert!(check("defaultStore: d", "defaultStore: zz").contains("missing config for datastore zz"));
+        assert!(check("defaultStore: d", "defaultStore: zz")
+            .contains("missing config for datastore zz"));
         assert!(check("visibilityStore: v", "visibilityStore: ''")
             .contains("one of VisibilityStore and AdvancedVisibilityStore"));
         assert!(check("databaseName: db, ", "").contains("databaseName can not be empty"));
-        assert!(check("connectAddr: 'h:1'", "connectAddr: ''").contains("connectAddr can not be empty"));
+        assert!(
+            check("connectAddr: 'h:1'", "connectAddr: ''").contains("connectAddr can not be empty")
+        );
         assert!(check("d: {nosql: {pluginName: cassandra}}", "d: {}").contains("provided 0"));
         // sqlite needs neither database nor address.
-        Config::from_yaml(&ok.replace("{pluginName: mysql, databaseName: db, connectAddr: 'h:1'}", "{pluginName: sqlite}"))
+        Config::from_yaml(&ok.replace(
+            "{pluginName: mysql, databaseName: db, connectAddr: 'h:1'}",
+            "{pluginName: sqlite}",
+        ))
+        .unwrap()
+        .persistence
+        .validate_go()
+        .unwrap();
+        // Advanced-visibility-only is accepted.
+        let advanced = ok.replace("visibilityStore: v", "advancedVisibilityStore: v");
+        Config::from_yaml(&advanced)
             .unwrap()
             .persistence
             .validate_go()
             .unwrap();
-        // Advanced-visibility-only is accepted.
-        let advanced = ok.replace("visibilityStore: v", "advancedVisibilityStore: v");
-        Config::from_yaml(&advanced).unwrap().persistence.validate_go().unwrap();
         // Deprecated `cassandra` key is promoted to NoSQL with plugin "cassandra".
-        let legacy = Config::from_yaml(&ok.replace("d: {nosql: {pluginName: cassandra}}", "d: {cassandra: {hosts: h}}")).unwrap();
+        let legacy = Config::from_yaml(&ok.replace(
+            "d: {nosql: {pluginName: cassandra}}",
+            "d: {cassandra: {hosts: h}}",
+        ))
+        .unwrap();
         let nosql = legacy.persistence.datastores["d"].nosql.as_ref().unwrap();
-        assert_eq!((nosql.plugin_name.as_str(), nosql.hosts.as_str()), ("cassandra", "h"));
+        assert_eq!(
+            (nosql.plugin_name.as_str(), nosql.hosts.as_str()),
+            ("cassandra", "h")
+        );
         legacy.persistence.validate_go().unwrap();
         // SQL nShards defaults to 1.
-        assert_eq!(cfg.persistence.datastores["v"].sql.as_ref().unwrap().n_shards, 1);
+        assert_eq!(
+            cfg.persistence.datastores["v"]
+                .sql
+                .as_ref()
+                .unwrap()
+                .n_shards,
+            1
+        );
     }
 
     #[test]
@@ -1663,5 +1781,103 @@ shard-distributor-matching:
             .metrics
             .validate()
             .is_err());
+    }
+
+    #[test]
+    fn frontend_persistence_roles_select_go_default_and_visibility_stores() {
+        let mut persistence: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: primary\nvisibilityStore: visibility\ndatastores:\n  primary: {sql: {pluginName: sqlite, databaseName: primary.db}}\n  visibility: {sql: {pluginName: postgres, databaseName: visibility, connectAddr: 'localhost:5432'}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Default),
+            Ok(Some("primary"))
+        );
+        for role in [
+            PersistenceStoreRole::Domain,
+            PersistenceStoreRole::Metadata,
+            PersistenceStoreRole::History,
+            PersistenceStoreRole::Execution,
+        ] {
+            assert_eq!(persistence.store_name_for(role), Ok(Some("primary")));
+            assert!(persistence
+                .datastore_for(role)
+                .unwrap()
+                .unwrap()
+                .sql
+                .is_some());
+        }
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(Some("visibility"))
+        );
+        assert_eq!(
+            persistence
+                .datastore_for(PersistenceStoreRole::Visibility)
+                .unwrap()
+                .unwrap()
+                .sql
+                .as_ref()
+                .unwrap()
+                .plugin_name,
+            "postgres"
+        );
+
+        persistence.visibility_store.clear();
+        persistence.advanced_visibility_store = "other".into();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(None)
+        );
+
+        let cassandra: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: primary\ndatastores:\n  primary: {nosql: {pluginName: cassandra, hosts: '127.0.0.1'}}\n",
+        )
+        .unwrap();
+        for role in [
+            PersistenceStoreRole::Domain,
+            PersistenceStoreRole::Metadata,
+            PersistenceStoreRole::History,
+            PersistenceStoreRole::Execution,
+        ] {
+            assert_eq!(cassandra.store_name_for(role), Ok(Some("primary")));
+            assert_eq!(
+                cassandra
+                    .datastore_for(role)
+                    .unwrap()
+                    .unwrap()
+                    .nosql
+                    .as_ref()
+                    .unwrap()
+                    .plugin_name,
+                "cassandra"
+            );
+        }
+    }
+
+    #[test]
+    fn frontend_persistence_selection_keeps_go_literal_store_names_and_errors() {
+        let mut persistence: PersistenceConfig = serde_yaml::from_str(
+            "defaultStore: ' primary '\nvisibilityStore: visibility\ndatastores:\n  primary: {sql: {pluginName: sqlite, databaseName: primary.db}}\n  visibility: {sql: {pluginName: sqlite, databaseName: visibility.db}}\n",
+        )
+        .unwrap();
+        assert!(persistence
+            .store_name_for(PersistenceStoreRole::Default)
+            .unwrap_err()
+            .contains("\" primary \""));
+        persistence.default_store.clear();
+        assert!(persistence
+            .store_name_for(PersistenceStoreRole::Default)
+            .unwrap_err()
+            .contains("defaultStore"));
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(Some("visibility"))
+        );
+        persistence.visibility_store.clear();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(None)
+        );
     }
 }
