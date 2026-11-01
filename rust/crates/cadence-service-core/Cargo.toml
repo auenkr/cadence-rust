@@ -36,7 +36,7 @@ semver = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tower = { version = "0.5", features = ["util"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 rand = "0.8"
 if-addrs = "0.13"
 hickory-resolver = { version = "0.24.4", default-features = false, features = ["system-config", "tokio-runtime"] }
