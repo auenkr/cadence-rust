@@ -900,22 +900,6 @@ mod tests {
             frontend_members[0].named_ports.get("grpc").copied(),
             Some(7836)
         );
-        provider_b.self_evict().await.unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if provider_a
-                    .members("cadence-frontend")
-                    .await
-                    .is_ok_and(|members| members.is_empty())
-                {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("Matching peer retained the self-evicted Frontend member");
-        provider_b.stop().await.unwrap();
         let matching_members = provider_a.members("cadence-matching").await.unwrap();
         assert_eq!(matching_members.len(), 1);
         assert_eq!(matching_members[0].address, addr_a.to_string());
@@ -976,6 +960,22 @@ mod tests {
         })
         .await
         .expect("restarted provider did not restore Matching membership");
+
+        provider_b.self_evict().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if restarted_provider
+                    .members("cadence-frontend")
+                    .await
+                    .is_ok_and(|members| members.is_empty())
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("restarted Matching peer retained the self-evicted Frontend member");
 
         restarted_provider.stop().await.unwrap();
         provider_b.stop().await.unwrap();
