@@ -1990,13 +1990,46 @@ async fn run_with_lifecycle(
                         task.abort();
                         let _ = task.await;
                     }
-                    if let Err(cleanup_error) = cleanup {
-                        anyhow::bail!(
-                            "starting Frontend Ringpop failed: {start_error}; cleanup failed: {cleanup_error}"
-                        );
+                    let mut cleanup_errors = Vec::new();
+                    if let Err(error) = cleanup {
+                        cleanup_errors.push(format!("stopping Frontend membership: {error}"));
                     }
-                    return Err(anyhow::Error::new(start_error)
-                        .context("starting Frontend Ringpop membership"));
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        if let Err(error) = lifecycle.withdraw().await {
+                            cleanup_errors.push(format!("withdrawing Matching membership: {error}"));
+                        }
+                    }
+                    if let Some(runtime) = matching_runtime.as_mut() {
+                        if let Err(error) = runtime.shutdown().await {
+                            cleanup_errors.push(format!("stopping Matching runtime: {error:#}"));
+                        }
+                    }
+                    if let Some(lifecycle) = matching_membership_lifecycle.as_mut() {
+                        if let Err(error) = lifecycle.stop_after_drain().await {
+                            cleanup_errors.push(format!("stopping Matching membership: {error}"));
+                        }
+                    }
+                    if let Some(task) = matching_tchannel_task.take() {
+                        task.abort();
+                        if let Err(error) = task.await {
+                            if !error.is_cancelled() {
+                                cleanup_errors.push(format!("joining Matching TChannel listener: {error}"));
+                            }
+                        }
+                    }
+                    if let Some(metrics) = matching_metrics_runtime.as_mut() {
+                        if let Err(error) = metrics.shutdown().await {
+                            cleanup_errors.push(format!("stopping Matching metrics: {error:#}"));
+                        }
+                    }
+                    if cleanup_errors.is_empty() {
+                        return Err(anyhow::Error::new(start_error)
+                            .context("starting Frontend Ringpop membership"));
+                    }
+                    anyhow::bail!(
+                        "starting Frontend Ringpop failed: {start_error}; cleanup also failed: {}",
+                        cleanup_errors.join("; ")
+                    );
                 }
             }
             if run_frontend {
