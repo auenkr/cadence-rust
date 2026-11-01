@@ -1,6 +1,10 @@
 //! Batch system workflow wire names from Go `batcher`.
 use std::collections::VecDeque;
 
+pub mod activity;
+pub mod grpc;
+pub mod workflow;
+
 pub const TASK_LIST: &str = "cadence-sys-batcher-tasklist";
 pub const V1_WORKFLOW_TYPE: &str = "cadence-sys-batch-workflow";
 pub const V2_WORKFLOW_TYPE: &str = "cadence-sys-batch-workflow-v2";

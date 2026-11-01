@@ -44,7 +44,7 @@ fn random_u64() -> u64 {
     std::collections::hash_map::RandomState::new().build_hasher().finish()
 }
 
-fn random_request_id() -> String {
+pub(crate) fn random_request_id() -> String {
     let (a, b) = (random_u64(), random_u64());
     format!(
         "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
@@ -153,7 +153,7 @@ struct RpcStatus {
     details: Vec<prost_types::Any>,
 }
 
-fn detail_name(status: &tonic::Status) -> String {
+pub(crate) fn detail_name(status: &tonic::Status) -> String {
     RpcStatus::decode(status.details())
         .ok()
         .and_then(|s| s.details.into_iter().next())

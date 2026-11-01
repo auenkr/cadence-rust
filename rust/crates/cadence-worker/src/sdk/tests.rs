@@ -1056,3 +1056,170 @@ fn local_activity_failure_is_recorded_and_surfaced() {
     };
     assert_eq!(f.failure.as_ref().unwrap().reason, "boom");
 }
+
+// ------------------------------------------------------------ batcher
+
+mod batcher_workflows {
+    use super::*;
+    use crate::batcher as b;
+    use crate::batcher::workflow::TuneSignal;
+
+    fn params() -> b::BatchParams {
+        b::BatchParams {
+            domain_name: "d".into(),
+            query: "q".into(),
+            reason: "r".into(),
+            batch_type: "terminate".into(),
+            ..Default::default()
+        }
+    }
+
+    fn start_with(params: &b::BatchParams) -> A {
+        A::WorkflowExecutionStartedEventAttributes(pb::WorkflowExecutionStartedEventAttributes {
+            task_list: Some(pb::TaskList {
+                name: b::TASK_LIST.into(),
+                ..Default::default()
+            }),
+            input: Some(pb::Payload {
+                data: converter::encode(params).unwrap(),
+            }),
+            ..Default::default()
+        })
+    }
+
+    fn registry() -> Registry {
+        let mut r = Registry::default();
+        b::workflow::register_sdk(&mut r);
+        r
+    }
+
+    fn decoded_params(a: &pb::ScheduleActivityTaskDecisionAttributes) -> b::BatchParams {
+        converter::decode(&a.input.as_ref().unwrap().data).unwrap()
+    }
+
+    #[test]
+    fn v1_schedules_activity_with_go_options_and_returns_its_result() {
+        let p = params();
+        let mut e = vec![ev(1, start_with(&p)), ev(2, dt_sched()), ev(3, dt_started())];
+        let out = process_decision_task(&registry(), input(b::V1_WORKFLOW_TYPE, e.clone())).unwrap();
+        let Some(DA::ScheduleActivityTaskDecisionAttributes(a)) = &out.decisions[0].attributes
+        else {
+            panic!("expected schedule activity");
+        };
+        assert_eq!(a.activity_type.as_ref().unwrap().name, b::ACTIVITY_TYPE);
+        assert_eq!(a.heartbeat_timeout.as_ref().unwrap().seconds, 10);
+        assert_eq!(a.schedule_to_start_timeout.as_ref().unwrap().seconds, 300);
+        let retry = a.retry_policy.as_ref().unwrap();
+        assert_eq!(retry.non_retryable_error_reasons, vec!["non-retriable-error"]);
+        assert_eq!(retry.maximum_attempts, 0);
+        assert_eq!(decoded_params(a).rps, 50);
+
+        let result = b::HeartBeatDetails {
+            success_count: 3,
+            ..Default::default()
+        };
+        e.extend([
+            ev(4, dt_completed()),
+            ev(5, activity_scheduled("0")),
+            ev(
+                6,
+                A::ActivityTaskCompletedEventAttributes(pb::ActivityTaskCompletedEventAttributes {
+                    scheduled_event_id: 5,
+                    result: Some(pb::Payload {
+                        data: converter::encode(&result).unwrap(),
+                    }),
+                    ..Default::default()
+                }),
+            ),
+            ev(7, dt_sched()),
+            ev(8, dt_started()),
+        ]);
+        let out = process_decision_task(&registry(), input(b::V1_WORKFLOW_TYPE, e)).unwrap();
+        let Some(DA::CompleteWorkflowExecutionDecisionAttributes(c)) = &out.decisions[0].attributes
+        else {
+            panic!("expected complete");
+        };
+        let back: b::HeartBeatDetails =
+            converter::decode(&c.result.as_ref().unwrap().data).unwrap();
+        assert_eq!(back.success_count, 3);
+    }
+
+    #[test]
+    fn invalid_params_fail_the_workflow() {
+        let mut p = params();
+        p.batch_type = "bogus".into();
+        let e = vec![ev(1, start_with(&p)), ev(2, dt_sched()), ev(3, dt_started())];
+        let out = process_decision_task(&registry(), input(b::V1_WORKFLOW_TYPE, e)).unwrap();
+        let Some(DA::FailWorkflowExecutionDecisionAttributes(f)) = &out.decisions[0].attributes
+        else {
+            panic!("expected fail");
+        };
+        let msg: String = converter::decode(&f.failure.as_ref().unwrap().details).unwrap();
+        assert_eq!(msg, "not supported batch type: bogus");
+    }
+
+    #[test]
+    fn v2_tune_signal_cancels_activity_and_restarts_with_progress() {
+        let p = params();
+        let tune = TuneSignal {
+            rps: 7,
+            concurrency: 0,
+        };
+        let mut e = vec![
+            ev(1, start_with(&p)),
+            ev(2, dt_sched()),
+            ev(3, dt_started()),
+            ev(4, dt_completed()),
+            ev(5, activity_scheduled("0")),
+            ev(6, signal(b::TUNE_SIGNAL, converter::encode(&tune).unwrap())),
+            ev(7, dt_sched()),
+            ev(8, dt_started()),
+        ];
+        let out =
+            process_decision_task(&registry(), input(b::V2_WORKFLOW_TYPE, e.clone())).unwrap();
+        assert!(matches!(
+            out.decisions[0].attributes,
+            Some(DA::RequestCancelActivityTaskDecisionAttributes(_))
+        ));
+
+        let progress = b::HeartBeatDetails {
+            current_page: 2,
+            page_token: vec![9],
+            ..Default::default()
+        };
+        e.extend([
+            ev(9, dt_completed()),
+            ev(
+                10,
+                A::ActivityTaskCancelRequestedEventAttributes(
+                    pb::ActivityTaskCancelRequestedEventAttributes {
+                        activity_id: "0".into(),
+                        ..Default::default()
+                    },
+                ),
+            ),
+            ev(
+                11,
+                A::ActivityTaskCanceledEventAttributes(pb::ActivityTaskCanceledEventAttributes {
+                    scheduled_event_id: 5,
+                    details: Some(pb::Payload {
+                        data: converter::encode(&progress).unwrap(),
+                    }),
+                    ..Default::default()
+                }),
+            ),
+            ev(12, dt_sched()),
+            ev(13, dt_started()),
+        ]);
+        let out = process_decision_task(&registry(), input(b::V2_WORKFLOW_TYPE, e)).unwrap();
+        let Some(DA::ScheduleActivityTaskDecisionAttributes(a)) = &out.decisions[0].attributes
+        else {
+            panic!("expected reschedule, got {:?}", out.decisions);
+        };
+        assert_eq!(a.activity_type.as_ref().unwrap().name, b::V2_ACTIVITY_TYPE);
+        let restarted = decoded_params(a);
+        assert_eq!(restarted.rps, 7);
+        assert_eq!(restarted.concurrency, 5);
+        assert_eq!(restarted.progress, Some(progress));
+    }
+}

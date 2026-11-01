@@ -137,6 +137,9 @@ pub struct ActivityOptions {
     pub start_to_close: Duration,
     pub heartbeat: Duration,
     pub retry_policy: Option<RetryPolicy>,
+    /// Go `ActivityOptions.WaitForCancellation`: a cancelled activity resolves
+    /// only once the server reports its outcome.
+    pub wait_for_cancellation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +159,10 @@ pub struct Core {
     pub decisions: Vec<PendingDecision>,
     pub activities: HashMap<String, Option<ActivityResult>>,
     pub activity_by_scheduled: HashMap<i64, String>,
+    /// Activities scheduled with `WaitForCancellation`.
+    pub activity_wait_cancel: std::collections::HashSet<String>,
+    /// Details of `ActivityTaskCanceled` events by activity id.
+    pub activity_cancel_details: HashMap<String, Vec<u8>>,
     pub timers: HashMap<String, Option<TimerOutcome>>,
     pub timer_by_started: HashMap<i64, String>,
     pub signals: HashMap<String, VecDeque<Vec<u8>>>,
@@ -271,6 +278,9 @@ impl Core {
             ..Default::default()
         };
         self.activities.insert(activity_id.clone(), None);
+        if o.wait_for_cancellation {
+            self.activity_wait_cancel.insert(activity_id.clone());
+        }
         self.push(
             DKey::Activity(activity_id.clone()),
             DA::ScheduleActivityTaskDecisionAttributes(attrs),
@@ -293,6 +303,10 @@ impl Core {
                     },
                 ),
             );
+            if self.activity_wait_cancel.contains(activity_id) {
+                // WaitForCancellation: the outcome event resolves the future.
+                return;
+            }
         }
         self.activities
             .insert(activity_id.to_owned(), Some(Err(ActivityError::Canceled)));
@@ -657,6 +671,17 @@ impl ActivityFuture {
     }
 
     /// Await and decode the result.
+    /// Await the outcome and, for a cancelled activity, the details it was
+    /// cancelled with (Go `CanceledError.Details`).
+    pub async fn get_detailed(mut self) -> (ActivityResult, Option<Vec<u8>>) {
+        let result = std::future::poll_fn(|cx| Pin::new(&mut self).poll(cx)).await;
+        let details = self
+            .core
+            .as_ref()
+            .and_then(|c| c.borrow().activity_cancel_details.get(&self.id).cloned());
+        (result, details)
+    }
+
     pub async fn get<R: DeserializeOwned>(self) -> Result<R, ActivityError> {
         let data = self.await?.unwrap_or_default();
         converter::decode(&data).map_err(|e| ActivityError::Invalid(e.to_string()))

@@ -76,6 +76,11 @@ impl WorkerService {
                     eprintln!("worker module {} not started: not ported to the Rust runtime", module.name)
                 }
                 ModuleState::Run => {
+                    if module.name == "batcher" {
+                        ensure_domain_exists(&client, BATCHER_DOMAIN).await;
+                        tasks.extend(self.start_batcher(svc, &endpoint, client.clone(), &identity, &stop_rx)?);
+                        eprintln!("worker module batcher started");
+                    }
                     if module.name == "parentclosepolicy" {
                         tasks.extend(self.start_parent_close_policy(
                             svc, &endpoint, client.clone(), config, &identity, &stop_rx,
@@ -94,6 +99,62 @@ impl WorkerService {
         self.lifecycle.stop();
         eprintln!("worker stopped");
         Ok(())
+    }
+
+    /// Go `startBatcher`: one worker on the batcher domain and task list.
+    fn start_batcher(
+        &self,
+        svc: &cadence_service_core::config::Config,
+        frontend: &str,
+        client: crate::client::CadenceClient,
+        identity: &str,
+        stop: &tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<Vec<tokio::task::JoinHandle<()>>> {
+        use crate::batcher as b;
+        let channel = tonic::transport::Endpoint::from_shared(frontend.to_owned())?.connect_lazy();
+        let remotes = remote_endpoints(svc);
+        let current = svc
+            .cluster_metadata
+            .as_ref()
+            .or(svc.legacy_cluster_metadata.as_ref())
+            .map(|m| m.current_cluster_name.clone())
+            .unwrap_or_default();
+        let backend = std::sync::Arc::new(b::grpc::GrpcBackend::new(
+            channel,
+            client.clone(),
+            current,
+            std::sync::Arc::new(move |cluster: &str| {
+                let endpoint = remotes.get(cluster)?;
+                Some(tonic::transport::Endpoint::from_shared(endpoint.clone()).ok()?.connect_lazy())
+            }),
+        ));
+        let mut activities = crate::sdk::activity::ActivityRegistry::default();
+        b::activity::register_activities(&mut activities, backend);
+        let mut workflows = crate::sdk::registry::Registry::default();
+        b::workflow::register_sdk(&mut workflows);
+        let decision = crate::sdk::decision_poller::DecisionWorker::new(
+            client.clone(),
+            std::sync::Arc::new(workflows),
+            crate::sdk::decision_poller::PollerOptions {
+                domain: BATCHER_DOMAIN.to_owned(),
+                task_list: b::TASK_LIST.to_owned(),
+                identity: identity.to_owned(),
+                binary_checksum: String::new(),
+            },
+        );
+        let activity = crate::sdk::activity::ActivityWorker::new(
+            client,
+            std::sync::Arc::new(activities),
+            crate::sdk::activity::ActivityPollerOptions {
+                domain: BATCHER_DOMAIN.to_owned(),
+                task_list: b::TASK_LIST.to_owned(),
+                identity: identity.to_owned(),
+            },
+        );
+        Ok(vec![
+            tokio::spawn(decision.run(stop.clone())),
+            tokio::spawn(activity.run(stop.clone())),
+        ])
     }
 
     fn start_parent_close_policy(
@@ -157,6 +218,9 @@ impl WorkerService {
     }
 }
 
+/// Go `constants.BatcherLocalDomainName`.
+pub const BATCHER_DOMAIN: &str = "cadence-batcher";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModuleState {
     Run,
@@ -183,7 +247,7 @@ pub fn startup_plan(config: &crate::config::Config) -> Vec<Module> {
         Module { name: "diagnostics", state: NotPorted },
         Module { name: "domaindeprecation", state: NotPorted },
         Module { name: "archiver", state: NotPorted },
-        Module { name: "batcher", state: gated(config.enable_batcher) },
+        Module { name: "batcher", state: if config.enable_batcher { Run } else { Disabled } },
         Module { name: "scheduler", state: gated(config.enable_scheduler) },
         Module {
             name: "parentclosepolicy",

@@ -221,6 +221,11 @@ fn apply_reply_event(core: &mut Core, e: &pb::HistoryEvent) -> Result<(), Replay
             Err(ActivityError::TimedOut(a.timeout_type)),
         ),
         A::ActivityTaskCanceledEventAttributes(a) => {
+            if let Some(id) = core.activity_by_scheduled.get(&a.scheduled_event_id).cloned() {
+                if let Some(d) = &a.details {
+                    core.activity_cancel_details.insert(id, d.data.clone());
+                }
+            }
             resolve_activity(core, a.scheduled_event_id, Err(ActivityError::Canceled))
         }
         A::TimerFiredEventAttributes(a) => {

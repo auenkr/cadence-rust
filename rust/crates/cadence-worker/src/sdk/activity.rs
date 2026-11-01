@@ -22,6 +22,8 @@ pub enum ActivityFailure {
     Failed { reason: String, details: Vec<u8> },
     /// The activity observed its cancellation request.
     Canceled,
+    /// Cancelled with details (Go `NewCanceledError(details)`).
+    CanceledWith(Vec<u8>),
 }
 
 impl ActivityFailure {
@@ -211,6 +213,17 @@ impl ActivityWorker {
                 Err(ActivityFailure::Canceled) => {
                     self.client
                         .cancel_activity_task(token.clone(), None, identity)
+                        .await
+                }
+                Err(ActivityFailure::CanceledWith(details)) => {
+                    self.client
+                        .cancel_activity_task(
+                            token.clone(),
+                            Some(pb::Payload {
+                                data: details.clone(),
+                            }),
+                            identity,
+                        )
                         .await
                 }
             };
