@@ -235,7 +235,9 @@ fn hook_operation(
     };
     let op = match (method.as_str(), route) {
         ("POST", "/api/v1/workflows/start") => "StartWorkflowExecution",
+        ("POST", "/api/v1/workflows/start-async") => "StartWorkflowExecutionAsync",
         ("POST", "/api/v1/workflows/signal-with-start") => "SignalWithStartWorkflowExecution",
+        ("POST", "/api/v1/workflows/signal-with-start-async") => "SignalWithStartWorkflowExecutionAsync",
         ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
@@ -944,6 +946,25 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             .map(cv::start)
             .transpose()?
             .ok_or_else(|| Status::invalid_argument("Request is not set."))?;
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("StartWorkflowExecutionAsync"))
+        {
+            let input = t::StartWorkflowExecutionAsyncRequest {
+                request: Some(inner.clone()),
+            };
+            let _: t::StartWorkflowExecutionAsyncResponse = self
+                .call_with_headers(
+                    Method::POST,
+                    "/api/v1/workflows/start-async",
+                    &input,
+                    &[],
+                )
+                .await?;
+            return Ok(Response::new(p::StartWorkflowExecutionAsyncResponse {}));
+        }
         let executions = self.domain(&inner.domain)?;
         cadence_api::validation::validate_start_workflow_execution_request(
             Some(&inner),
@@ -993,6 +1014,27 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             signal_input: cv::data(inner_proto.signal_input),
             control: inner_proto.control,
         };
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("SignalWithStartWorkflowExecutionAsync"))
+        {
+            let input = st::SignalWithStartWorkflowExecutionAsyncRequest {
+                request: Some(input.clone()),
+            };
+            let _: st::SignalWithStartWorkflowExecutionAsyncResponse = self
+                .call_with_headers(
+                    Method::POST,
+                    "/api/v1/workflows/signal-with-start-async",
+                    &input,
+                    &[],
+                )
+                .await?;
+            return Ok(Response::new(
+                p::SignalWithStartWorkflowExecutionAsyncResponse {},
+            ));
+        }
         let executions = self.domain(&input.domain)?;
         cadence_api::validation::validate_signal_with_start_request(
             Some(&input),
@@ -2296,7 +2338,9 @@ mod workflow_hook_tests {
             matches!(
                 operation,
                 "StartWorkflowExecution"
+                    | "StartWorkflowExecutionAsync"
                     | "SignalWithStartWorkflowExecution"
+                    | "SignalWithStartWorkflowExecutionAsync"
                     | "GetWorkflowExecutionHistory"
             )
         }
@@ -2415,6 +2459,139 @@ mod workflow_hook_tests {
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("hook failure"));
         assert_eq!(api.calls.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn async_start_hooks_preserve_wrappers_fields_and_caller_context() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::json!({}),
+            error: false,
+        });
+        // Default state has no local domain; successful replies prove both
+        // hook-served calls bypass the local execution store.
+        let frontend = frontend(api.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(27);
+        let headers = std::collections::HashMap::from([(
+            "x-cadence-caller".to_owned(),
+            "sdk-worker".to_owned(),
+        )]);
+        let start = p::StartWorkflowExecutionAsyncRequest {
+            request: Some(p::StartWorkflowExecutionRequest {
+                memo: Some(p::Memo {
+                    fields: std::collections::HashMap::from([(
+                        "memo-key".to_owned(),
+                        p::Payload { data: vec![1, 2, 3] },
+                    )]),
+                }),
+                header: Some(p::Header {
+                    fields: std::collections::HashMap::from([(
+                        "header-key".to_owned(),
+                        p::Payload { data: vec![4, 5] },
+                    )]),
+                }),
+                ..valid_start_request()
+            }),
+        };
+        let signal = p::SignalWithStartWorkflowExecutionAsyncRequest {
+            request: Some(p::SignalWithStartWorkflowExecutionRequest {
+                start_request: Some(valid_start_request()),
+                signal_name: "async-signal".into(),
+                signal_input: Some(p::Payload { data: vec![6, 7] }),
+                control: vec![8, 9],
+            }),
+        };
+        let start_call = frontend.start_workflow_execution_async(tonic::Request::new(start));
+        GRPC_CALLER
+            .scope((headers.clone(), Some(deadline)), start_call)
+            .await
+            .unwrap();
+        let signal_call = frontend
+            .signal_with_start_workflow_execution_async(tonic::Request::new(signal));
+        GRPC_CALLER
+            .scope((headers, Some(deadline)), signal_call)
+            .await
+            .unwrap();
+
+        let calls = api.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "StartWorkflowExecutionAsync");
+        assert_eq!(calls[0].1["request"]["domain"], "sample-domain");
+        assert_eq!(calls[0].1["request"]["memo"]["fields"]["memo-key"]["data"], "AQID");
+        assert_eq!(calls[0].1["request"]["header"]["fields"]["header-key"]["data"], "BAU=");
+        assert_eq!(calls[1].0, "SignalWithStartWorkflowExecutionAsync");
+        assert_eq!(calls[1].1["request"]["domain"], "sample-domain");
+        assert_eq!(calls[1].1["request"]["signalName"], "async-signal");
+        assert_eq!(calls[1].1["request"]["signalInput"]["data"], "Bgc=");
+        assert_eq!(calls[1].1["request"]["control"], "CAk=");
+        for (_, request, context) in calls.iter() {
+            assert!(request["request"].is_object());
+            assert_eq!(context.headers["x-cadence-caller"], "sdk-worker");
+            assert_eq!(context.deadline, Some(deadline));
+        }
+    }
+
+    #[tokio::test]
+    async fn async_start_hooks_validate_missing_nested_requests_before_dispatch() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::json!({}),
+            error: false,
+        });
+        let frontend = frontend(api.clone());
+        let missing_start = frontend
+            .start_workflow_execution_async(tonic::Request::new(
+                p::StartWorkflowExecutionAsyncRequest { request: None },
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(missing_start.code(), tonic::Code::InvalidArgument);
+        assert_eq!(missing_start.message(), "Request is not set.");
+
+        for request in [None, Some(p::SignalWithStartWorkflowExecutionRequest::default())] {
+            let error = frontend
+                .signal_with_start_workflow_execution_async(tonic::Request::new(
+                    p::SignalWithStartWorkflowExecutionAsyncRequest { request },
+                ))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        }
+        assert_eq!(api.calls.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn async_start_hook_errors_map_to_grpc_errors() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::Value::Null,
+            error: true,
+        });
+        let frontend = frontend(api.clone());
+        let error = frontend
+            .start_workflow_execution_async(tonic::Request::new(
+                p::StartWorkflowExecutionAsyncRequest {
+                    request: Some(valid_start_request()),
+                },
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("hook failure"));
+        let error = frontend
+            .signal_with_start_workflow_execution_async(tonic::Request::new(
+                p::SignalWithStartWorkflowExecutionAsyncRequest {
+                    request: Some(p::SignalWithStartWorkflowExecutionRequest {
+                        start_request: Some(valid_start_request()),
+                        ..Default::default()
+                    }),
+                },
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("hook failure"));
+        assert_eq!(api.calls.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]
