@@ -1,5 +1,6 @@
 //! Domain deprecation workflow names and Go-mirrored modules.
 
+pub mod activity;
 pub mod entities;
 pub mod helpers;
 pub mod workflow;

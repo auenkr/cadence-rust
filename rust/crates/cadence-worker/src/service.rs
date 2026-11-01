@@ -81,6 +81,12 @@ impl WorkerService {
                         tasks.extend(self.start_batcher(svc, &endpoint, client.clone(), &identity, &stop_rx)?);
                         eprintln!("worker module batcher started");
                     }
+                    if module.name == "domaindeprecation" {
+                        tasks.extend(self.start_domain_deprecation(
+                            svc, &endpoint, client.clone(), &identity, &stop_rx,
+                        )?);
+                        eprintln!("worker module domaindeprecation started");
+                    }
                     if module.name == "parentclosepolicy" {
                         tasks.extend(self.start_parent_close_policy(
                             svc, &endpoint, client.clone(), config, &identity, &stop_rx,
@@ -110,51 +116,53 @@ impl WorkerService {
         identity: &str,
         stop: &tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<Vec<tokio::task::JoinHandle<()>>> {
-        use crate::batcher as b;
+        let backend = batcher_backend(svc, frontend, &client)?;
+        let mut activities = crate::sdk::activity::ActivityRegistry::default();
+        crate::batcher::activity::register_activities(&mut activities, backend);
+        let mut workflows = crate::sdk::registry::Registry::default();
+        crate::batcher::workflow::register_sdk(&mut workflows);
+        Ok(spawn_worker(client, BATCHER_DOMAIN, crate::batcher::TASK_LIST, workflows, activities, identity, stop))
+    }
+
+    /// Go `startDomainDeprecation`. The Go worker also serves the batcher
+    /// workflows and activities through the SDK's global registry, because the
+    /// deprecation workflow starts `BatchWorkflowV2` as a child on its own
+    /// task list.
+    fn start_domain_deprecation(
+        &self,
+        svc: &cadence_service_core::config::Config,
+        frontend: &str,
+        client: crate::client::CadenceClient,
+        identity: &str,
+        stop: &tokio::sync::watch::Receiver<bool>,
+    ) -> anyhow::Result<Vec<tokio::task::JoinHandle<()>>> {
+        use crate::domaindeprecation as dd;
         let channel = tonic::transport::Endpoint::from_shared(frontend.to_owned())?.connect_lazy();
         let remotes = remote_endpoints(svc);
-        let current = svc
-            .cluster_metadata
-            .as_ref()
-            .or(svc.legacy_cluster_metadata.as_ref())
-            .map(|m| m.current_cluster_name.clone())
-            .unwrap_or_default();
-        let backend = std::sync::Arc::new(b::grpc::GrpcBackend::new(
+        let backend = std::sync::Arc::new(dd::activity::GrpcBackend::new(
             channel,
-            client.clone(),
-            current,
+            current_cluster(svc),
             std::sync::Arc::new(move |cluster: &str| {
                 let endpoint = remotes.get(cluster)?;
                 Some(tonic::transport::Endpoint::from_shared(endpoint.clone()).ok()?.connect_lazy())
             }),
+            client.clone(),
         ));
         let mut activities = crate::sdk::activity::ActivityRegistry::default();
-        b::activity::register_activities(&mut activities, backend);
+        dd::activity::register_activities(&mut activities, backend);
+        crate::batcher::activity::register_activities(&mut activities, batcher_backend(svc, frontend, &client)?);
         let mut workflows = crate::sdk::registry::Registry::default();
-        b::workflow::register_sdk(&mut workflows);
-        let decision = crate::sdk::decision_poller::DecisionWorker::new(
-            client.clone(),
-            std::sync::Arc::new(workflows),
-            crate::sdk::decision_poller::PollerOptions {
-                domain: BATCHER_DOMAIN.to_owned(),
-                task_list: b::TASK_LIST.to_owned(),
-                identity: identity.to_owned(),
-                binary_checksum: String::new(),
-            },
-        );
-        let activity = crate::sdk::activity::ActivityWorker::new(
+        dd::workflow::register_sdk(&mut workflows);
+        crate::batcher::workflow::register_sdk(&mut workflows);
+        Ok(spawn_worker(
             client,
-            std::sync::Arc::new(activities),
-            crate::sdk::activity::ActivityPollerOptions {
-                domain: BATCHER_DOMAIN.to_owned(),
-                task_list: b::TASK_LIST.to_owned(),
-                identity: identity.to_owned(),
-            },
-        );
-        Ok(vec![
-            tokio::spawn(decision.run(stop.clone())),
-            tokio::spawn(activity.run(stop.clone())),
-        ])
+            crate::workercommon::SYSTEM_DOMAIN,
+            dd::TASK_LIST,
+            workflows,
+            activities,
+            identity,
+            stop,
+        ))
     }
 
     fn start_parent_close_policy(
@@ -218,6 +226,64 @@ impl WorkerService {
     }
 }
 
+fn current_cluster(svc: &cadence_service_core::config::Config) -> String {
+    svc.cluster_metadata
+        .as_ref()
+        .or(svc.legacy_cluster_metadata.as_ref())
+        .map(|m| m.current_cluster_name.clone())
+        .unwrap_or_default()
+}
+
+fn batcher_backend(
+    svc: &cadence_service_core::config::Config,
+    frontend: &str,
+    client: &crate::client::CadenceClient,
+) -> anyhow::Result<std::sync::Arc<crate::batcher::grpc::GrpcBackend>> {
+    let channel = tonic::transport::Endpoint::from_shared(frontend.to_owned())?.connect_lazy();
+    let remotes = remote_endpoints(svc);
+    Ok(std::sync::Arc::new(crate::batcher::grpc::GrpcBackend::new(
+        channel,
+        client.clone(),
+        current_cluster(svc),
+        std::sync::Arc::new(move |cluster: &str| {
+            let endpoint = remotes.get(cluster)?;
+            Some(tonic::transport::Endpoint::from_shared(endpoint.clone()).ok()?.connect_lazy())
+        }),
+    )))
+}
+
+/// One decision worker plus one activity worker on a domain and task list.
+fn spawn_worker(
+    client: crate::client::CadenceClient,
+    domain: &str,
+    task_list: &str,
+    workflows: crate::sdk::registry::Registry,
+    activities: crate::sdk::activity::ActivityRegistry,
+    identity: &str,
+    stop: &tokio::sync::watch::Receiver<bool>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let decision = crate::sdk::decision_poller::DecisionWorker::new(
+        client.clone(),
+        std::sync::Arc::new(workflows),
+        crate::sdk::decision_poller::PollerOptions {
+            domain: domain.to_owned(),
+            task_list: task_list.to_owned(),
+            identity: identity.to_owned(),
+            binary_checksum: String::new(),
+        },
+    );
+    let activity = crate::sdk::activity::ActivityWorker::new(
+        client,
+        std::sync::Arc::new(activities),
+        crate::sdk::activity::ActivityPollerOptions {
+            domain: domain.to_owned(),
+            task_list: task_list.to_owned(),
+            identity: identity.to_owned(),
+        },
+    );
+    vec![tokio::spawn(decision.run(stop.clone())), tokio::spawn(activity.run(stop.clone()))]
+}
+
 /// Go `constants.BatcherLocalDomainName`.
 pub const BATCHER_DOMAIN: &str = "cadence-batcher";
 
@@ -245,7 +311,7 @@ pub fn startup_plan(config: &crate::config::Config) -> Vec<Module> {
         Module { name: "indexer", state: NotPorted },
         Module { name: "replicator", state: NotPorted },
         Module { name: "diagnostics", state: NotPorted },
-        Module { name: "domaindeprecation", state: NotPorted },
+        Module { name: "domaindeprecation", state: Run },
         Module { name: "archiver", state: NotPorted },
         Module { name: "batcher", state: if config.enable_batcher { Run } else { Disabled } },
         Module { name: "scheduler", state: gated(config.enable_scheduler) },

@@ -1,13 +1,24 @@
 //! Workflow planning from Go `domaindeprecation/workflow.go`.
 //!
-//! The SDK-driven workflow body (activity scheduling, the child batch
-//! execution and the visibility sleep) is not ported yet. This module holds
-//! its Go-equal timeouts, retry policy, batch request and attempt decisions so
-//! that body can be wired without re-deriving them.
+//! Go-equal timeouts, retry policy, batch request and attempt decisions, plus
+//! the SDK-driven workflow body (`domain_deprecation_workflow`).
 
 use std::time::Duration;
 
 use crate::batcher::{BatchParams, TerminateParams};
+use crate::batcher::{HeartBeatDetails, V2_WORKFLOW_TYPE};
+use crate::domaindeprecation::entities::DomainDeprecationParams;
+use crate::domaindeprecation::{
+    CHECK_ACTIVE_POLLERS_ACTIVITY, CHECK_OPEN_WORKFLOWS_ACTIVITY, DEPRECATE_DOMAIN_ACTIVITY,
+    DISABLE_ARCHIVAL_ACTIVITY,
+};
+use crate::sdk::converter;
+use crate::sdk::core::{
+    ActivityOptions, RetryPolicy, WorkflowContext, WorkflowError, WorkflowResult,
+};
+use crate::sdk::features::ChildWorkflowOptions;
+use crate::sdk::registry::Registry;
+
 use crate::domaindeprecation::helpers::{
     DEFAULT_ACTIVITY_HEARTBEAT_TIMEOUT, DEFAULT_ATTEMPTS_ON_RETRYABLE_ERROR, DEFAULT_CONCURRENCY,
     DEFAULT_MAX_ACTIVITY_RETRIES, DEFAULT_PAGE_SIZE, DEFAULT_RPS, ERR_ACCESS_DENIED_NON_RETRYABLE,
@@ -101,6 +112,106 @@ pub fn after_open_workflow_check(attempt: u32, has_open_workflows: bool) -> Atte
     } else {
         AttemptOutcome::RetryBatch
     }
+}
+
+fn activity_options() -> ActivityOptions {
+    ActivityOptions {
+        schedule_to_start: ACTIVITY_SCHEDULE_TO_START_TIMEOUT,
+        start_to_close: ACTIVITY_START_TO_CLOSE_TIMEOUT,
+        heartbeat: ACTIVITY_HEARTBEAT_TIMEOUT,
+        retry_policy: Some(RetryPolicy {
+            initial_interval: RETRY_INITIAL_INTERVAL,
+            backoff_coefficient: RETRY_BACKOFF_COEFFICIENT_MILLI as f64 / 1000.0,
+            maximum_interval: RETRY_MAXIMUM_INTERVAL,
+            maximum_attempts: 0,
+            expiration_interval: RETRY_EXPIRATION_INTERVAL,
+            non_retriable_error_reasons: NON_RETRIABLE_ERROR_REASONS
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+        }),
+        ..Default::default()
+    }
+}
+
+/// Deterministic UUID-shaped id (FNV-1a over run id and attempt). Go calls
+/// `uuid.New()` inside the workflow, which is not replay-safe; the Rust
+/// runtime matches child decisions by workflow id, so the id is derived.
+pub(crate) fn deterministic_uuid(run_id: &str, attempt: u32) -> String {
+    let mut h: u128 = 0x6c62272e07bb014262b821756295c58d;
+    for b in run_id.bytes().chain(attempt.to_be_bytes()) {
+        h ^= b as u128;
+        h = h.wrapping_mul(0x0000000001000000000000000000013b);
+    }
+    let h = (h & !(0xf000u128 << 64) | (4u128 << 76)) & !(0xc000u128 << 48) | (0x8000u128 << 48);
+    let x = format!("{h:032x}");
+    format!("{}-{}-{}-{}-{}", &x[0..8], &x[8..12], &x[12..16], &x[16..20], &x[20..32])
+}
+
+async fn run_step(ctx: &WorkflowContext, activity: &str, params: &DomainDeprecationParams)
+    -> Result<Option<Vec<u8>>, WorkflowError>
+{
+    ctx.execute_activity(activity, &activity_options(), params)
+        .await
+        .map_err(WorkflowError::from)
+}
+
+/// Go `DomainDeprecationWorkflow`.
+pub async fn domain_deprecation_workflow(ctx: WorkflowContext, input: Vec<u8>) -> WorkflowResult {
+    let params: DomainDeprecationParams =
+        converter::decode(&input).map_err(|e| WorkflowError::generic(e.to_string()))?;
+    if requires_active_poller_check(params.force) {
+        run_step(&ctx, CHECK_ACTIVE_POLLERS_ACTIVITY, &params).await?;
+    }
+    run_step(&ctx, DISABLE_ARCHIVAL_ACTIVITY, &params).await?;
+    run_step(&ctx, DEPRECATE_DOMAIN_ACTIVITY, &params).await?;
+
+    let batch = batch_params(&params.domain_name);
+    for attempt in 1..=MAX_BATCH_WORKFLOW_ATTEMPTS {
+        let uuid = deterministic_uuid(&ctx.info().run_id, attempt);
+        let options = ChildWorkflowOptions {
+            workflow_id: Some(batch_child_workflow_id(&params.domain_name, &uuid, attempt)),
+            execution_start_to_close: WORKFLOW_START_TO_CLOSE_TIMEOUT,
+            task_start_to_close: WORKFLOW_TASK_START_TO_CLOSE_TIMEOUT,
+            ..Default::default()
+        };
+        ctx.execute_child_workflow(V2_WORKFLOW_TYPE, &options, &batch)
+            .get::<HeartBeatDetails>()
+            .await
+            .map_err(|e| {
+                WorkflowError::generic(format!("batch workflow failed on attempt {attempt}: {e}"))
+            })?;
+        ctx.timer(VISIBILITY_REFRESH_WAIT_TIME).await.map_err(|e| {
+            WorkflowError::generic(format!("workflow sleep failed on attempt {attempt}: {e}"))
+        })?;
+        let open = ctx
+            .execute_activity(CHECK_OPEN_WORKFLOWS_ACTIVITY, &activity_options(), &params)
+            .await
+            .map_err(|e| {
+                WorkflowError::generic(format!(
+                    "failed to check open workflows on attempt {attempt}: {e}"
+                ))
+            })?;
+        let has_open: bool = converter::decode(&open.unwrap_or_default()).map_err(|e| {
+            WorkflowError::generic(format!(
+                "failed to check open workflows on attempt {attempt}: {e}"
+            ))
+        })?;
+        match after_open_workflow_check(attempt, has_open) {
+            AttemptOutcome::Completed => break,
+            AttemptOutcome::Failed => {
+                return Err(WorkflowError::generic(format!(
+                    "failed to terminate all workflows after {MAX_BATCH_WORKFLOW_ATTEMPTS} attempts"
+                )))
+            }
+            AttemptOutcome::RetryBatch => {}
+        }
+    }
+    Ok(None)
+}
+
+pub fn register_sdk(registry: &mut Registry) {
+    registry.register_workflow(crate::domaindeprecation::WORKFLOW_TYPE, domain_deprecation_workflow);
 }
 
 #[cfg(test)]

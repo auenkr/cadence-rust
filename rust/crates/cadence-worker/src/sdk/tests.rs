@@ -1265,3 +1265,108 @@ fn scanner_daemon_workflows_run_one_scavenger_activity() {
         ));
     }
 }
+
+mod domain_deprecation_workflow {
+    use super::*;
+    use crate::domaindeprecation as dd;
+    use crate::domaindeprecation::entities::DomainDeprecationParams;
+
+    fn start(force: bool) -> A {
+        let params = DomainDeprecationParams {
+            domain_name: "orders".into(),
+            security_token: "t".into(),
+            force,
+        };
+        A::WorkflowExecutionStartedEventAttributes(pb::WorkflowExecutionStartedEventAttributes {
+            task_list: Some(pb::TaskList { name: dd::TASK_LIST.into(), ..Default::default() }),
+            input: Some(pb::Payload { data: converter::encode(&params).unwrap() }),
+            ..Default::default()
+        })
+    }
+
+    fn registry() -> Registry {
+        let mut r = Registry::default();
+        dd::workflow::register_sdk(&mut r);
+        r
+    }
+
+    fn first_activity(out: &super::super::replay::TaskOutput) -> pb::ScheduleActivityTaskDecisionAttributes {
+        let Some(DA::ScheduleActivityTaskDecisionAttributes(a)) = &out.decisions[0].attributes
+        else {
+            panic!("expected schedule activity, got {:?}", out.decisions);
+        };
+        a.clone()
+    }
+
+    fn completed_step(events: &mut Vec<pb::HistoryEvent>, activity_id: &str, result: Vec<u8>) {
+        let n = events.len() as i64;
+        events.extend([
+            ev(n + 1, dt_completed()),
+            ev(n + 2, activity_scheduled(activity_id)),
+            ev(
+                n + 3,
+                A::ActivityTaskCompletedEventAttributes(pb::ActivityTaskCompletedEventAttributes {
+                    scheduled_event_id: n + 2,
+                    result: Some(pb::Payload { data: result }),
+                    ..Default::default()
+                }),
+            ),
+            ev(n + 4, dt_sched()),
+            ev(n + 5, dt_started()),
+        ]);
+    }
+
+    #[test]
+    fn checks_pollers_first_unless_forced_and_uses_go_retry_policy() {
+        let r = registry();
+        let e = vec![ev(1, start(false)), ev(2, dt_sched()), ev(3, dt_started())];
+        let out = process_decision_task(&r, input(dd::WORKFLOW_TYPE, e)).unwrap();
+        let a = first_activity(&out);
+        assert_eq!(a.activity_type.as_ref().unwrap().name, dd::CHECK_ACTIVE_POLLERS_ACTIVITY);
+        assert_eq!(a.heartbeat_timeout.as_ref().unwrap().seconds, 30);
+        let retry = a.retry_policy.as_ref().unwrap();
+        assert_eq!(retry.backoff_coefficient, 1.7);
+        assert_eq!(retry.expiration_interval.as_ref().unwrap().seconds, 86_400);
+        assert_eq!(retry.non_retryable_error_reasons.len(), 3);
+
+        let e = vec![ev(1, start(true)), ev(2, dt_sched()), ev(3, dt_started())];
+        let out = process_decision_task(&r, input(dd::WORKFLOW_TYPE, e)).unwrap();
+        assert_eq!(
+            first_activity(&out).activity_type.unwrap().name,
+            dd::DISABLE_ARCHIVAL_ACTIVITY
+        );
+    }
+
+    #[test]
+    fn after_three_activities_starts_batch_v2_child_with_go_options() {
+        let mut e = vec![ev(1, start(true)), ev(2, dt_sched()), ev(3, dt_started())];
+        completed_step(&mut e, "0", vec![]);
+        let out = process_decision_task(&registry(), input(dd::WORKFLOW_TYPE, e.clone())).unwrap();
+        assert_eq!(
+            first_activity(&out).activity_type.unwrap().name,
+            dd::DEPRECATE_DOMAIN_ACTIVITY
+        );
+        completed_step(&mut e, "1", vec![]);
+        let out = process_decision_task(&registry(), input(dd::WORKFLOW_TYPE, e)).unwrap();
+        let Some(DA::StartChildWorkflowExecutionDecisionAttributes(c)) = &out.decisions[0].attributes
+        else {
+            panic!("expected child start, got {:?}", out.decisions);
+        };
+        assert_eq!(c.workflow_type.as_ref().unwrap().name, "cadence-sys-batch-workflow-v2");
+        assert!(c.workflow_id.starts_with("domain-deprecation-batch-orders-"));
+        assert!(c.workflow_id.ends_with("-1"));
+        assert_eq!(c.execution_start_to_close_timeout.as_ref().unwrap().seconds, 30 * 86_400);
+        assert_eq!(c.task_start_to_close_timeout.as_ref().unwrap().seconds, 300);
+    }
+
+    #[test]
+    fn deterministic_uuid_is_stable_and_shaped_like_a_v4_uuid() {
+        let id = dd::workflow::deterministic_uuid("run", 1);
+        assert_eq!(id, dd::workflow::deterministic_uuid("run", 1));
+        assert_ne!(id, dd::workflow::deterministic_uuid("run", 2));
+        let parts: Vec<_> = id.split('-').collect();
+        assert_eq!(parts.iter().map(|p| p.len()).collect::<Vec<_>>(), [8, 4, 4, 4, 12]);
+        assert!(parts[2].starts_with('4'));
+        assert!(matches!(parts[3].as_bytes()[0], b'8' | b'9' | b'a' | b'b'));
+    }
+}
