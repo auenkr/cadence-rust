@@ -278,6 +278,8 @@ pub fn open_configured_default_store(
         }
         "mysql" => {
             validate_sql_shards(sql)?;
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 { anyhow::bail!("Frontend MySQL visibilityStore nShards must be positive, got {n_shards}"); }
             if !sql.use_multiple_databases && sql.database_name.is_empty() {
                 anyhow::bail!("Matching MySQL SQL persistence databaseName cannot be empty");
             }
@@ -410,6 +412,73 @@ pub fn open_configured_default_store(
             "Matching task persistence does not support SQL plugin {other:?}; supported plugins are sqlite, mysql, and postgres"
         ),
     }
+}
+
+/// Opens the optional Frontend visibility manager selected by Go's
+/// persistence factory. Matching-only startup must not call this function.
+pub fn open_configured_visibility_store(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>> {
+    use cadence_service_core::config::PersistenceStoreRole;
+    let Some((name, datastore)) = persistence
+        .store_name_for(PersistenceStoreRole::Visibility)
+        .map_err(anyhow::Error::msg)?
+        .zip(persistence.datastore_for(PersistenceStoreRole::Visibility).map_err(anyhow::Error::msg)?)
+    else {
+        return Ok(None);
+    };
+    if datastore.sql.is_some() && datastore.nosql.is_some() {
+        anyhow::bail!("Frontend visibilityStore {name:?} configures both SQL and NoSQL backends");
+    }
+    let sql = datastore.sql.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("Frontend visibilityStore {name:?} has no supported SQL visibility reader (Cassandra visibility support remains unavailable)")
+    })?;
+    let store: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> = match sql.plugin_name.as_str() {
+        "mysql" => {
+            validate_sql_shards(sql)?;
+            if !sql.use_multiple_databases && (sql.database_name.is_empty() || sql.connect_addr.is_empty()) {
+                anyhow::bail!("Frontend MySQL visibilityStore requires databaseName and connectAddr");
+            }
+            let tls = sql.tls.as_ref().map(|tls| MySqlTlsConfig {
+                enabled: tls.enabled, ssl_mode: tls.ssl_mode.clone(), ca_file: tls.ca_file.clone(),
+                cert_file: tls.cert_file.clone(), key_file: tls.key_file.clone(),
+                enable_host_verification: tls.enable_host_verification, require_client_auth: tls.require_client_auth,
+            });
+            let config = MySqlTaskStoreConfig {
+                user: sql.user.clone(), password: sql.password.clone(), database_name: sql.database_name.clone(),
+                connect_protocol: sql.connect_protocol.clone(), connect_addr: sql.connect_addr.clone(),
+                connect_attributes: sql.connect_attributes.clone(), max_conns: sql.max_conns,
+                max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0).then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
+                n_shards: n_shards as usize, use_multiple_databases: sql.use_multiple_databases,
+                multiple_databases_config: sql.multiple_databases_config.iter().map(|entry| cadence_persistence::matching_mysql::MySqlShardConfig {
+                    user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_addr: entry.connect_addr.clone(),
+                }).collect(), encoding: BlobEncoding::ThriftRW, tls,
+            };
+            Arc::new(MySqlTaskStore::connect_visibility_only(config)?)
+        }
+        "postgres" => {
+            validate_sql_shards(sql)?;
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 { anyhow::bail!("Frontend PostgreSQL visibilityStore nShards must be positive, got {n_shards}"); }
+            if !sql.use_multiple_databases && (sql.database_name.is_empty() || sql.connect_addr.is_empty()) {
+                anyhow::bail!("Frontend PostgreSQL visibilityStore requires databaseName and connectAddr");
+            }
+            let tls = sql.tls.as_ref().map(|tls| PostgresTlsConfig { enabled: tls.enabled, ssl_mode: tls.ssl_mode.clone(), ca_file: tls.ca_file.clone(), cert_file: tls.cert_file.clone(), key_file: tls.key_file.clone() });
+            let shards = if sql.use_multiple_databases {
+                sql.multiple_databases_config.iter().map(|entry| PostgresShardConfig { connect_addr: entry.connect_addr.clone(), user: entry.user.clone(), password: entry.password.clone(), database_name: entry.database_name.clone(), connect_attributes: sql.connect_attributes.clone(), tls: tls.clone() }).collect()
+            } else {
+                vec![PostgresShardConfig { connect_addr: sql.connect_addr.clone(), user: sql.user.clone(), password: sql.password.clone(), database_name: sql.database_name.clone(), connect_attributes: sql.connect_attributes.clone(), tls }]
+            };
+            Arc::new(PostgresTaskStore::connect_visibility_only(PostgresTaskStoreConfig {
+                shards, n_shards: n_shards as usize, use_multiple_databases: sql.use_multiple_databases,
+                max_conns: sql.max_conns, max_idle_conns: sql.max_idle_conns,
+                max_conn_lifetime: (sql.max_conn_lifetime_nanos > 0).then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)), encoding: BlobEncoding::ThriftRW,
+            })?)
+        }
+        other => anyhow::bail!("Frontend visibilityStore SQL plugin {other:?} is unsupported; supported plugins are mysql and postgres"),
+    };
+    Ok(Some(store))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -628,6 +697,41 @@ mod tests {
         let (name, datastore) = configured_default_datastore(&config).unwrap();
         assert_eq!(name, "primary");
         assert_eq!(datastore.sql.as_ref().unwrap().plugin_name, "sqlite");
+        let (visibility_name, visibility) = config
+            .store_name_for(crate::config::PersistenceStoreRole::Visibility)
+            .unwrap()
+            .zip(config.datastore_for(crate::config::PersistenceStoreRole::Visibility).unwrap())
+            .unwrap();
+        assert_eq!(visibility_name, "visibility");
+        assert_eq!(visibility.sql.as_ref().unwrap().plugin_name, "postgres");
+        assert!(open_configured_visibility_store(&config).is_err()); // missing connectAddr is rejected before opening.
+    }
+
+    #[test]
+    fn visibility_store_is_optional_and_rejects_unknown_role_store() {
+        let config = persistence(None);
+        assert!(open_configured_visibility_store(&config).unwrap().is_none());
+        let mut invalid = config;
+        invalid.visibility_store = "missing".into();
+        let error = open_configured_visibility_store(&invalid).unwrap_err().to_string();
+        assert!(error.contains("missing"), "{error}");
+    }
+
+    #[test]
+    fn visibility_constructor_does_not_require_task_schema() {
+        let config = crate::config::PersistenceConfig {
+            visibility_store: "vis".into(),
+            datastores: HashMap::from([("vis".into(), DatastoreConfig {
+                sql: Some(SqlConfig {
+                    plugin_name: "mysql".into(), database_name: "visibility_only".into(),
+                    connect_addr: "127.0.0.1:1".into(), ..Default::default()
+                }), ..Default::default()
+            })]),
+            ..Default::default()
+        };
+        // Pool construction is lazy and must not run task_lists/tasks schema
+        // validation; the database can contain only executions_visibility.
+        assert!(open_configured_visibility_store(&config).unwrap().is_some());
     }
 
     #[test]

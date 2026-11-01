@@ -474,6 +474,27 @@ pub struct MySqlTaskStore {
 }
 
 impl MySqlTaskStore {
+    /// Open only the configured SQL pools for Frontend visibility reads.
+    /// Unlike `connect`, this deliberately does not validate task tables: a
+    /// Go visibility database contains executions_visibility, not task schema.
+    pub fn connect_visibility_only(config: MySqlTaskStoreConfig) -> Result<Self> {
+        validate_mysql_shards(&config)?;
+        if config.n_shards == 0 || config.n_shards > i32::MAX as usize {
+            return Err(StorageError::BackendConfiguration(format!(
+                "MySQL Matching nShards must be in 1..={}, got {}",
+                i32::MAX, config.n_shards
+            )));
+        }
+        let pools = Self::create_mysql_pools(&config)?;
+        Ok(Self {
+            pools,
+            n_shards: config.n_shards,
+            encoding: config.encoding,
+            encoding_source: None,
+            isolation: configured_isolation(&config.connect_attributes)?,
+        })
+    }
+
     /// Encode new rows with Go's dynamic `history.serializationEncoding`
     /// instead of the (Go-ignored) SQL `encodingType` setting.
     pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {

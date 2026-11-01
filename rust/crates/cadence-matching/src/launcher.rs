@@ -1538,11 +1538,28 @@ async fn run_with_lifecycle(
                 .and_then(|stores| stores.visibility_store.clone());
             if run_frontend && !embedded_development {
                 let visibility_config = cfg.persistence.clone();
-                state.visibility_store = tokio::task::spawn_blocking(move || {
-                    crate::matching_task_store::open_configured_visibility_store(&visibility_config)
-                })
-                .await
-                .map_err(|error| anyhow::anyhow!("joining Frontend visibility store startup: {error}"))??;
+                let shares_default = visibility_config
+                    .store_name_for(config::PersistenceStoreRole::Visibility)
+                    .map_err(anyhow::Error::msg)?
+                    .zip(
+                        visibility_config
+                            .store_name_for(config::PersistenceStoreRole::Default)
+                            .map_err(anyhow::Error::msg)?,
+                    )
+                    .is_some_and(|(visibility, default)| visibility == default);
+                if shares_default {
+                    // Reuse the already-open default pool when Go configured
+                    // one SQL datastore for both task and visibility roles.
+                    state.visibility_store = configured_matching_stores
+                        .as_ref()
+                        .and_then(|stores| stores.visibility_store.clone());
+                } else {
+                    state.visibility_store = tokio::task::spawn_blocking(move || {
+                        crate::matching_task_store::open_configured_visibility_store(&visibility_config)
+                    })
+                    .await
+                    .map_err(|error| anyhow::anyhow!("joining Frontend visibility store startup: {error}"))??;
+                }
             }
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()

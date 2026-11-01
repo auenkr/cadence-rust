@@ -294,6 +294,33 @@ const DELETE_TASK: &str =
 const RANGE_DELETE_TASKS: &str = "DELETE FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id IN (SELECT task_id FROM tasks WHERE domain_id = $1 AND task_list_name = $2 AND task_type = $3 AND task_id <= $4 ORDER BY domain_id,task_list_name,task_type,task_id LIMIT $5 )";
 
 impl PostgresTaskStore {
+    /// Open configured pools for Frontend visibility reads without requiring
+    /// the task tables that are absent from Go visibility-only databases.
+    pub fn connect_visibility_only(config: PostgresTaskStoreConfig) -> Result<Self> {
+        validate_shard_config(&config)?;
+        if config.n_shards > u32::MAX as usize {
+            return Err(configuration_error(
+                "n_shards exceeds FarmHash routing range".into(),
+            ));
+        }
+        let max_open = if config.max_conns <= 0 { usize::MAX } else { usize::try_from(config.max_conns).unwrap_or(usize::MAX) };
+        let configured_idle = if config.max_idle_conns > 0 { usize::try_from(config.max_idle_conns).unwrap_or(usize::MAX) } else { DEFAULT_MAX_IDLE_CONNS };
+        let max_idle = configured_idle.min(max_open);
+        let max_lifetime = config.max_conn_lifetime.filter(|value| !value.is_zero());
+        let mut pools = Vec::with_capacity(config.shards.len());
+        for shard in config.shards {
+            let (options, tls) = postgres_options(&shard)?;
+            pools.push(PostgresConnectionPool::new(options, tls, max_open, max_idle, max_lifetime));
+        }
+        Ok(Self {
+            pools,
+            n_shards: config.n_shards,
+            use_multiple_databases: config.use_multiple_databases,
+            encoding: config.encoding,
+            encoding_source: None,
+        })
+    }
+
     /// Encode new rows with Go's dynamic `history.serializationEncoding`
     /// instead of the (Go-ignored) SQL `encodingType` setting.
     pub fn with_encoding_source(mut self, source: crate::matching_blob::EncodingSource) -> Self {
