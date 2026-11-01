@@ -1371,7 +1371,8 @@ async fn run_with_lifecycle(
                     })
                 };
                 let history = plugin(&cfg.persistence.default_store);
-                let visibility = plugin(&cfg.persistence.visibility_store).or_else(|| history.clone());
+                let visibility =
+                    plugin(&cfg.persistence.visibility_store).or_else(|| history.clone());
                 if let Some(history) = history {
                     state.admin.persistence_description.history_backend = history.clone();
                     state.admin.persistence_description.visibility_backend =

@@ -651,8 +651,7 @@ fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult
 }
 
 fn handle_describe_cluster(state: &AppState) -> HandlerResult {
-    let response = crate::admin::describe_cluster_for(&state.admin)
-        .map_err(AppError::internal)?;
+    let response = crate::admin::describe_cluster_for(&state.admin).map_err(AppError::internal)?;
     Ok(wrap_success(&response))
 }
 
@@ -679,9 +678,7 @@ fn require_domain_dlq_type(dlq_type: Option<cadence_api::enums::DLQType>) -> Res
 
 fn proxy_app_error(error: crate::admin_replication::ProxyError) -> AppError {
     match error {
-        crate::admin_replication::ProxyError::BadRequest(message) => {
-            AppError::bad_request(message)
-        }
+        crate::admin_replication::ProxyError::BadRequest(message) => AppError::bad_request(message),
         crate::admin_replication::ProxyError::Internal(message) => AppError::internal(message),
     }
 }

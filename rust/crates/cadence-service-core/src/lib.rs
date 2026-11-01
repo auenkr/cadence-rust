@@ -1,6 +1,7 @@
 //! Shared building blocks of every Cadence service: configuration, transports,
 //! metrics sinks, lifecycle helpers and the legacy in-process `AppState`.
 pub mod admin;
+pub mod admin_replication;
 pub mod cli;
 pub mod config;
 pub mod frontend_lifecycle;
@@ -17,7 +18,6 @@ pub mod matching_metrics_runtime;
 pub mod matching_metrics_statsd;
 pub mod matching_quota;
 pub mod openfeature;
-pub mod admin_replication;
 pub mod replication_convert;
 pub mod ringpop_discovery;
 pub mod ringpop_tchannel;

@@ -225,26 +225,28 @@ mod tests {
                 seconds: 2,
                 nanos: 5,
             }),
-            attributes: Some(pa::replication_task::Attributes::SyncActivityTaskAttributes(
-                pa::SyncActivityTaskAttributes {
-                    domain_id: "d".into(),
-                    workflow_execution: Some(cadence_proto::api::WorkflowExecution {
-                        workflow_id: "w".into(),
-                        run_id: "r".into(),
-                    }),
-                    version: 3,
-                    attempt: 2,
-                    last_worker_identity: "id".into(),
-                    version_history: Some(pa::VersionHistory {
-                        branch_token: vec![1],
-                        items: vec![pa::VersionHistoryItem {
-                            event_id: 4,
-                            version: 3,
-                        }],
-                    }),
-                    ..Default::default()
-                },
-            )),
+            attributes: Some(
+                pa::replication_task::Attributes::SyncActivityTaskAttributes(
+                    pa::SyncActivityTaskAttributes {
+                        domain_id: "d".into(),
+                        workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                            workflow_id: "w".into(),
+                            run_id: "r".into(),
+                        }),
+                        version: 3,
+                        attempt: 2,
+                        last_worker_identity: "id".into(),
+                        version_history: Some(pa::VersionHistory {
+                            branch_token: vec![1],
+                            items: vec![pa::VersionHistoryItem {
+                                event_id: 4,
+                                version: 3,
+                            }],
+                        }),
+                        ..Default::default()
+                    },
+                ),
+            ),
         };
         let out = replication_task_in(task).unwrap();
         assert_eq!(out.task_type, Some(e::ReplicationTaskType::SyncActivity));

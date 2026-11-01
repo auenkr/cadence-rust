@@ -383,7 +383,11 @@ pub fn describe_cluster_for(
 pub async fn describe_cluster(State(state): State<StdArc<AppState>>) -> Response {
     match describe_cluster_for(&state.admin) {
         Ok(response) => ok_json(response),
-        Err(error) => error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error,
+        ),
     }
 }
 
@@ -497,7 +501,8 @@ pub fn valid_search_attributes(
     admin: &AdminState,
 ) -> std::collections::HashMap<String, cadence_api::enums::IndexedValueType> {
     let mut keys = cadence_api::search_attributes::default_indexed_keys();
-    let configured = read_valid_attributes(&admin.dynamic_config.lock().expect("admin config lock"));
+    let configured =
+        read_valid_attributes(&admin.dynamic_config.lock().expect("admin config lock"));
     if let Ok(configured) = configured {
         keys.extend(configured.into_iter().filter_map(|(key, raw)| {
             cadence_api::enums::IndexedValueType::from_i32(raw).map(|t| (key, t))
@@ -587,15 +592,20 @@ pub async fn add_search_attribute(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AddSearchAttributeRequest>,
 ) -> Response {
-    match add_search_attribute_core(&state.admin, &req.security_token, req.search_attribute.as_ref())
-    {
+    match add_search_attribute_core(
+        &state.admin,
+        &req.security_token,
+        req.search_attribute.as_ref(),
+    ) {
         Ok(()) => ok_json(cadence_api::admin::AddSearchAttributeResponse {}),
         Err(AddSearchAttributeError::BadRequest(message)) => {
             bad_request(BadRequestError::new(message))
         }
-        Err(AddSearchAttributeError::Internal(message)) => {
-            error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, message)
-        }
+        Err(AddSearchAttributeError::Internal(message)) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
     }
 }
 
@@ -1881,7 +1891,9 @@ mod tests {
     #[test]
     fn describe_cluster_uses_resolver_members_per_role_like_go() {
         let admin = AdminState::default();
-        admin.membership.set(Some(Arc::new(FakeMembership { fail_role: None })));
+        admin
+            .membership
+            .set(Some(Arc::new(FakeMembership { fail_role: None })));
         let response = describe_cluster_for(&admin).unwrap();
         let versions = response.supported_client_versions.unwrap();
         assert_eq!(versions.go_sdk, "<=1.7.0");
@@ -1891,7 +1903,12 @@ mod tests {
         let roles: Vec<_> = membership.rings.iter().map(|r| r.role.as_str()).collect();
         assert_eq!(
             roles,
-            ["cadence-frontend", "cadence-history", "cadence-matching", "cadence-worker"]
+            [
+                "cadence-frontend",
+                "cadence-history",
+                "cadence-matching",
+                "cadence-worker"
+            ]
         );
         assert_eq!(membership.rings[0].member_count, 2);
         assert_eq!(membership.rings[2].member_count, 0);
@@ -1907,12 +1924,18 @@ mod tests {
     #[test]
     fn describe_cluster_without_resolver_has_empty_membership_and_errors_propagate() {
         let admin = AdminState::default();
-        let membership = describe_cluster_for(&admin).unwrap().membership_info.unwrap();
+        let membership = describe_cluster_for(&admin)
+            .unwrap()
+            .membership_info
+            .unwrap();
         assert!(membership.current_host.is_none() && membership.rings.is_empty());
-        admin
-            .membership
-            .set(Some(Arc::new(FakeMembership { fail_role: Some("cadence-history") })));
-        assert_eq!(describe_cluster_for(&admin).unwrap_err(), "ring unavailable");
+        admin.membership.set(Some(Arc::new(FakeMembership {
+            fail_role: Some("cadence-history"),
+        })));
+        assert_eq!(
+            describe_cluster_for(&admin).unwrap_err(),
+            "ring unavailable"
+        );
     }
 
     #[test]

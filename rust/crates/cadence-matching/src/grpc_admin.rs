@@ -921,7 +921,9 @@ impl a::admin_api_server::AdminApi for Admin {
                     "domain replication DLQ is unavailable for this persistence backend",
                 )
             })?;
-        let domain = persistence.domain_replication_dlq_size().map_err(Status::internal)?;
+        let domain = persistence
+            .domain_replication_dlq_size()
+            .map_err(Status::internal)?;
         let mut history = self.history_client()?;
         let response = history
             .count_dlq_messages(crate::admin::history_admin_request(
