@@ -23,7 +23,8 @@ Admin/Domain/Schedule APIs it calls must work against the Rust Frontend.
    RFC3339, ns Durations and string enums, so these are converted explicitly.
 
 ## CI evidence
-(see below; updated per run)
+- Run https://github.com/auenkr/cadence-rust/actions/runs/41314536592 (package=cadence-frontend), head 17cd77b68, conclusion: success (format, clippy, tests).
+- Earlier runs 41313528769 (fmt), 41313759228 (clippy result_large_err), 41314148334 (fmt) failed and were fixed.
 
 ## Remaining gaps
 - Wire the History-proxy methods and scheduler_wire into the live transport
