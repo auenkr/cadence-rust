@@ -6,21 +6,21 @@
 
 pub mod cassandra;
 pub mod config_store;
+pub mod domain_audit;
 pub mod domain_replication;
 pub mod domain_update;
-pub mod domain_audit;
 pub mod domains;
 pub mod dynamic_config;
 pub mod executions;
 pub mod history_branch;
 pub mod history_reader;
-pub mod visibility_reader;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;
 pub mod semaphores_native;
 pub mod version_history;
 pub mod visibility;
+pub mod visibility_reader;
 
 pub use domains::{
     DomainRecord, FailoverError, FrontendDomainError, FrontendDomainManager, InMemoryDomainStore,

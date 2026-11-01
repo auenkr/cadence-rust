@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use cadence_common::duration::parse_nanos;
 use serde_json::{Map, Value};
 
-use super::provider::{self, ErrorCode, FeatureProvider, FlagValue, FlattenedContext, ResolutionError};
+use super::provider::{
+    self, ErrorCode, FeatureProvider, FlagValue, FlattenedContext, ResolutionError,
+};
 
 /// Go `dynamicconfig.NotFoundError` message (`types.EntityNotExistsError`).
 pub const NOT_FOUND_MESSAGE: &str = "unable to find key";
@@ -252,7 +254,11 @@ impl OpenFeatureClient {
         default: Map<String, Value>,
         filters: &FlattenedContext,
     ) -> (Map<String, Value>, Option<ClientError>) {
-        match evaluate(name, FlagValue::Object(Value::Object(default.clone())), filters) {
+        match evaluate(
+            name,
+            FlagValue::Object(Value::Object(default.clone())),
+            filters,
+        ) {
             (FlagValue::Object(Value::Object(value)), None) => (value, None),
             (FlagValue::Object(other), None) => (
                 default,
@@ -297,7 +303,11 @@ impl OpenFeatureClient {
         default: Vec<Value>,
         filters: &FlattenedContext,
     ) -> (Vec<Value>, Option<ClientError>) {
-        match evaluate(name, FlagValue::Object(Value::Array(default.clone())), filters) {
+        match evaluate(
+            name,
+            FlagValue::Object(Value::Array(default.clone())),
+            filters,
+        ) {
             (FlagValue::Object(Value::Array(value)), None) => (value, None),
             (FlagValue::Object(other), None) => (
                 default,
@@ -343,7 +353,9 @@ impl OpenFeatureClient {
 /// Defensive only: a conforming provider returns the variant of the default
 /// it was given, so this is unreachable for the providers in this crate.
 fn type_error(expected: &str, got: &FlagValue) -> ClientError {
-    ClientError::Message(format!("openfeature provider returned {got:?} for a {expected} flag"))
+    ClientError::Message(format!(
+        "openfeature provider returned {got:?} for a {expected} flag"
+    ))
 }
 
 /// Go `%T` names for the JSON values a provider can return. Go decodes JSON
@@ -430,7 +442,11 @@ mod tests {
     }
 
     fn static_variant(value: Value) -> TestFlag {
-        TestFlag { disabled: false, variant: Some(value), evaluator: None }
+        TestFlag {
+            disabled: false,
+            variant: Some(value),
+            evaluator: None,
+        }
     }
 
     /// Mirrors `memprovider.InMemoryProvider` resolution: missing flags are
@@ -530,7 +546,10 @@ mod tests {
     }
 
     fn filters(pairs: &[(&str, Value)]) -> FlattenedContext {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     fn no_filters() -> FlattenedContext {
@@ -563,7 +582,9 @@ mod tests {
         );
         provider::register(name, constructor).unwrap();
         let err = register_provider(name, None).unwrap_err();
-        assert!(err.to_string().contains("failed to construct openfeature provider"));
+        assert!(err
+            .to_string()
+            .contains("failed to construct openfeature provider"));
         // Go's registerOnce keeps the first outcome, so a retry sees it too.
         let again = register_provider(name, None).unwrap_err();
         assert_eq!(err.to_string(), again.to_string());
@@ -615,8 +636,8 @@ mod tests {
         register_provider(name, None).unwrap();
         register_provider(name, None).unwrap();
         assert_eq!(constructed.load(Ordering::SeqCst), 1);
-        let (value, err) = OpenFeatureClient::new()
-            .get_bool_value("testGetBoolPropertyKey", false, &no_filters());
+        let (value, err) =
+            OpenFeatureClient::new().get_bool_value("testGetBoolPropertyKey", false, &no_filters());
         assert!(err.is_none());
         assert!(value);
         deregister_provider();
@@ -645,7 +666,9 @@ mod tests {
         }
         register_provider(first, None).unwrap();
         let err = register_provider(second, None).unwrap_err();
-        assert!(err.to_string().contains("already registered in this process"));
+        assert!(err
+            .to_string()
+            .contains("already registered in this process"));
         deregister_provider();
     }
 
@@ -664,7 +687,10 @@ mod tests {
         assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
         let (value, err) = client.get_bool_value("testGetBoolPropertyKey", false, &no_filters());
         assert!(err.is_none());
-        assert!(value, "second service still attached: evaluation must still work");
+        assert!(
+            value,
+            "second service still attached: evaluation must still work"
+        );
 
         deregister_provider();
         assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
@@ -728,7 +754,11 @@ mod tests {
         let evaluator: ContextEvaluator = Arc::new(|ctx: &FlattenedContext| {
             Some(ctx.get("domainName").cloned().unwrap_or(Value::Null))
         });
-        let flag = TestFlag { disabled: false, variant: None, evaluator: Some(evaluator) };
+        let flag = TestFlag {
+            disabled: false,
+            variant: None,
+            evaluator: Some(evaluator),
+        };
         let (client, _) = new_test_client(
             "test-filters-propagate",
             one_flag("testGetStringPropertyKey", flag),
@@ -769,7 +799,10 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-float",
-            one_flag("testGetFloat64PropertyKey", static_variant(Value::from(4.25))),
+            one_flag(
+                "testGetFloat64PropertyKey",
+                static_variant(Value::from(4.25)),
+            ),
         );
         let (value, err) = client.get_float_value("testGetFloat64PropertyKey", 0.0, &no_filters());
         assert!(err.is_none());
@@ -783,7 +816,10 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-string",
-            one_flag("testGetStringPropertyKey", static_variant(Value::from("hello"))),
+            one_flag(
+                "testGetStringPropertyKey",
+                static_variant(Value::from("hello")),
+            ),
         );
         let (value, err) = client.get_string_value("testGetStringPropertyKey", "", &no_filters());
         assert!(err.is_none());
@@ -812,7 +848,10 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-map-mismatch",
-            one_flag("testGetMapPropertyKey", static_variant(Value::from("not-a-map"))),
+            one_flag(
+                "testGetMapPropertyKey",
+                static_variant(Value::from("not-a-map")),
+            ),
         );
         let (value, err) = client.get_map_value("testGetMapPropertyKey", Map::new(), &no_filters());
         assert!(is_message(&err, "value type is not map but is"));
@@ -826,9 +865,13 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-duration",
-            one_flag("testGetDurationPropertyKey", static_variant(Value::from("5s"))),
+            one_flag(
+                "testGetDurationPropertyKey",
+                static_variant(Value::from("5s")),
+            ),
         );
-        let (value, err) = client.get_duration_value("testGetDurationPropertyKey", 0, &no_filters());
+        let (value, err) =
+            client.get_duration_value("testGetDurationPropertyKey", 0, &no_filters());
         assert!(err.is_none());
         assert_eq!(value, 5_000_000_000);
         deregister_provider();
@@ -840,7 +883,10 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-duration-bad",
-            one_flag("testGetDurationPropertyKey", static_variant(Value::from("not-a-duration"))),
+            one_flag(
+                "testGetDurationPropertyKey",
+                static_variant(Value::from("not-a-duration")),
+            ),
         );
         let (value, err) =
             client.get_duration_value("testGetDurationPropertyKey", 3_000_000_000, &no_filters());
@@ -856,7 +902,10 @@ mod tests {
         let want = vec![Value::from("a"), Value::from("b")];
         let (client, _) = new_test_client(
             "test-list",
-            one_flag("testGetListPropertyKey", static_variant(Value::Array(want.clone()))),
+            one_flag(
+                "testGetListPropertyKey",
+                static_variant(Value::Array(want.clone())),
+            ),
         );
         let (value, err) = client.get_list_value("testGetListPropertyKey", vec![], &no_filters());
         assert!(err.is_none());
@@ -870,7 +919,10 @@ mod tests {
         let _guard = test_lock();
         let (client, _) = new_test_client(
             "test-list-mismatch",
-            one_flag("testGetListPropertyKey", static_variant(Value::from("not-a-list"))),
+            one_flag(
+                "testGetListPropertyKey",
+                static_variant(Value::from("not-a-list")),
+            ),
         );
         let (value, err) = client.get_list_value("testGetListPropertyKey", vec![], &no_filters());
         assert!(is_message(&err, "value type is not list but is"));
@@ -883,12 +935,22 @@ mod tests {
     fn unsupported_write_operations() {
         let _guard = test_lock();
         let (client, _) = new_test_client("test-writes", BTreeMap::new());
-        let err = client.update_value("testGetIntPropertyKey", &Value::from(1)).unwrap_err();
-        assert!(err.to_string().contains("not supported for openfeature client"));
-        let err = client.restore_value("testGetIntPropertyKey", &no_filters()).unwrap_err();
-        assert!(err.to_string().contains("not supported for openfeature client"));
+        let err = client
+            .update_value("testGetIntPropertyKey", &Value::from(1))
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("not supported for openfeature client"));
+        let err = client
+            .restore_value("testGetIntPropertyKey", &no_filters())
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("not supported for openfeature client"));
         let err = client.list_value("testGetIntPropertyKey").unwrap_err();
-        assert!(err.to_string().contains("not supported for openfeature client"));
+        assert!(err
+            .to_string()
+            .contains("not supported for openfeature client"));
         deregister_provider();
     }
 

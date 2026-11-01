@@ -139,7 +139,8 @@ mod tests {
     #[test]
     fn empty_statsd_host_uses_the_go_noop_scope() {
         let config: MetricsConfig = serde_yaml::from_str("statsd: {hostPort: ''}").unwrap();
-        let runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
+        let runtime =
+            MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         assert!(runtime.exporter.is_none());
     }
 
@@ -149,7 +150,8 @@ mod tests {
             "statsd: {hostPort: ''}\nprometheus: {listenAddress: '127.0.0.1:0'}",
         )
         .unwrap();
-        let runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
+        let runtime =
+            MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         assert!(matches!(&runtime.exporter, Some(Exporter::Prometheus(_))));
     }
 
@@ -157,7 +159,8 @@ mod tests {
     async fn prometheus_listener_is_owned_and_stopped_by_runtime() {
         let config: MetricsConfig =
             serde_yaml::from_str("prometheus: {listenAddress: '127.0.0.1:0'}").unwrap();
-        let mut runtime = MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
+        let mut runtime =
+            MatchingMetricsRuntime::new(&config, None, MigrationPolicy::default()).unwrap();
         runtime.start().await.unwrap();
         assert!(runtime.listener.is_some());
         runtime.shutdown().await.unwrap();

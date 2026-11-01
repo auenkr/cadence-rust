@@ -758,7 +758,11 @@ mod tests {
         set(&overlay, "matching.persistenceGlobalMaxQPS", 1);
         let members = Arc::new(AtomicUsize::new(1));
         let count = members.clone();
-        let names = ["default".to_owned(), "visibility".to_owned(), "unused".to_owned()];
+        let names = [
+            "default".to_owned(),
+            "visibility".to_owned(),
+            "unused".to_owned(),
+        ];
         let limiters = build_datastore_limiters(
             names.iter(),
             overlay,

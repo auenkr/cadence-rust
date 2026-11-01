@@ -42,13 +42,22 @@ pub struct RequestTokens {
 impl RequestTokens {
     pub fn new(count: Count) -> Self {
         let value = count().max(0);
-        Self { count, generation: Mutex::new(Generation { count: value, semaphore: Arc::new(Semaphore::new(value as usize)) }) }
+        Self {
+            count,
+            generation: Mutex::new(Generation {
+                count: value,
+                semaphore: Arc::new(Semaphore::new(value as usize)),
+            }),
+        }
     }
     fn current(&self) -> Arc<Semaphore> {
         let count = (self.count)().max(0);
         let mut generation = self.generation.lock().expect("forwarder token lock");
         if generation.count != count {
-            *generation = Generation { count, semaphore: Arc::new(Semaphore::new(count as usize)) };
+            *generation = Generation {
+                count,
+                semaphore: Arc::new(Semaphore::new(count as usize)),
+            };
         }
         generation.semaphore.clone()
     }
@@ -72,7 +81,13 @@ pub struct ForwardRate {
 impl ForwardRate {
     pub fn new(rate: Count, now: i64) -> Self {
         let value = rate();
-        Self { rate, state: Mutex::new(RateState { limiter: RateLimiter::new(value as f64, if value == 0 { 0 } else { value.max(1) }), updated: now }) }
+        Self {
+            rate,
+            state: Mutex::new(RateState {
+                limiter: RateLimiter::new(value as f64, if value == 0 { 0 } else { value.max(1) }),
+                updated: now,
+            }),
+        }
     }
     pub fn allow(&self, now: i64) -> bool {
         let mut state = self.state.lock().expect("forwarder rate lock");
@@ -81,7 +96,9 @@ impl ForwardRate {
             // of now before changing the rate/burst.
             state.limiter.tokens(now);
             let rate = (self.rate)();
-            state.limiter.set_limit_and_burst(rate as f64, if rate == 0 { 0 } else { rate.max(1) });
+            state
+                .limiter
+                .set_limit_and_burst(rate as f64, if rate == 0 { 0 } else { rate.max(1) });
             state.updated = now;
         }
         state.limiter.allow(now)
@@ -131,17 +148,31 @@ mod tests {
     #[test]
     fn matching_forward_classifies_service_busy_only() {
         let busy = crate::grpc::detailed_status(
-            tonic::Code::ResourceExhausted, "busy", "ServiceBusyError",
-            cadence_proto::api::ServiceBusyError { reason: String::new() },
+            tonic::Code::ResourceExhausted,
+            "busy",
+            "ServiceBusyError",
+            cadence_proto::api::ServiceBusyError {
+                reason: String::new(),
+            },
         );
-        assert!(matches!(ForwardError::classify(busy), ForwardError::SlowDown));
+        assert!(matches!(
+            ForwardError::classify(busy),
+            ForwardError::SlowDown
+        ));
         let malformed = tonic::Status::with_details(
-            tonic::Code::ResourceExhausted, "busy",
+            tonic::Code::ResourceExhausted,
+            "busy",
             tonic::codegen::Bytes::from_static(b"uber.cadence.api.v1.ServiceBusyError"),
         );
-        assert!(matches!(ForwardError::classify(malformed), ForwardError::Remote(_)));
+        assert!(matches!(
+            ForwardError::classify(malformed),
+            ForwardError::Remote(_)
+        ));
         let exhausted = tonic::Status::resource_exhausted("other exhausted error");
-        assert!(matches!(ForwardError::classify(exhausted), ForwardError::Remote(_)));
+        assert!(matches!(
+            ForwardError::classify(exhausted),
+            ForwardError::Remote(_)
+        ));
     }
     #[tokio::test(start_paused = true)]
     async fn matching_forward_max_outstanding_concurrency() {
@@ -158,15 +189,25 @@ mod tests {
                 callers.push(tokio::spawn(async move {
                     let mut took = (0, 0);
                     if let Ok(Some(token)) =
-                        tokio::time::timeout(std::time::Duration::from_millis(100), adds.acquire()).await
+                        tokio::time::timeout(std::time::Duration::from_millis(100), adds.acquire())
+                            .await
                     {
-                        if leak { std::mem::forget(token) } else { drop(token) }
+                        if leak {
+                            std::mem::forget(token)
+                        } else {
+                            drop(token)
+                        }
                         took.0 = 1;
                     }
                     if let Ok(Some(token)) =
-                        tokio::time::timeout(std::time::Duration::from_millis(100), polls.acquire()).await
+                        tokio::time::timeout(std::time::Duration::from_millis(100), polls.acquire())
+                            .await
                     {
-                        if leak { std::mem::forget(token) } else { drop(token) }
+                        if leak {
+                            std::mem::forget(token)
+                        } else {
+                            drop(token)
+                        }
                         took.1 = 1;
                     }
                     took

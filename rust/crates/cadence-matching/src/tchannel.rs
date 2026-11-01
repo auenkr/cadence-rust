@@ -425,9 +425,7 @@ async fn handle_call(
         }
         let method = match String::from_utf8(call.args[0].clone()) {
             Ok(method) => method,
-            Err(_) => {
-                return error(&writer, id, 6, &call.trace, "Malformed TChannel method").await
-            }
+            Err(_) => return error(&writer, id, 6, &call.trace, "Malformed TChannel method").await,
         };
         let request_headers: Option<std::collections::HashMap<String, String>> =
             match serde_json::from_slice(&call.args[1]) {
@@ -506,10 +504,14 @@ async fn handle_call(
             Err(RingpopError::System(message)) => {
                 return error(&writer, id, 6, &call.trace, &message).await
             }
-        }
+        };
     }
 
-    let expected_service = if matching.is_some() { "cadence-matching" } else { "cadence-frontend" };
+    let expected_service = if matching.is_some() {
+        "cadence-matching"
+    } else {
+        "cadence-frontend"
+    };
     if call.service != expected_service {
         return error(&writer, id, 6, &call.trace, "Unknown TChannel service").await;
     }
@@ -528,7 +530,15 @@ async fn handle_call(
         bail!("Unknown Cadence procedure");
     }
     let definition = cadence_thrift::service::find_method(procedure)
-        .filter(|definition| definition.service == "Meta" || definition.service == if matching.is_some() { "MatchingService" } else { "WorkflowService" })
+        .filter(|definition| {
+            definition.service == "Meta"
+                || definition.service
+                    == if matching.is_some() {
+                        "MatchingService"
+                    } else {
+                        "WorkflowService"
+                    }
+        })
         .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
     let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
@@ -540,21 +550,29 @@ async fn handle_call(
     let request = read_struct(&mut reader)?;
     let deadline = call.started + call.ttl;
     let remaining = deadline.saturating_duration_since(Instant::now());
-    let result = tokio::time::timeout(
-        remaining,
-        async {
-            match matching {
-                Some(matching) => crate::thrift_matching::dispatch_with_context(
+    let result = tokio::time::timeout(remaining, async {
+        match matching {
+            Some(matching) => {
+                crate::thrift_matching::dispatch_with_context(
                     &matching,
                     procedure,
                     &request,
                     deadline,
                     matching_metric_context(&call),
-                ).await,
-                None => crate::yarpc::dispatch(&state, method, &request, deadline.min(Instant::now() + Duration::from_secs(60))).await,
+                )
+                .await
             }
-        },
-    )
+            None => {
+                crate::yarpc::dispatch(
+                    &state,
+                    method,
+                    &request,
+                    deadline.min(Instant::now() + Duration::from_secs(60)),
+                )
+                .await
+            }
+        }
+    })
     .await;
     let (result, application_error) = match result {
         Err(_) => return error(&writer, id, 1, &call.trace, "Request timed out").await,
@@ -680,7 +698,10 @@ async fn connection(
 pub async fn serve(addr: std::net::SocketAddr, state: AppState) -> Result<()> {
     serve_with(addr, state, None, None).await
 }
-pub async fn serve_matching(addr: std::net::SocketAddr, matching: crate::grpc_matching::Matching) -> Result<()> {
+pub async fn serve_matching(
+    addr: std::net::SocketAddr,
+    matching: crate::grpc_matching::Matching,
+) -> Result<()> {
     serve_with(addr, matching.frontend.state.clone(), Some(matching), None).await
 }
 /// Serve Matching Thrift and Ringpop JSON methods on one TChannel listener.
@@ -689,7 +710,13 @@ pub async fn serve_matching_with_ringpop(
     matching: crate::grpc_matching::Matching,
     ringpop: RingpopHandler,
 ) -> Result<()> {
-    serve_with(addr, matching.frontend.state.clone(), Some(matching), Some(ringpop)).await
+    serve_with(
+        addr,
+        matching.frontend.state.clone(),
+        Some(matching),
+        Some(ringpop),
+    )
+    .await
 }
 /// Serve Matching Thrift and Ringpop JSON methods on a caller-bound shared
 /// listener. This lets bootstrap derive the advertised Ringpop address from
@@ -796,7 +823,8 @@ mod tests {
                 vec![b'b'; 4],
                 vec![b'c'; 150000],
             ];
-            let frames = response_frames(42, [7; 25], false, false, args.clone(), checksum).unwrap();
+            let frames =
+                response_frames(42, [7; 25], false, false, args.clone(), checksum).unwrap();
             assert!(frames.len() > 2);
             assert_eq!(assemble(frames, kind).unwrap(), args);
         }
@@ -853,23 +881,44 @@ mod tests {
         use crate::matching_metrics::{RecordingMetricSink, CADENCE_REQUESTS_PER_TASK_LIST};
         let sink = Arc::new(RecordingMetricSink::default());
         let state = crate::handlers::AppState::default();
-        state.domains.create(
-            cadence_api::types::DomainInfo { name: "domain-a".into(), uuid: "00000000-0000-0000-0000-000000000001".into(), ..Default::default() },
-            Default::default(),
-            Default::default(),
-            false,
-        ).unwrap();
+        state
+            .domains
+            .create(
+                cadence_api::types::DomainInfo {
+                    name: "domain-a".into(),
+                    uuid: "00000000-0000-0000-0000-000000000001".into(),
+                    ..Default::default()
+                },
+                Default::default(),
+                Default::default(),
+                false,
+            )
+            .unwrap();
         let matching = crate::grpc_matching::Matching::new(state).with_metrics(sink.clone());
         let call = Call {
-            started: Instant::now(), ttl: Duration::from_secs(1), trace: [0; 25],
+            started: Instant::now(),
+            ttl: Duration::from_secs(1),
+            trace: [0; 25],
             service: "cadence-matching".into(),
-            headers: HashMap::from([("cn".into(), "worker-origin".into()), ("as".into(), "cadence-matching".into())]),
-            checksum: Checksum::new(0).unwrap(), args: Default::default(), arg: 0, size: 0,
+            headers: HashMap::from([
+                ("cn".into(), "worker-origin".into()),
+                ("as".into(), "cadence-matching".into()),
+            ]),
+            checksum: Checksum::new(0).unwrap(),
+            args: Default::default(),
+            arg: 0,
+            size: 0,
         };
         let args = cadence_thrift::value::Struct {
-            fields: vec![(1, cadence_thrift::value::Value::Struct(cadence_thrift::value::Struct {
-                fields: vec![(10, cadence_thrift::value::Value::Bytes(b"domain-a".to_vec()))],
-            }))],
+            fields: vec![(
+                1,
+                cadence_thrift::value::Value::Struct(cadence_thrift::value::Struct {
+                    fields: vec![(
+                        10,
+                        cadence_thrift::value::Value::Bytes(b"domain-a".to_vec()),
+                    )],
+                }),
+            )],
         };
         crate::thrift_matching::dispatch_with_context(
             &matching,
@@ -877,9 +926,21 @@ mod tests {
             &args,
             Instant::now() + Duration::from_secs(1),
             matching_metric_context(&call),
-        ).await.unwrap();
-        let request = sink.events().into_iter().find(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST).unwrap();
-        assert_eq!(request.tags.get("caller").map(String::as_str), Some("worker-origin"));
-        assert_eq!(request.tags.get("transport").map(String::as_str), Some("tchannel"));
+        )
+        .await
+        .unwrap();
+        let request = sink
+            .events()
+            .into_iter()
+            .find(|event| event.name == CADENCE_REQUESTS_PER_TASK_LIST)
+            .unwrap();
+        assert_eq!(
+            request.tags.get("caller").map(String::as_str),
+            Some("worker-origin")
+        );
+        assert_eq!(
+            request.tags.get("transport").map(String::as_str),
+            Some("tchannel")
+        );
     }
 }

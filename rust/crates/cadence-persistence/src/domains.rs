@@ -2685,12 +2685,11 @@ mod go_sql_frontend_manager_tests {
                 "cluster-a",
             ),
         );
-        let manager =
-            PersistedFrontendDomainManager::new(
-                InMemoryDomainStore::new(),
-                persistence.clone(),
-                std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
-            );
+        let manager = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+            std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+        );
         let domain_id = uuid::Uuid::from_u128(0x1234).to_string();
         let (mut info, config, replication) = super::tests::sample("durable", &domain_id);
         info.uuid = domain_id.clone();
@@ -2701,12 +2700,11 @@ mod go_sql_frontend_manager_tests {
         assert_eq!(persistence.get_metadata_version().unwrap(), 8);
 
         // A fresh cache misses and must read the Go-format row through SQL.
-        let restarted =
-            PersistedFrontendDomainManager::new(
-                InMemoryDomainStore::new(),
-                persistence.clone(),
-                std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
-            );
+        let restarted = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+            std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+        );
         let described = restarted
             .describe(&DescribeDomainRequest {
                 name: Some("durable".into()),

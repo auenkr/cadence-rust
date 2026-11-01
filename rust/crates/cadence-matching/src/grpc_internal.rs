@@ -73,8 +73,9 @@ impl h::history_api_server::HistoryApi for History {
         let r = request.into_inner();
         let parent_info = r.parent_execution_info.clone();
         let attempt = r.attempt;
-        let expiration_nanos =
-            r.expiration_time.map(|ts| ts.seconds * 1_000_000_000 + i64::from(ts.nanos));
+        let expiration_nanos = r
+            .expiration_time
+            .map(|ts| ts.seconds * 1_000_000_000 + i64::from(ts.nanos));
         let continued_initiator = r.continue_as_new_initiator;
         let _continued_failure_reason = r
             .continued_failure
@@ -91,9 +92,9 @@ impl h::history_api_server::HistoryApi for History {
             .as_ref()
             .map(|p| p.data.clone())
             .unwrap_or_default();
-        let first_decision_backoff_seconds = r
-            .first_decision_task_backoff
-            .map_or(0, |d| d.seconds as i32 + if d.nanos > 500_000_000 { 1 } else { 0 });
+        let first_decision_backoff_seconds = r.first_decision_task_backoff.map_or(0, |d| {
+            d.seconds as i32 + if d.nanos > 500_000_000 { 1 } else { 0 }
+        });
         let workflow_id = r
             .request
             .as_ref()
@@ -122,15 +123,20 @@ impl h::history_api_server::HistoryApi for History {
         let _ = store.set_start_execution_metadata(
             &domain,
             &execution,
-            parent_info.as_ref().map(|p| (p.domain_name.clone(), p
-                .workflow_execution
-                .as_ref()
-                .map(|w| w.workflow_id.clone())
-                .unwrap_or_default(), p
-                .workflow_execution
-                .as_ref()
-                .map(|w| w.run_id.clone())
-                .unwrap_or_default(), p.initiated_id)),
+            parent_info.as_ref().map(|p| {
+                (
+                    p.domain_name.clone(),
+                    p.workflow_execution
+                        .as_ref()
+                        .map(|w| w.workflow_id.clone())
+                        .unwrap_or_default(),
+                    p.workflow_execution
+                        .as_ref()
+                        .map(|w| w.run_id.clone())
+                        .unwrap_or_default(),
+                    p.initiated_id,
+                )
+            }),
             attempt,
             expiration_nanos,
             first_decision_backoff_seconds,
@@ -251,7 +257,7 @@ impl h::history_api_server::HistoryApi for History {
     ) -> Result<Response<h::GetMutableStateResponse>, Status> {
         let r = request.into_inner();
         let proto_execution = r.workflow_execution.unwrap_or_default();
-        let (_, view) = mutable_state_response(self,&r.domain_id, proto_execution)?;
+        let (_, view) = mutable_state_response(self, &r.domain_id, proto_execution)?;
         Ok(Response::new(history_mutable_state_response(view)))
     }
 
@@ -263,7 +269,7 @@ impl h::history_api_server::HistoryApi for History {
         let proto_execution = r.workflow_execution.unwrap_or_default();
         // Single host answers immediately with current state instead of
         // long-polling for the expected event ID.
-        let (_, view) = mutable_state_response(self,&r.domain_id, proto_execution)?;
+        let (_, view) = mutable_state_response(self, &r.domain_id, proto_execution)?;
         Ok(Response::new(history_poll_mutable_state_response(view)))
     }
 
@@ -273,7 +279,7 @@ impl h::history_api_server::HistoryApi for History {
     ) -> Result<Response<h::DescribeMutableStateResponse>, Status> {
         let r = request.into_inner();
         let proto_execution = r.workflow_execution.unwrap_or_default();
-        let (domain, view) = mutable_state_response(self,&r.domain_id, proto_execution)?;
+        let (domain, view) = mutable_state_response(self, &r.domain_id, proto_execution)?;
         let store = self
             .frontend
             .state
@@ -299,8 +305,7 @@ impl h::history_api_server::HistoryApi for History {
         _request: Request<h::DescribeHistoryHostRequest>,
     ) -> Result<Response<h::DescribeHistoryHostResponse>, Status> {
         let count = self.frontend.state.num_history_shards.max(1);
-        let hostname =
-            std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
         let domains = self.frontend.state.domains.len() as i64;
         Ok(Response::new(h::DescribeHistoryHostResponse {
             number_of_shards: count,
@@ -413,7 +418,9 @@ impl h::history_api_server::HistoryApi for History {
         let _domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         if execution.workflow_id.is_empty() {
-            return Err(Status::invalid_argument("WorkflowId is not set on request."));
+            return Err(Status::invalid_argument(
+                "WorkflowId is not set on request.",
+            ));
         }
         Ok(Response::new(h::ReplicateEventsV2Response {}))
     }
@@ -544,7 +551,9 @@ impl h::history_api_server::HistoryApi for History {
         };
         let execution = r.workflow_execution.unwrap_or_default();
         if execution.workflow_id.is_empty() {
-            return Err(Status::invalid_argument("WorkflowID is not set on request."));
+            return Err(Status::invalid_argument(
+                "WorkflowID is not set on request.",
+            ));
         }
         // Go quirks a missing events blob into ErrWorkflowIDNotSet.
         let blob = r
@@ -579,7 +588,9 @@ impl h::history_api_server::HistoryApi for History {
         &self,
         _request: Request<h::CountDlqMessagesRequest>,
     ) -> Result<Response<h::CountDlqMessagesResponse>, Status> {
-        Ok(Response::new(h::CountDlqMessagesResponse { entries: vec![] }))
+        Ok(Response::new(h::CountDlqMessagesResponse {
+            entries: vec![],
+        }))
     }
 
     /// Read DLQ messages. Single host has no replication DLQ.
@@ -725,18 +736,18 @@ impl h::history_api_server::HistoryApi for History {
                 }),
                 event_store_version: 0,
                 branch_token: vec![],
-                scheduled_time: recorded.scheduled_time_millis.map(|ms| {
-                    prost_types::Timestamp {
+                scheduled_time: recorded
+                    .scheduled_time_millis
+                    .map(|ms| prost_types::Timestamp {
                         seconds: ms.div_euclid(1000),
                         nanos: (ms.rem_euclid(1000) * 1_000_000) as i32,
-                    }
-                }),
-                started_time: recorded.started_time_millis.map(|ms| {
-                    prost_types::Timestamp {
+                    }),
+                started_time: recorded
+                    .started_time_millis
+                    .map(|ms| prost_types::Timestamp {
                         seconds: ms.div_euclid(1000),
                         nanos: (ms.rem_euclid(1000) * 1_000_000) as i32,
-                    }
-                }),
+                    }),
                 queries: Default::default(),
                 history_size: 0,
             })),
@@ -819,9 +830,9 @@ impl h::history_api_server::HistoryApi for History {
         let domain = self.domain_name(&r.domain_id)?;
         let execution = r.workflow_execution.unwrap_or_default();
         let completed = r.completed_execution.unwrap_or_default();
-        let event = r.completion_event.ok_or_else(|| {
-            Status::invalid_argument("Completion event is not set.")
-        })?;
+        let event = r
+            .completion_event
+            .ok_or_else(|| Status::invalid_argument("Completion event is not set."))?;
         let event = child_completion_event_in(event)?;
         let store = self
             .frontend
@@ -1066,10 +1077,19 @@ fn history_mutable_state_response(
         Some(CloseStatus::TimedOut) => (3, 6),
         _ => (3, 0),
     };
-    let current_branch_token = view.version_histories.as_ref().and_then(|histories| {
-        histories.histories.get(histories.current_version_history_index as usize)
-    }).map(|history| history.branch_token.clone()).unwrap_or_default();
-    let version_histories = view.version_histories.map(crate::grpc_convert::version_histories_out);
+    let current_branch_token = view
+        .version_histories
+        .as_ref()
+        .and_then(|histories| {
+            histories
+                .histories
+                .get(histories.current_version_history_index as usize)
+        })
+        .map(|history| history.branch_token.clone())
+        .unwrap_or_default();
+    let version_histories = view
+        .version_histories
+        .map(crate::grpc_convert::version_histories_out);
     h::GetMutableStateResponse {
         workflow_execution: Some(cadence_proto::api::WorkflowExecution {
             workflow_id: view.workflow_id,
@@ -1126,8 +1146,7 @@ fn history_poll_mutable_state_response(
         client_library_version: full.client_library_version,
         client_feature_version: full.client_feature_version,
         client_impl: full.client_impl,
-        sticky_task_list_schedule_to_start_timeout: full
-            .sticky_task_list_schedule_to_start_timeout,
+        sticky_task_list_schedule_to_start_timeout: full.sticky_task_list_schedule_to_start_timeout,
         current_branch_token: full.current_branch_token,
         version_histories: full.version_histories,
         workflow_state: full.workflow_state,
@@ -1144,7 +1163,8 @@ fn child_completion_event_in(
     use cadence_api::{enums as e, service_types as st, tasks as tk, types as t};
     let event_id = v.event_id;
     let timestamp = v.event_time.map(|t| {
-        t.seconds.saturating_mul(1000)
+        t.seconds
+            .saturating_mul(1000)
             .saturating_add(i64::from(t.nanos) / 1_000_000)
     });
     let execution = |e: Option<cadence_proto::api::WorkflowExecution>| {

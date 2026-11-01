@@ -105,9 +105,7 @@ pub struct ShardDistributor {
 }
 
 impl ShardDistributor {
-    fn lock(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, ShardDistributorState>, Status> {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ShardDistributorState>, Status> {
         self.state
             .shard_distributor
             .lock()
@@ -262,9 +260,10 @@ impl sd::shard_distributor_api_server::ShardDistributorApi for ShardDistributor 
             std::future::pending::<()>().await;
         });
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        Ok(Response::new(
-            Box::pin(stream) as tonic::codegen::BoxStream<sd::WatchNamespaceStateResponse>,
-        ))
+        Ok(Response::new(Box::pin(stream)
+            as tonic::codegen::BoxStream<
+                sd::WatchNamespaceStateResponse,
+            >))
     }
 
     async fn list_namespaces(
@@ -354,24 +353,20 @@ impl sd::shard_distributor_executor_api_server::ShardDistributorExecutorApi for 
             .map_err(|_| Status::internal("Shard distributor state is unavailable."))?;
         // Namespaces spring into existence on first heartbeat as ephemeral,
         // so a lone host can coordinate without static fleet config.
-        let ns = guard.namespaces.entry(r.namespace.clone()).or_insert_with(|| {
-            NamespaceState {
+        let ns = guard
+            .namespaces
+            .entry(r.namespace.clone())
+            .or_insert_with(|| NamespaceState {
                 namespace_type: "ephemeral".to_string(),
                 ..Default::default()
-            }
-        });
+            });
         let mut assignments = HashMap::new();
         let mut assigned: HashSet<String> = HashSet::new();
         for (key, report) in &r.shard_status_reports {
             // shard_status 1 = READY, 2 = DONE; both keep the assignment.
             if report.status == 1 || report.status == 2 {
                 assigned.insert(key.clone());
-                assignments.insert(
-                    key.clone(),
-                    sd::ShardAssignment {
-                        status: 1,
-                    },
-                );
+                assignments.insert(key.clone(), sd::ShardAssignment { status: 1 });
             }
         }
         for key in assigned {
@@ -471,7 +466,8 @@ mod tests {
         let ns = state.namespaces.entry("n".to_string()).or_default();
         ns.namespace_type = "ephemeral".to_string();
         ns.owners.insert("s".to_string(), "e".to_string());
-        ns.executors.insert("e".to_string(), ExecutorState::default());
+        ns.executors
+            .insert("e".to_string(), ExecutorState::default());
         assert_eq!(
             ShardDistributor::owner_of(&state.namespaces, "n", "s").unwrap(),
             "e"

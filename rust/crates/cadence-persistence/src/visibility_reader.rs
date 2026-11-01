@@ -139,9 +139,7 @@ pub fn parse_rfc3339_us(text: &str) -> Option<i64> {
     let mut padded = format!("{frac:0<9}");
     padded.truncate(6);
     let micro: i64 = padded.parse().ok()?;
-    Some(
-        (days_from_civil(y, m, d) * 86_400 + hh * 3600 + mm * 60 + ss) * 1_000_000 + micro,
-    )
+    Some((days_from_civil(y, m, d) * 86_400 + hh * 3600 + mm * 60 + ss) * 1_000_000 + micro)
 }
 
 pub fn serialize_page_token(token: &PageToken) -> Vec<u8> {
@@ -165,7 +163,10 @@ pub fn deserialize_page_token(data: &[u8]) -> Result<PageToken, VisibilityError>
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    Ok(PageToken { time_us: time, run_id })
+    Ok(PageToken {
+        time_us: time,
+        run_id,
+    })
 }
 
 /// Decodes the visibility memo blob (Go `DeserializeVisibilityMemo`).
@@ -180,8 +181,8 @@ pub fn decode_memo(data: &[u8], encoding: &str) -> Result<Option<Memo>, Visibili
             if reader.read_u8().map_err(|e| bad(e.to_string()))? != 0x59 {
                 return Err(bad("invalid ThriftRW version".into()));
             }
-            let s = cadence_thrift::value::read_struct(&mut reader)
-                .map_err(|e| bad(e.to_string()))?;
+            let s =
+                cadence_thrift::value::read_struct(&mut reader).map_err(|e| bad(e.to_string()))?;
             let memo = <Memo as cadence_thrift::FromThrift>::from_thrift(&s)
                 .map_err(|e| bad(e.to_string()))?;
             Ok(Some(memo))
@@ -215,7 +216,10 @@ pub fn list_executions(
     latest_time_us: i64,
 ) -> Result<ListPage, VisibilityError> {
     let level = if page_token.is_empty() {
-        PageToken { time_us: latest_time_us, run_id: String::new() }
+        PageToken {
+            time_us: latest_time_us,
+            run_id: String::new(),
+        }
     } else {
         deserialize_page_token(page_token)?
     };
@@ -233,7 +237,10 @@ pub fn list_executions(
             run_id: last.run_id.clone(),
         });
     }
-    Ok(ListPage { rows, next_page_token: next })
+    Ok(ListPage {
+        rows,
+        next_page_token: next,
+    })
 }
 
 #[cfg(test)]
@@ -246,14 +253,26 @@ mod tests {
         let text = format_rfc3339_us(us);
         assert_eq!(text, "2023-11-14T22:13:20.123456Z");
         assert_eq!(parse_rfc3339_us(&text), Some(us));
-        assert_eq!(format_rfc3339_us(1_700_000_000_000_000), "2023-11-14T22:13:20Z");
-        assert_eq!(parse_rfc3339_us("2023-11-14T22:13:20Z"), Some(1_700_000_000_000_000));
+        assert_eq!(
+            format_rfc3339_us(1_700_000_000_000_000),
+            "2023-11-14T22:13:20Z"
+        );
+        assert_eq!(
+            parse_rfc3339_us("2023-11-14T22:13:20Z"),
+            Some(1_700_000_000_000_000)
+        );
     }
 
     #[test]
     fn page_token_round_trip() {
-        let t = PageToken { time_us: 42_000_000, run_id: "r".into() };
-        assert_eq!(deserialize_page_token(&serialize_page_token(&t)).unwrap(), t);
+        let t = PageToken {
+            time_us: 42_000_000,
+            run_id: "r".into(),
+        };
+        assert_eq!(
+            deserialize_page_token(&serialize_page_token(&t)).unwrap(),
+            t
+        );
         assert!(deserialize_page_token(b"nope").is_err());
     }
 
@@ -270,12 +289,31 @@ mod tests {
 
     #[test]
     fn next_token_only_when_last_row_after_earliest() {
-        let row = |t| VisibilityRow { run_id: "r".into(), start_time_us: t, ..Default::default() };
-        let page = list_executions(&Fake(vec![row(10)]), VisibilityFilter::default(), &[], 5, 100).unwrap();
+        let row = |t| VisibilityRow {
+            run_id: "r".into(),
+            start_time_us: t,
+            ..Default::default()
+        };
+        let page = list_executions(
+            &Fake(vec![row(10)]),
+            VisibilityFilter::default(),
+            &[],
+            5,
+            100,
+        )
+        .unwrap();
         assert!(!page.next_page_token.is_empty());
-        let page = list_executions(&Fake(vec![row(5)]), VisibilityFilter::default(), &[], 5, 100).unwrap();
+        let page = list_executions(
+            &Fake(vec![row(5)]),
+            VisibilityFilter::default(),
+            &[],
+            5,
+            100,
+        )
+        .unwrap();
         assert!(page.next_page_token.is_empty());
-        let page = list_executions(&Fake(vec![]), VisibilityFilter::default(), &[], 5, 100).unwrap();
+        let page =
+            list_executions(&Fake(vec![]), VisibilityFilter::default(), &[], 5, 100).unwrap();
         assert!(page.rows.is_empty());
     }
 }

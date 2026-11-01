@@ -103,10 +103,12 @@ impl SemaphorePersistence for ScriptStore {
         // Each manager load starts a fresh paging sequence; scans counts calls
         // across loads, including retries and replacement managers.
         let index = if next_page_token.is_none() {
-            self.next_page_index.store(1, std::sync::atomic::Ordering::SeqCst);
+            self.next_page_index
+                .store(1, std::sync::atomic::Ordering::SeqCst);
             0
         } else {
-            self.next_page_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            self.next_page_index
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         };
         // Go expectScan: the first page starts with no token, and each later page is
         // requested with the token the previous page returned.
@@ -329,13 +331,19 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
     let store = ScriptStore::new(free(&[1, 2]), vec![]);
     let manager = new_manager(&store);
     manager.stop();
-    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
+    assert_eq!(
+        manager.acquire("a", None).await,
+        Err(ManagerError::NotReady)
+    );
 
     let store = ScriptStore::new(vec![], vec![]);
     *store.rows.lock().unwrap() = Some(Err(AcquireError::Internal("scan failed".into())));
     let manager = new_manager(&store);
     assert!(manager.start().await.is_err());
-    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
+    assert_eq!(
+        manager.acquire("a", None).await,
+        Err(ManagerError::NotReady)
+    );
 
     let store = ScriptStore::new(free(&[1, 2]), vec![]);
     store
@@ -350,7 +358,10 @@ async fn matching_semaphore_acquire_before_bucket_usable() {
     manager.stop();
     store.finish_scan.notify_one();
     assert_eq!(loading.await.unwrap(), Err(ManagerError::NotReady));
-    assert_eq!(manager.acquire("a", None).await, Err(ManagerError::NotReady));
+    assert_eq!(
+        manager.acquire("a", None).await,
+        Err(ManagerError::NotReady)
+    );
     assert_eq!(manager.free_count(), 0);
 }
 
@@ -392,7 +403,9 @@ async fn matching_semaphore_aborted_start_unregisters_releases_waiter_and_rebuil
     let loading = tokio::spawn(async move { startup_registry.get_or_create(startup_id).await });
     store.scanning.notified().await;
 
-    let manager = registry.by_identifier(&id).expect("startup manager registered");
+    let manager = registry
+        .by_identifier(&id)
+        .expect("startup manager registered");
     let mut waiter = Box::pin(manager.acquire("waiter", None));
     assert!(futures_util::poll!(waiter.as_mut()).is_pending());
 
@@ -411,7 +424,9 @@ async fn matching_semaphore_aborted_start_unregisters_releases_waiter_and_rebuil
     assert!(Arc::ptr_eq(&replacement, &reused));
     assert!(Arc::ptr_eq(
         &replacement,
-        &registry.by_identifier(&id).expect("replacement remains registered")
+        &registry
+            .by_identifier(&id)
+            .expect("replacement remains registered")
     ));
     assert_eq!(store.scans.load(std::sync::atomic::Ordering::SeqCst), 2);
 }

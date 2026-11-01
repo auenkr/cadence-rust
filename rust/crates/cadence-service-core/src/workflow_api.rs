@@ -114,38 +114,101 @@ fn codec(method: &str) -> Option<Codec> {
     use cadence_api::tasks as tk;
     use cadence_api::types as ty;
     Some(match method {
-        "StartWorkflowExecution" => op!(ty::StartWorkflowExecutionRequest, ty::StartWorkflowExecutionResponse),
-        "StartWorkflowExecutionAsync" => op!(ty::StartWorkflowExecutionAsyncRequest, ty::StartWorkflowExecutionAsyncResponse),
+        "StartWorkflowExecution" => op!(
+            ty::StartWorkflowExecutionRequest,
+            ty::StartWorkflowExecutionResponse
+        ),
+        "StartWorkflowExecutionAsync" => op!(
+            ty::StartWorkflowExecutionAsyncRequest,
+            ty::StartWorkflowExecutionAsyncResponse
+        ),
         "SignalWorkflowExecution" => op!(ty::SignalWorkflowExecutionRequest, void),
-        "SignalWithStartWorkflowExecution" => op!(st::SignalWithStartWorkflowExecutionRequest, ty::StartWorkflowExecutionResponse),
-        "SignalWithStartWorkflowExecutionAsync" => op!(st::SignalWithStartWorkflowExecutionAsyncRequest, st::SignalWithStartWorkflowExecutionAsyncResponse),
+        "SignalWithStartWorkflowExecution" => op!(
+            st::SignalWithStartWorkflowExecutionRequest,
+            ty::StartWorkflowExecutionResponse
+        ),
+        "SignalWithStartWorkflowExecutionAsync" => op!(
+            st::SignalWithStartWorkflowExecutionAsyncRequest,
+            st::SignalWithStartWorkflowExecutionAsyncResponse
+        ),
         "TerminateWorkflowExecution" => op!(ty::TerminateWorkflowExecutionRequest, void),
         "RequestCancelWorkflowExecution" => op!(st::RequestCancelWorkflowExecutionRequest, void),
-        "ResetWorkflowExecution" => op!(ty::ResetWorkflowExecutionRequest, ty::ResetWorkflowExecutionResponse),
-        "RestartWorkflowExecution" => op!(ty::RestartWorkflowExecutionRequest, ty::RestartWorkflowExecutionResponse),
-        "DiagnoseWorkflowExecution" => op!(ty::DiagnoseWorkflowExecutionRequest, ty::DiagnoseWorkflowExecutionResponse),
-        "DescribeWorkflowExecution" => op!(st::DescribeWorkflowExecutionRequest, st::DescribeWorkflowExecutionResponse),
+        "ResetWorkflowExecution" => op!(
+            ty::ResetWorkflowExecutionRequest,
+            ty::ResetWorkflowExecutionResponse
+        ),
+        "RestartWorkflowExecution" => op!(
+            ty::RestartWorkflowExecutionRequest,
+            ty::RestartWorkflowExecutionResponse
+        ),
+        "DiagnoseWorkflowExecution" => op!(
+            ty::DiagnoseWorkflowExecutionRequest,
+            ty::DiagnoseWorkflowExecutionResponse
+        ),
+        "DescribeWorkflowExecution" => op!(
+            st::DescribeWorkflowExecutionRequest,
+            st::DescribeWorkflowExecutionResponse
+        ),
         "QueryWorkflow" => op!(tk::QueryWorkflowRequest, tk::QueryWorkflowResponse),
-        "ResetStickyTaskList" => op!(st::ResetStickyTaskListRequest, st::ResetStickyTaskListResponse),
+        "ResetStickyTaskList" => op!(
+            st::ResetStickyTaskListRequest,
+            st::ResetStickyTaskListResponse
+        ),
         "RefreshWorkflowTasks" => op!(ty::RefreshWorkflowTasksRequest, void),
-        "GetWorkflowExecutionHistory" => op!(st::GetWorkflowExecutionHistoryRequest, st::GetWorkflowExecutionHistoryResponse),
-        "PollForDecisionTask" => op!(tk::PollForDecisionTaskRequest, tk::PollForDecisionTaskResponse),
-        "PollForActivityTask" => op!(tk::PollForActivityTaskRequest, tk::PollForActivityTaskResponse),
-        "RespondDecisionTaskCompleted" => op!(tk::RespondDecisionTaskCompletedRequest, tk::RespondDecisionTaskCompletedResponse),
+        "GetWorkflowExecutionHistory" => op!(
+            st::GetWorkflowExecutionHistoryRequest,
+            st::GetWorkflowExecutionHistoryResponse
+        ),
+        "PollForDecisionTask" => op!(
+            tk::PollForDecisionTaskRequest,
+            tk::PollForDecisionTaskResponse
+        ),
+        "PollForActivityTask" => op!(
+            tk::PollForActivityTaskRequest,
+            tk::PollForActivityTaskResponse
+        ),
+        "RespondDecisionTaskCompleted" => op!(
+            tk::RespondDecisionTaskCompletedRequest,
+            tk::RespondDecisionTaskCompletedResponse
+        ),
         "RespondDecisionTaskFailed" => op!(tk::RespondDecisionTaskFailedRequest, void),
         "RespondActivityTaskCompleted" => op!(tk::RespondActivityTaskCompletedRequest, void),
         "RespondActivityTaskFailed" => op!(tk::RespondActivityTaskFailedRequest, void),
         "RespondActivityTaskCanceled" => op!(tk::RespondActivityTaskCanceledRequest, void),
-        "RecordActivityTaskHeartbeat" => op!(tk::RecordActivityTaskHeartbeatRequest, tk::RecordActivityTaskHeartbeatResponse),
+        "RecordActivityTaskHeartbeat" => op!(
+            tk::RecordActivityTaskHeartbeatRequest,
+            tk::RecordActivityTaskHeartbeatResponse
+        ),
         "RespondQueryTaskCompleted" => op!(tk::RespondQueryTaskCompletedRequest, void),
-        "ListOpenWorkflowExecutions" => op!(st::ListOpenWorkflowExecutionsRequest, st::ListOpenWorkflowExecutionsResponse),
-        "ListClosedWorkflowExecutions" => op!(st::ListClosedWorkflowExecutionsRequest, st::ListClosedWorkflowExecutionsResponse),
-        "ListWorkflowExecutions" | "ScanWorkflowExecutions" => op!(st::ListWorkflowExecutionsRequest, st::ListWorkflowExecutionsResponse),
-        "ListArchivedWorkflowExecutions" => op!(st::ListArchivedWorkflowExecutionsRequest, st::ListArchivedWorkflowExecutionsResponse),
-        "CountWorkflowExecutions" => op!(st::CountWorkflowExecutionsRequest, st::CountWorkflowExecutionsResponse),
+        "ListOpenWorkflowExecutions" => op!(
+            st::ListOpenWorkflowExecutionsRequest,
+            st::ListOpenWorkflowExecutionsResponse
+        ),
+        "ListClosedWorkflowExecutions" => op!(
+            st::ListClosedWorkflowExecutionsRequest,
+            st::ListClosedWorkflowExecutionsResponse
+        ),
+        "ListWorkflowExecutions" | "ScanWorkflowExecutions" => op!(
+            st::ListWorkflowExecutionsRequest,
+            st::ListWorkflowExecutionsResponse
+        ),
+        "ListArchivedWorkflowExecutions" => op!(
+            st::ListArchivedWorkflowExecutionsRequest,
+            st::ListArchivedWorkflowExecutionsResponse
+        ),
+        "CountWorkflowExecutions" => op!(
+            st::CountWorkflowExecutionsRequest,
+            st::CountWorkflowExecutionsResponse
+        ),
         "DescribeTaskList" => op!(tk::DescribeTaskListRequest, tk::DescribeTaskListResponse),
-        "GetTaskListsByDomain" => op!(tk::GetTaskListsByDomainRequest, tk::GetTaskListsByDomainResponse),
-        "ListTaskListPartitions" => op!(tk::ListTaskListPartitionsRequest, tk::ListTaskListPartitionsResponse),
+        "GetTaskListsByDomain" => op!(
+            tk::GetTaskListsByDomainRequest,
+            tk::GetTaskListsByDomainResponse
+        ),
+        "ListTaskListPartitions" => op!(
+            tk::ListTaskListPartitionsRequest,
+            tk::ListTaskListPartitionsResponse
+        ),
         "GetSearchAttributes" => Codec {
             decode: decode_none,
             encode: encode_resp::<tk::GetSearchAttributesResponse>,
@@ -173,8 +236,12 @@ pub fn error_to_thrift(error: &CadenceError) -> (&'static str, Struct, String) {
     match error {
         CadenceError::BadRequest(x) => ("BadRequestError", x.to_thrift(), x.message.clone()),
         CadenceError::Internal(x) => ("InternalServiceError", x.to_thrift(), x.message.clone()),
-        CadenceError::EntityNotExists(x) => ("EntityNotExistsError", x.to_thrift(), x.message.clone()),
-        CadenceError::DomainNotActive(x) => ("DomainNotActiveError", x.to_thrift(), x.message.clone()),
+        CadenceError::EntityNotExists(x) => {
+            ("EntityNotExistsError", x.to_thrift(), x.message.clone())
+        }
+        CadenceError::DomainNotActive(x) => {
+            ("DomainNotActiveError", x.to_thrift(), x.message.clone())
+        }
         CadenceError::WorkflowAlreadyStarted(x) => (
             "WorkflowExecutionAlreadyStartedError",
             x.to_thrift(),
@@ -185,11 +252,9 @@ pub fn error_to_thrift(error: &CadenceError) -> (&'static str, Struct, String) {
             x.to_thrift(),
             x.message.clone(),
         ),
-        CadenceError::DomainAlreadyExists(x) => (
-            "DomainAlreadyExistsError",
-            x.to_thrift(),
-            x.message.clone(),
-        ),
+        CadenceError::DomainAlreadyExists(x) => {
+            ("DomainAlreadyExistsError", x.to_thrift(), x.message.clone())
+        }
         CadenceError::CancellationAlreadyRequested(x) => (
             "CancellationAlreadyRequestedError",
             x.to_thrift(),
@@ -198,11 +263,9 @@ pub fn error_to_thrift(error: &CadenceError) -> (&'static str, Struct, String) {
         CadenceError::QueryFailed(x) => ("QueryFailedError", x.to_thrift(), x.message.clone()),
         CadenceError::ServiceBusy(x) => ("ServiceBusyError", x.to_thrift(), x.message.clone()),
         CadenceError::LimitExceeded(x) => ("LimitExceededError", x.to_thrift(), x.message.clone()),
-        CadenceError::ShardOwnershipLost(x) => (
-            "ShardOwnershipLostError",
-            x.to_thrift(),
-            x.message.clone(),
-        ),
+        CadenceError::ShardOwnershipLost(x) => {
+            ("ShardOwnershipLostError", x.to_thrift(), x.message.clone())
+        }
         CadenceError::RetryTaskV2(x) => ("RetryTaskV2Error", x.to_thrift(), x.message.clone()),
         CadenceError::AccessDenied(x) => ("AccessDeniedError", x.to_thrift(), x.message.clone()),
         CadenceError::ClientVersionNotSupported(x) => (
@@ -210,9 +273,7 @@ pub fn error_to_thrift(error: &CadenceError) -> (&'static str, Struct, String) {
             x.to_thrift(),
             x.to_string(),
         ),
-        CadenceError::Unknown(m) => {
-            ("InternalServiceError", msg(m), m.clone())
-        }
+        CadenceError::Unknown(m) => ("InternalServiceError", msg(m), m.clone()),
     }
 }
 
@@ -243,7 +304,9 @@ pub async fn dispatch_thrift(
             if field.is_none() {
                 // Undeclared exceptions are reported as InternalServiceError
                 // when declared, matching Go's ordinary-error fallthrough.
-                if let Some(id) = cadence_thrift::service::exception_field(def, "InternalServiceError") {
+                if let Some(id) =
+                    cadence_thrift::service::exception_field(def, "InternalServiceError")
+                {
                     name = "InternalServiceError";
                     value = Struct {
                         fields: vec![(1, Value::Bytes(message.as_bytes().to_vec()))],

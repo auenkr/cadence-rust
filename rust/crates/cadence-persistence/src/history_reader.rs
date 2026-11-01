@@ -278,7 +278,8 @@ pub fn read_history_branch(
         let (Some(first), Some(last)) = (events.first(), events.last()) else {
             return Err(corrupted("corrupted history event batch, empty events"));
         };
-        if first.version != last.version || first.event_id + events.len() as i64 - 1 != last.event_id
+        if first.version != last.version
+            || first.event_id + events.len() as i64 - 1 != last.event_id
         {
             return Err(corrupted(
                 "corrupted history event batch, wrong version and IDs",

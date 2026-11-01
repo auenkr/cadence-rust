@@ -9,8 +9,7 @@ use cadence_api::errors::CadenceError;
 use cadence_api::service_types as st;
 use cadence_api::types as ty;
 use cadence_persistence::visibility_reader::{
-    decode_memo, list_executions, VisibilityError, VisibilityFilter, VisibilityRow,
-    VisibilityStore,
+    decode_memo, list_executions, VisibilityError, VisibilityFilter, VisibilityRow, VisibilityStore,
 };
 
 use crate::workflow_backend::{bad_request, internal, to_json, ProductionBackend};
@@ -110,7 +109,10 @@ impl ProductionBackend {
             workflow_id: str_field(request, "workflowId"),
             workflow_type_name: str_field(request, "workflowTypeName"),
             close_status: if closed { close_status } else { None },
-            page_size: request.get("pageSize").and_then(serde_json::Value::as_i64).unwrap_or(0),
+            page_size: request
+                .get("pageSize")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
             ..Default::default()
         };
         let token = match request.get("nextPageToken") {

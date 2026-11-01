@@ -97,7 +97,10 @@ pub(crate) struct ForwardState {
     permits: Arc<crate::matching_forward::RequestTokens>,
     add_permits: Arc<crate::matching_forward::RequestTokens>,
     add_rate: Arc<crate::matching_forward::ForwardRate>,
-    task_metrics: Option<(crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
+    task_metrics: Option<(
+        crate::matching_metrics::MatchingMetrics,
+        crate::matching_metrics::PollMetricContext,
+    )>,
 }
 pub(crate) enum Parent {
     Dispatcher(Box<TaskDispatcher>),
@@ -151,23 +154,28 @@ impl ForwardPollRequest<m::PollForDecisionTaskResponse> for p::PollForDecisionTa
                     .deadline
                     .saturating_duration_since(tokio::time::Instant::now()),
             );
-            crate::matching_fault_injection::inject_client_call("matching-poll-for-decision-task", async move {
-            match target.target {
-                Parent::Service(service) => {
-                    m::matching_api_server::MatchingApi::poll_for_decision_task(&*service, request)
-                        .await
-                }
-                Parent::Remote(channel) => {
-                    matching_yarpc_grpc_metadata(&mut request);
-                    m::matching_api_client::MatchingApiClient::new(channel)
-                        .poll_for_decision_task(request)
-                        .await
-                }
-                Parent::Dispatcher(_) => {
-                    unreachable!("library dispatcher handled by forwarding loop")
-                }
-            }
-            })
+            crate::matching_fault_injection::inject_client_call(
+                "matching-poll-for-decision-task",
+                async move {
+                    match target.target {
+                        Parent::Service(service) => {
+                            m::matching_api_server::MatchingApi::poll_for_decision_task(
+                                &*service, request,
+                            )
+                            .await
+                        }
+                        Parent::Remote(channel) => {
+                            matching_yarpc_grpc_metadata(&mut request);
+                            m::matching_api_client::MatchingApiClient::new(channel)
+                                .poll_for_decision_task(request)
+                                .await
+                        }
+                        Parent::Dispatcher(_) => {
+                            unreachable!("library dispatcher handled by forwarding loop")
+                        }
+                    }
+                },
+            )
             .await
             .map(tonic::Response::into_inner)
         })
@@ -204,23 +212,28 @@ impl ForwardPollRequest<m::PollForActivityTaskResponse> for p::PollForActivityTa
                     .deadline
                     .saturating_duration_since(tokio::time::Instant::now()),
             );
-            crate::matching_fault_injection::inject_client_call("matching-poll-for-activity-task", async move {
-            match target.target {
-                Parent::Service(service) => {
-                    m::matching_api_server::MatchingApi::poll_for_activity_task(&*service, request)
-                        .await
-                }
-                Parent::Remote(channel) => {
-                    matching_yarpc_grpc_metadata(&mut request);
-                    m::matching_api_client::MatchingApiClient::new(channel)
-                        .poll_for_activity_task(request)
-                        .await
-                }
-                Parent::Dispatcher(_) => {
-                    unreachable!("library dispatcher handled by forwarding loop")
-                }
-            }
-            })
+            crate::matching_fault_injection::inject_client_call(
+                "matching-poll-for-activity-task",
+                async move {
+                    match target.target {
+                        Parent::Service(service) => {
+                            m::matching_api_server::MatchingApi::poll_for_activity_task(
+                                &*service, request,
+                            )
+                            .await
+                        }
+                        Parent::Remote(channel) => {
+                            matching_yarpc_grpc_metadata(&mut request);
+                            m::matching_api_client::MatchingApiClient::new(channel)
+                                .poll_for_activity_task(request)
+                                .await
+                        }
+                        Parent::Dispatcher(_) => {
+                            unreachable!("library dispatcher handled by forwarding loop")
+                        }
+                    }
+                },
+            )
             .await
             .map(tonic::Response::into_inner)
         })
@@ -280,7 +293,10 @@ impl<R: Send + 'static> ForwardPollRequest<R> for () {
 // Go's ForwardTask timer is deferred: remote busy responses and context
 // cancellation are timed too, while local limiter rejection is not.
 struct ForwardTaskTimer<'a> {
-    metrics: Option<&'a (crate::matching_metrics::MatchingMetrics, crate::matching_metrics::PollMetricContext)>,
+    metrics: Option<&'a (
+        crate::matching_metrics::MatchingMetrics,
+        crate::matching_metrics::PollMetricContext,
+    )>,
     started: std::time::Instant,
 }
 impl Drop for ForwardTaskTimer<'_> {
@@ -310,7 +326,11 @@ impl ForwardState {
         }
     }
 
-    pub(crate) fn with_task_metrics(mut self, metrics: crate::matching_metrics::MatchingMetrics, context: crate::matching_metrics::PollMetricContext) -> Self {
+    pub(crate) fn with_task_metrics(
+        mut self,
+        metrics: crate::matching_metrics::MatchingMetrics,
+        context: crate::matching_metrics::PollMetricContext,
+    ) -> Self {
         self.task_metrics = Some((metrics, context));
         self
     }
@@ -336,82 +356,154 @@ impl ForwardState {
         }
         // Go `ForwardTask`: the parent name is resolved before the rate limit
         // is charged; the outstanding-add token is taken by the caller.
-        let name = cadence_common::task_list::TaskListName::parse(&self.source)
-            .map_err(|error| crate::matching_forward::ForwardError::Remote(Status::invalid_argument(error)))?;
+        let name =
+            cadence_common::task_list::TaskListName::parse(&self.source).map_err(|error| {
+                crate::matching_forward::ForwardError::Remote(Status::invalid_argument(error))
+            })?;
         if name.is_root() {
             return Err(crate::matching_forward::ForwardError::NoParent);
         }
         if !self.add_rate.allow(now()) {
             return Err(crate::matching_forward::ForwardError::SlowDown);
         }
-        let _timer = ForwardTaskTimer { metrics: self.task_metrics.as_ref(), started: std::time::Instant::now() };
+        let _timer = ForwardTaskTimer {
+            metrics: self.task_metrics.as_ref(),
+            started: std::time::Instant::now(),
+        };
         if !matches!(task_type, 0 | 1) {
             return Err(crate::matching_forward::ForwardError::InvalidTaskListType);
         }
-        let (parent, parent_name) = (self.resolve)().await.ok_or_else(||
-            crate::matching_forward::ForwardError::Remote(Status::unavailable("cannot resolve parent task list for forwarding")))?;
+        let (parent, parent_name) = (self.resolve)().await.ok_or_else(|| {
+            crate::matching_forward::ForwardError::Remote(Status::unavailable(
+                "cannot resolve parent task list for forwarding",
+            ))
+        })?;
         let run_id = task.data.run_id_string();
-        let execution = Some(p::WorkflowExecution { workflow_id: task.data.workflow_id.clone(), run_id });
-        let partition_config = task.data.partition_config.clone().unwrap_or_default().into_iter().collect();
+        let execution = Some(p::WorkflowExecution {
+            workflow_id: task.data.workflow_id.clone(),
+            run_id,
+        });
+        let partition_config = task
+            .data
+            .partition_config
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         // Go persistence GetTasks leaves ScheduleToStartTimeoutSeconds at
         // zero (SQL and NoSQL). Expiry is for reader filtering, not a new
         // timeout to reconstruct when forwarding an already-persisted task.
         let timeout_seconds = 0i32;
         let forwarded_from = self.source.clone();
-        let operation = if task_type == 0 { "matching-add-decision-task" } else { "matching-add-activity-task" };
-        let result = crate::matching_fault_injection::inject_client_call(operation, async { match parent {
-            Parent::Remote(channel) => {
-                let mut client = m::matching_api_client::MatchingApiClient::new(channel);
-                if task_type == 0 {
-                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
-                        domain_id: source_domain.to_owned(), workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
-                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
-                        source: 2, forwarded_from, partition_config,
-                    });
-                    request.set_timeout(Duration::from_secs(2));
-                    matching_yarpc_grpc_metadata(&mut request);
-                    client.add_decision_task(request).await.map(|_| ())
-                } else {
-                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
-                        domain_id: domain_id.to_owned(), source_domain_id: source_domain.to_owned(),
-                        workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
-                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
-                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
-                    });
-                    request.set_timeout(Duration::from_secs(2));
-                    matching_yarpc_grpc_metadata(&mut request);
-                    client.add_activity_task(request).await.map(|_| ())
+        let operation = if task_type == 0 {
+            "matching-add-decision-task"
+        } else {
+            "matching-add-activity-task"
+        };
+        let result = crate::matching_fault_injection::inject_client_call(operation, async {
+            match parent {
+                Parent::Remote(channel) => {
+                    let mut client = m::matching_api_client::MatchingApiClient::new(channel);
+                    if task_type == 0 {
+                        let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
+                            domain_id: source_domain.to_owned(),
+                            workflow_execution: execution,
+                            task_list: Some(p::TaskList {
+                                name: parent_name,
+                                kind: i32::from(kind) + 1,
+                                ..Default::default()
+                            }),
+                            schedule_id: task.data.schedule_id,
+                            schedule_to_start_timeout: Some(prost_types::Duration {
+                                seconds: i64::from(timeout_seconds),
+                                nanos: 0,
+                            }),
+                            source: 2,
+                            forwarded_from,
+                            partition_config,
+                        });
+                        request.set_timeout(Duration::from_secs(2));
+                        matching_yarpc_grpc_metadata(&mut request);
+                        client.add_decision_task(request).await.map(|_| ())
+                    } else {
+                        let mut request = tonic::Request::new(m::AddActivityTaskRequest {
+                            domain_id: domain_id.to_owned(),
+                            source_domain_id: source_domain.to_owned(),
+                            workflow_execution: execution,
+                            task_list: Some(p::TaskList {
+                                name: parent_name,
+                                kind: i32::from(kind) + 1,
+                                ..Default::default()
+                            }),
+                            schedule_id: task.data.schedule_id,
+                            schedule_to_start_timeout: Some(prost_types::Duration {
+                                seconds: i64::from(timeout_seconds),
+                                nanos: 0,
+                            }),
+                            source: 2,
+                            forwarded_from,
+                            partition_config,
+                            activity_task_dispatch_info: None,
+                        });
+                        request.set_timeout(Duration::from_secs(2));
+                        matching_yarpc_grpc_metadata(&mut request);
+                        client.add_activity_task(request).await.map(|_| ())
+                    }
+                }
+                Parent::Service(service) => {
+                    use m::matching_api_server::MatchingApi;
+                    if task_type == 0 {
+                        let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
+                            domain_id: source_domain.to_owned(),
+                            workflow_execution: execution,
+                            task_list: Some(p::TaskList {
+                                name: parent_name,
+                                kind: i32::from(kind) + 1,
+                                ..Default::default()
+                            }),
+                            schedule_id: task.data.schedule_id,
+                            schedule_to_start_timeout: Some(prost_types::Duration {
+                                seconds: i64::from(timeout_seconds),
+                                nanos: 0,
+                            }),
+                            source: 2,
+                            forwarded_from,
+                            partition_config,
+                        });
+                        request.set_timeout(Duration::from_secs(2));
+                        service.add_decision_task(request).await.map(|_| ())
+                    } else {
+                        let mut request = tonic::Request::new(m::AddActivityTaskRequest {
+                            domain_id: domain_id.to_owned(),
+                            source_domain_id: source_domain.to_owned(),
+                            workflow_execution: execution,
+                            task_list: Some(p::TaskList {
+                                name: parent_name,
+                                kind: i32::from(kind) + 1,
+                                ..Default::default()
+                            }),
+                            schedule_id: task.data.schedule_id,
+                            schedule_to_start_timeout: Some(prost_types::Duration {
+                                seconds: i64::from(timeout_seconds),
+                                nanos: 0,
+                            }),
+                            source: 2,
+                            forwarded_from,
+                            partition_config,
+                            activity_task_dispatch_info: None,
+                        });
+                        request.set_timeout(Duration::from_secs(2));
+                        service.add_activity_task(request).await.map(|_| ())
+                    }
+                }
+                Parent::Dispatcher(dispatcher) => {
+                    dispatcher
+                        .accept_forwarded_backlog(task, source_domain, &parent_name, task_type)
+                        .await
                 }
             }
-            Parent::Service(service) => {
-                use m::matching_api_server::MatchingApi;
-                if task_type == 0 {
-                    let mut request = tonic::Request::new(m::AddDecisionTaskRequest {
-                        domain_id: source_domain.to_owned(), workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
-                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
-                        source: 2, forwarded_from, partition_config,
-                    });
-                    request.set_timeout(Duration::from_secs(2));
-                    service.add_decision_task(request).await.map(|_| ())
-                } else {
-                    let mut request = tonic::Request::new(m::AddActivityTaskRequest {
-                        domain_id: domain_id.to_owned(), source_domain_id: source_domain.to_owned(),
-                        workflow_execution: execution,
-                        task_list: Some(p::TaskList { name: parent_name, kind: i32::from(kind) + 1, ..Default::default() }),
-                        schedule_id: task.data.schedule_id, schedule_to_start_timeout: Some(prost_types::Duration { seconds: i64::from(timeout_seconds), nanos: 0 }),
-                        source: 2, forwarded_from, partition_config, activity_task_dispatch_info: None,
-                    });
-                    request.set_timeout(Duration::from_secs(2));
-                    service.add_activity_task(request).await.map(|_| ())
-                }
-            }
-            Parent::Dispatcher(dispatcher) => {
-                dispatcher.accept_forwarded_backlog(task, source_domain, &parent_name, task_type).await
-            }
-        } }).await;
+        })
+        .await;
         result.map_err(crate::matching_forward::ForwardError::classify)
     }
 }
@@ -443,16 +535,20 @@ enum WaitResult {
 fn queue_status(error: QueueError) -> Status {
     if matches!(
         error,
-        QueueError::Storage(cadence_persistence::matching_sqlite::StorageError::Backend {
-            kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
-            ..
-        })
+        QueueError::Storage(
+            cadence_persistence::matching_sqlite::StorageError::Backend {
+                kind: cadence_persistence::matching_task_store::BackendErrorKind::Throttled,
+                ..
+            }
+        )
     ) {
         return crate::grpc::detailed_status(
             tonic::Code::ResourceExhausted,
             error.to_string(),
             "ServiceBusyError",
-            cadence_proto::api::ServiceBusyError { reason: String::new() },
+            cadence_proto::api::ServiceBusyError {
+                reason: String::new(),
+            },
         );
     }
     Status::internal(error.to_string())
@@ -477,21 +573,41 @@ impl TaskDispatcher {
     ) -> Result<(), Status> {
         let source_domain = uuid::Uuid::parse_str(source_domain)
             .map_err(|_| Status::invalid_argument("DomainUUID is not valid."))?;
-        let matcher = self.sync_matcher.as_ref().ok_or_else(remote_sync_match_failed)?;
+        let matcher = self
+            .sync_matcher
+            .as_ref()
+            .ok_or_else(remote_sync_match_failed)?;
         let root = cadence_common::task_list::TaskListName::parse(parent_name)
             .map_err(|_| Status::invalid_argument("TaskList is not valid."))?
             .is_root();
         let local_wait = if root {
             Duration::from_secs(2)
         } else {
-            self.forward.as_ref().map(|forward| Duration::from_nanos((forward.local_wait)().max(0) as u64))
+            self.forward
+                .as_ref()
+                .map(|forward| Duration::from_nanos((forward.local_wait)().max(0) as u64))
                 .unwrap_or(Duration::from_millis(10))
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-        let group = task.data.partition_config.as_ref()
+        let group = task
+            .data
+            .partition_config
+            .as_ref()
             .and_then(|config| config.get("isolation-group"))
-            .map(String::as_str).unwrap_or_default().to_owned();
-        if matcher.offer(task.data.clone(), &group, &source_domain.to_string(), true, local_wait, deadline).await {
+            .map(String::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        if matcher
+            .offer(
+                task.data.clone(),
+                &group,
+                &source_domain.to_string(),
+                true,
+                local_wait,
+                deadline,
+            )
+            .await
+        {
             return Ok(());
         }
         // Library users have no local Matching RPC factory. Preserve the
@@ -502,7 +618,16 @@ impl TaskDispatcher {
                 if let Some(_permit) = forward.add_permits.try_acquire() {
                     // Go forwards with task.Event.DomainID, which the accepted
                     // task carries as TaskInfo.DomainID from the wire source domain.
-                    if Box::pin(forward.forward_backlog_task(task, &self.domain_id, &source_domain.to_string(), task_type, 0)).await.is_ok() {
+                    if Box::pin(forward.forward_backlog_task(
+                        task,
+                        &self.domain_id,
+                        &source_domain.to_string(),
+                        task_type,
+                        0,
+                    ))
+                    .await
+                    .is_ok()
+                    {
                         return Ok(());
                     }
                 }
@@ -1077,7 +1202,9 @@ impl TaskDispatcher {
         let timeout_metrics = lifecycle
             .as_ref()
             .and_then(|l| Some((l.metrics.clone(), l.metric_context.clone()?)));
-        let blocked_poller = lifecycle.as_ref().map(|poll| (poll.manager.clone(), poll.id.clone()));
+        let blocked_poller = lifecycle
+            .as_ref()
+            .map(|poll| (poll.manager.clone(), poll.id.clone()));
         let worker = self.clone();
         let deadline = tokio::time::Instant::now() + expiration;
         let poll_started = tokio::time::Instant::now();
@@ -1384,8 +1511,9 @@ impl TaskDispatcher {
                         lifecycle.metrics.async_match_handler_latency(
                             context,
                             std::time::Duration::from_nanos(
-                                now_nanos.saturating_sub(task.task.data.created_nanos).max(0)
-                                    as u64,
+                                now_nanos
+                                    .saturating_sub(task.task.data.created_nanos)
+                                    .max(0) as u64,
                             ),
                         );
                     }
@@ -1423,11 +1551,19 @@ impl TaskDispatcher {
                 }
                 Err(error) => match start_error_kind(&error) {
                     StartErrorKind::Discard => {
-                        if let Some(context) = lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()) {
-                            let kind = if context.task_type == "decision_task" { "decision" } else { "activity" };
+                        if let Some(context) =
+                            lifecycle.as_ref().and_then(|l| l.metric_context.as_ref())
+                        {
+                            let kind = if context.task_type == "decision_task" {
+                                "decision"
+                            } else {
+                                "activity"
+                            };
                             log_task_event(
                                 &format!("Duplicated {kind} task"),
-                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| sync.source_domain.as_str()),
+                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| {
+                                    sync.source_domain.as_str()
+                                }),
                                 &self.domain_id,
                                 context,
                                 &task.task,
@@ -1443,11 +1579,15 @@ impl TaskDispatcher {
                         self.finish_delivery(task, Ok(())).await
                     }
                     StartErrorKind::InactiveDomain => {
-                        if let Some(context) = lifecycle.as_ref().and_then(|l| l.metric_context.as_ref()) {
+                        if let Some(context) =
+                            lifecycle.as_ref().and_then(|l| l.metric_context.as_ref())
+                        {
                             // Go logs this text for both decision and activity polls.
                             log_task_event(
                                 "Decision task dropped because domain is not active",
-                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| sync.source_domain.as_str()),
+                                task.sync.as_ref().map_or(self.domain_id.as_str(), |sync| {
+                                    sync.source_domain.as_str()
+                                }),
                                 &self.domain_id,
                                 context,
                                 &task.task,
@@ -1508,7 +1648,10 @@ mod tests {
             kind: BackendErrorKind::Throttled,
             message: "too many connections".into(),
         });
-        assert_eq!(queue_status(throttled).code(), tonic::Code::ResourceExhausted);
+        assert_eq!(
+            queue_status(throttled).code(),
+            tonic::Code::ResourceExhausted
+        );
         // Timeouts, persistence failures, condition failures and shutdown reach
         // handleErr's default branch: InternalServiceError.
         let timeout = QueueError::Storage(StorageError::Backend {
@@ -1516,18 +1659,22 @@ mod tests {
             message: "timed out".into(),
         });
         assert_eq!(queue_status(timeout).code(), tonic::Code::Internal);
-        let condition = QueueError::Storage(MatchingTaskStoreError::ConditionFailed("fenced".into()));
+        let condition =
+            QueueError::Storage(MatchingTaskStoreError::ConditionFailed("fenced".into()));
         assert_eq!(queue_status(condition).code(), tonic::Code::Internal);
-        assert_eq!(queue_status(QueueError::Stopped).code(), tonic::Code::Internal);
+        assert_eq!(
+            queue_status(QueueError::Stopped).code(),
+            tonic::Code::Internal
+        );
     }
+    use crate::matching_forward::ForwardError;
+    use crate::matching_sync::SyncMatcher;
     use prost::Message;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
     };
     use uuid::Uuid;
-    use crate::matching_forward::ForwardError;
-    use crate::matching_sync::SyncMatcher;
     #[test]
     fn matching_forwarded_poll_rebuilds_parent_request() {
         let activity = p::PollForActivityTaskRequest {
@@ -1603,7 +1750,6 @@ mod tests {
             activity.workflow_execution.unwrap().workflow_id,
             "go-peer-workflow"
         );
-
     }
     fn fixture(
         count: usize,
@@ -1950,7 +2096,7 @@ mod tests {
         let lifecycle = PollLifecycle {
             manager: manager.clone(),
             id: "poll".into(),
-                    cancel: None,
+            cancel: None,
             info: cadence_common::poller::Info {
                 identity: "worker".into(),
                 rate_per_second: 42.0,
@@ -2071,7 +2217,7 @@ mod tests {
             let lifecycle = PollLifecycle {
                 manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
                 id: format!("metric-poller-{case}"),
-                    cancel: None,
+                cancel: None,
                 info: cadence_common::poller::Info {
                     identity: "worker".into(),
                     rate_per_second: 1.0,
@@ -2217,26 +2363,55 @@ mod tests {
     struct BacklogParent;
     #[tonic::async_trait]
     impl m::matching_api_server::MatchingApi for BacklogParent {
-        async fn add_decision_task(&self, request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
-            assert_eq!(request.metadata().get("rpc-service").unwrap(), "cadence-matching");
+        async fn add_decision_task(
+            &self,
+            request: tonic::Request<m::AddDecisionTaskRequest>,
+        ) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            assert_eq!(
+                request.metadata().get("rpc-service").unwrap(),
+                "cadence-matching"
+            );
             let task = request.into_inner();
-            assert_eq!(task.task_list.unwrap(), p::TaskList { name: "queue".into(), kind: 1, ..Default::default() });
+            assert_eq!(
+                task.task_list.unwrap(),
+                p::TaskList {
+                    name: "queue".into(),
+                    kind: 1,
+                    ..Default::default()
+                }
+            );
             assert_eq!(task.domain_id, uuid::Uuid::from_u128(1).to_string());
             assert_eq!(task.forwarded_from, "/__cadence_sys/queue/1");
             assert_eq!(task.source, 2);
             assert_eq!(task.schedule_id, 91);
             assert_eq!(task.schedule_to_start_timeout.unwrap().seconds, 0);
-            assert_eq!(task.partition_config.get("isolation-group").unwrap(), "zone-a");
+            assert_eq!(
+                task.partition_config.get("isolation-group").unwrap(),
+                "zone-a"
+            );
             Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
         }
-        async fn add_activity_task(&self, request: tonic::Request<m::AddActivityTaskRequest>) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
-            assert_eq!(request.metadata().get("rpc-caller").unwrap(), "cadence-matching");
+        async fn add_activity_task(
+            &self,
+            request: tonic::Request<m::AddActivityTaskRequest>,
+        ) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
+            assert_eq!(
+                request.metadata().get("rpc-caller").unwrap(),
+                "cadence-matching"
+            );
             let task = request.into_inner();
             assert_eq!(task.task_list.unwrap().name, "queue");
             assert_eq!(task.domain_id, task.source_domain_id);
             assert_eq!(task.source, 2);
             assert_eq!(task.forwarded_from, "/__cadence_sys/queue/1");
-            Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "parent busy", "ServiceBusyError", p::ServiceBusyError { reason: String::new() }))
+            Err(crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "parent busy",
+                "ServiceBusyError",
+                p::ServiceBusyError {
+                    reason: String::new(),
+                },
+            ))
         }
     }
     #[tokio::test]
@@ -2246,33 +2421,89 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
-                .add_service(m::matching_api_server::MatchingApiServer::new(BacklogParent))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+                .add_service(m::matching_api_server::MatchingApiServer::new(
+                    BacklogParent,
+                ))
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
         });
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
-        let state = ForwardState::new(move || {
-            let channel = channel.clone();
-            Box::pin(async move { Some((Parent::Remote(channel), "queue".into())) })
-        }, Arc::new(|| 1), Arc::new(RequestTokens::new(Arc::new(|| 1))), Arc::new(ForwardRate::new(Arc::new(|| 2), now())), "/__cadence_sys/queue/1".into(), Arc::new(|| 0));
-        let task = AllocatedTask { task_id: 1, data: cadence_persistence::matching_blob::TaskData {
-            schedule_id: 91, created_nanos: 1_000_000_000, expiry_nanos: 10_000_000_000,
-            partition_config: Some(std::collections::BTreeMap::from([("isolation-group".into(), "zone-a".into())])),
-            ..Default::default()
-        }};
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        let state = ForwardState::new(
+            move || {
+                let channel = channel.clone();
+                Box::pin(async move { Some((Parent::Remote(channel), "queue".into())) })
+            },
+            Arc::new(|| 1),
+            Arc::new(RequestTokens::new(Arc::new(|| 1))),
+            Arc::new(ForwardRate::new(Arc::new(|| 2), now())),
+            "/__cadence_sys/queue/1".into(),
+            Arc::new(|| 0),
+        );
+        let task = AllocatedTask {
+            task_id: 1,
+            data: cadence_persistence::matching_blob::TaskData {
+                schedule_id: 91,
+                created_nanos: 1_000_000_000,
+                expiry_nanos: 10_000_000_000,
+                partition_config: Some(std::collections::BTreeMap::from([(
+                    "isolation-group".into(),
+                    "zone-a".into(),
+                )])),
+                ..Default::default()
+            },
+        };
         let domain = uuid::Uuid::from_u128(1).to_string();
-        state.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await.unwrap();
-        assert!(matches!(state.forward_backlog_task(task.clone(), &domain, &domain, 1, 0).await, Err(ForwardError::SlowDown)));
+        state
+            .forward_backlog_task(task.clone(), &domain, &domain, 0, 0)
+            .await
+            .unwrap();
+        assert!(matches!(
+            state
+                .forward_backlog_task(task.clone(), &domain, &domain, 1, 0)
+                .await,
+            Err(ForwardError::SlowDown)
+        ));
         let mut limited = state.clone();
         limited.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 0), now()));
-        assert!(matches!(limited.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await, Err(ForwardError::SlowDown)), "zero forwarding rate rejects before issuing an RPC");
-        assert!(matches!(state.forward_backlog_task(task, &domain, &domain, 0, 1).await, Err(ForwardError::TaskListKind)));
-        let task = AllocatedTask { task_id: 2, data: Default::default() };
+        assert!(
+            matches!(
+                limited
+                    .forward_backlog_task(task.clone(), &domain, &domain, 0, 0)
+                    .await,
+                Err(ForwardError::SlowDown)
+            ),
+            "zero forwarding rate rejects before issuing an RPC"
+        );
+        assert!(matches!(
+            state
+                .forward_backlog_task(task, &domain, &domain, 0, 1)
+                .await,
+            Err(ForwardError::TaskListKind)
+        ));
+        let task = AllocatedTask {
+            task_id: 2,
+            data: Default::default(),
+        };
         let mut root = state.clone();
         root.source = "queue".into();
-        assert!(matches!(root.forward_backlog_task(task.clone(), &domain, &domain, 0, 0).await, Err(ForwardError::NoParent)));
+        assert!(matches!(
+            root.forward_backlog_task(task.clone(), &domain, &domain, 0, 0)
+                .await,
+            Err(ForwardError::NoParent)
+        ));
         let mut invalid = state.clone();
         invalid.add_rate = Arc::new(ForwardRate::new(Arc::new(|| 1), now()));
-        assert!(matches!(invalid.forward_backlog_task(task, &domain, &domain, 2, 0).await, Err(ForwardError::InvalidTaskListType)));
+        assert!(matches!(
+            invalid
+                .forward_backlog_task(task, &domain, &domain, 2, 0)
+                .await,
+            Err(ForwardError::InvalidTaskListType)
+        ));
         server.abort();
     }
     fn forward_state(source: &str, rate: i64) -> ForwardState {
@@ -2282,13 +2513,19 @@ mod tests {
             || Box::pin(async { None::<(Parent, String)> }),
             Arc::new(|| 1),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(move || rate), now())),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(move || rate),
+                now(),
+            )),
             source.into(),
             Arc::new(|| 0),
         )
     }
     fn unallocated_task() -> AllocatedTask {
-        AllocatedTask { task_id: 0, data: TaskData::default() }
+        AllocatedTask {
+            task_id: 0,
+            data: TaskData::default(),
+        }
     }
     #[tokio::test]
     async fn matching_forward_task_error_is_no_parent_or_task_list_kind() {
@@ -2296,12 +2533,15 @@ mod tests {
         // list cannot forward.
         let root = forward_state("queue", 10);
         assert!(matches!(
-            root.forward_backlog_task(unallocated_task(), "domain", "domain", 0, 0).await,
+            root.forward_backlog_task(unallocated_task(), "domain", "domain", 0, 0)
+                .await,
             Err(ForwardError::NoParent)
         ));
         let partition = forward_state("/__cadence_sys/queue/1", 10);
         assert!(matches!(
-            partition.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 1).await,
+            partition
+                .forward_backlog_task(unallocated_task(), "domain", "domain", 1, 1)
+                .await,
             Err(ForwardError::TaskListKind)
         ));
     }
@@ -2312,12 +2552,16 @@ mod tests {
         let forward = forward_state("/__cadence_sys/queue/1", 2);
         for _ in 0..2 {
             assert!(matches!(
-                forward.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0).await,
+                forward
+                    .forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0)
+                    .await,
                 Err(ForwardError::Remote(_))
             ));
         }
         assert!(matches!(
-            forward.forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0).await,
+            forward
+                .forward_backlog_task(unallocated_task(), "domain", "domain", 1, 0)
+                .await,
             Err(ForwardError::SlowDown)
         ));
     }
@@ -2333,24 +2577,46 @@ mod tests {
     }
     #[tonic::async_trait]
     impl m::matching_api_server::MatchingApi for RecordingParent {
-        async fn add_decision_task(&self, request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+        async fn add_decision_task(
+            &self,
+            request: tonic::Request<m::AddDecisionTaskRequest>,
+        ) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
             *self.add_decision.lock().unwrap() = Some(request.into_inner());
             Ok(tonic::Response::new(m::AddDecisionTaskResponse::default()))
         }
-        async fn add_activity_task(&self, request: tonic::Request<m::AddActivityTaskRequest>) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
+        async fn add_activity_task(
+            &self,
+            request: tonic::Request<m::AddActivityTaskRequest>,
+        ) -> Result<tonic::Response<m::AddActivityTaskResponse>, Status> {
             *self.add_activity.lock().unwrap() = Some(request.into_inner());
             Ok(tonic::Response::new(m::AddActivityTaskResponse::default()))
         }
-        async fn poll_for_decision_task(&self, request: tonic::Request<m::PollForDecisionTaskRequest>) -> Result<tonic::Response<m::PollForDecisionTaskResponse>, Status> {
+        async fn poll_for_decision_task(
+            &self,
+            request: tonic::Request<m::PollForDecisionTaskRequest>,
+        ) -> Result<tonic::Response<m::PollForDecisionTaskResponse>, Status> {
             *self.poll_decision.lock().unwrap() = Some(request.into_inner());
-            Ok(tonic::Response::new(m::PollForDecisionTaskResponse { task_token: vec![7], ..Default::default() }))
+            Ok(tonic::Response::new(m::PollForDecisionTaskResponse {
+                task_token: vec![7],
+                ..Default::default()
+            }))
         }
-        async fn poll_for_activity_task(&self, request: tonic::Request<m::PollForActivityTaskRequest>) -> Result<tonic::Response<m::PollForActivityTaskResponse>, Status> {
+        async fn poll_for_activity_task(
+            &self,
+            request: tonic::Request<m::PollForActivityTaskRequest>,
+        ) -> Result<tonic::Response<m::PollForActivityTaskResponse>, Status> {
             *self.poll_activity.lock().unwrap() = Some(request.into_inner());
-            Ok(tonic::Response::new(m::PollForActivityTaskResponse { task_token: vec![8], ..Default::default() }))
+            Ok(tonic::Response::new(m::PollForActivityTaskResponse {
+                task_token: vec![8],
+                ..Default::default()
+            }))
         }
     }
-    async fn recording_parent() -> (RecordingParent, tonic::transport::Channel, tokio::task::JoinHandle<()>) {
+    async fn recording_parent() -> (
+        RecordingParent,
+        tonic::transport::Channel,
+        tokio::task::JoinHandle<()>,
+    ) {
         let parent = RecordingParent::default();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2358,9 +2624,15 @@ mod tests {
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(m::matching_api_server::MatchingApiServer::new(served))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
         });
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
         (parent, channel, server)
     }
     /// Go `newForwarder` with a parent resolving to `tl0` over the recording channel.
@@ -2372,7 +2644,10 @@ mod tests {
             },
             Arc::new(|| 1),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 2),
+                now(),
+            )),
             source.into(),
             Arc::new(|| 0),
         )
@@ -2389,10 +2664,17 @@ mod tests {
             let domain = Uuid::from_u128(5).to_string();
             let task = AllocatedTask {
                 task_id: 1,
-                data: TaskData { workflow_id: "wf".into(), schedule_id: 91, ..Default::default() }
-                    .with_request_run_id(raw),
+                data: TaskData {
+                    workflow_id: "wf".into(),
+                    schedule_id: 91,
+                    ..Default::default()
+                }
+                .with_request_run_id(raw),
             };
-            state.forward_backlog_task(task, &domain, &domain, 0, 0).await.unwrap();
+            state
+                .forward_backlog_task(task, &domain, &domain, 0, 0)
+                .await
+                .unwrap();
             let request = parent.add_decision.lock().unwrap().clone().unwrap();
             assert_eq!(request.workflow_execution.unwrap().run_id, raw);
             server.abort();
@@ -2417,8 +2699,16 @@ mod tests {
                 ..Default::default()
             },
         };
-        state.forward_backlog_task(task, &domain, &domain, 0, 0).await.unwrap();
-        let request = parent.add_decision.lock().unwrap().clone().expect("decision add reached the parent");
+        state
+            .forward_backlog_task(task, &domain, &domain, 0, 0)
+            .await
+            .unwrap();
+        let request = parent
+            .add_decision
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("decision add reached the parent");
         let list = request.task_list.clone().unwrap();
         assert_eq!(list.name, "tl0");
         assert_eq!(list.kind, 1);
@@ -2454,8 +2744,16 @@ mod tests {
                 ..Default::default()
             },
         };
-        state.forward_backlog_task(task, &list_domain, &source_domain, 1, 0).await.unwrap();
-        let request = parent.add_activity.lock().unwrap().clone().expect("activity add reached the parent");
+        state
+            .forward_backlog_task(task, &list_domain, &source_domain, 1, 0)
+            .await
+            .unwrap();
+        let request = parent
+            .add_activity
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("activity add reached the parent");
         assert_eq!(request.domain_id, list_domain);
         assert_eq!(request.source_domain_id, source_domain);
         let list = request.task_list.clone().unwrap();
@@ -2472,12 +2770,15 @@ mod tests {
     fn query_lifecycle() -> PollLifecycle {
         PollLifecycle {
             manager: Arc::new(Mutex::new(cadence_common::poller::Manager::default())),
-            id: "query-poller".into(), cancel: None,
+            id: "query-poller".into(),
+            cancel: None,
             info: cadence_common::poller::Info {
-                identity: "query-worker".into(), rate_per_second: 1.0,
+                identity: "query-worker".into(),
+                rate_per_second: 1.0,
                 isolation_group: String::new(),
             },
-            forwarded: false, metric_context: None,
+            forwarded: false,
+            metric_context: None,
             metrics: crate::matching_metrics::MatchingMetrics::default(),
         }
     }
@@ -2493,18 +2794,31 @@ mod tests {
             },
             Arc::new(|| 1),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
-            "/__cadence_sys/tl0/1".into(), Arc::new(|| 0),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 2),
+                now(),
+            )),
+            "/__cadence_sys/tl0/1".into(),
+            Arc::new(|| 0),
         );
         let dispatcher = dispatcher.with_forward(forward);
         let before = dispatcher.queue.levels();
-        let response = dispatcher.forward_query_poll(
-            p::PollForDecisionTaskRequest {
-                identity: "query-worker".into(),
-                task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
-                ..Default::default()
-            }, Duration::from_secs(5), query_lifecycle(),
-        ).await.unwrap();
+        let response = dispatcher
+            .forward_query_poll(
+                p::PollForDecisionTaskRequest {
+                    identity: "query-worker".into(),
+                    task_list: Some(p::TaskList {
+                        name: "/__cadence_sys/tl0/1".into(),
+                        kind: 1,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                Duration::from_secs(5),
+                query_lifecycle(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.task_token, vec![7]);
         let request = parent.poll_decision.lock().unwrap().clone().unwrap();
         assert_eq!(request.poller_id, "query-poller");
@@ -2525,7 +2839,10 @@ mod tests {
             || Box::pin(async { None }),
             Arc::new(|| 0),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 2),
+                now(),
+            )),
             "/__cadence_sys/queue/1".into(),
             Arc::new(|| 0),
         );
@@ -2535,7 +2852,11 @@ mod tests {
             .forward_query_poll(
                 p::PollForDecisionTaskRequest {
                     identity: "query-worker".into(),
-                    task_list: Some(p::TaskList { name: "/__cadence_sys/queue/1".into(), kind: 1, ..Default::default() }),
+                    task_list: Some(p::TaskList {
+                        name: "/__cadence_sys/queue/1".into(),
+                        kind: 1,
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
                 Duration::from_millis(200),
@@ -2543,8 +2864,14 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(response.task_token.is_empty(), "no parent means no forwarded task");
-        assert!(started.elapsed() >= Duration::from_millis(200), "poll waits out its local deadline");
+        assert!(
+            response.task_token.is_empty(),
+            "no parent means no forwarded task"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "poll waits out its local deadline"
+        );
     }
 
     #[tokio::test]
@@ -2556,25 +2883,44 @@ mod tests {
         let started = entered.clone();
         let complete = finish.clone();
         let mut poll = tokio::spawn(async move {
-            worker.poll_with_lifecycle(
-                (), Duration::from_secs(60),
-                tokio::time::Instant::now() + Duration::from_secs(60),
-                move |_, _, _| {
-                    let started = started.clone();
-                    let complete = complete.clone();
-                    async move {
-                        started.notify_one();
-                        complete.notified().await;
-                        Ok(m::PollForDecisionTaskResponse { task_token: vec![9], ..Default::default() })
-                    }
-                }, Some(query_lifecycle()),
-            ).await
+            worker
+                .poll_with_lifecycle(
+                    (),
+                    Duration::from_secs(60),
+                    tokio::time::Instant::now() + Duration::from_secs(60),
+                    move |_, _, _| {
+                        let started = started.clone();
+                        let complete = complete.clone();
+                        async move {
+                            started.notify_one();
+                            complete.notified().await;
+                            Ok(m::PollForDecisionTaskResponse {
+                                task_token: vec![9],
+                                ..Default::default()
+                            })
+                        }
+                    },
+                    Some(query_lifecycle()),
+                )
+                .await
         });
-        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
         dispatcher.release_blocked_pollers();
-        assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll).await.is_err());
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut poll)
+            .await
+            .is_err());
         finish.notify_one();
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().unwrap().task_token, vec![9]);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), poll)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .task_token,
+            vec![9]
+        );
         assert_eq!(dispatcher.queue.levels().1, 1);
     }
 
@@ -2590,11 +2936,16 @@ mod tests {
             },
             Arc::new(|| 1),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
-            "/__cadence_sys/tl0/1".into(), Arc::new(|| 0),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 2),
+                now(),
+            )),
+            "/__cadence_sys/tl0/1".into(),
+            Arc::new(|| 0),
         );
         let reader = crate::matching_reader::TaskReader::new(
-            dispatcher.queue.clone(), dispatcher.task_notification(),
+            dispatcher.queue.clone(),
+            dispatcher.task_notification(),
             crate::matching_reader::ReaderConfig::default(),
         );
         let dispatcher = dispatcher.with_forward(forward).with_reader(reader.clone());
@@ -2602,18 +2953,33 @@ mod tests {
         let manager = lifecycle.manager.clone();
         let worker = dispatcher.clone();
         let poll = tokio::spawn(async move {
-            worker.poll_decision_with_poller(
-                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), lifecycle, None,
-            ).await
+            worker
+                .poll_decision_with_poller(
+                    p::PollForDecisionTaskRequest::default(),
+                    Duration::from_secs(60),
+                    lifecycle,
+                    None,
+                )
+                .await
         });
-        tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .unwrap();
         dispatcher.release_blocked_pollers();
-        assert!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().unwrap().task_token.is_empty());
+        assert!(tokio::time::timeout(Duration::from_secs(1), poll)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .task_token
+            .is_empty());
         tokio::time::timeout(Duration::from_secs(1), async {
             while manager.lock().unwrap().contains_poll("query-poller") {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert!(!dispatcher.queue.is_stopped());
         reader.stop();
         reader.wait_stopped().await;
@@ -2632,23 +2998,46 @@ mod tests {
                 },
                 Arc::new(move || if stage == 1 { 0 } else { 1 }),
                 Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-                Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
-                "/__cadence_sys/tl0/1".into(), Arc::new(move || if stage == 0 { 60_000_000_000 } else { 0 }),
+                Arc::new(crate::matching_forward::ForwardRate::new(
+                    Arc::new(|| 2),
+                    now(),
+                )),
+                "/__cadence_sys/tl0/1".into(),
+                Arc::new(move || if stage == 0 { 60_000_000_000 } else { 0 }),
             );
             let dispatcher = dispatcher.with_forward(forward);
             let poll = dispatcher.forward_query_poll(
-                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), query_lifecycle(),
+                p::PollForDecisionTaskRequest::default(),
+                Duration::from_secs(60),
+                query_lifecycle(),
             );
             tokio::pin!(poll);
-            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll).await.is_err());
+            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll)
+                .await
+                .is_err());
             assert_eq!(entered.load(Ordering::SeqCst), stage == 2);
             dispatcher.release_blocked_pollers();
-            assert!(tokio::time::timeout(Duration::from_secs(1), poll).await.unwrap().unwrap().task_token.is_empty());
+            assert!(tokio::time::timeout(Duration::from_secs(1), poll)
+                .await
+                .unwrap()
+                .unwrap()
+                .task_token
+                .is_empty());
             assert!(!dispatcher.queue.is_stopped());
             // The overall poll deadline also applies while the resolver waits.
-            assert!(tokio::time::timeout(Duration::from_secs(1), dispatcher.forward_query_poll(
-                p::PollForDecisionTaskRequest::default(), Duration::from_millis(10), query_lifecycle(),
-            )).await.unwrap().unwrap().task_token.is_empty());
+            assert!(tokio::time::timeout(
+                Duration::from_secs(1),
+                dispatcher.forward_query_poll(
+                    p::PollForDecisionTaskRequest::default(),
+                    Duration::from_millis(10),
+                    query_lifecycle(),
+                )
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .task_token
+            .is_empty());
         }
     }
 
@@ -2659,12 +3048,21 @@ mod tests {
         // release it just as Go DisconnectBlockedPollers does.
         for _ in 0..2 {
             let poll = dispatcher.forward_query_poll(
-                p::PollForDecisionTaskRequest::default(), Duration::from_secs(60), query_lifecycle(),
+                p::PollForDecisionTaskRequest::default(),
+                Duration::from_secs(60),
+                query_lifecycle(),
             );
             tokio::pin!(poll);
-            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll).await.is_err());
+            assert!(tokio::time::timeout(Duration::from_millis(10), &mut poll)
+                .await
+                .is_err());
             dispatcher.release_blocked_pollers();
-            assert!(tokio::time::timeout(Duration::from_secs(1), &mut poll).await.unwrap().unwrap().task_token.is_empty());
+            assert!(tokio::time::timeout(Duration::from_secs(1), &mut poll)
+                .await
+                .unwrap()
+                .unwrap()
+                .task_token
+                .is_empty());
             assert!(!dispatcher.queue.is_stopped());
         }
     }
@@ -2687,7 +3085,11 @@ mod tests {
         };
         let response = p::PollForDecisionTaskRequest {
             identity: "id1".into(),
-            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys/tl0/1".into(),
+                kind: 1,
+                ..Default::default()
+            }),
             ..Default::default()
         }
         .forward(forward)
@@ -2696,7 +3098,12 @@ mod tests {
         assert_eq!(response.task_token, vec![7]);
         // Go returns a decision response with no activity response; the Rust
         // return type is the decision response, so that routing is by type.
-        let request = parent.poll_decision.lock().unwrap().clone().expect("decision poll reached the parent");
+        let request = parent
+            .poll_decision
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("decision poll reached the parent");
         assert_eq!(request.poller_id, poller);
         assert_eq!(request.domain_id, domain);
         let inner = request.request.clone().unwrap();
@@ -2722,14 +3129,23 @@ mod tests {
         };
         let response = p::PollForActivityTaskRequest {
             identity: "id1".into(),
-            task_list: Some(p::TaskList { name: "/__cadence_sys/tl0/1".into(), kind: 1, ..Default::default() }),
+            task_list: Some(p::TaskList {
+                name: "/__cadence_sys/tl0/1".into(),
+                kind: 1,
+                ..Default::default()
+            }),
             ..Default::default()
         }
         .forward(forward)
         .await
         .unwrap();
         assert_eq!(response.task_token, vec![8]);
-        let request = parent.poll_activity.lock().unwrap().clone().expect("activity poll reached the parent");
+        let request = parent
+            .poll_activity
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("activity poll reached the parent");
         assert_eq!(request.poller_id, poller);
         assert_eq!(request.domain_id, domain);
         let inner = request.request.clone().unwrap();
@@ -2750,16 +3166,29 @@ mod tests {
         let (parent, channel, server) = recording_parent().await;
         let list_domain = Uuid::from_u128(1).to_string();
         let source_domain = Uuid::from_u128(5).to_string();
-        let dispatcher = TaskDispatcher::new(root.queue.clone(), lazy_history(), list_domain.clone())
-            .with_sync_matcher(sync)
-            .with_forward(remote_forward_state(channel, "/__cadence_sys/tl0/1"));
+        let dispatcher =
+            TaskDispatcher::new(root.queue.clone(), lazy_history(), list_domain.clone())
+                .with_sync_matcher(sync)
+                .with_forward(remote_forward_state(channel, "/__cadence_sys/tl0/1"));
         let task = AllocatedTask {
             task_id: 1,
-            data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
+            data: TaskData {
+                workflow_id: "child-workflow".into(),
+                schedule_id: 91,
+                ..Default::default()
+            },
         };
         // Zero local wait makes the local offer fail at once, forcing the second hop.
-        dispatcher.accept_forwarded_backlog(task, &source_domain, "/__cadence_sys/tl0/2", 1).await.unwrap();
-        let request = parent.add_activity.lock().unwrap().clone().expect("second hop reached the parent");
+        dispatcher
+            .accept_forwarded_backlog(task, &source_domain, "/__cadence_sys/tl0/2", 1)
+            .await
+            .unwrap();
+        let request = parent
+            .add_activity
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("second hop reached the parent");
         assert_eq!(request.domain_id, list_domain);
         assert_eq!(request.source_domain_id, source_domain);
         server.abort();
@@ -2767,19 +3196,27 @@ mod tests {
     /// Go `ForwardState` pointed at an in-process root dispatcher: the parent
     /// resolves to `Parent::Dispatcher`, whose `accept_forwarded_backlog` offers
     /// to the root's sync matcher, the Rust analog of Go's rootMatcher.Offer.
-    fn forward_to_root(queue: Arc<DurableTaskQueue>, sync: Arc<SyncMatcher>, source: &str) -> ForwardState {
+    fn forward_to_root(
+        queue: Arc<DurableTaskQueue>,
+        sync: Arc<SyncMatcher>,
+        source: &str,
+    ) -> ForwardState {
         let domain = Uuid::from_u128(1).to_string();
         ForwardState::new(
             move || {
                 let (queue, sync, domain) = (queue.clone(), sync.clone(), domain.clone());
                 Box::pin(async move {
-                    let root = TaskDispatcher::new(queue, lazy_history(), domain).with_sync_matcher(sync);
+                    let root =
+                        TaskDispatcher::new(queue, lazy_history(), domain).with_sync_matcher(sync);
                     Some((Parent::Dispatcher(Box::new(root)), "tl0".into()))
                 })
             },
             Arc::new(|| 1),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 1))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 2), now())),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 2),
+                now(),
+            )),
             source.into(),
             Arc::new(|| 0),
         )
@@ -2829,10 +3266,16 @@ mod tests {
         };
         let domain = Uuid::from_u128(1).to_string();
         assert!(
-            forward.forward_backlog_task(task, &domain, &domain, 0, 0).await.is_ok(),
+            forward
+                .forward_backlog_task(task, &domain, &domain, 0, 0)
+                .await
+                .is_ok(),
             "forwarded add reports a remote sync match"
         );
-        let (workflow_id, forwarded) = parked.await.unwrap().expect("root poller received the forwarded task");
+        let (workflow_id, forwarded) = parked
+            .await
+            .unwrap()
+            .expect("root poller received the forwarded task");
         assert_eq!(workflow_id, "child-workflow");
         // Go checks req.ForwardedFrom on the wire; the in-process root only sees the transient signal.
         assert!(forwarded, "root sees the forwarded request signal");
@@ -2902,8 +3345,18 @@ mod tests {
     struct BusyParent;
     #[tonic::async_trait]
     impl m::matching_api_server::MatchingApi for BusyParent {
-        async fn add_decision_task(&self, _request: tonic::Request<m::AddDecisionTaskRequest>) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
-            Err(crate::grpc::detailed_status(tonic::Code::ResourceExhausted, "parent busy", "ServiceBusyError", p::ServiceBusyError { reason: String::new() }))
+        async fn add_decision_task(
+            &self,
+            _request: tonic::Request<m::AddDecisionTaskRequest>,
+        ) -> Result<tonic::Response<m::AddDecisionTaskResponse>, Status> {
+            Err(crate::grpc::detailed_status(
+                tonic::Code::ResourceExhausted,
+                "parent busy",
+                "ServiceBusyError",
+                p::ServiceBusyError {
+                    reason: String::new(),
+                },
+            ))
         }
     }
     #[tokio::test]
@@ -2916,17 +3369,31 @@ mod tests {
         let server = tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(m::matching_api_server::MatchingApiServer::new(BusyParent))
-                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
         });
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}")).unwrap().connect().await.unwrap();
+        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
         let state = remote_forward_state(channel, "/__cadence_sys/tl0/1");
         let task = AllocatedTask {
             task_id: 1,
-            data: TaskData { workflow_id: "child-workflow".into(), schedule_id: 91, ..Default::default() },
+            data: TaskData {
+                workflow_id: "child-workflow".into(),
+                schedule_id: 91,
+                ..Default::default()
+            },
         };
         let domain = Uuid::from_u128(1).to_string();
-        assert!(matches!(state.forward_backlog_task(task, &domain, &domain, 0, 0).await, Err(ForwardError::SlowDown)));
+        assert!(matches!(
+            state
+                .forward_backlog_task(task, &domain, &domain, 0, 0)
+                .await,
+            Err(ForwardError::SlowDown)
+        ));
         server.abort();
     }
-
 }

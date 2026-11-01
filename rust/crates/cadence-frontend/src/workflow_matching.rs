@@ -19,7 +19,9 @@ use crate::handler_workflow_history::{
     deserialize_history_token, serialize_history_token, validate_history_run_id,
     verify_history_is_complete, HistoryContinuationToken,
 };
-use crate::workflow_backend::{bad_request, domain_uuid, internal, to_json, typed, ProductionBackend};
+use crate::workflow_backend::{
+    bad_request, domain_uuid, internal, to_json, typed, ProductionBackend,
+};
 
 const MATCHING_SERVICE: &str = "cadence-matching";
 /// Go's matching client long-poll timeout headroom.
@@ -96,10 +98,11 @@ impl HistoryAccess {
         loop {
             let store = self.store.clone();
             let req = request.clone();
-            let response = tokio::task::spawn_blocking(move || read_history_branch(store.as_ref(), &req))
-                .await
-                .map_err(|e| internal(format!("history read task failed: {e}")))?
-                .map_err(read_error)?;
+            let response =
+                tokio::task::spawn_blocking(move || read_history_branch(store.as_ref(), &req))
+                    .await
+                    .map_err(|e| internal(format!("history read task failed: {e}")))?
+                    .map_err(read_error)?;
             events.extend(response.events());
             if events.len() as i64 >= request.page_size || response.next_page_token.is_empty() {
                 return Ok((events, response.next_page_token));
@@ -264,7 +267,9 @@ struct MutableState {
 impl ProductionBackend {
     fn access(&self) -> Result<&HistoryAccess, CadenceError> {
         self.history_access.as_ref().ok_or_else(|| {
-            internal("history persistence is not configured for this Frontend (MySQL/PostgreSQL only)")
+            internal(
+                "history persistence is not configured for this Frontend (MySQL/PostgreSQL only)",
+            )
         })
     }
 
@@ -366,7 +371,10 @@ impl ProductionBackend {
     ) -> Result<Struct, CadenceError> {
         let mut fields = vec![
             (10, domain_uuid(request, "domainUUID")?),
-            (15, Value::Bytes(str_field(request, "pollerID").into_bytes())),
+            (
+                15,
+                Value::Bytes(str_field(request, "pollerID").into_bytes()),
+            ),
             (20, Value::Struct(poll)),
         ];
         let _ = poll_key;
@@ -383,7 +391,9 @@ impl ProductionBackend {
     ) -> Result<serde_json::Value, CadenceError> {
         let poll: tk::PollForDecisionTaskRequest = typed(request, "pollRequest")?;
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
-        let reply = self.matching("PollForDecisionTask", envelope, POLL_TIMEOUT).await?;
+        let reply = self
+            .matching("PollForDecisionTask", envelope, POLL_TIMEOUT)
+            .await?;
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             return Ok(serde_json::json!({}));
         };
@@ -399,7 +409,9 @@ impl ProductionBackend {
     ) -> Result<serde_json::Value, CadenceError> {
         let poll: tk::PollForActivityTaskRequest = typed(request, "pollRequest")?;
         let envelope = self.poll_envelope(request, "pollRequest", poll.to_thrift())?;
-        let reply = self.matching("PollForActivityTask", envelope, POLL_TIMEOUT).await?;
+        let reply = self
+            .matching("PollForActivityTask", envelope, POLL_TIMEOUT)
+            .await?;
         let response = tk::PollForActivityTaskResponse::from_thrift(&reply)
             .map_err(|e| thrift_err("Matching PollForActivityTask response", e))?;
         to_json(&response)
@@ -416,12 +428,16 @@ impl ProductionBackend {
                 (20, Value::Struct(complete.to_thrift())),
             ],
         };
-        let reply = self.history("RespondDecisionTaskCompleted", envelope).await?;
+        let reply = self
+            .history("RespondDecisionTaskCompleted", envelope)
+            .await?;
         let mut response = tk::RespondDecisionTaskCompletedResponse::default();
         if complete.return_new_decision_task {
             if let Some(Value::Struct(started)) = reply.get(10) {
-                let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&complete.task_token)
-                    .map_err(|e| bad_request(e.to_string()))?;
+                let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(
+                    &complete.task_token,
+                )
+                .map_err(|e| bad_request(e.to_string()))?;
                 let scheduled_id = started
                     .opt_i64(30)
                     .map_err(|e| thrift_err("History started response", e))?
@@ -445,7 +461,8 @@ impl ProductionBackend {
                     run_id: token.run_id,
                 };
                 let task = DecisionTask::from_started(started, execution, bytes)?;
-                response.decision_task = Some(self.decision_response(&token.domain_id, task).await?);
+                response.decision_task =
+                    Some(self.decision_response(&token.domain_id, task).await?);
             }
         }
         to_json(&response)
@@ -465,8 +482,12 @@ impl ProductionBackend {
                 (40, Value::Struct(completed.to_thrift())),
             ],
         };
-        self.matching("RespondQueryTaskCompleted", envelope, Duration::from_secs(30))
-            .await?;
+        self.matching(
+            "RespondQueryTaskCompleted",
+            envelope,
+            Duration::from_secs(30),
+        )
+        .await?;
         Ok(serde_json::json!({}))
     }
 
@@ -499,7 +520,11 @@ impl ProductionBackend {
             task_list: typed(request, "taskList")?,
         };
         let reply = self
-            .matching("ListTaskListPartitions", list.to_thrift(), Duration::from_secs(30))
+            .matching(
+                "ListTaskListPartitions",
+                list.to_thrift(),
+                Duration::from_secs(30),
+            )
             .await?;
         to_json(
             &tk::ListTaskListPartitionsResponse::from_thrift(&reply)
@@ -515,7 +540,11 @@ impl ProductionBackend {
             domain: str_field(request, "domain"),
         };
         let reply = self
-            .matching("GetTaskListsByDomain", req.to_thrift(), Duration::from_secs(30))
+            .matching(
+                "GetTaskListsByDomain",
+                req.to_thrift(),
+                Duration::from_secs(30),
+            )
             .await?;
         to_json(
             &tk::GetTaskListsByDomainResponse::from_thrift(&reply)
@@ -540,7 +569,11 @@ impl ProductionBackend {
         if !current_branch_token.is_empty() {
             fields.push((40, Value::Bytes(current_branch_token.to_vec())));
         }
-        let timeout = if long_poll { POLL_TIMEOUT } else { Duration::from_secs(30) };
+        let timeout = if long_poll {
+            POLL_TIMEOUT
+        } else {
+            Duration::from_secs(30)
+        };
         let reply = self
             .call_with_timeout(
                 self.history_addr(),
@@ -560,7 +593,10 @@ impl ProductionBackend {
         let histories = match reply.get(130) {
             Some(Value::Struct(v)) => ty::VersionHistories {
                 current_version_history_index: v.opt_i32(10).map_err(e)?.unwrap_or(0),
-                histories: v.opt_list::<ty::VersionHistory>(20).map_err(e)?.unwrap_or_default(),
+                histories: v
+                    .opt_list::<ty::VersionHistory>(20)
+                    .map_err(e)?
+                    .unwrap_or_default(),
             },
             _ => ty::VersionHistories::default(),
         };
@@ -598,7 +634,8 @@ impl ProductionBackend {
         }
         page_size = page_size.min(HISTORY_MAX_PAGE_SIZE);
         let long_poll = req.wait_for_new_event;
-        let close_event_only = req.history_event_filter_type == Some(cadence_api::HistoryEventFilterType::CloseEvent);
+        let close_event_only =
+            req.history_event_filter_type == Some(cadence_api::HistoryEventFilterType::CloseEvent);
         let mut execution = req.execution.clone().unwrap_or_default();
 
         let mut token = HistoryContinuationToken::default();
@@ -611,11 +648,18 @@ impl ProductionBackend {
                 .map_err(|_| bad_request("Invalid NextPageToken."))?;
             validate_history_run_id(&execution.run_id, &token).map_err(CadenceError::BadRequest)?;
             execution.run_id = token.run_id.clone();
-            if token.persistence_token.as_deref().is_none_or(<[u8]>::is_empty)
+            if token
+                .persistence_token
+                .as_deref()
+                .is_none_or(<[u8]>::is_empty)
                 && long_poll
                 && token.is_workflow_running
             {
-                let query_next = if close_event_only { END_EVENT_ID } else { token.next_event_id };
+                let query_next = if close_event_only {
+                    END_EVENT_ID
+                } else {
+                    token.next_event_id
+                };
                 let state = self
                     .poll_mutable_state(
                         &domain_id,
@@ -635,7 +679,11 @@ impl ProductionBackend {
                 token.is_workflow_running = running;
             }
         } else {
-            let query_next = if close_event_only { END_EVENT_ID } else { FIRST_EVENT_ID };
+            let query_next = if close_event_only {
+                END_EVENT_ID
+            } else {
+                FIRST_EVENT_ID
+            };
             let state = self
                 .poll_mutable_state(&domain_id, &execution, query_next, &[], false)
                 .await?;
@@ -705,7 +753,11 @@ impl ProductionBackend {
                     .await?;
                 history = h;
                 let exhausted = persistence_token.is_empty();
-                t.persistence_token = if exhausted { None } else { Some(persistence_token) };
+                t.persistence_token = if exhausted {
+                    None
+                } else {
+                    Some(persistence_token)
+                };
                 if exhausted && (!t.is_workflow_running || !long_poll) {
                     token_out = None;
                 }

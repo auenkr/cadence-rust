@@ -661,7 +661,12 @@ impl MySqlTaskStore {
         let row: Option<Row> = connection
             .exec_first(
                 SELECT_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         // Columns: domain_id, range_id, name, task_type, data, data_encoding.
@@ -699,7 +704,12 @@ impl MySqlTaskStore {
         let range: Option<i64> = transaction
             .exec_first(
                 LOCK_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, discard))?;
         match range {
@@ -743,11 +753,13 @@ impl MatchingTaskStore for MySqlTaskStore {
                 (row_type,),
             )
             .map_err(|e| e.to_string())?;
-        Ok(row.map(|(version, data, encoding)| crate::config_store::ConfigStoreRow {
-            version: -version,
-            data,
-            encoding,
-        }))
+        Ok(row.map(
+            |(version, data, encoding)| crate::config_store::ConfigStoreRow {
+                version: -version,
+                data,
+                encoding,
+            },
+        ))
     }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
@@ -791,7 +803,15 @@ impl MatchingTaskStore for MySqlTaskStore {
                 connection
                     .exec_drop(
                         INSERT_TASK_LIST,
-                        (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, 0_i64, bytes, encoding),
+                        (
+                            shard_id,
+                            key.domain_id.as_bytes().as_slice(),
+                            &key.name,
+                            key.task_type,
+                            0_i64,
+                            bytes,
+                            encoding,
+                        ),
                     )
                     .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
                 TaskListRecord { range_id: 0, data }
@@ -819,7 +839,15 @@ impl MatchingTaskStore for MySqlTaskStore {
         transaction
             .exec_drop(
                 UPDATE_TASK_LIST,
-                (current.range_id, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
+                (
+                    current.range_id,
+                    bytes,
+                    encoding,
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         if transaction.affected_rows() != 1 {
@@ -865,7 +893,15 @@ impl MatchingTaskStore for MySqlTaskStore {
         transaction
             .exec_drop(
                 UPDATE_TASK_LIST,
-                (range, bytes, encoding, shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type),
+                (
+                    range,
+                    bytes,
+                    encoding,
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         if transaction.affected_rows() != 1 {
@@ -903,13 +939,24 @@ impl MatchingTaskStore for MySqlTaskStore {
         let encoding = self.write_encoding()?;
         for (domain, task) in tasks {
             // Go stamps CreatedTimestamp with the CreateTasks request time.
-            let mut data = task.data.for_sql().map_err(StorageError::MalformedSqlMatchingRunId)?;
+            let mut data = task
+                .data
+                .for_sql()
+                .map_err(StorageError::MalformedSqlMatchingRunId)?;
             data.created_nanos = now_nanos;
-            let bytes = encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
+            let bytes = encoding
+                .encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             transaction
                 .exec_drop(
                     INSERT_TASK,
-                    (domain.as_bytes().as_slice(), &key.name, key.task_type, task.task_id, bytes, encoding.as_str()),
+                    (
+                        domain.as_bytes().as_slice(),
+                        &key.name,
+                        key.task_type,
+                        task.task_id,
+                        bytes,
+                        encoding.as_str(),
+                    ),
                 )
                 .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         }
@@ -933,7 +980,14 @@ impl MatchingTaskStore for MySqlTaskStore {
         let rows: Vec<(i64, Vec<u8>, String)> = connection
             .exec(
                 SELECT_TASKS,
-                (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, read_level, max_read_level, batch_size),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                    read_level,
+                    max_read_level,
+                    batch_size,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         rows.into_iter()
@@ -953,7 +1007,12 @@ impl MatchingTaskStore for MySqlTaskStore {
         let size: Option<i64> = connection
             .exec_first(
                 COUNT_TASKS,
-                (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, ack_level),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                    ack_level,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         size.ok_or_else(|| StorageError::Backend {
@@ -968,7 +1027,12 @@ impl MatchingTaskStore for MySqlTaskStore {
         connection
             .exec_drop(
                 DELETE_TASK,
-                (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, task_id),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                    task_id,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))
     }
@@ -987,7 +1051,13 @@ impl MatchingTaskStore for MySqlTaskStore {
         connection
             .exec_drop(
                 RANGE_DELETE_TASKS,
-                (key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, inclusive_task_id, limit),
+                (
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                    inclusive_task_id,
+                    limit,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         usize::try_from(connection.affected_rows()).map_err(|error| StorageError::Backend {
@@ -1003,7 +1073,13 @@ impl MatchingTaskStore for MySqlTaskStore {
         connection
             .exec_drop(
                 DELETE_TASK_LIST,
-                (shard_id, key.domain_id.as_bytes().as_slice(), &key.name, key.task_type, range),
+                (
+                    shard_id,
+                    key.domain_id.as_bytes().as_slice(),
+                    &key.name,
+                    key.task_type,
+                    range,
+                ),
             )
             .map_err(|error| normalize_mysql_error_on_lease(error, &discard))?;
         let affected = connection.affected_rows();
@@ -1016,7 +1092,9 @@ impl MatchingTaskStore for MySqlTaskStore {
 
 impl std::fmt::Debug for MySqlTaskStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("MySqlTaskStore").finish_non_exhaustive()
+        formatter
+            .debug_struct("MySqlTaskStore")
+            .finish_non_exhaustive()
     }
 }
 
@@ -2230,8 +2308,10 @@ impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
         min_node: i64,
         max_node: i64,
         limit: i64,
-    ) -> std::result::Result<Vec<crate::history_reader::HistoryNodeRow>, crate::history_reader::HistoryReadError>
-    {
+    ) -> std::result::Result<
+        Vec<crate::history_reader::HistoryNodeRow>,
+        crate::history_reader::HistoryReadError,
+    > {
         use crate::history_reader::{HistoryNodeRow, HistoryReadError};
         let index = mysql_database_index(shard_id.max(0) as usize, self.pools.len());
         let mut connection = self.pools[index]
@@ -2246,7 +2326,12 @@ impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
             .map_err(|e| HistoryReadError::Internal(format!("{:?}", normalize_mysql_error_on_lease(e, &discard))))?;
         Ok(rows
             .into_iter()
-            .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow { node_id, txn_id, data, encoding })
+            .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow {
+                node_id,
+                txn_id,
+                data,
+                encoding,
+            })
             .collect())
     }
 }
@@ -2283,7 +2368,10 @@ impl crate::visibility_reader::VisibilityStore for MySqlTaskStore {
             run_id,
             crate::visibility_reader::SqlDialect::MySql,
         );
-        Ok(self.visibility_query(&sql, &params, true)?.into_iter().next())
+        Ok(self
+            .visibility_query(&sql, &params, true)?
+            .into_iter()
+            .next())
     }
 }
 

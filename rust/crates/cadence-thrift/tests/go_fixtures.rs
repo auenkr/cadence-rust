@@ -282,12 +282,23 @@ fn active_active_zero_version_matches_go_mapper() {
     let active = ActiveClusters {
         // The pinned Go mapper ignores this deprecated wire field.
         active_clusters_by_region: Some(std::collections::HashMap::from([(
-            "ignored".into(), ActiveClusterInfo { active_cluster_name: "unknown".into(), failover_version: 999 },
+            "ignored".into(),
+            ActiveClusterInfo {
+                active_cluster_name: "unknown".into(),
+                failover_version: 999,
+            },
         )])),
         active_clusters_by_cluster_attribute: Some(std::collections::HashMap::from([(
-            "city".into(), ClusterAttributeScope { cluster_attributes: Some(std::collections::HashMap::from([(
-                "x".into(), ActiveClusterInfo { active_cluster_name: "a".into(), failover_version: 0 },
-            )])) },
+            "city".into(),
+            ClusterAttributeScope {
+                cluster_attributes: Some(std::collections::HashMap::from([(
+                    "x".into(),
+                    ActiveClusterInfo {
+                        active_cluster_name: "a".into(),
+                        failover_version: 0,
+                    },
+                )])),
+            },
         )])),
     };
     let mut writer = Writer::new();

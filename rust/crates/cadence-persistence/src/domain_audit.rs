@@ -91,7 +91,10 @@ pub fn new_event_id(now_nanos: i64) -> String {
 /// (`_timefmt=2006-01-02T15:04:05.000000000Z07:00`), so range scans compare
 /// lexicographically.
 pub fn format_sqlite_datetime(nanos: i64) -> Result<String, String> {
-    let (secs, sub) = (nanos.div_euclid(1_000_000_000), nanos.rem_euclid(1_000_000_000));
+    let (secs, sub) = (
+        nanos.div_euclid(1_000_000_000),
+        nanos.rem_euclid(1_000_000_000),
+    );
     let time = chrono::DateTime::from_timestamp(secs, sub as u32)
         .ok_or_else(|| format!("timestamp out of range: {nanos}"))?;
     Ok(time.format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string())
@@ -156,7 +159,8 @@ pub fn decode_domain_state(blob: &GoDomainBlob) -> Result<DomainAuditState, Stri
     if reader.remaining() != 0 {
         return Err("trailing domain audit ThriftRW bytes".into());
     }
-    let describe = DescribeDomainResponse::from_thrift(&value).map_err(|error| error.to_string())?;
+    let describe =
+        DescribeDomainResponse::from_thrift(&value).map_err(|error| error.to_string())?;
     let failover_expire_nanos = match value
         .fields
         .iter()
@@ -274,7 +278,10 @@ pub fn failover_event(log: &DomainAuditLog) -> Result<Option<FailoverEvent>, Str
 /// MySQL `DATETIME(6)` and Postgres `TIMESTAMP` hold UTC wall-clock time
 /// without a zone; Go writes `time.Time.UTC()` at microsecond precision.
 pub fn format_wallclock_datetime(nanos: i64) -> Result<String, String> {
-    let (secs, sub) = (nanos.div_euclid(1_000_000_000), nanos.rem_euclid(1_000_000_000));
+    let (secs, sub) = (
+        nanos.div_euclid(1_000_000_000),
+        nanos.rem_euclid(1_000_000_000),
+    );
     let time = chrono::DateTime::from_timestamp(secs, sub as u32)
         .ok_or_else(|| format!("timestamp out of range: {nanos}"))?;
     Ok(time.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
@@ -289,7 +296,10 @@ pub fn audit_page_window(
 ) -> Result<(i64, String), String> {
     match page_token {
         Some(token) => decode_page_token(token),
-        None => Ok((now_nanos, "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string())),
+        None => Ok((
+            now_nanos,
+            "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+        )),
     }
 }
 
@@ -433,7 +443,12 @@ mod tests {
         );
     }
 
-    fn audit_row(event: &str, nanos: i64, before: &DomainAuditState, after: &DomainAuditState) -> DomainAuditLog {
+    fn audit_row(
+        event: &str,
+        nanos: i64,
+        before: &DomainAuditState,
+        after: &DomainAuditState,
+    ) -> DomainAuditLog {
         DomainAuditLog {
             event_id: event.into(),
             domain_id: "domain-1".into(),
@@ -459,9 +474,15 @@ mod tests {
         assert_eq!(event.failover_type, Some(FailoverType::Graceful));
         assert_eq!(event.created_time, Some(42));
         let change = &event.cluster_failovers[0];
-        assert_eq!(change.from_cluster.as_ref().unwrap().active_cluster_name, "cluster-a");
+        assert_eq!(
+            change.from_cluster.as_ref().unwrap().active_cluster_name,
+            "cluster-a"
+        );
         assert_eq!(change.from_cluster.as_ref().unwrap().failover_version, 1);
-        assert_eq!(change.to_cluster.as_ref().unwrap().active_cluster_name, "cluster-b");
+        assert_eq!(
+            change.to_cluster.as_ref().unwrap().active_cluster_name,
+            "cluster-b"
+        );
         assert_eq!(change.to_cluster.as_ref().unwrap().failover_version, 2);
     }
 
@@ -476,7 +497,9 @@ mod tests {
 
     #[test]
     fn sqlite_audit_rows_page_newest_first_and_decode() {
-        use crate::matching_domain_metadata::{DomainMetadataPersistence, MatchingDomainMetadataStore};
+        use crate::matching_domain_metadata::{
+            DomainMetadataPersistence, MatchingDomainMetadataStore,
+        };
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
             .execute_batch(
@@ -503,21 +526,34 @@ mod tests {
             store.create_domain_audit_log(&row(nanos, 5)).unwrap();
         }
         // Other operation types are excluded by the operation-type filter.
-        store.create_domain_audit_log(&row(4_000_000_000, 2)).unwrap();
+        store
+            .create_domain_audit_log(&row(4_000_000_000, 2))
+            .unwrap();
 
         let first = store
             .get_domain_audit_logs("domain-1", DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER, 2, None)
             .unwrap();
         let created: Vec<i64> = first.logs.iter().map(|l| l.created_time_nanos).collect();
         assert_eq!(created, vec![3_000_000_000, 2_000_000_000]);
-        let token = first.next_page_token.clone().expect("full page has a token");
+        let token = first
+            .next_page_token
+            .clone()
+            .expect("full page has a token");
 
         let second = store
-            .get_domain_audit_logs("domain-1", DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER, 2, Some(&token))
+            .get_domain_audit_logs(
+                "domain-1",
+                DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+                2,
+                Some(&token),
+            )
             .unwrap();
         assert_eq!(second.logs.len(), 1);
         assert_eq!(second.logs[0].created_time_nanos, 1_000_000_000);
         assert_eq!(second.next_page_token, None);
-        assert_eq!(decode_domain_state(&second.logs[0].state_after).unwrap(), snapshot);
+        assert_eq!(
+            decode_domain_state(&second.logs[0].state_after).unwrap(),
+            snapshot
+        );
     }
 }

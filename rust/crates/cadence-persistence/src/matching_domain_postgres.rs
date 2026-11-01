@@ -112,7 +112,10 @@ impl PostgresDomainMetadataStore {
         &self,
         last_message_id: i64,
         max_count: usize,
-    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, MatchingDomainMetadataError> {
+    ) -> Result<
+        Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>,
+        MatchingDomainMetadataError,
+    > {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
         let mut client = self
@@ -130,10 +133,12 @@ impl PostgresDomainMetadataStore {
         let messages = rows
             .into_iter()
             .map(|row| {
-                Ok(crate::matching_domain_metadata::DomainReplicationQueueMessage {
-                    id: row.try_get(0).map_err(domain_error)?,
-                    payload: row.try_get(1).map_err(domain_error)?,
-                })
+                Ok(
+                    crate::matching_domain_metadata::DomainReplicationQueueMessage {
+                        id: row.try_get(0).map_err(domain_error)?,
+                        payload: row.try_get(1).map_err(domain_error)?,
+                    },
+                )
             })
             .collect::<Result<Vec<_>, MatchingDomainMetadataError>>()?;
         transaction.commit().map_err(domain_error)?;
@@ -145,10 +150,16 @@ impl PostgresDomainMetadataStore {
         first_message_id: i64,
         last_message_id: i64,
         max_count: usize,
-    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, MatchingDomainMetadataError> {
+    ) -> Result<
+        Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>,
+        MatchingDomainMetadataError,
+    > {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
-        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
         set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
         let rows = transaction
@@ -160,10 +171,12 @@ impl PostgresDomainMetadataStore {
         let messages = rows
             .into_iter()
             .map(|row| {
-                Ok(crate::matching_domain_metadata::DomainReplicationDlqMessage {
-                    id: row.try_get(0).map_err(domain_error)?,
-                    payload: row.try_get(1).map_err(domain_error)?,
-                })
+                Ok(
+                    crate::matching_domain_metadata::DomainReplicationDlqMessage {
+                        id: row.try_get(0).map_err(domain_error)?,
+                        payload: row.try_get(1).map_err(domain_error)?,
+                    },
+                )
             })
             .collect::<Result<Vec<_>, MatchingDomainMetadataError>>()?;
         transaction.commit().map_err(domain_error)?;
@@ -177,13 +190,20 @@ impl PostgresDomainMetadataStore {
     ) -> Result<(), MatchingDomainMetadataError> {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
-        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
         set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
         transaction
             .execute(
                 "DELETE FROM queue WHERE queue_type=$1 AND message_id>$2 AND message_id<=$3",
-                &[&GO_DOMAIN_REPLICATION_DLQ_TYPE, &first_message_id, &last_message_id],
+                &[
+                    &GO_DOMAIN_REPLICATION_DLQ_TYPE,
+                    &first_message_id,
+                    &last_message_id,
+                ],
             )
             .map_err(domain_error)?;
         transaction.commit().map_err(domain_error)
@@ -192,7 +212,10 @@ impl PostgresDomainMetadataStore {
     pub fn domain_replication_dlq_size(&self) -> Result<i64, MatchingDomainMetadataError> {
         let started = Instant::now();
         let timeout = DEFAULT_TIMEOUT;
-        let mut client = self.pool.checkout_with_timeout(timeout).map_err(checkout_error)?;
+        let mut client = self
+            .pool
+            .checkout_with_timeout(timeout)
+            .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
         set_statement_timeout(&mut transaction, timeout.saturating_sub(started.elapsed()))?;
         let size = transaction
@@ -258,7 +281,10 @@ impl PostgresDomainMetadataStore {
                 ))
             })?
             .unwrap_or_default();
-        if levels.get(&cluster_name).is_some_and(|old| *old >= message_id) {
+        if levels
+            .get(&cluster_name)
+            .is_some_and(|old| *old >= message_id)
+        {
             transaction.commit().map_err(domain_error)?;
             return Ok(());
         }
@@ -356,7 +382,10 @@ impl PostgresDomainMetadataStore {
             .checkout_with_timeout(DEFAULT_TIMEOUT)
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
-        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        set_statement_timeout(
+            &mut transaction,
+            DEFAULT_TIMEOUT.saturating_sub(started.elapsed()),
+        )?;
         transaction
             .execute(
                 "INSERT INTO domains (shard_id, id, name, is_global, data, data_encoding) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -371,7 +400,10 @@ impl PostgresDomainMetadataStore {
             )
             .map_err(domain_error)?;
         transaction
-            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
+            .query_one(
+                "SELECT notification_version FROM domain_metadata FOR UPDATE",
+                &[],
+            )
             .map_err(domain_error)?;
         let changed = transaction
             .execute(
@@ -402,7 +434,10 @@ impl PostgresDomainMetadataStore {
             .checkout_with_timeout(DEFAULT_TIMEOUT)
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
-        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        set_statement_timeout(
+            &mut transaction,
+            DEFAULT_TIMEOUT.saturating_sub(started.elapsed()),
+        )?;
         let blob = crate::matching_domain_metadata::encode_go_sql_domain_metadata(metadata)?;
         let uuid = uuid::Uuid::parse_str(&metadata.info.uuid)
             .map_err(|error| MatchingDomainMetadataError::InvalidUuid(error.to_string()))?;
@@ -424,7 +459,10 @@ impl PostgresDomainMetadataStore {
             ));
         }
         let row = transaction
-            .query_one("SELECT notification_version FROM domain_metadata FOR UPDATE", &[])
+            .query_one(
+                "SELECT notification_version FROM domain_metadata FOR UPDATE",
+                &[],
+            )
             .map_err(domain_error)?;
         let current: i64 = row.try_get(0).map_err(domain_error)?;
         if current != expected_notification_version {
@@ -435,7 +473,10 @@ impl PostgresDomainMetadataStore {
         let changed = transaction
             .execute(
                 "UPDATE domain_metadata SET notification_version=$1 WHERE notification_version=$2",
-                &[&(expected_notification_version + 1), &expected_notification_version],
+                &[
+                    &(expected_notification_version + 1),
+                    &expected_notification_version,
+                ],
             )
             .map_err(domain_error)?;
         if changed != 1 {
@@ -457,7 +498,10 @@ impl PostgresDomainMetadataStore {
             .checkout_with_timeout(DEFAULT_TIMEOUT)
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
-        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        set_statement_timeout(
+            &mut transaction,
+            DEFAULT_TIMEOUT.saturating_sub(started.elapsed()),
+        )?;
         transaction
             .execute(
                 "DELETE FROM domains WHERE shard_id=$1 AND id=$2",
@@ -690,7 +734,10 @@ impl PostgresDomainMetadataStore {
             .checkout_with_timeout(DEFAULT_TIMEOUT)
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
-        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        set_statement_timeout(
+            &mut transaction,
+            DEFAULT_TIMEOUT.saturating_sub(started.elapsed()),
+        )?;
         transaction
             .execute(
                 "INSERT INTO domain_audit_log (domain_id, event_id, state_before, \
@@ -727,8 +774,8 @@ impl PostgresDomainMetadataStore {
         page_token: Option<&[u8]>,
     ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
         use crate::domain_audit::{
-            audit_page_next_token, audit_page_window, format_wallclock_datetime,
-            now_unix_nanos, parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
+            audit_page_next_token, audit_page_window, format_wallclock_datetime, now_unix_nanos,
+            parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
         };
         type AuditRow = (
             String,
@@ -760,7 +807,10 @@ impl PostgresDomainMetadataStore {
             .checkout_with_timeout(DEFAULT_TIMEOUT)
             .map_err(checkout_error)?;
         let mut transaction = client.transaction().map_err(domain_error)?;
-        set_statement_timeout(&mut transaction, DEFAULT_TIMEOUT.saturating_sub(started.elapsed()))?;
+        set_statement_timeout(
+            &mut transaction,
+            DEFAULT_TIMEOUT.saturating_sub(started.elapsed()),
+        )?;
         let rows = transaction
             .query(
                 r#"SELECT event_id, domain_id, state_before, state_before_encoding, state_after,
@@ -797,8 +847,20 @@ impl PostgresDomainMetadataStore {
             .collect();
         transaction.commit().map_err(domain_error)?;
         let mut logs = Vec::with_capacity(rows.len());
-        for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in
-            rows
+        for (
+            event_id,
+            domain_id,
+            sb,
+            sbe,
+            sa,
+            sae,
+            op,
+            created,
+            updated,
+            identity,
+            id_type,
+            comment,
+        ) in rows
         {
             logs.push(DomainAuditLog {
                 event_id,
@@ -858,7 +920,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDoma
     }
 
     fn metadata_version(&self) -> Result<i64, String> {
-        self.get_metadata_version().map_err(|error| error.to_string())
+        self.get_metadata_version()
+            .map_err(|error| error.to_string())
     }
 
     fn create_domain(

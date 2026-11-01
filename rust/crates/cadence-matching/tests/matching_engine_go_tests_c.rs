@@ -469,10 +469,7 @@ async fn refresh_workflow_tasks_nil_execution_is_forwarded() {
     let mut empty = allocated_task();
     empty.data.workflow_id = String::new();
     empty.data.run_id = None;
-    client
-        .refresh_workflow_tasks("", &empty)
-        .await
-        .unwrap();
+    client.refresh_workflow_tasks("", &empty).await.unwrap();
     let requests = seen.lock().unwrap();
     assert_eq!(requests.len(), 2);
     let first = requests[0].workflow_execution.as_ref().unwrap();
@@ -512,7 +509,11 @@ fn setup_executor_with_empty_config_installs_noop_executor() {
 fn shard_distributor_onboarded_zero_excludes_every_task_list() {
     // Go "offboarded at zero". Rust gates each task list by fingerprint bucket
     // (`fingerprint % 100 >= percentage`), and every bucket is >= 0.
-    for name in ["test-tasklist", "other-tasklist", "/__cadence_sys/test-tasklist/1"] {
+    for name in [
+        "test-tasklist",
+        "other-tasklist",
+        "/__cadence_sys/test-tasklist/1",
+    ] {
         assert!(
             task_list_excluded_from_shard_distributor(name, 0, false),
             "{name} must be excluded at 0 percent"
@@ -523,7 +524,11 @@ fn shard_distributor_onboarded_zero_excludes_every_task_list() {
 #[test]
 fn shard_distributor_onboarded_full_excludes_no_task_list() {
     // Go "onboarded at full". Buckets are 0..=99, all below 100.
-    for name in ["test-tasklist", "other-tasklist", "/__cadence_sys/test-tasklist/1"] {
+    for name in [
+        "test-tasklist",
+        "other-tasklist",
+        "/__cadence_sys/test-tasklist/1",
+    ] {
         assert!(
             !task_list_excluded_from_shard_distributor(name, 100, false),
             "{name} must not be excluded at 100 percent"

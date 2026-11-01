@@ -562,8 +562,10 @@ impl CassandraFrontendDomainPersistence {
         match executor.exec(&all, values()) {
             Ok(()) => Ok(()),
             Err(error) if error.is_unavailable() => {
-                let fallback =
-                    CqlStatement::with_consistency(statement.text.clone(), Consistency::LocalQuorum);
+                let fallback = CqlStatement::with_consistency(
+                    statement.text.clone(),
+                    Consistency::LocalQuorum,
+                );
                 executor.exec(&fallback, values()).map_err(Self::cql_error)
             }
             Err(error) => Err(Self::cql_error(error)),
@@ -1532,10 +1534,16 @@ impl MatchingDomainMetadataStore {
             .map(|elapsed| i64::try_from(elapsed.as_nanos()).unwrap_or(i64::MAX))
             .unwrap_or(0);
         let (max_nanos, min_event_id) = match page_token {
-            Some(token) => decode_page_token(token).map_err(MatchingDomainMetadataError::InvalidBlob)?,
-            None => (now_nanos, "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string()),
+            Some(token) => {
+                decode_page_token(token).map_err(MatchingDomainMetadataError::InvalidBlob)?
+            }
+            None => (
+                now_nanos,
+                "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
+            ),
         };
-        let max = format_sqlite_datetime(max_nanos).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+        let max =
+            format_sqlite_datetime(max_nanos).map_err(MatchingDomainMetadataError::InvalidBlob)?;
         let min = format_sqlite_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
         let (connection, deadline) = self.lock_connection(Duration::from_secs(3))?;
         let _deadline = SqliteOperationDeadline::new(&connection, deadline, self.busy_timeout)?;
@@ -1576,7 +1584,21 @@ impl MatchingDomainMetadataStore {
                 .map_err(|error| sqlite_operation_error(error, deadline))?
         };
         let mut logs = Vec::with_capacity(rows.len());
-        for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in rows {
+        for (
+            event_id,
+            domain_id,
+            sb,
+            sbe,
+            sa,
+            sae,
+            op,
+            created,
+            updated,
+            identity,
+            id_type,
+            comment,
+        ) in rows
+        {
             logs.push(DomainAuditLog {
                 event_id,
                 domain_id,
@@ -1615,7 +1637,8 @@ impl MatchingDomainMetadataStore {
 
 impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDomainMetadataStore {
     fn metadata_version(&self) -> Result<i64, String> {
-        self.get_metadata_version().map_err(|error| error.to_string())
+        self.get_metadata_version()
+            .map_err(|error| error.to_string())
     }
 
     fn create_domain(
@@ -2301,10 +2324,12 @@ mod tests {
         let mut stale = metadata.clone();
         stale.info.name = "stale-domain".into();
         stale.info.uuid = stale_uuid.to_string();
-        assert!(crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
-            &store, &stale, 7,
-        )
-        .is_err());
+        assert!(
+            crate::matching_domain_metadata::DomainMetadataPersistence::create_domain(
+                &store, &stale, 7,
+            )
+            .is_err()
+        );
         assert!(matches!(
             store.get_domain(None, Some(&stale_uuid.to_string())),
             Err(MatchingDomainMetadataError::NotFound(_))

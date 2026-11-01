@@ -332,7 +332,9 @@ impl MetricSink for M3MetricSink {
                     Some(HistogramSpec::GoPersistenceLatency) => {
                         crate::matching_metrics::go_persistence_latency_bounds_nanos()
                     }
-                    Some(HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize) => {
+                    Some(
+                        HistogramSpec::GoResponseRowSize | HistogramSpec::GoResponsePayloadSize,
+                    ) => {
                         return;
                     }
                 };
@@ -367,7 +369,10 @@ impl MetricSink for M3MetricSink {
                         || crate::matching_metrics::go_value_histogram_bounds(spec).is_some()
                 }) =>
             {
-                let bounds = match event.histogram.and_then(crate::matching_metrics::go_value_histogram_bounds) {
+                let bounds = match event
+                    .histogram
+                    .and_then(crate::matching_metrics::go_value_histogram_bounds)
+                {
                     Some(bounds) => bounds,
                     None => mid_1_to_16k_bounds(),
                 };

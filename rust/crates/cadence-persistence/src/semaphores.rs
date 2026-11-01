@@ -39,8 +39,14 @@ pub struct SemaphoreHold {
 /// token it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemaphoreRow {
-    Token { token_id: i32, holder: String },
-    Owner { owner_id: String, held_token: i32 },
+    Token {
+        token_id: i32,
+        holder: String,
+    },
+    Owner {
+        owner_id: String,
+        held_token: i32,
+    },
     /// A row whose type this version cannot classify. Go's scan returns it
     /// and the manager's load skips it, so an unknown row never fails the load.
     Unknown,
@@ -150,7 +156,9 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
         _bucket: i32,
         _owner_id: &str,
     ) -> Result<i32, AcquireError> {
-        Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
+        Err(AcquireError::Invalid(
+            SqlUnsupportedSemaphorePersistence::MESSAGE.into(),
+        ))
     }
     async fn grant_semaphore_token(
         &self,
@@ -168,7 +176,9 @@ pub trait SemaphorePersistence: std::fmt::Debug + Send + Sync {
         _token_id: i32,
         _owner_id: &str,
     ) -> Result<bool, AcquireError> {
-        Err(AcquireError::Invalid(SqlUnsupportedSemaphorePersistence::MESSAGE.into()))
+        Err(AcquireError::Invalid(
+            SqlUnsupportedSemaphorePersistence::MESSAGE.into(),
+        ))
     }
 }
 
@@ -284,7 +294,11 @@ impl super::InMemoryExecutionStore {
                 "BucketSize must not exceed {MAX_BUCKET_SIZE}, got {bucket_size}"
             )));
         }
-        let namespace = self.inner.read().expect("execution store lock").domain_id(domain);
+        let namespace = self
+            .inner
+            .read()
+            .expect("execution store lock")
+            .domain_id(domain);
         self.create_semaphore_by_id(&namespace, name, size, bucket_size)
     }
 
@@ -298,7 +312,9 @@ impl super::InMemoryExecutionStore {
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError> {
         if size <= 0 {
-            return Err(SemaphoreError::Invalid(format!("Size must be positive, got {size}")));
+            return Err(SemaphoreError::Invalid(format!(
+                "Size must be positive, got {size}"
+            )));
         }
         if !(0..=MAX_BUCKET_SIZE).contains(&bucket_size) {
             return Err(SemaphoreError::Invalid(format!(
@@ -330,12 +346,17 @@ impl super::InMemoryExecutionStore {
         domain_id: &str,
         name: &str,
     ) -> Result<SemaphoreMetadata, AcquireError> {
-        self.inner.read().expect("execution store lock")
-            .semaphores.get(&(domain_id.to_string(), name.to_string()))
+        self.inner
+            .read()
+            .expect("execution store lock")
+            .semaphores
+            .get(&(domain_id.to_string(), name.to_string()))
             .cloned()
-            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("semaphore {name:?} does not exist in domain {domain_id:?}"),
-            )))
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore {name:?} does not exist in domain {domain_id:?}"
+                )))
+            })
     }
 
     /// Grant a token slot immediately or report `NoSlot`, mirroring Go's
@@ -354,7 +375,9 @@ impl super::InMemoryExecutionStore {
             return Err(AcquireError::Invalid("domainID is required".to_string()));
         }
         if name.is_empty() {
-            return Err(AcquireError::Invalid("semaphoreName is required".to_string()));
+            return Err(AcquireError::Invalid(
+                "semaphoreName is required".to_string(),
+            ));
         }
         if bucket < 0 {
             return Err(AcquireError::Invalid(format!(
@@ -377,18 +400,13 @@ impl super::InMemoryExecutionStore {
                 )))
             })?;
         let budget = bucket_budget(metadata.bucket_size);
-        let key = (
-            domain_id.to_string(),
-            name.to_string(),
-            bucket,
-        );
+        let key = (domain_id.to_string(), name.to_string(), bucket);
         let holds = inner.semaphore_holds.entry(key).or_default();
         // Idempotent re-acquire by the same owner.
         if let Some(hold) = holds.iter().find(|h| h.owner_id == owner_id) {
             return Ok((Outcome::Acquired, hold.token_id));
         }
-        let taken: std::collections::HashSet<i32> =
-            holds.iter().map(|h| h.token_id).collect();
+        let taken: std::collections::HashSet<i32> = holds.iter().map(|h| h.token_id).collect();
         let free: Vec<i32> = (1..=budget).filter(|id| !taken.contains(id)).collect();
         if free.is_empty() {
             return Ok((Outcome::NoSlot, 0));
@@ -404,18 +422,13 @@ impl super::InMemoryExecutionStore {
 
     /// Release a hold by owner ID, freeing its slot. Unknown owners are a
     /// no-op success, mirroring conditional-write semantics.
-    pub fn release_semaphore_hold(
-        &self,
-        domain_id: &str,
-        name: &str,
-        bucket: i32,
-        owner_id: &str,
-    ) {        let mut inner = self.inner.write().expect("execution store lock");
-        if let Some(holds) = inner.semaphore_holds.get_mut(&(
-            domain_id.to_string(),
-            name.to_string(),
-            bucket,
-        )) {
+    pub fn release_semaphore_hold(&self, domain_id: &str, name: &str, bucket: i32, owner_id: &str) {
+        let mut inner = self.inner.write().expect("execution store lock");
+        if let Some(holds) =
+            inner
+                .semaphore_holds
+                .get_mut(&(domain_id.to_string(), name.to_string(), bucket))
+        {
             holds.retain(|h| h.owner_id != owner_id);
         }
     }
@@ -462,14 +475,16 @@ impl super::InMemoryExecutionStore {
         next_page_token: Option<&[u8]>,
     ) -> Result<SemaphoreBucketPage, AcquireError> {
         if page_size == 0 {
-            return Err(AcquireError::Invalid(SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE.into()));
+            return Err(AcquireError::Invalid(
+                SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE.into(),
+            ));
         }
         let start = match next_page_token {
             None => 0,
             Some(token) => {
-                let bytes: [u8; 8] = token
-                    .try_into()
-                    .map_err(|_| AcquireError::Invalid("invalid semaphore scan page token".into()))?;
+                let bytes: [u8; 8] = token.try_into().map_err(|_| {
+                    AcquireError::Invalid("invalid semaphore scan page token".into())
+                })?;
                 u64::from_be_bytes(bytes) as usize
             }
         };
@@ -549,13 +564,16 @@ impl super::InMemoryExecutionStore {
     ) -> Result<i32, AcquireError> {
         let inner = self.inner.read().expect("execution store lock");
         Self::semaphore_budget(&inner, domain_id, name)?;
-        inner.semaphore_holds
+        inner
+            .semaphore_holds
             .get(&(domain_id.to_string(), name.to_string(), bucket))
             .and_then(|holds| holds.iter().find(|hold| hold.owner_id == owner_id))
             .map(|hold| hold.token_id)
-            .ok_or_else(|| AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(
-                format!("semaphore owner {owner_id:?} does not hold a token in bucket {bucket}"),
-            )))
+            .ok_or_else(|| {
+                AcquireError::NotFound(cadence_api::errors::EntityNotExistsError::new(format!(
+                    "semaphore owner {owner_id:?} does not hold a token in bucket {bucket}"
+                )))
+            })
     }
 
     /// Conditional grant of one token to an owner, mirroring
@@ -608,9 +626,10 @@ impl super::InMemoryExecutionStore {
         let mut inner = self.inner.write().expect("execution store lock");
         Self::semaphore_budget(&inner, domain_id, name)?;
         let mut applied = false;
-        if let Some(holds) = inner
-            .semaphore_holds
-            .get_mut(&(domain_id.to_string(), name.to_string(), bucket))
+        if let Some(holds) =
+            inner
+                .semaphore_holds
+                .get_mut(&(domain_id.to_string(), name.to_string(), bucket))
         {
             let before = holds.len();
             holds.retain(|hold| !(hold.owner_id == owner_id && hold.token_id == token_id));
@@ -629,7 +648,13 @@ impl SemaphorePersistence for super::InMemoryExecutionStore {
         size: i32,
         bucket_size: i32,
     ) -> Result<SemaphoreMetadata, SemaphoreError> {
-        super::InMemoryExecutionStore::create_semaphore_by_id(self, domain_id, name, size, bucket_size)
+        super::InMemoryExecutionStore::create_semaphore_by_id(
+            self,
+            domain_id,
+            name,
+            size,
+            bucket_size,
+        )
     }
 
     async fn get_semaphore_metadata(
@@ -745,22 +770,32 @@ mod tests {
         use cadence_api::enums::SemaphoreAcquireOutcome as Outcome;
         let store = store();
         store.create_semaphore("d", "sem", 10, 2).unwrap();
-        let (outcome, first) = store.acquire_semaphore("uuid-d", "sem", 0, "1:w:r1:1").unwrap();
+        let (outcome, first) = store
+            .acquire_semaphore("uuid-d", "sem", 0, "1:w:r1:1")
+            .unwrap();
         assert_eq!(outcome, Outcome::Acquired);
         assert!((1..=2).contains(&first));
-        let (outcome, second) = store.acquire_semaphore("uuid-d", "sem", 0, "1:w:r2:1").unwrap();
+        let (outcome, second) = store
+            .acquire_semaphore("uuid-d", "sem", 0, "1:w:r2:1")
+            .unwrap();
         assert_eq!(outcome, Outcome::Acquired);
         assert_ne!(first, second);
         // Bucket full: immediate NoSlot with token 0.
-        let (outcome, token) = store.acquire_semaphore("uuid-d", "sem", 0, "1:w:r3:1").unwrap();
+        let (outcome, token) = store
+            .acquire_semaphore("uuid-d", "sem", 0, "1:w:r3:1")
+            .unwrap();
         assert_eq!(outcome, Outcome::NoSlot);
         assert_eq!(token, 0);
         // Same owner re-acquires its held slot idempotently.
-        let (outcome, again) = store.acquire_semaphore("uuid-d", "sem", 0, "1:w:r1:1").unwrap();
+        let (outcome, again) = store
+            .acquire_semaphore("uuid-d", "sem", 0, "1:w:r1:1")
+            .unwrap();
         assert_eq!((outcome, again), (Outcome::Acquired, first));
         // Release frees the slot for the waiter.
         store.release_semaphore_hold("uuid-d", "sem", 0, "1:w:r1:1");
-        let (outcome, _) = store.acquire_semaphore("uuid-d", "sem", 0, "1:w:r3:1").unwrap();
+        let (outcome, _) = store
+            .acquire_semaphore("uuid-d", "sem", 0, "1:w:r3:1")
+            .unwrap();
         assert_eq!(outcome, Outcome::Acquired);
     }
 
@@ -769,9 +804,13 @@ mod tests {
         let store = store();
         assert!(store.acquire_semaphore("", "sem", 0, "1:w:r:1").is_err());
         assert!(store.acquire_semaphore("uuid-d", "", 0, "1:w:r:1").is_err());
-        assert!(store.acquire_semaphore("uuid-d", "sem", -1, "1:w:r:1").is_err());
+        assert!(store
+            .acquire_semaphore("uuid-d", "sem", -1, "1:w:r:1")
+            .is_err());
         assert!(store.acquire_semaphore("uuid-d", "sem", 0, "").is_err());
-        assert!(store.acquire_semaphore("uuid-d", "sem", 0, "nonsense").is_err());
+        assert!(store
+            .acquire_semaphore("uuid-d", "sem", 0, "nonsense")
+            .is_err());
         assert!(matches!(
             store.acquire_semaphore("uuid-d", "missing", 0, "1:w:r:1"),
             Err(AcquireError::NotFound(_))
@@ -786,17 +825,22 @@ mod tests {
             Err(SemaphoreError::UnsupportedBackend)
         ));
         assert_eq!(
-            sql.scan_semaphore_bucket("d", "s", 0, 1, None).await.unwrap_err().to_string(),
-            SqlUnsupportedSemaphorePersistence::MESSAGE
-        );
-        assert_eq!(
-            sql.get_semaphore_ownership_by_token("d", "s", 0, 1).await
+            sql.scan_semaphore_bucket("d", "s", 0, 1, None)
+                .await
                 .unwrap_err()
                 .to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE
         );
         assert_eq!(
-            sql.grant_semaphore_token("d", "s", 0, 1, "owner").await
+            sql.get_semaphore_ownership_by_token("d", "s", 0, 1)
+                .await
+                .unwrap_err()
+                .to_string(),
+            SqlUnsupportedSemaphorePersistence::MESSAGE
+        );
+        assert_eq!(
+            sql.grant_semaphore_token("d", "s", 0, 1, "owner")
+                .await
                 .unwrap_err()
                 .to_string(),
             SqlUnsupportedSemaphorePersistence::MESSAGE

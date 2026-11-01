@@ -4,8 +4,10 @@
 pub mod decisions;
 pub mod history;
 
-use cadence_api::{enums as e, schedule as tk_schedule, service_types as st, tasks as tk, types as t};
 use crate::api as p;
+use cadence_api::{
+    enums as e, schedule as tk_schedule, service_types as st, tasks as tk, types as t,
+};
 use tonic::Status;
 
 pub fn timestamp(ms: i64) -> prost_types::Timestamp {
@@ -135,12 +137,25 @@ pub fn active_clusters_in(v: p::ActiveClusters) -> t::ActiveClusters {
     let scopes = v.active_clusters_by_cluster_attribute;
     t::ActiveClusters {
         active_clusters_by_region: None,
-        active_clusters_by_cluster_attribute: (!scopes.is_empty()).then(|| scopes.into_iter().map(|(name, scope)| {
-            let attributes = scope.cluster_attributes;
-            (name, t::ClusterAttributeScope {
-                cluster_attributes: (!attributes.is_empty()).then(|| attributes.into_iter().map(|(name, value)| (name, info(value))).collect()),
-            })
-        }).collect()),
+        active_clusters_by_cluster_attribute: (!scopes.is_empty()).then(|| {
+            scopes
+                .into_iter()
+                .map(|(name, scope)| {
+                    let attributes = scope.cluster_attributes;
+                    (
+                        name,
+                        t::ClusterAttributeScope {
+                            cluster_attributes: (!attributes.is_empty()).then(|| {
+                                attributes
+                                    .into_iter()
+                                    .map(|(name, value)| (name, info(value)))
+                                    .collect()
+                            }),
+                        },
+                    )
+                })
+                .collect()
+        }),
     }
 }
 #[allow(deprecated)]
@@ -820,7 +835,11 @@ pub fn failover_event_out(v: t::FailoverEvent) -> p::FailoverEvent {
 
 /// Nanos since the epoch from a proto timestamp.
 pub fn nanos(v: Option<prost_types::Timestamp>) -> Option<i64> {
-    v.map(|t| t.seconds.saturating_mul(1_000_000_000).saturating_add(i64::from(t.nanos)))
+    v.map(|t| {
+        t.seconds
+            .saturating_mul(1_000_000_000)
+            .saturating_add(i64::from(t.nanos))
+    })
 }
 
 /// Proto timestamp from nanos since the epoch.
@@ -891,27 +910,29 @@ pub fn schedule_action_in(v: p::ScheduleAction) -> Result<tk_schedule::ScheduleA
 
 pub fn schedule_action_out(v: tk_schedule::ScheduleAction) -> p::ScheduleAction {
     p::ScheduleAction {
-        start_workflow: v.start_workflow.map(|a| p::schedule_action::StartWorkflowAction {
-            workflow_type: a.workflow_type.map(|t| p::WorkflowType { name: t.name }),
-            task_list: a.task_list.map(task_list_out),
-            input: payload(a.input),
-            workflow_id_prefix: a.workflow_id_prefix,
-            execution_start_to_close_timeout: a
-                .execution_start_to_close_timeout_seconds
-                .map(|s| prost_types::Duration {
-                    seconds: i64::from(s),
-                    nanos: 0,
+        start_workflow: v
+            .start_workflow
+            .map(|a| p::schedule_action::StartWorkflowAction {
+                workflow_type: a.workflow_type.map(|t| p::WorkflowType { name: t.name }),
+                task_list: a.task_list.map(task_list_out),
+                input: payload(a.input),
+                workflow_id_prefix: a.workflow_id_prefix,
+                execution_start_to_close_timeout: a.execution_start_to_close_timeout_seconds.map(
+                    |s| prost_types::Duration {
+                        seconds: i64::from(s),
+                        nanos: 0,
+                    },
+                ),
+                task_start_to_close_timeout: a.task_start_to_close_timeout_seconds.map(|s| {
+                    prost_types::Duration {
+                        seconds: i64::from(s),
+                        nanos: 0,
+                    }
                 }),
-            task_start_to_close_timeout: a
-                .task_start_to_close_timeout_seconds
-                .map(|s| prost_types::Duration {
-                    seconds: i64::from(s),
-                    nanos: 0,
-                }),
-            retry_policy: a.retry_policy.map(retry_out),
-            memo: a.memo.map(memo),
-            search_attributes: a.search_attributes.map(search_attributes),
-        }),
+                retry_policy: a.retry_policy.map(retry_out),
+                memo: a.memo.map(memo),
+                search_attributes: a.search_attributes.map(search_attributes),
+            }),
     }
 }
 
@@ -989,20 +1010,28 @@ pub fn schedule_entry_out(v: tk_schedule::ScheduleListEntry) -> p::ScheduleListE
     }
 }
 
-
 pub fn version_history_out(value: t::VersionHistory) -> crate::admin::VersionHistory {
     crate::admin::VersionHistory {
         branch_token: value.branch_token,
-        items: value.items.into_iter().map(|item| crate::admin::VersionHistoryItem {
-            event_id: item.event_id, version: item.version,
-        }).collect(),
+        items: value
+            .items
+            .into_iter()
+            .map(|item| crate::admin::VersionHistoryItem {
+                event_id: item.event_id,
+                version: item.version,
+            })
+            .collect(),
     }
 }
 
 pub fn version_histories_out(value: t::VersionHistories) -> crate::shared::VersionHistories {
     crate::shared::VersionHistories {
         current_version_history_index: value.current_version_history_index,
-        histories: value.histories.into_iter().map(version_history_out).collect(),
+        histories: value
+            .histories
+            .into_iter()
+            .map(version_history_out)
+            .collect(),
     }
 }
 
@@ -1015,7 +1044,9 @@ mod tests {
             task_token: b"t".to_vec(),
             result: Some(p::WorkflowQueryResult {
                 result_type: 1,
-                answer: Some(p::Payload { data: b"a".to_vec() }),
+                answer: Some(p::Payload {
+                    data: b"a".to_vec(),
+                }),
                 error_message: String::new(),
             }),
             worker_version_info: None,
@@ -1047,12 +1078,14 @@ mod tests {
         // Round trip back to proto preserves the wire encoding.
         let back = query_completed_out(failed);
         assert_eq!(
-            back.result.as_ref().unwrap().result_type, 2,
+            back.result.as_ref().unwrap().result_type,
+            2,
             "failed must encode as QUERY_RESULT_TYPE_FAILED"
         );
         let back = query_completed_out(completed);
         assert_eq!(
-            back.result.as_ref().unwrap().result_type, 1,
+            back.result.as_ref().unwrap().result_type,
+            1,
             "completed must encode as QUERY_RESULT_TYPE_ANSWERED"
         );
     }
@@ -1153,10 +1186,9 @@ mod reverse_tests {
             identity: "id".to_string(),
             binary_checksum: "bc".to_string(),
         };
-        let back = poll_for_decision_task_request_in(poll_for_decision_task_request_out(
-            decision.clone(),
-        ))
-        .unwrap();
+        let back =
+            poll_for_decision_task_request_in(poll_for_decision_task_request_out(decision.clone()))
+                .unwrap();
         assert_eq!(back, decision);
 
         let activity = tk::PollForActivityTaskRequest {
@@ -1167,10 +1199,9 @@ mod reverse_tests {
                 max_tasks_per_second: Some(2.5),
             }),
         };
-        let back = poll_for_activity_task_request_in(poll_for_activity_task_request_out(
-            activity.clone(),
-        ))
-        .unwrap();
+        let back =
+            poll_for_activity_task_request_in(poll_for_activity_task_request_out(activity.clone()))
+                .unwrap();
         assert_eq!(back, activity);
     }
 
@@ -1241,8 +1272,7 @@ mod reverse_tests {
             }],
             decision_task_list_partitions: Vec::new(),
         };
-        let back =
-            list_task_list_partitions_in(list_task_list_partitions_out(response.clone()));
+        let back = list_task_list_partitions_in(list_task_list_partitions_out(response.clone()));
         assert_eq!(back, response);
     }
 

@@ -1,14 +1,14 @@
 //! Run by the original-Go service harness; never substitutes an embedded engine.
-use cadence_persistence::{
-    matching_blob::BlobEncoding,
-    matching_sqlite::{SqliteTaskStore, TaskListKey},
-};
-use cadence_proto::{api as p, matching as m};
 use cadence_matching::{
     grpc_matching::Matching,
     matching_history::{start_error_kind, MatchingHistoryClient, StartErrorKind},
     matching_registry::QueueRegistry,
 };
+use cadence_persistence::{
+    matching_blob::BlobEncoding,
+    matching_sqlite::{SqliteTaskStore, TaskListKey},
+};
+use cadence_proto::{api as p, matching as m};
 use prost::Message;
 use serde::Deserialize;
 use std::{
@@ -82,13 +82,28 @@ async fn matching_delivery_go_history() {
     );
     let state = cadence_service_core::handlers::AppState::default();
     if !fixture.isolation_groups.is_empty() {
-        let blob = |value: serde_json::Value| Some(cadence_api::types::DataBlob::new(cadence_api::enums::EncodingType::JSON, serde_json::to_vec(&value).unwrap()));
+        let blob = |value: serde_json::Value| {
+            Some(cadence_api::types::DataBlob::new(
+                cadence_api::enums::EncodingType::JSON,
+                serde_json::to_vec(&value).unwrap(),
+            ))
+        };
         let mut config = state.admin.dynamic_config.lock().unwrap();
         for (key, value) in [
-            ("system.allIsolationGroups", serde_json::json!(fixture.isolation_groups)),
+            (
+                "system.allIsolationGroups",
+                serde_json::json!(fixture.isolation_groups),
+            ),
             ("system.enableTasklistIsolation", serde_json::json!(true)),
         ] {
-            config.update(false, key, vec![cadence_api::admin::DynamicConfigValue { value: blob(value), filters: vec![] }]);
+            config.update(
+                false,
+                key,
+                vec![cadence_api::admin::DynamicConfigValue {
+                    value: blob(value),
+                    filters: vec![],
+                }],
+            );
         }
     }
     state

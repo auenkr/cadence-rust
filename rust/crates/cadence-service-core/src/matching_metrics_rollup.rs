@@ -13,8 +13,12 @@ pub(crate) fn rollup(name: &str) -> Option<&'static str> {
         "buffer_throttle_count_per_tl" => Some("buffer_throttle_count"),
         "buffer_unknown_task_dispatch_error_per_tl" => Some("buffer_unknown_task_dispatch_error"),
         "buffer_isolation_group_redirected_per_tl" => Some("buffer_isolation_group_redirected"),
-        "buffer_isolation_group_redirect_failure_per_tl" => Some("buffer_isolation_group_redirect_failure"),
-        "buffer_isolation_group_misconfigured_failure_per_tl" => Some("buffer_isolation_group_misconfigured_failure"),
+        "buffer_isolation_group_redirect_failure_per_tl" => {
+            Some("buffer_isolation_group_redirect_failure")
+        }
+        "buffer_isolation_group_misconfigured_failure_per_tl" => {
+            Some("buffer_isolation_group_misconfigured_failure")
+        }
         "tasks_expired_per_tl" => Some("tasks_expired"),
         "forwarded_per_tl" => Some("forwarded"),
         "forward_task_calls_per_tl" => Some("forward_task_calls"),
@@ -48,25 +52,43 @@ pub(crate) fn rollup(name: &str) -> Option<&'static str> {
         "syncmatch_forward_poll_latency_per_tl_ns" => Some("syncmatch_forward_poll_latency_ns"),
         "asyncmatch_local_poll_per_tl" => Some("asyncmatch_local_poll"),
         "asyncmatch_local_poll_attempt_per_tl" => Some("asyncmatch_local_poll_attempt"),
-        "asyncmatch_local_poll_attempt_per_tl_counts" => Some("asyncmatch_local_poll_attempt_counts"),
+        "asyncmatch_local_poll_attempt_per_tl_counts" => {
+            Some("asyncmatch_local_poll_attempt_counts")
+        }
         "asyncmatch_local_poll_latency_per_tl" => Some("asyncmatch_local_poll_latency"),
         "asyncmatch_local_poll_latency_per_tl_ns" => Some("asyncmatch_local_poll_latency_ns"),
         "asyncmatch_forward_poll_per_tl" => Some("asyncmatch_forward_poll"),
         "asyncmatch_forward_poll_attempt_per_tl" => Some("asyncmatch_forward_poll_attempt"),
-        "asyncmatch_forward_poll_attempt_per_tl_counts" => Some("asyncmatch_forward_poll_attempt_counts"),
+        "asyncmatch_forward_poll_attempt_per_tl_counts" => {
+            Some("asyncmatch_forward_poll_attempt_counts")
+        }
         "asyncmatch_forward_poll_latency_per_tl" => Some("asyncmatch_forward_poll_latency"),
         "asyncmatch_forward_poll_latency_per_tl_ns" => Some("asyncmatch_forward_poll_latency_ns"),
-        "asyncmatch_local_poll_after_forward_failed_per_tl" => Some("asyncmatch_local_poll_after_forward_failed"),
-        "asyncmatch_local_poll_after_forward_failed_attempt_per_tl" => Some("asyncmatch_local_poll_after_forward_failed_attempt"),
-        "asyncmatch_local_poll_after_forward_failed_attempt_per_tl_counts" => Some("asyncmatch_local_poll_after_forward_failed_attempt_counts"),
-        "asyncmatch_local_poll_after_forward_failed_latency_per_tl" => Some("asyncmatch_local_poll_after_forward_failed_latency"),
-        "asyncmatch_local_poll_after_forward_failed_latency_per_tl_ns" => Some("asyncmatch_local_poll_after_forward_failed_latency_ns"),
+        "asyncmatch_local_poll_after_forward_failed_per_tl" => {
+            Some("asyncmatch_local_poll_after_forward_failed")
+        }
+        "asyncmatch_local_poll_after_forward_failed_attempt_per_tl" => {
+            Some("asyncmatch_local_poll_after_forward_failed_attempt")
+        }
+        "asyncmatch_local_poll_after_forward_failed_attempt_per_tl_counts" => {
+            Some("asyncmatch_local_poll_after_forward_failed_attempt_counts")
+        }
+        "asyncmatch_local_poll_after_forward_failed_latency_per_tl" => {
+            Some("asyncmatch_local_poll_after_forward_failed_latency")
+        }
+        "asyncmatch_local_poll_after_forward_failed_latency_per_tl_ns" => {
+            Some("asyncmatch_local_poll_after_forward_failed_latency_ns")
+        }
         "poll_local_match_latency_per_tl" => Some("poll_local_match_latency"),
         "poll_local_match_latency_per_tl_ns" => Some("poll_local_match_latency_ns"),
         "poll_forward_match_latency_per_tl" => Some("poll_forward_match_latency"),
         "poll_forward_match_latency_per_tl_ns" => Some("poll_forward_match_latency_ns"),
-        "poll_local_match_after_forward_failed_latency_per_tl" => Some("poll_local_match_after_forward_failed_latency"),
-        "poll_local_match_after_forward_failed_latency_per_tl_ns" => Some("poll_local_match_after_forward_failed_latency_ns"),
+        "poll_local_match_after_forward_failed_latency_per_tl" => {
+            Some("poll_local_match_after_forward_failed_latency")
+        }
+        "poll_local_match_after_forward_failed_latency_per_tl_ns" => {
+            Some("poll_local_match_after_forward_failed_latency_ns")
+        }
         "task_isolation_leak_per_tl" => Some("task_isolation_leak"),
         "partition_upscale_per_tl" => Some("partition_upscale"),
         "partition_downscale_per_tl" => Some("partition_downscale"),

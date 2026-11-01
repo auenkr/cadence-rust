@@ -200,7 +200,10 @@ impl NativeSemaphoreService {
             cancelled,
             dropped: Some(dropped),
         };
-        let result = manager.acquire_with_context(&r.owner_id, &context).await.map_err(status)?;
+        let result = manager
+            .acquire_with_context(&r.owner_id, &context)
+            .await
+            .map_err(status)?;
         let outcome = match result.outcome {
             cadence_api::enums::SemaphoreAcquireOutcome::Acquired => 1,
             cadence_api::enums::SemaphoreAcquireOutcome::NoSlot => 2,
@@ -269,11 +272,20 @@ fn status(error: ManagerError) -> Status {
         ManagerError::NotReady => busy("semaphore manager is not ready".into(), String::new()),
         ManagerError::ServiceBusy(message) => busy(message, String::new()),
         ManagerError::ServiceBusyReason { message, reason } => busy(message, reason),
-        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => Status::internal(message),
+        ManagerError::Internal(message) | ManagerError::TypedInternal(message) => {
+            Status::internal(message)
+        }
         ManagerError::Load(id, source) => {
             // Both Go mappers use errors.As and serialize the underlying typed
             // error. Only uncategorized errors retain the load wrapper on wire.
-            if matches!(*source, ManagerError::BadRequest(_) | ManagerError::NotFound(_) | ManagerError::ServiceBusy(_) | ManagerError::ServiceBusyReason { .. } | ManagerError::TypedInternal(_)) {
+            if matches!(
+                *source,
+                ManagerError::BadRequest(_)
+                    | ManagerError::NotFound(_)
+                    | ManagerError::ServiceBusy(_)
+                    | ManagerError::ServiceBusyReason { .. }
+                    | ManagerError::TypedInternal(_)
+            ) {
                 return status(*source);
             }
             let original = status(*source);
@@ -282,9 +294,11 @@ fn status(error: ManagerError) -> Status {
             message.extend_from_slice(b": ");
             message.extend_from_slice(original.message().as_bytes());
             crate::matching_native_status::raw_status(
-                original.code(), &GoString::from(message), tonic::codegen::Bytes::copy_from_slice(original.details()),
+                original.code(),
+                &GoString::from(message),
+                tonic::codegen::Bytes::copy_from_slice(original.details()),
             )
-        },
+        }
     }
 }
 fn busy(message: String, reason: String) -> Status {
@@ -292,9 +306,7 @@ fn busy(message: String, reason: String) -> Status {
         Code::ResourceExhausted,
         message,
         "ServiceBusyError",
-        cadence_proto::api::ServiceBusyError {
-            reason,
-        },
+        cadence_proto::api::ServiceBusyError { reason },
     )
 }
 
@@ -481,7 +493,9 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(false),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
+            scan_release: Notify::new(),
+            park_confirm: AtomicBool::new(false),
+            cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let metrics = Arc::new(AtomicUsize::new(0));
@@ -538,7 +552,9 @@ mod tests {
         // observed and cached rather than dropped along with the reservation.
         let (cancel, receiver) = tokio::sync::watch::channel(false);
         let mut grant_request = request(b"8:deadline:r:3");
-        grant_request.extensions_mut().insert(CallerCancel(receiver));
+        grant_request
+            .extensions_mut()
+            .insert(CallerCancel(receiver));
         let grant = {
             let service = service.clone();
             tokio::spawn(async move { service.acquire(grant_request).await })
@@ -562,7 +578,10 @@ mod tests {
         store.entered.notified().await;
         cancel.send(true).unwrap();
         store.release.notify_one();
-        assert_eq!(confirm.await.unwrap().unwrap().into_inner().token_id, acquired.token_id);
+        assert_eq!(
+            confirm.await.unwrap().unwrap().into_inner().token_id,
+            acquired.token_id
+        );
         assert_eq!(metrics.load(Ordering::SeqCst), 2);
         drop(cancel);
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 1);
@@ -587,7 +606,9 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(false),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
+            scan_release: Notify::new(),
+            park_confirm: AtomicBool::new(false),
+            cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let metrics = Arc::new(AtomicUsize::new(0));
@@ -688,7 +709,10 @@ mod tests {
         use tokio::sync::Notify;
 
         let inner = InMemorySemaphorePersistenceBytes::default();
-        inner.create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1).await.unwrap();
+        inner
+            .create_semaphore(&bytes(b"d"), &bytes(b"s\xff"), 1, 1)
+            .await
+            .unwrap();
         let store = Arc::new(ParkGrant {
             inner,
             entered: Notify::new(),
@@ -697,18 +721,30 @@ mod tests {
             park_scan: AtomicBool::new(true),
             fail_scan: AtomicBool::new(true),
             scan_entered: Notify::new(),
-            scan_release: Notify::new(), park_confirm: AtomicBool::new(false), cancel_grant: AtomicBool::new(false),
+            scan_release: Notify::new(),
+            park_confirm: AtomicBool::new(false),
+            cancel_grant: AtomicBool::new(false),
         });
         let registry = Registry::new(store.clone());
         let service = NativeSemaphoreService::new(
             registry.clone(),
-            Membership::new("self", vec![Host { address: "self".into(), identity: "self".into(), grpc_address: String::new() }]),
+            Membership::new(
+                "self",
+                vec![Host {
+                    address: "self".into(),
+                    identity: "self".into(),
+                    grpc_address: String::new(),
+                }],
+            ),
             Arc::new(|_| Ok(bytes(b"domain"))),
             Arc::new(|_| (true, 1_000_000_000)),
             Arc::new(|| false),
             Arc::new(|_, _, _| {}),
         );
-        let first = { let service = service.clone(); tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await }) };
+        let first = {
+            let service = service.clone();
+            tokio::spawn(async move { service.acquire(request(b"1:x:r:1")).await })
+        };
         store.scan_entered.notified().await;
         let waiter = service.acquire(request(b"1:y:r:2"));
         tokio::pin!(waiter);
@@ -719,11 +755,28 @@ mod tests {
         store.scan_release.notify_one();
         let error = first.await.unwrap().unwrap_err();
         assert_eq!(error.code(), Code::Internal);
-        assert_eq!(error.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).unwrap().to_bytes().unwrap().as_ref(), b"load semaphore bucket d/s\xff/0: injected scan failure");
+        assert_eq!(
+            error
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+                .unwrap()
+                .to_bytes()
+                .unwrap()
+                .as_ref(),
+            b"load semaphore bucket d/s\xff/0: injected scan failure"
+        );
         assert_eq!(waiter.await.unwrap_err().code(), Code::ResourceExhausted);
         assert!(registry.all_managers().is_empty());
         store.release.notify_one();
-        assert_eq!(service.acquire(request(b"1:z:r:3")).await.unwrap().into_inner().outcome, 1);
+        assert_eq!(
+            service
+                .acquire(request(b"1:z:r:3"))
+                .await
+                .unwrap()
+                .into_inner()
+                .outcome,
+            1
+        );
         assert_eq!(store.scan_pages.load(Ordering::SeqCst), 2);
     }
 
@@ -731,17 +784,24 @@ mod tests {
     fn wrapped_typed_startup_error_uses_underlying_grpc_details() {
         use prost::Message;
         let source = cadence_api::errors::EntityNotExistsError {
-            message: "missing".into(), current_cluster: "a".into(),
-            active_cluster: "b".into(), active_clusters: vec!["b".into(), "c".into()],
+            message: "missing".into(),
+            current_cluster: "a".into(),
+            active_cluster: "b".into(),
+            active_clusters: vec!["b".into(), "c".into()],
         };
         let error = status(ManagerError::Load(
-            bytes(b"d/s\xff/0"), Box::new(ManagerError::NotFound(source)),
+            bytes(b"d/s\xff/0"),
+            Box::new(ManagerError::NotFound(source)),
         ));
         assert_eq!(error.code(), Code::NotFound);
         assert_eq!(error.message(), "missing");
         let envelope = RawEnvelope::decode(error.details()).unwrap();
-        assert!(envelope.details[0].type_url.ends_with(".EntityNotExistsError"));
-        let detail = cadence_proto::api::EntityNotExistsError::decode(envelope.details[0].value.as_slice()).unwrap();
+        assert!(envelope.details[0]
+            .type_url
+            .ends_with(".EntityNotExistsError"));
+        let detail =
+            cadence_proto::api::EntityNotExistsError::decode(envelope.details[0].value.as_slice())
+                .unwrap();
         assert_eq!(detail.current_cluster, "a");
         assert_eq!(detail.active_clusters, ["b", "c"]);
         let wire = error.into_http();
@@ -754,28 +814,55 @@ mod tests {
         let id = bytes(b"d/s\xff/0");
         let typed = status(ManagerError::Load(
             id.clone(),
-            Box::new(cadence_persistence::semaphores::AcquireError::TypedInternal("typed failure".into()).into()),
+            Box::new(
+                cadence_persistence::semaphores::AcquireError::TypedInternal(
+                    "typed failure".into(),
+                )
+                .into(),
+            ),
         ));
         assert_eq!(typed.code(), Code::Internal);
         assert_eq!(typed.message(), "typed failure");
-        assert!(typed.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER).is_none());
+        assert!(typed
+            .metadata()
+            .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+            .is_none());
 
         let untyped = status(ManagerError::Load(
             id.clone(),
-            Box::new(cadence_persistence::semaphores::AcquireError::Internal("store timeout".into()).into()),
+            Box::new(
+                cadence_persistence::semaphores::AcquireError::Internal("store timeout".into())
+                    .into(),
+            ),
         ));
         assert_eq!(untyped.code(), Code::Internal);
-        assert_eq!(untyped.metadata().get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
-            .unwrap().to_bytes().unwrap().as_ref(), b"load semaphore bucket d/s\xff/0: store timeout");
+        assert_eq!(
+            untyped
+                .metadata()
+                .get_bin(crate::matching_native_status::RAW_MESSAGE_MARKER)
+                .unwrap()
+                .to_bytes()
+                .unwrap()
+                .as_ref(),
+            b"load semaphore bucket d/s\xff/0: store timeout"
+        );
 
         let busy = status(ManagerError::Load(
             id,
-            Box::new(cadence_persistence::semaphores::AcquireError::ServiceBusy { message: "busy".into(), reason: "overloaded".into() }.into()),
+            Box::new(
+                cadence_persistence::semaphores::AcquireError::ServiceBusy {
+                    message: "busy".into(),
+                    reason: "overloaded".into(),
+                }
+                .into(),
+            ),
         ));
         assert_eq!(busy.code(), Code::ResourceExhausted);
         assert_eq!(busy.message(), "busy");
         let envelope = RawEnvelope::decode(busy.details()).unwrap();
-        let detail = cadence_proto::api::ServiceBusyError::decode(envelope.details[0].value.as_slice()).unwrap();
+        let detail =
+            cadence_proto::api::ServiceBusyError::decode(envelope.details[0].value.as_slice())
+                .unwrap();
         assert_eq!(detail.reason, "overloaded");
     }
 

@@ -38,8 +38,14 @@ fn both(entries: Vec<(i32, Vec<&str>)>) -> (PartitionMap, PartitionMap) {
 /// Go `aggregatePartitionMetrics` with the isolation-group fields the balancer reads.
 fn group_metrics(qps: &[(&str, f64)], pollers: &[(&str, bool)]) -> AggregateMetrics {
     AggregateMetrics {
-        qps_by_group: qps.iter().map(|(group, value)| (group.to_string(), *value)).collect(),
-        has_pollers_by_group: pollers.iter().map(|(group, polled)| (group.to_string(), *polled)).collect(),
+        qps_by_group: qps
+            .iter()
+            .map(|(group, value)| (group.to_string(), *value))
+            .collect(),
+        has_pollers_by_group: pollers
+            .iter()
+            .map(|(group, polled)| (group.to_string(), *polled))
+            .collect(),
         ..AggregateMetrics::default()
     }
 }
@@ -169,7 +175,10 @@ fn matching_isolation_balancer_initial_balance_from_one_partition_skewed() {
     run_balancer(
         2,
         vec![
-            observe(polled(&[("a", 300.0), ("b", 75.0), ("c", 2.0), ("d", 1.0)]), even(1)),
+            observe(
+                polled(&[("a", 300.0), ("b", 75.0), ("c", 2.0), ("d", 1.0)]),
+                even(1),
+            ),
             idle(),
             idle(),
             idle(),
@@ -201,7 +210,10 @@ fn matching_isolation_balancer_require_pollers() {
     run_balancer(
         2,
         vec![
-            observe(group_metrics(&[("a", 100.0), ("b", 99.0)], &[("a", true)]), even(2)),
+            observe(
+                group_metrics(&[("a", 100.0), ("b", 99.0)], &[("a", true)]),
+                even(2),
+            ),
             idle(),
             idle(),
             idle(),
@@ -215,7 +227,10 @@ fn matching_isolation_balancer_fewer_groups_than_partitions() {
     run_balancer(
         2,
         vec![
-            observe(polled(&[("a", 100.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)]), even(6)),
+            observe(
+                polled(&[("a", 100.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)]),
+                even(6),
+            ),
             idle(),
             idle(),
             idle(),
@@ -236,7 +251,10 @@ fn matching_isolation_balancer_fewer_partitions_than_groups() {
     run_balancer(
         2,
         vec![
-            observe(polled(&[("a", 100.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)]), even(2)),
+            observe(
+                polled(&[("a", 100.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)]),
+                even(2),
+            ),
             idle(),
             idle(),
             idle(),
@@ -306,7 +324,10 @@ fn matching_isolation_balancer_pollers_added() {
             idle(),
             idle(),
             idle(),
-            expect(parts(vec![(0, vec!["a", "b", "c"]), (1, vec!["a", "b", "c"])])),
+            expect(parts(vec![
+                (0, vec!["a", "b", "c"]),
+                (1, vec!["a", "b", "c"]),
+            ])),
         ],
     );
 }
@@ -345,7 +366,12 @@ fn matching_isolation_balancer_scale_up_single_partition() {
                 parts(vec![(0, vec!["a", "d"]), (1, vec!["b", "c"])]),
             ),
             BalancerCycle {
-                metrics: Some(polled(&[("a", 101.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)])),
+                metrics: Some(polled(&[
+                    ("a", 101.0),
+                    ("b", 99.0),
+                    ("c", 98.0),
+                    ("d", 97.0),
+                ])),
                 ..BalancerCycle::default()
             },
             idle(),
@@ -532,7 +558,12 @@ fn matching_isolation_balancer_scale_down_single_partition() {
                 parts(vec![(0, vec!["a", "c"]), (1, vec!["a", "b", "d"])]),
             ),
             BalancerCycle {
-                metrics: Some(polled(&[("a", 74.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)])),
+                metrics: Some(polled(&[
+                    ("a", 74.0),
+                    ("b", 99.0),
+                    ("c", 98.0),
+                    ("d", 97.0),
+                ])),
                 ..BalancerCycle::default()
             },
             idle(),
@@ -647,7 +678,12 @@ fn matching_isolation_balancer_scale_up_then_down() {
                 parts(vec![(0, vec!["a", "d"]), (1, vec!["b", "c"])]),
             ),
             BalancerCycle {
-                metrics: Some(polled(&[("a", 101.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)])),
+                metrics: Some(polled(&[
+                    ("a", 101.0),
+                    ("b", 99.0),
+                    ("c", 98.0),
+                    ("d", 97.0),
+                ])),
                 ..BalancerCycle::default()
             },
             idle(),
@@ -656,11 +692,21 @@ fn matching_isolation_balancer_scale_up_then_down() {
             expect(parts(vec![(0, vec!["a", "d"]), (1, vec!["a", "b", "c"])])),
             BalancerCycle {
                 partitions: Some(parts(vec![(0, vec!["a", "d"]), (1, vec!["a", "b", "c"])])),
-                metrics: Some(polled(&[("a", 199.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)])),
+                metrics: Some(polled(&[
+                    ("a", 199.0),
+                    ("b", 99.0),
+                    ("c", 98.0),
+                    ("d", 97.0),
+                ])),
                 ..BalancerCycle::default()
             },
             BalancerCycle {
-                metrics: Some(polled(&[("a", 74.0), ("b", 99.0), ("c", 98.0), ("d", 97.0)])),
+                metrics: Some(polled(&[
+                    ("a", 74.0),
+                    ("b", 99.0),
+                    ("c", 98.0),
+                    ("d", 97.0),
+                ])),
                 ..BalancerCycle::default()
             },
             idle(),
@@ -767,7 +813,11 @@ fn matching_isolation_balancer_new_partition_increase_partitions_per_group() {
                 parts(vec![(0, vec!["a", "b"]), (1, vec!["a", "b"])]),
             ),
             BalancerCycle {
-                partitions: Some(parts(vec![(0, vec!["a", "b"]), (1, vec!["a", "b"]), (2, vec![])])),
+                partitions: Some(parts(vec![
+                    (0, vec!["a", "b"]),
+                    (1, vec!["a", "b"]),
+                    (2, vec![]),
+                ])),
                 // The adaptive scaler gave us a new partition. Even though these groups do not need
                 // more partitions, every partition must be assigned groups.
                 expected: Some(parts(vec![
@@ -790,10 +840,22 @@ fn matching_isolation_balancer_new_partition_move_groups() {
                 // Even though the others are not polled, they are still active because they are assigned
                 // to a partition and pollers have not been missing long enough to remove them.
                 group_metrics(
-                    &[("a", 99.0), ("b", 1.0), ("c", 2.0), ("d", 3.0), ("e", 4.0), ("f", 5.0), ("g", 6.0), ("h", 7.0)],
+                    &[
+                        ("a", 99.0),
+                        ("b", 1.0),
+                        ("c", 2.0),
+                        ("d", 3.0),
+                        ("e", 4.0),
+                        ("f", 5.0),
+                        ("g", 6.0),
+                        ("h", 7.0),
+                    ],
                     &[("a", true), ("b", true)],
                 ),
-                parts(vec![(0, vec!["a", "b"]), (1, vec!["c", "d", "e", "f", "g", "h"])]),
+                parts(vec![
+                    (0, vec!["a", "b"]),
+                    (1, vec!["c", "d", "e", "f", "g", "h"]),
+                ]),
             ),
             BalancerCycle {
                 partitions: Some(parts(vec![
@@ -819,7 +881,14 @@ fn matching_isolation_balancer_new_partition_move_groups_from_multiple_partition
         vec![
             observe(
                 group_metrics(
-                    &[("a", 99.0), ("b", 1.0), ("c", 2.0), ("d", 3.0), ("e", 4.0), ("f", 5.0)],
+                    &[
+                        ("a", 99.0),
+                        ("b", 1.0),
+                        ("c", 2.0),
+                        ("d", 3.0),
+                        ("e", 4.0),
+                        ("f", 5.0),
+                    ],
                     &[("a", true), ("b", true)],
                 ),
                 parts(vec![(0, vec!["a", "b", "c"]), (1, vec!["d", "e", "f"])]),
@@ -863,7 +932,11 @@ impl Described {
         PartitionMetrics {
             qps: self.qps,
             read_only: !self.write_ids.contains(&id),
-            empty: if empty_check { self.empty } else { self.backlog == 0 },
+            empty: if empty_check {
+                self.empty
+            } else {
+                self.backlog == 0
+            },
         }
     }
 }
@@ -989,7 +1062,14 @@ fn run_scaler_case(case: ScalerCase, describe_trailing: bool) {
     for (index, cycle) in case.cycles.into_iter().enumerate() {
         let current = cycle.current.unwrap_or_else(|| (even(1), even(1)));
         let describes: HashMap<i32, Option<Described>> = cycle.describes.into_iter().collect();
-        let actual = run_scaler_cycle(&mut scaler, &config, now, &current, &describes, describe_trailing);
+        let actual = run_scaler_cycle(
+            &mut scaler,
+            &config,
+            now,
+            &current,
+            &describes,
+            describe_trailing,
+        );
         assert_eq!(actual, cycle.expected, "cycle {index} - update mismatch");
         now += SECOND_NANOS;
     }
@@ -1026,7 +1106,10 @@ fn run_scaler_cycle(
             metrics.total_qps += resp.qps;
             for (group, qps, polled) in &resp.groups {
                 *metrics.qps_by_group.entry(group.clone()).or_insert(0.0) += *qps;
-                *metrics.has_pollers_by_group.entry(group.clone()).or_insert(false) |= *polled;
+                *metrics
+                    .has_pollers_by_group
+                    .entry(group.clone())
+                    .or_insert(false) |= *polled;
             }
             metrics
                 .by_partition
@@ -1047,14 +1130,18 @@ fn run_scaler_cycle(
         });
     }
     let prepared = scaler.tick_prepare(config, now, write, &metrics);
-    let (new_read, changed) = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(super::adjust_read_partitions_async(
-        &metrics,
-        read,
-        &prepared.write,
-        |id| async move {
-            response(id).map(|resp| resp.partition_metrics(id, config.empty_check))
-        },
-    ));
+    let (new_read, changed) =
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(super::adjust_read_partitions_async(
+                &metrics,
+                read,
+                &prepared.write,
+                |id| async move {
+                    response(id).map(|resp| resp.partition_metrics(id, config.empty_check))
+                },
+            ));
     scaler.tick_finish(prepared, read, &metrics, new_read, changed)
 }
 
@@ -1074,7 +1161,11 @@ async fn matching_adaptive_scaler_lifecycle_start_stop_is_idempotent() {
     daemon.start(periodic(runs.clone()));
     tokio::task::yield_now().await;
     assert!(daemon.is_started());
-    assert_eq!(runs.load(Ordering::SeqCst), 1, "second Start must not spawn a loop");
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        1,
+        "second Start must not spawn a loop"
+    );
     daemon.stop();
     daemon.stop();
     assert!(!daemon.is_started());
@@ -1086,12 +1177,18 @@ async fn matching_adaptive_scaler_lifecycle_start_stop_is_idempotent() {
 
 #[test]
 fn matching_adaptive_scaler_no_op() {
-    run_scaler_case(non_isolated(vec![tick(vec![d(0, qps_resp(1, 0.0))], None)]), true);
+    run_scaler_case(
+        non_isolated(vec![tick(vec![d(0, qps_resp(1, 0.0))], None)]),
+        true,
+    );
 }
 
 #[test]
 fn matching_adaptive_scaler_overload_start() {
-    run_scaler_case(non_isolated(vec![tick(vec![d(0, qps_resp(1, 300.0))], None)]), true);
+    run_scaler_case(
+        non_isolated(vec![tick(vec![d(0, qps_resp(1, 300.0))], None)]),
+        true,
+    );
 }
 
 #[test]
@@ -1188,11 +1285,7 @@ fn matching_adaptive_scaler_underload_sustained_then_drain_require_empty() {
         ScalerCase {
             empty_check: true,
             ..non_isolated(vec![
-                tick_with(
-                    (even(3), even(3)),
-                    vec![d(0, qps_resp(3, 0.0))],
-                    None,
-                ),
+                tick_with((even(3), even(3)), vec![d(0, qps_resp(3, 0.0))], None),
                 // Partition 2 is checked but not drained: it has not received the update yet.
                 tick_with(
                     (even(3), even(3)),
@@ -1467,8 +1560,17 @@ fn matching_adaptive_scaler_clamp_malformed_minimum_write_partitions_to_one_on_d
 #[test]
 fn matching_isolation_balancer_ensure_minimum_single_pass_keeps_donor() {
     let sizes: HashMap<String, f64> = [
-        ("g1", 1.0), ("g2", 2.0), ("g3", 3.0), ("g4", 4.0), ("g5", 5.0), ("g6", 7.0),
-        ("h1", 10.0), ("h2", 11.0), ("h3", 12.0), ("h4", 13.0), ("k", 0.5),
+        ("g1", 1.0),
+        ("g2", 2.0),
+        ("g3", 3.0),
+        ("g4", 4.0),
+        ("g5", 5.0),
+        ("g6", 7.0),
+        ("h1", 10.0),
+        ("h2", 11.0),
+        ("h3", 12.0),
+        ("h4", 13.0),
+        ("k", 0.5),
     ]
     .into_iter()
     .map(|(group, size)| (group.to_owned(), size))

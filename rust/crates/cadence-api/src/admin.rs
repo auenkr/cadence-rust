@@ -390,7 +390,11 @@ pub struct DescribeHistoryHostResponse {
     pub number_of_shards: i32,
     #[serde(rename = "shardIds", default, skip_serializing_if = "Vec::is_empty")]
     pub shard_ids: Vec<i32>,
-    #[serde(rename = "domainCache", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "domainCache",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub domain_cache: Option<DomainCacheInfo>,
     #[serde(
         rename = "shardControllerStatus",
@@ -501,11 +505,7 @@ pub struct DescribeQueueResponse {
 pub struct GetWorkflowExecutionRawHistoryV2Request {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
     #[serde(
         rename = "startEventId",
@@ -519,7 +519,11 @@ pub struct GetWorkflowExecutionRawHistoryV2Request {
         skip_serializing_if = "Option::is_none"
     )]
     pub start_event_version: Option<i64>,
-    #[serde(rename = "endEventId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "endEventId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub end_event_id: Option<i64>,
     #[serde(
         rename = "endEventVersion",
@@ -567,11 +571,7 @@ pub struct GetWorkflowExecutionRawHistoryV2Response {
 pub struct AdminDescribeWorkflowExecutionRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
 }
 
@@ -603,11 +603,7 @@ pub struct AdminDescribeWorkflowExecutionResponse {
 pub struct MaintainCorruptWorkflowRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
 }
 
@@ -714,7 +710,11 @@ pub struct GetDomainReplicationMessagesRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplicationMessages {
-    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "replicationTasks",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub replication_tasks: Vec<crate::types::ReplicationTask>,
     #[serde(rename = "lastRetrievedMessageId", default)]
     pub last_retrieved_message_id: i64,
@@ -736,7 +736,11 @@ pub struct CountDLQMessagesRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryDLQCountEntry {
-    #[serde(rename = "sourceCluster", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "sourceCluster",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub source_cluster: String,
     #[serde(rename = "messageCount", default)]
     pub message_count: i64,
@@ -784,7 +788,11 @@ pub struct ReadDLQMessagesRequest {
 pub struct ReadDLQMessagesResponse {
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub dlq_type: Option<crate::enums::DLQType>,
-    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "replicationTasks",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub replication_tasks: Vec<crate::types::ReplicationTask>,
     #[serde(
         rename = "nextPageToken",
@@ -891,7 +899,11 @@ pub struct ResendReplicationTasksRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub start_version: Option<i64>,
-    #[serde(rename = "endEventID", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "endEventID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub end_event_id: Option<i64>,
     #[serde(
         rename = "endVersion",

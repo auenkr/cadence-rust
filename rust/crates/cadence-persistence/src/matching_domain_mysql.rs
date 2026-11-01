@@ -473,7 +473,10 @@ impl MySqlDomainMetadataStore {
         first_message_id: i64,
         last_message_id: i64,
         max_count: usize,
-    ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>, MatchingDomainMetadataError> {
+    ) -> Result<
+        Vec<crate::matching_domain_metadata::DomainReplicationDlqMessage>,
+        MatchingDomainMetadataError,
+    > {
         use mysql_async::prelude::Queryable;
         let deadline = Instant::now() + GO_DOMAIN_PERSISTENCE_TIMEOUT;
         self.pool
@@ -528,7 +531,11 @@ impl MySqlDomainMetadataStore {
                             (GO_DOMAIN_REPLICATION_DLQ_TYPE,),
                         )
                         .await?
-                        .ok_or_else(|| mysql_async::Error::Other(Box::new(std::io::Error::other("queue count returned no row"))))
+                        .ok_or_else(|| {
+                            mysql_async::Error::Other(Box::new(std::io::Error::other(
+                                "queue count returned no row",
+                            )))
+                        })
                 })
             })
             .map_err(query_error)
@@ -580,7 +587,10 @@ impl MySqlDomainMetadataStore {
                             mysql_async::Error::Other(Box::new(std::io::Error::other(error)))
                         })?
                         .unwrap_or_default();
-                    if levels.get(&cluster_name).is_some_and(|old| *old >= message_id) {
+                    if levels
+                        .get(&cluster_name)
+                        .is_some_and(|old| *old >= message_id)
+                    {
                         transaction.commit().await?;
                         return Ok(());
                     }
@@ -714,8 +724,8 @@ impl MySqlDomainMetadataStore {
         page_token: Option<&[u8]>,
     ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
         use crate::domain_audit::{
-            audit_page_next_token, audit_page_window, format_wallclock_datetime,
-            now_unix_nanos, parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
+            audit_page_next_token, audit_page_window, format_wallclock_datetime, now_unix_nanos,
+            parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
         };
         type AuditRow = (
             String,
@@ -772,8 +782,20 @@ impl MySqlDomainMetadataStore {
             })
             .map_err(query_error)?;
         let mut logs = Vec::with_capacity(rows.len());
-        for (event_id, domain_id, sb, sbe, sa, sae, op, created, updated, identity, id_type, comment) in
-            rows
+        for (
+            event_id,
+            domain_id,
+            sb,
+            sbe,
+            sa,
+            sae,
+            op,
+            created,
+            updated,
+            identity,
+            id_type,
+            comment,
+        ) in rows
         {
             logs.push(DomainAuditLog {
                 event_id,
@@ -874,7 +896,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
     }
 
     fn metadata_version(&self) -> Result<i64, String> {
-        self.get_metadata_version().map_err(|error| error.to_string())
+        self.get_metadata_version()
+            .map_err(|error| error.to_string())
     }
 
     fn create_domain(
@@ -910,12 +933,8 @@ impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainM
         last_message_id: i64,
         max_count: usize,
     ) -> Result<Vec<crate::matching_domain_metadata::DomainReplicationQueueMessage>, String> {
-        MySqlDomainMetadataStore::read_domain_replication_messages(
-            self,
-            last_message_id,
-            max_count,
-        )
-        .map_err(|error| error.to_string())
+        MySqlDomainMetadataStore::read_domain_replication_messages(self, last_message_id, max_count)
+            .map_err(|error| error.to_string())
     }
 
     fn read_domain_replication_dlq(

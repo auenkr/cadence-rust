@@ -52,10 +52,7 @@ impl TaskIsolation<'_> {
     /// Preserve Go's leak reason while keeping `select`'s behavior and public
     /// return shape for existing callers.
     pub fn select_with_cause(&self) -> (&str, i64, Option<&'static str>) {
-        if !self.enabled
-            || self.sticky
-            || self.group.is_empty()
-        {
+        if !self.enabled || self.sticky || self.group.is_empty() {
             return ("", 0, None);
         }
         if self.drained.is_err() {
@@ -174,26 +171,57 @@ mod tests {
     }
     #[test]
     fn selection_preserves_go_leak_causes() {
-        let policy = |drained, known, recent_poller, partition_groups, total_duration, task_latency| {
-            TaskIsolation {
-                enabled: true,
-                sticky: false,
-                group: "a",
-                known,
-                drained,
-                recent_poller,
-                partition_groups,
-                total_duration,
-                task_latency,
-            }
-        };
-        assert_eq!(policy(Err(()), true, true, Some(&[]), 0, 0).select_with_cause().2, Some("error"));
-        assert_eq!(policy(Ok(true), true, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_drained"));
-        assert_eq!(policy(Ok(false), false, true, Some(&[]), 0, 0).select_with_cause().2, Some("group_unknown"));
-        assert_eq!(policy(Ok(false), true, false, Some(&[]), 0, 0).select_with_cause().2, Some("no_recent_pollers"));
+        let policy =
+            |drained, known, recent_poller, partition_groups, total_duration, task_latency| {
+                TaskIsolation {
+                    enabled: true,
+                    sticky: false,
+                    group: "a",
+                    known,
+                    drained,
+                    recent_poller,
+                    partition_groups,
+                    total_duration,
+                    task_latency,
+                }
+            };
+        assert_eq!(
+            policy(Err(()), true, true, Some(&[]), 0, 0)
+                .select_with_cause()
+                .2,
+            Some("error")
+        );
+        assert_eq!(
+            policy(Ok(true), true, true, Some(&[]), 0, 0)
+                .select_with_cause()
+                .2,
+            Some("group_drained")
+        );
+        assert_eq!(
+            policy(Ok(false), false, true, Some(&[]), 0, 0)
+                .select_with_cause()
+                .2,
+            Some("group_unknown")
+        );
+        assert_eq!(
+            policy(Ok(false), true, false, Some(&[]), 0, 0)
+                .select_with_cause()
+                .2,
+            Some("no_recent_pollers")
+        );
         let wrong_partition = vec!["b".to_owned()];
-        assert_eq!(policy(Ok(false), true, true, Some(&wrong_partition), 0, 0).select_with_cause().2, Some("partition_change"));
-        assert_eq!(policy(Ok(false), true, true, Some(&[]), 100, 60).select_with_cause().2, Some("expired"));
+        assert_eq!(
+            policy(Ok(false), true, true, Some(&wrong_partition), 0, 0)
+                .select_with_cause()
+                .2,
+            Some("partition_change")
+        );
+        assert_eq!(
+            policy(Ok(false), true, true, Some(&[]), 100, 60)
+                .select_with_cause()
+                .2,
+            Some("expired")
+        );
     }
 
     /// Go TestGetIsolationGroupForTask: all 16 table cases, mapped onto the
@@ -232,21 +260,107 @@ mod tests {
             expected: ("", 0),
         };
         let cases = [
-            Case { name: "success - recent poller allows group", pollers: &["a"], expected: ("a", 0), ..base },
-            Case { name: "success - with isolation duration", group: "b", duration: SEC, pollers: &["b"], expected: ("b", SEC), ..base },
-            Case { name: "success - low task latency", duration: SEC, latency: 300 * MS, pollers: &["a"], expected: ("a", SEC - 300 * MS), ..base },
-            Case { name: "success - other group drained", pollers: &["a"], drained: &["b"], expected: ("a", 0), ..base },
-            Case { name: "success - right partition", pollers: &["a"], partition: Some(&["a", "b", "c", "d"]), expected: ("a", 0), ..base },
-            Case { name: "leak - no recent pollers", expected: ("", 0), ..base },
-            Case { name: "leak - no matching recent poller", duration: SEC, pollers: &["b"], ..base },
-            Case { name: "leak - unknown group", duration: SEC, available: &["b"], ..base },
-            Case { name: "leak - unknown group even with recent poller", duration: SEC, available: &["b"], pollers: &["a"], ..base },
-            Case { name: "leak - task latency", duration: SEC, latency: SEC, pollers: &["a"], ..base },
-            Case { name: "leak - task latency close to taskIsolationDuration", duration: SEC, latency: SEC - MINIMUM_ISOLATION_NANOS, pollers: &["a"], ..base },
-            Case { name: "leak - group drained", duration: SEC, pollers: &["a"], drained: &["a"], ..base },
-            Case { name: "leak - state error", duration: SEC, pollers: &["a"], state_error: true, ..base },
-            Case { name: "leak - task isolation disabled", duration: SEC, pollers: &["a"], disabled: true, ..base },
-            Case { name: "leak - wrong partition", pollers: &["a"], partition: Some(&["b", "c", "d"]), ..base },
+            Case {
+                name: "success - recent poller allows group",
+                pollers: &["a"],
+                expected: ("a", 0),
+                ..base
+            },
+            Case {
+                name: "success - with isolation duration",
+                group: "b",
+                duration: SEC,
+                pollers: &["b"],
+                expected: ("b", SEC),
+                ..base
+            },
+            Case {
+                name: "success - low task latency",
+                duration: SEC,
+                latency: 300 * MS,
+                pollers: &["a"],
+                expected: ("a", SEC - 300 * MS),
+                ..base
+            },
+            Case {
+                name: "success - other group drained",
+                pollers: &["a"],
+                drained: &["b"],
+                expected: ("a", 0),
+                ..base
+            },
+            Case {
+                name: "success - right partition",
+                pollers: &["a"],
+                partition: Some(&["a", "b", "c", "d"]),
+                expected: ("a", 0),
+                ..base
+            },
+            Case {
+                name: "leak - no recent pollers",
+                expected: ("", 0),
+                ..base
+            },
+            Case {
+                name: "leak - no matching recent poller",
+                duration: SEC,
+                pollers: &["b"],
+                ..base
+            },
+            Case {
+                name: "leak - unknown group",
+                duration: SEC,
+                available: &["b"],
+                ..base
+            },
+            Case {
+                name: "leak - unknown group even with recent poller",
+                duration: SEC,
+                available: &["b"],
+                pollers: &["a"],
+                ..base
+            },
+            Case {
+                name: "leak - task latency",
+                duration: SEC,
+                latency: SEC,
+                pollers: &["a"],
+                ..base
+            },
+            Case {
+                name: "leak - task latency close to taskIsolationDuration",
+                duration: SEC,
+                latency: SEC - MINIMUM_ISOLATION_NANOS,
+                pollers: &["a"],
+                ..base
+            },
+            Case {
+                name: "leak - group drained",
+                duration: SEC,
+                pollers: &["a"],
+                drained: &["a"],
+                ..base
+            },
+            Case {
+                name: "leak - state error",
+                duration: SEC,
+                pollers: &["a"],
+                state_error: true,
+                ..base
+            },
+            Case {
+                name: "leak - task isolation disabled",
+                duration: SEC,
+                pollers: &["a"],
+                disabled: true,
+                ..base
+            },
+            Case {
+                name: "leak - wrong partition",
+                pollers: &["a"],
+                partition: Some(&["b", "c", "d"]),
+                ..base
+            },
         ];
         for case in cases {
             let partition: Option<Vec<String>> = case

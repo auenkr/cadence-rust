@@ -385,10 +385,7 @@ impl PostgresTaskStore {
             &key.name,
             &task_type,
         ];
-        match client.query_opt(
-            SELECT_TASK_LIST,
-            params,
-        ) {
+        match client.query_opt(SELECT_TASK_LIST, params) {
             Ok(row) => row
                 .map(|row| {
                     // Columns: domain_id, range_id, name, task_type, data, data_encoding.
@@ -437,10 +434,7 @@ impl PostgresTaskStore {
             &task_type,
         ];
         let actual: Option<i64> = transaction
-            .query_opt(
-                LOCK_TASK_LIST,
-                params,
-            )
+            .query_opt(LOCK_TASK_LIST, params)
             .map_err(normalize_postgres_error)?
             .map(|row| row.get(0));
         let Some(actual) = actual else {
@@ -520,15 +514,10 @@ impl MatchingTaskStore for PostgresTaskStore {
                     &bytes,
                     &encoding,
                 ];
-                client
-                    .execute(
-                        INSERT_TASK_LIST,
-                        params,
-                    )
-                    .map_err(|error| {
-                        client.poison_if_closed(&error);
-                        normalize_postgres_error(error)
-                    })?;
+                client.execute(INSERT_TASK_LIST, params).map_err(|error| {
+                    client.poison_if_closed(&error);
+                    normalize_postgres_error(error)
+                })?;
                 TaskListRecord { range_id: 0, data }
             }
         };
@@ -550,10 +539,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
         ];
         let affected = transaction
-            .execute(
-                UPDATE_TASK_LIST,
-                params,
-            )
+            .execute(UPDATE_TASK_LIST, params)
             .map_err(normalize_postgres_error)?;
         if affected != 1 {
             return Err(StorageError::Backend {
@@ -595,10 +581,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
         ];
         let affected = transaction
-            .execute(
-                UPDATE_TASK_LIST,
-                params,
-            )
+            .execute(UPDATE_TASK_LIST, params)
             .map_err(normalize_postgres_error)?;
         if affected != 1 {
             return Err(StorageError::Backend {
@@ -621,9 +604,13 @@ impl MatchingTaskStore for PostgresTaskStore {
         let mut transaction = client.transaction().map_err(normalize_postgres_error)?;
         let write_encoding = self.write_encoding()?;
         for (domain, task) in tasks {
-            let mut data = task.data.for_sql().map_err(StorageError::MalformedSqlMatchingRunId)?;
+            let mut data = task
+                .data
+                .for_sql()
+                .map_err(StorageError::MalformedSqlMatchingRunId)?;
             data.created_nanos = now_nanos;
-            let bytes = write_encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
+            let bytes = write_encoding
+                .encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             let encoding = write_encoding.as_str();
             let params: &[&(dyn ToSql + Sync)] = &[
                 &domain.as_bytes().as_slice(),
@@ -634,10 +621,7 @@ impl MatchingTaskStore for PostgresTaskStore {
                 &encoding,
             ];
             transaction
-                .execute(
-                    INSERT_TASK,
-                    params,
-                )
+                .execute(INSERT_TASK, params)
                 .map_err(normalize_postgres_error)?;
         }
         self.lock_and_check(&mut transaction, key, range)?;
@@ -661,15 +645,10 @@ impl MatchingTaskStore for PostgresTaskStore {
             &max_read_level,
             &batch_size,
         ];
-        let rows = client
-            .query(
-                SELECT_TASKS,
-                params,
-            )
-            .map_err(|error| {
-                client.poison_if_closed(&error);
-                normalize_postgres_error(error)
-            })?;
+        let rows = client.query(SELECT_TASKS, params).map_err(|error| {
+            client.poison_if_closed(&error);
+            normalize_postgres_error(error)
+        })?;
         rows.into_iter()
             .map(|row| {
                 let task_id: i64 = row.try_get(0).map_err(normalize_postgres_error)?;
@@ -694,10 +673,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &ack_level,
         ];
         client
-            .query_one(
-                COUNT_TASKS,
-                params,
-            )
+            .query_one(COUNT_TASKS, params)
             .and_then(|row| row.try_get(0))
             .map_err(|error| {
                 client.poison_if_closed(&error);
@@ -715,10 +691,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_id,
         ];
         client
-            .execute(
-                DELETE_TASK,
-                params,
-            )
+            .execute(DELETE_TASK, params)
             .map(|_| ())
             .map_err(|error| {
                 client.poison_if_closed(&error);
@@ -745,10 +718,7 @@ impl MatchingTaskStore for PostgresTaskStore {
             &limit,
         ];
         let affected = client
-            .execute(
-                RANGE_DELETE_TASKS,
-                params,
-            )
+            .execute(RANGE_DELETE_TASKS, params)
             .map_err(|error| {
                 client.poison_if_closed(&error);
                 normalize_postgres_error(error)
@@ -770,15 +740,10 @@ impl MatchingTaskStore for PostgresTaskStore {
             &task_type,
             &range,
         ];
-        let affected = client
-            .execute(
-                DELETE_TASK_LIST,
-                params,
-            )
-            .map_err(|error| {
-                client.poison_if_closed(&error);
-                normalize_postgres_error(error)
-            })?;
+        let affected = client.execute(DELETE_TASK_LIST, params).map_err(|error| {
+            client.poison_if_closed(&error);
+            normalize_postgres_error(error)
+        })?;
         if affected != 1 {
             return Err(StorageError::DeleteCount(affected as usize));
         }
@@ -791,7 +756,9 @@ mod native;
 
 impl std::fmt::Debug for PostgresTaskStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("PostgresTaskStore").finish_non_exhaustive()
+        formatter
+            .debug_struct("PostgresTaskStore")
+            .finish_non_exhaustive()
     }
 }
 
@@ -804,12 +771,9 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         size: i32,
         bucket_size: i32,
     ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
-        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
-            domain,
-            name,
-            size,
-            bucket_size,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .create_semaphore(domain, name, size, bucket_size)
+            .await
     }
 
     async fn get_semaphore_metadata(
@@ -842,9 +806,9 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         bucket: i32,
         token_id: i32,
     ) -> std::result::Result<String, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
-            domain_id, name, bucket, token_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
+            .await
     }
 
     async fn grant_semaphore_token(
@@ -855,12 +819,11 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
         token_id: i32,
         owner_id: &str,
     ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
-            domain_id, name, bucket, token_id, owner_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
     }
 }
-
 
 fn postgres_options(
     shard: &PostgresShardConfig,
@@ -1468,8 +1431,10 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
         min_node: i64,
         max_node: i64,
         limit: i64,
-    ) -> std::result::Result<Vec<crate::history_reader::HistoryNodeRow>, crate::history_reader::HistoryReadError>
-    {
+    ) -> std::result::Result<
+        Vec<crate::history_reader::HistoryNodeRow>,
+        crate::history_reader::HistoryReadError,
+    > {
         use crate::history_reader::{HistoryNodeRow, HistoryReadError};
         let index = database_index(shard_id.max(0) as usize, self.use_multiple_databases);
         let mut client = self.pools[index]
@@ -1477,7 +1442,8 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
             .map_err(|e| HistoryReadError::Internal(format!("{e:?}")))?;
         let tree = tree_id.as_slice();
         let branch = branch_id.as_slice();
-        let params: &[&(dyn ToSql + Sync)] = &[&shard_id, &tree, &branch, &min_node, &max_node, &limit];
+        let params: &[&(dyn ToSql + Sync)] =
+            &[&shard_id, &tree, &branch, &min_node, &max_node, &limit];
         let rows = client
             .query(
                 "SELECT node_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 AND node_id >= $4 AND node_id < $5 ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT $6",
@@ -1533,7 +1499,10 @@ impl crate::visibility_reader::VisibilityStore for PostgresTaskStore {
             run_id,
             crate::visibility_reader::SqlDialect::Postgres,
         );
-        Ok(self.visibility_query(&sql, &params, true)?.into_iter().next())
+        Ok(self
+            .visibility_query(&sql, &params, true)?
+            .into_iter()
+            .next())
     }
 }
 
@@ -1579,7 +1548,10 @@ impl PostgresTaskStore {
                         .map_err(err)?
                         .unwrap_or_default(),
                     encoding: row.try_get(6).map_err(err)?,
-                    is_cron: row.try_get::<_, Option<bool>>(7).map_err(err)?.unwrap_or(false),
+                    is_cron: row
+                        .try_get::<_, Option<bool>>(7)
+                        .map_err(err)?
+                        .unwrap_or(false),
                     update_time_us: row.try_get::<_, Option<i64>>(8).map_err(err)?.unwrap_or(0),
                     shard_id: row.try_get::<_, Option<i32>>(9).map_err(err)?.unwrap_or(0),
                     ..Default::default()

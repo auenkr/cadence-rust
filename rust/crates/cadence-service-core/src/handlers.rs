@@ -118,11 +118,9 @@ pub struct AppState {
     pub domain_metadata_persistence:
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     /// History-node reader for Frontend history reads (SQL stores).
-    pub history_node_store:
-        Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
+    pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
     /// `executions_visibility` reader for Frontend list operations (SQL stores).
-    pub visibility_store:
-        Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
+    pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub executions: InMemoryExecutionStore,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported

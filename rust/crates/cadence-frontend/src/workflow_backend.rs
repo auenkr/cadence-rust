@@ -15,8 +15,8 @@ use std::time::Duration;
 use cadence_api::errors::{
     AccessDeniedError, BadRequestError, CadenceError, CancellationAlreadyRequestedError,
     ClientVersionNotSupportedError, DomainNotActiveError, EntityNotExistsError,
-    InternalServiceError, LimitExceededError, QueryFailedError, RetryTaskV2Error,
-    ServiceBusyError, ShardOwnershipLostError, WorkflowExecutionAlreadyCompletedError,
+    InternalServiceError, LimitExceededError, QueryFailedError, RetryTaskV2Error, ServiceBusyError,
+    ShardOwnershipLostError, WorkflowExecutionAlreadyCompletedError,
     WorkflowExecutionAlreadyStartedError,
 };
 use cadence_api::{service_types as st, tasks as tk, types as ty};
@@ -39,7 +39,8 @@ pub struct ProductionBackend {
     matching_addr: String,
     pub(crate) history_access: Option<crate::workflow_matching::HistoryAccess>,
     pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
-    pub(crate) visibility: Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
+    pub(crate) visibility:
+        Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -51,7 +52,8 @@ impl std::fmt::Debug for ProductionBackend {
     }
 }
 
-type BackendFuture<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, CadenceError>> + Send + 'a>>;
+type BackendFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<serde_json::Value, CadenceError>> + Send + 'a>>;
 
 pub(crate) fn bad_request(message: impl Into<String>) -> CadenceError {
     CadenceError::BadRequest(BadRequestError::new(message))
@@ -69,8 +71,14 @@ pub(crate) fn domain_uuid(envelope: &serde_json::Value, key: &str) -> Result<Val
     Ok(Value::Bytes(id.as_bytes().to_vec()))
 }
 
-pub(crate) fn typed<T: DeserializeOwned>(envelope: &serde_json::Value, key: &str) -> Result<T, CadenceError> {
-    let inner = envelope.get(key).cloned().unwrap_or(serde_json::Value::Null);
+pub(crate) fn typed<T: DeserializeOwned>(
+    envelope: &serde_json::Value,
+    key: &str,
+) -> Result<T, CadenceError> {
+    let inner = envelope
+        .get(key)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     serde_json::from_value(inner).map_err(|e| bad_request(format!("invalid {key}: {e}")))
 }
 
@@ -104,12 +112,12 @@ fn exception_to_error(name: &str, exception: &Struct, details: &str) -> CadenceE
         "WorkflowExecutionAlreadyStartedError" => {
             match WorkflowExecutionAlreadyStartedError::from_thrift(exception) {
                 Ok(e) => CadenceError::WorkflowAlreadyStarted(e),
-                Err(_) => CadenceError::WorkflowAlreadyStarted(
-                    WorkflowExecutionAlreadyStartedError {
+                Err(_) => {
+                    CadenceError::WorkflowAlreadyStarted(WorkflowExecutionAlreadyStartedError {
                         message,
                         ..Default::default()
-                    },
-                ),
+                    })
+                }
             }
         }
         "DomainNotActiveError" => match DomainNotActiveError::from_thrift(exception) {
@@ -129,21 +137,23 @@ fn exception_to_error(name: &str, exception: &Struct, details: &str) -> CadenceE
             CancellationAlreadyRequestedError::new(message),
         ),
         "AccessDeniedError" => CadenceError::AccessDenied(AccessDeniedError::new(message)),
-        "ClientVersionNotSupportedError" => match ClientVersionNotSupportedError::from_thrift(exception) {
-            Ok(e) => CadenceError::ClientVersionNotSupported(e),
-            Err(_) => CadenceError::ClientVersionNotSupported(Default::default()),
-        },
+        "ClientVersionNotSupportedError" => {
+            match ClientVersionNotSupportedError::from_thrift(exception) {
+                Ok(e) => CadenceError::ClientVersionNotSupported(e),
+                Err(_) => CadenceError::ClientVersionNotSupported(Default::default()),
+            }
+        }
         "RetryTaskV2Error" => match RetryTaskV2Error::from_thrift(exception) {
             Ok(e) => CadenceError::RetryTaskV2(e),
             Err(_) => internal(message),
         },
         // History reports these with the message in field 10.
-        "ShardOwnershipLostError" => CadenceError::ShardOwnershipLost(ShardOwnershipLostError::new(
-            match exception.get(10) {
+        "ShardOwnershipLostError" => CadenceError::ShardOwnershipLost(
+            ShardOwnershipLostError::new(match exception.get(10) {
                 Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
                 _ => message,
-            },
-        )),
+            }),
+        ),
         _ => internal(message),
     }
 }
@@ -182,9 +192,19 @@ impl ProductionBackend {
 
     /// One History call: `envelope` is the single IDL argument. Returns the
     /// success struct (empty for `void` methods).
-    pub(crate) async fn history(&self, method: &str, envelope: Struct) -> Result<Struct, CadenceError> {
-        self.call(&self.history_addr, HISTORY_SERVICE, "HistoryService", method, envelope)
-            .await
+    pub(crate) async fn history(
+        &self,
+        method: &str,
+        envelope: Struct,
+    ) -> Result<Struct, CadenceError> {
+        self.call(
+            &self.history_addr,
+            HISTORY_SERVICE,
+            "HistoryService",
+            method,
+            envelope,
+        )
+        .await
     }
 
     async fn call(
@@ -195,8 +215,15 @@ impl ProductionBackend {
         method: &str,
         envelope: Struct,
     ) -> Result<Struct, CadenceError> {
-        self.call_with_timeout(addr, service, thrift_service, method, envelope, HISTORY_TIMEOUT)
-            .await
+        self.call_with_timeout(
+            addr,
+            service,
+            thrift_service,
+            method,
+            envelope,
+            HISTORY_TIMEOUT,
+        )
+        .await
     }
 
     pub(crate) async fn call_with_timeout(
@@ -225,7 +252,9 @@ impl ProductionBackend {
         )
         .await
         .map_err(|error| match error {
-            JsonCallError::Application(message) => internal(format!("{service} {method}: {message}")),
+            JsonCallError::Application(message) => {
+                internal(format!("{service} {method}: {message}"))
+            }
             JsonCallError::Transport(error) => {
                 if error.to_string().contains("deadline exceeded") {
                     internal(format!("context deadline exceeded: {error}"))
@@ -261,7 +290,11 @@ impl ProductionBackend {
         })
     }
 
-    async fn history_void(&self, method: &str, envelope: Struct) -> Result<serde_json::Value, CadenceError> {
+    async fn history_void(
+        &self,
+        method: &str,
+        envelope: Struct,
+    ) -> Result<serde_json::Value, CadenceError> {
         self.history(method, envelope).await?;
         Ok(serde_json::json!({}))
     }
@@ -272,7 +305,8 @@ impl ProductionBackend {
         envelope: Struct,
     ) -> Result<serde_json::Value, CadenceError> {
         let reply = self.history(method, envelope).await?;
-        let response = R::from_thrift(&reply).map_err(|e| internal(format!("invalid {method} response: {e}")))?;
+        let response = R::from_thrift(&reply)
+            .map_err(|e| internal(format!("invalid {method} response: {e}")))?;
         to_json(&response)
     }
 
@@ -284,7 +318,10 @@ impl ProductionBackend {
         use WorkflowOperation as Op;
         // Envelope field 10 is `domainUUID`; field 20 is the public request.
         let env = |inner: Struct, extras: Vec<(i16, Value)>| -> Result<Struct, CadenceError> {
-            let mut fields = vec![(10, domain_uuid(&request, "domainUUID")?), (20, Value::Struct(inner))];
+            let mut fields = vec![
+                (10, domain_uuid(&request, "domainUUID")?),
+                (20, Value::Struct(inner)),
+            ];
             fields.extend(extras);
             Ok(Struct { fields })
         };
@@ -293,8 +330,11 @@ impl ProductionBackend {
                 let start: ty::StartWorkflowExecutionRequest = typed(&request, "startRequest")?;
                 let extras = start_extras(&start)?;
                 let envelope = env(start.to_thrift(), extras)?;
-                self.history_typed::<ty::StartWorkflowExecutionResponse>("StartWorkflowExecution", envelope)
-                    .await
+                self.history_typed::<ty::StartWorkflowExecutionResponse>(
+                    "StartWorkflowExecution",
+                    envelope,
+                )
+                .await
             }
             Op::SignalWithStartWorkflowExecution => {
                 let inner: st::SignalWithStartWorkflowExecutionRequest =
@@ -312,14 +352,22 @@ impl ProductionBackend {
                     .await
             }
             Op::TerminateWorkflowExecution => {
-                let inner: ty::TerminateWorkflowExecutionRequest = typed(&request, "terminateRequest")?;
-                self.history_void("TerminateWorkflowExecution", env(inner.to_thrift(), vec![])?)
-                    .await
+                let inner: ty::TerminateWorkflowExecutionRequest =
+                    typed(&request, "terminateRequest")?;
+                self.history_void(
+                    "TerminateWorkflowExecution",
+                    env(inner.to_thrift(), vec![])?,
+                )
+                .await
             }
             Op::RequestCancelWorkflowExecution => {
-                let inner: st::RequestCancelWorkflowExecutionRequest = typed(&request, "cancelRequest")?;
-                self.history_void("RequestCancelWorkflowExecution", env(inner.to_thrift(), vec![])?)
-                    .await
+                let inner: st::RequestCancelWorkflowExecutionRequest =
+                    typed(&request, "cancelRequest")?;
+                self.history_void(
+                    "RequestCancelWorkflowExecution",
+                    env(inner.to_thrift(), vec![])?,
+                )
+                .await
             }
             Op::ResetWorkflowExecution => {
                 let inner: ty::ResetWorkflowExecutionRequest = typed(&request, "resetRequest")?;
@@ -339,12 +387,15 @@ impl ProductionBackend {
             }
             Op::QueryWorkflow => {
                 let inner: tk::QueryWorkflowRequest = typed(&request, "request")?;
-                let reply = self.history("QueryWorkflow", env(inner.to_thrift(), vec![])?).await?;
+                let reply = self
+                    .history("QueryWorkflow", env(inner.to_thrift(), vec![])?)
+                    .await?;
                 // History's QueryWorkflowResponse wraps the public one at field 10.
                 match reply.get(10) {
                     Some(Value::Struct(s)) => {
-                        let response = tk::QueryWorkflowResponse::from_thrift(s)
-                            .map_err(|e| internal(format!("invalid QueryWorkflow response: {e}")))?;
+                        let response = tk::QueryWorkflowResponse::from_thrift(s).map_err(|e| {
+                            internal(format!("invalid QueryWorkflow response: {e}"))
+                        })?;
                         to_json(&response)
                     }
                     _ => Ok(serde_json::json!({})),
@@ -365,7 +416,8 @@ impl ProductionBackend {
                     .await
             }
             Op::RecordActivityTaskHeartbeat | Op::RecordActivityTaskHeartbeatByID => {
-                let inner: tk::RecordActivityTaskHeartbeatRequest = typed(&request, "heartbeatRequest")?;
+                let inner: tk::RecordActivityTaskHeartbeatRequest =
+                    typed(&request, "heartbeatRequest")?;
                 self.history_typed::<tk::RecordActivityTaskHeartbeatResponse>(
                     "RecordActivityTaskHeartbeat",
                     env(inner.to_thrift(), vec![])?,
@@ -373,9 +425,13 @@ impl ProductionBackend {
                 .await
             }
             Op::RespondActivityTaskCompleted | Op::RespondActivityTaskCompletedByID => {
-                let inner: tk::RespondActivityTaskCompletedRequest = typed(&request, "completeRequest")?;
-                self.history_void("RespondActivityTaskCompleted", env(inner.to_thrift(), vec![])?)
-                    .await
+                let inner: tk::RespondActivityTaskCompletedRequest =
+                    typed(&request, "completeRequest")?;
+                self.history_void(
+                    "RespondActivityTaskCompleted",
+                    env(inner.to_thrift(), vec![])?,
+                )
+                .await
             }
             Op::RespondActivityTaskFailed | Op::RespondActivityTaskFailedByID => {
                 let inner: tk::RespondActivityTaskFailedRequest = typed(&request, "failedRequest")?;
@@ -383,9 +439,13 @@ impl ProductionBackend {
                     .await
             }
             Op::RespondActivityTaskCanceled | Op::RespondActivityTaskCanceledByID => {
-                let inner: tk::RespondActivityTaskCanceledRequest = typed(&request, "cancelRequest")?;
-                self.history_void("RespondActivityTaskCanceled", env(inner.to_thrift(), vec![])?)
-                    .await
+                let inner: tk::RespondActivityTaskCanceledRequest =
+                    typed(&request, "cancelRequest")?;
+                self.history_void(
+                    "RespondActivityTaskCanceled",
+                    env(inner.to_thrift(), vec![])?,
+                )
+                .await
             }
             Op::RespondDecisionTaskFailed => {
                 let inner: tk::RespondDecisionTaskFailedRequest = typed(&request, "failedRequest")?;
@@ -402,9 +462,9 @@ impl ProductionBackend {
             Op::GetWorkflowExecutionHistory => self.get_workflow_execution_history(request).await,
             Op::ListOpenWorkflowExecutions => self.list_visibility(&request, false).await,
             Op::ListClosedWorkflowExecutions => self.list_visibility(&request, true).await,
-            Op::ListWorkflowExecutions | Op::ScanWorkflowExecutions | Op::CountWorkflowExecutions => {
-                Err(crate::workflow_visibility::not_supported())
-            }
+            Op::ListWorkflowExecutions
+            | Op::ScanWorkflowExecutions
+            | Op::CountWorkflowExecutions => Err(crate::workflow_visibility::not_supported()),
             other => Err(crate::handler_workflow::unimplemented_operation(other.name()).into()),
         }
     }
@@ -412,7 +472,9 @@ impl ProductionBackend {
 
 /// Go `common.CreateHistoryStartWorkflowRequest`: first-decision backoff and
 /// the retry expiration timestamp (History fields 60 and 50).
-fn start_extras(start: &ty::StartWorkflowExecutionRequest) -> Result<Vec<(i16, Value)>, CadenceError> {
+fn start_extras(
+    start: &ty::StartWorkflowExecutionRequest,
+) -> Result<Vec<(i16, Value)>, CadenceError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| internal(e.to_string()))?;
@@ -424,9 +486,12 @@ fn start_extras(start: &ty::StartWorkflowExecutionRequest) -> Result<Vec<(i16, V
     if first_run_at > now_nanos {
         backoff = ((first_run_at - now_nanos) / 1_000_000_000) as i32;
     } else if !start.cron_schedule.is_empty() {
-        let delayed = chrono::DateTime::from_timestamp(now.as_secs() as i64 + i64::from(delay), now.subsec_nanos())
-            .ok_or_else(|| internal("invalid time"))?
-            .naive_utc();
+        let delayed = chrono::DateTime::from_timestamp(
+            now.as_secs() as i64 + i64::from(delay),
+            now.subsec_nanos(),
+        )
+        .ok_or_else(|| internal("invalid time"))?
+        .naive_utc();
         backoff = cadence_common::cron::get_backoff_for_next_schedule_in_seconds(
             &start.cron_schedule,
             delayed,
@@ -454,7 +519,11 @@ fn start_extras(start: &ty::StartWorkflowExecutionRequest) -> Result<Vec<(i16, V
 }
 
 impl WorkflowBackend for ProductionBackend {
-    fn invoke<'a>(&'a self, operation: WorkflowOperation, request: serde_json::Value) -> BackendFuture<'a> {
+    fn invoke<'a>(
+        &'a self,
+        operation: WorkflowOperation,
+        request: serde_json::Value,
+    ) -> BackendFuture<'a> {
         Box::pin(self.dispatch(operation, request))
     }
 }
@@ -516,7 +585,10 @@ fn service_addr(
                 .filter(|ip| !ip.is_empty() && *ip != "0.0.0.0")
         })
         .unwrap_or("127.0.0.1");
-    let port = rpc.map(|r| r.port).filter(|p| *p != 0).unwrap_or(default_port);
+    let port = rpc
+        .map(|r| r.port)
+        .filter(|p| *p != 0)
+        .unwrap_or(default_port);
     format!("{host}:{port}")
 }
 
@@ -524,12 +596,24 @@ fn service_addr(
 pub fn build_workflow_api(
     ctx: cadence_matching::launcher::FrontendHookContext,
 ) -> anyhow::Result<cadence_service_core::workflow_api::SharedWorkflowApi> {
-    let history = service_addr(&ctx.config, "history", "CADENCE_HISTORY_TCHANNEL_ADDR", 7934);
-    let matching = service_addr(&ctx.config, "matching", "CADENCE_MATCHING_TCHANNEL_ADDR", 7935);
+    let history = service_addr(
+        &ctx.config,
+        "history",
+        "CADENCE_HISTORY_TCHANNEL_ADDR",
+        7934,
+    );
+    let matching = service_addr(
+        &ctx.config,
+        "matching",
+        "CADENCE_MATCHING_TCHANNEL_ADDR",
+        7935,
+    );
     let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
-        std::sync::Arc::new(crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
-            ctx.state.domain_manager.clone(),
-        ));
+        std::sync::Arc::new(
+            crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
+                ctx.state.domain_manager.clone(),
+            ),
+        );
     let mut backend = ProductionBackend::new(history, matching).with_domains(lookup.clone());
     if let Some(store) = ctx.state.history_node_store.clone() {
         backend = backend.with_history_access(crate::workflow_matching::HistoryAccess::new(

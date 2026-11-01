@@ -174,7 +174,9 @@ fn list(s: &Struct, id: i16) -> Option<&Vec<Value>> {
 }
 
 fn data_blob(s: &Struct, id: i16) -> Option<DataBlob> {
-    let Some(Value::Struct(b)) = s.get(id) else { return None };
+    let Some(Value::Struct(b)) = s.get(id) else {
+        return None;
+    };
     let encoding_type = match b.get(10) {
         Some(Value::I32(0)) => Some(EncodingType::ThriftRW),
         Some(Value::I32(1)) => Some(EncodingType::JSON),
@@ -184,7 +186,10 @@ fn data_blob(s: &Struct, id: i16) -> Option<DataBlob> {
         Some(Value::Bytes(d)) => d.clone(),
         _ => Vec::new(),
     };
-    Some(DataBlob { encoding_type, data })
+    Some(DataBlob {
+        encoding_type,
+        data,
+    })
 }
 
 fn blob_from_thrift(blob: &Struct, version: i64) -> Snapshot {
@@ -314,7 +319,11 @@ mod tests {
     }
 
     fn row(version: i64, data: Vec<u8>, encoding: &str) -> ConfigStoreRow {
-        ConfigStoreRow { version, data, encoding: encoding.into() }
+        ConfigStoreRow {
+            version,
+            data,
+            encoding: encoding.into(),
+        }
     }
 
     #[test]
@@ -339,7 +348,14 @@ mod tests {
     #[test]
     fn empty_data_is_empty_blob_and_unknown_encoding_errors() {
         let snap = decode_snapshot(&row(3, vec![], "thriftrw")).unwrap();
-        assert_eq!(snap, Snapshot { version: 3, schema_version: 0, entries: None });
+        assert_eq!(
+            snap,
+            Snapshot {
+                version: 3,
+                schema_version: 0,
+                entries: None
+            }
+        );
         assert!(decode_snapshot(&row(3, vec![1], "bogus")).is_err());
     }
 
@@ -404,18 +420,28 @@ mod tests {
         assert!(err.ends_with("Missing binary encoding version."), "{err}");
     }
 
-
     fn client_config(timeout: Duration) -> ClientConfig {
-        ClientConfig { fetch_timeout: timeout, ..ClientConfig::go_defaults() }
+        ClientConfig {
+            fetch_timeout: timeout,
+            ..ClientConfig::go_defaults()
+        }
     }
 
     #[test]
     fn update_replaces_snapshot_and_keeps_it_on_failure_or_missing_row() {
         let rows = Arc::new(Mutex::new(vec![
-            Ok(Some(row(1, encode_blob(&[("a", &[("1", None)])]), "thriftrw"))),
+            Ok(Some(row(
+                1,
+                encode_blob(&[("a", &[("1", None)])]),
+                "thriftrw",
+            ))),
             Ok(None),
             Err("boom".to_string()),
-            Ok(Some(row(2, encode_blob(&[("b", &[("1", None)])]), "thriftrw"))),
+            Ok(Some(row(
+                2,
+                encode_blob(&[("b", &[("1", None)])]),
+                "thriftrw",
+            ))),
         ]));
         let source = rows.clone();
         let fetch: ConfigRowFetcher = Arc::new(move |_| source.lock().unwrap().remove(0));
@@ -424,7 +450,10 @@ mod tests {
         client.update().unwrap(); // not found keeps the cache
         assert_eq!(client.snapshot().unwrap().version, 1);
         let err = client.update().unwrap_err();
-        assert!(err.starts_with("failed to fetch dynamic config snapshot"), "{err}");
+        assert!(
+            err.starts_with("failed to fetch dynamic config snapshot"),
+            "{err}"
+        );
         assert_eq!(client.snapshot().unwrap().version, 1);
         client.update().unwrap();
         let snap = client.snapshot().unwrap();
@@ -444,7 +473,9 @@ mod tests {
     #[test]
     fn go_default_two_nanosecond_fetch_timeout_always_times_out() {
         let fetch: ConfigRowFetcher = Arc::new(|_| Ok(None));
-        let err = ConfigStoreClient::new(&ClientConfig::go_defaults(), fetch).err().unwrap();
+        let err = ConfigStoreClient::new(&ClientConfig::go_defaults(), fetch)
+            .err()
+            .unwrap();
         assert_eq!(err, "timeout error on fetch");
     }
 

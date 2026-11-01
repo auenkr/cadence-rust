@@ -151,7 +151,9 @@ impl RawHistoryToken {
             .map_err(|_| cadence_api::errors::BadRequestError::new("Invalid pagination token."))
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> std::result::Result<Self, cadence_api::errors::BadRequestError> {
+    pub fn from_bytes(
+        bytes: &[u8],
+    ) -> std::result::Result<Self, cadence_api::errors::BadRequestError> {
         serde_json::from_slice(bytes)
             .map_err(|_| cadence_api::errors::BadRequestError::new("Invalid pagination token."))
     }
@@ -191,14 +193,20 @@ mod tests {
                 ..Default::default()
             };
             assert!(validate_request(&request).is_ok(), "{run_id}");
-            assert_eq!(canonical_run_id(run_id), "123e4567-e89b-12d3-a456-426614174000");
+            assert_eq!(
+                canonical_run_id(run_id),
+                "123e4567-e89b-12d3-a456-426614174000"
+            );
         }
         let invalid = Request {
             execution: Some(WorkflowExecution::new("workflow", "not-a-uuid")),
             maximum_page_size: 1,
             ..Default::default()
         };
-        assert_eq!(validate_request(&invalid).unwrap_err().message, "Invalid RunID.");
+        assert_eq!(
+            validate_request(&invalid).unwrap_err().message,
+            "Invalid RunID."
+        );
     }
 
     #[test]
