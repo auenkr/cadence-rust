@@ -14,7 +14,7 @@ use tonic::{transport::Channel, Code, Status};
 
 /// Resolve the History gRPC channel that owns a workflow ID.
 pub trait HistoryPeers: Send + Sync + std::fmt::Debug {
-    fn channel_for_workflow(&self, workflow_id: &str) -> Result<Channel, Status>;
+    fn channel_for_workflow(&self, workflow_id: &str) -> Result<Channel, ForwardError>;
 }
 
 /// One configured History endpoint owning every shard.
@@ -22,7 +22,7 @@ pub trait HistoryPeers: Send + Sync + std::fmt::Debug {
 pub struct StaticHistoryPeer(pub Channel);
 
 impl HistoryPeers for StaticHistoryPeer {
-    fn channel_for_workflow(&self, _workflow_id: &str) -> Result<Channel, Status> {
+    fn channel_for_workflow(&self, _workflow_id: &str) -> Result<Channel, ForwardError> {
         Ok(self.0.clone())
     }
 }
@@ -116,7 +116,7 @@ pub fn start_out(v: &t::StartWorkflowExecutionRequest) -> p::StartWorkflowExecut
         jitter_start: dur(v.jitter_start_seconds),
         first_run_at: v.first_run_at_timestamp.map(cv::timestamp),
         cron_overlap_policy: pb_enum(v.cron_overlap_policy.map(|x| x as i32)),
-        ..Default::default()
+        active_cluster_selection_policy: None,
     }
 }
 
@@ -141,7 +141,6 @@ fn sws_start_out(v: &st::SignalWithStartWorkflowExecutionRequest) -> p::StartWor
         delay_start_seconds: v.delay_start_seconds,
         jitter_start_seconds: v.jitter_start_seconds,
         first_run_at_timestamp: v.first_run_at_timestamp,
-        ..Default::default()
     })
 }
 
@@ -159,8 +158,7 @@ impl HistoryForward {
     ) -> Result<h::history_api_client::HistoryApiClient<Channel>, ForwardError> {
         let channel = self
             .peers
-            .channel_for_workflow(workflow_id)
-            .map_err(|s| map_status(&s))?;
+            .channel_for_workflow(workflow_id)?;
         Ok(h::history_api_client::HistoryApiClient::new(channel)
             .max_decoding_message_size(self.max_message_size)
             .max_encoding_message_size(self.max_message_size))
@@ -319,7 +317,7 @@ mod tests {
         };
         let out = start_out(&req);
         assert_eq!(out.execution_start_to_close_timeout.unwrap().seconds, 30);
-        assert_eq!(out.input.unwrap().data, b"in");
+        assert_eq!(out.input.clone().unwrap().data, b"in");
         assert_eq!(
             out.workflow_id_reuse_policy,
             e::WorkflowIDReusePolicy::RejectDuplicate as i32 + 1
