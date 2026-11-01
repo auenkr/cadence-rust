@@ -18,13 +18,49 @@ const GO_DEFAULT_BUSY_TIMEOUT_MS: u64 = 60_000;
 const GO_DEFAULT_JOURNAL_MODE: &str = "wal";
 const GO_DEFAULT_TIME_FORMAT: &str = "2006-01-02T15:04:05.000000000Z07:00";
 
+fn configured_default_datastore(
+    persistence: &crate::config::PersistenceConfig,
+) -> anyhow::Result<(&str, &crate::config::DatastoreConfig)> {
+    let configured_name = persistence.default_store.as_str();
+    if configured_name.is_empty() {
+        anyhow::bail!("Matching task persistence requires persistence.defaultStore");
+    }
+    if !persistence.datastores.contains_key(configured_name) {
+        anyhow::bail!(
+            "Matching defaultStore {configured_name:?} is not present in persistence.datastores"
+        );
+    }
+    let name = persistence
+        .store_name_for(crate::config::PersistenceStoreRole::Default)
+        .map_err(anyhow::Error::msg)?
+        .expect("the default persistence role is required");
+    let datastore = persistence
+        .datastore_for(crate::config::PersistenceStoreRole::Default)
+        .map_err(anyhow::Error::msg)?
+        .expect("a configured default store has a datastore");
+    Ok((name, datastore))
+}
+
 pub struct ConfiguredMatchingStores {
     pub task_store: Arc<dyn MatchingTaskStore>,
     /// The same backend/pool exposed through the byte-preserving contract.
-    pub native_task_store: Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
+    pub native_task_store:
+        Arc<dyn cadence_persistence::matching_native_task_store::MatchingTaskStoreBytes>,
     pub domain_metadata_source: Option<Arc<dyn crate::matching_domain_cache::DomainMetadataSource>>,
+    /// Transactional Go SQL domain/metadata manager when this backend exposes
+    /// the existing SQL domain row schema (currently MySQL and PostgreSQL).
+    pub domain_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence>>,
+    /// Frontend transactional mutation boundary, implemented by SQL and Cassandra stores.
+    pub domain_metadata_persistence:
+        Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     /// Explicit per-backend Go domain-ID parse behavior; every production constructor sets it.
     pub domain_id_parse: crate::matching_domain_uuid::DomainIdParse,
+    /// Frontend history reader over the default store's `history_node` table
+    /// (SQL backends only).
+    pub history_node_store: Option<Arc<dyn cadence_persistence::history_reader::HistoryNodeStore>>,
+    /// Frontend `executions_visibility` reader (SQL backends only).
+    pub visibility_store: Option<Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
 }
 
 fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
@@ -124,10 +160,7 @@ pub async fn open_configured_semaphore_store(
 pub async fn open_configured_semaphore_stores(
     persistence: &crate::config::PersistenceConfig,
 ) -> anyhow::Result<ConfiguredSemaphoreStores> {
-    let name = persistence.default_store.as_str();
-    let datastore = persistence.datastores.get(name).ok_or_else(|| {
-        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
-    })?;
+    let (name, datastore) = configured_default_datastore(persistence)?;
     if let Some(nosql) = datastore.nosql.as_ref() {
         if datastore.sql.is_some() {
             anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
@@ -137,12 +170,19 @@ pub async fn open_configured_semaphore_stores(
         }
         let config = cassandra_config(nosql)?;
         let session = Arc::new(config.connect().await?);
-        let store = Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session));
-        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
+        let store =
+            Arc::new(cadence_persistence::cassandra::CassandraSemaphorePersistence::new(session));
+        return Ok(ConfiguredSemaphoreStores {
+            legacy: store.clone(),
+            native: store,
+        });
     }
     if datastore.sql.is_some() {
         let store = Arc::new(cadence_persistence::SqlUnsupportedSemaphorePersistence);
-        return Ok(ConfiguredSemaphoreStores { legacy: store.clone(), native: store });
+        return Ok(ConfiguredSemaphoreStores {
+            legacy: store.clone(),
+            native: store,
+        });
     }
     anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
 }
@@ -153,13 +193,7 @@ pub fn open_configured_default_store(
     all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
     serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
-    let name = persistence.default_store.as_str();
-    if name.is_empty() {
-        anyhow::bail!("Matching task persistence requires persistence.defaultStore");
-    }
-    let datastore = persistence.datastores.get(name).ok_or_else(|| {
-        anyhow::anyhow!("Matching defaultStore {name:?} is not present in persistence.datastores")
-    })?;
+    let (name, datastore) = configured_default_datastore(persistence)?;
     if let Some(nosql) = datastore.nosql.as_ref() {
         if datastore.sql.is_some() {
             anyhow::bail!("Matching defaultStore {name:?} configures both SQL and NoSQL backends");
@@ -170,19 +204,38 @@ pub fn open_configured_default_store(
         let config = cassandra_config(nosql)?;
         let driver =
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        let domain_all_consistency_delete = all_consistency_delete.clone();
         let task_store = Arc::new(
             cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
                 driver.clone(),
                 all_consistency_delete,
             ),
         );
+        let domain_metadata =
+            cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+                driver.clone(),
+                active_cluster_name,
+            );
+        let domain_persistence: Arc<
+            dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence,
+        > = Arc::new(
+            cadence_persistence::matching_domain_metadata::CassandraFrontendDomainPersistence::new(
+                domain_metadata.clone(),
+            )
+            .with_all_consistency_delete(domain_all_consistency_delete),
+        );
         return Ok(ConfiguredMatchingStores {
+            history_node_store: None,
+            visibility_store: None,
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
             task_store,
-            domain_metadata_source: Some(Arc::new(
-                cadence_persistence::matching_domain_metadata::CassandraDomainMetadataStore::new(
+            domain_metadata_source: Some(Arc::new(domain_metadata)),
+            domain_persistence: Some(domain_persistence),
+            domain_metadata_persistence: Some(Arc::new(
+                cadence_persistence::matching_domain_cassandra::CassandraDomainMetadataPersistence::new(
                     driver,
+                    serialization_encoding,
                     active_cluster_name,
                 ),
             )),
@@ -196,13 +249,31 @@ pub fn open_configured_default_store(
             if sql.use_multiple_databases || !sql.multiple_databases_config.is_empty() {
                 anyhow::bail!("Matching SQLite task persistence does not support multipleDatabasesConfig");
             }
-            let task_store =
-                SqliteTaskStoreConfig::from_default_store(persistence)?.open_store()?;
+            let sqlite = SqliteTaskStoreConfig::from_default_store(persistence)?;
+            let task_store = sqlite.open_store()?;
+            let metadata = Arc::new(
+                cadence_persistence::matching_domain_metadata::MatchingDomainMetadataStore::open_read_write_with_options(
+                    &sqlite.database_name,
+                    active_cluster_name,
+                    &sqlite.mode,
+                    sqlite.busy_timeout,
+                )?,
+            );
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> =
+                metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> =
+                metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> =
+                metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: None,
+                visibility_store: None,
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: task_store.clone(),
                 task_store,
-                domain_metadata_source: None,
+                domain_metadata_source: Some(metadata_source),
+                domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         "mysql" => {
@@ -256,11 +327,19 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let metadata = Arc::new(metadata);
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: Some(store.clone()),
+                visibility_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
-                domain_metadata_source: Some(Arc::new(metadata)),
+                domain_metadata_source: Some(metadata_source),
+                domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         "postgres" => {
@@ -312,11 +391,19 @@ pub fn open_configured_default_store(
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let metadata = Arc::new(metadata);
+            let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
+            let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
+            let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
+                history_node_store: Some(store.clone()),
+                visibility_store: Some(store.clone()),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
-                domain_metadata_source: Some(Arc::new(metadata)),
+                domain_metadata_source: Some(metadata_source),
+                domain_persistence: Some(domain_persistence),
+                domain_metadata_persistence: Some(domain_metadata_persistence),
             })
         }
         other => anyhow::bail!(
@@ -340,15 +427,7 @@ impl SqliteTaskStoreConfig {
     ) -> anyhow::Result<Self> {
         // Go indexes persistence.datastores with the configured name exactly;
         // whitespace is part of the key and must not be normalized here.
-        let name = persistence.default_store.as_str();
-        if name.is_empty() {
-            anyhow::bail!("Matching task persistence requires persistence.defaultStore");
-        }
-        let datastore = persistence.datastores.get(name).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Matching defaultStore {name:?} is not present in persistence.datastores"
-            )
-        })?;
+        let (name, datastore) = configured_default_datastore(persistence)?;
         let sql = datastore.sql.as_ref().ok_or_else(|| {
             if datastore.nosql.is_some() {
                 anyhow::anyhow!("Matching task persistence does not support NoSQL defaultStore {name:?}; supported backend is SQL sqlite")
@@ -477,7 +556,10 @@ mod tests {
 
     fn nosql_from_yaml(body: &str) -> crate::config::NosqlConfig {
         let yaml = format!("persistence:\n  datastores:\n    c:\n      nosql:\n        pluginName: cassandra\n        hosts: \"h1,h2\"\n        keyspace: cadence\n{body}");
-        crate::config::Config::from_yaml(&yaml).unwrap().persistence.datastores["c"]
+        crate::config::Config::from_yaml(&yaml)
+            .unwrap()
+            .persistence
+            .datastores["c"]
             .nosql
             .clone()
             .unwrap()
@@ -501,7 +583,8 @@ mod tests {
 
     #[test]
     fn cassandra_config_ignores_disabled_tls_and_rejects_unsupported_proto() {
-        let nosql = nosql_from_yaml("        tls:\n          enabled: false\n          caFile: /ca.pem\n");
+        let nosql =
+            nosql_from_yaml("        tls:\n          enabled: false\n          caFile: /ca.pem\n");
         assert!(cassandra_config(&nosql).unwrap().tls.is_none());
         let nosql = nosql_from_yaml("        protoVersion: 3\n");
         let error = cassandra_config(&nosql).unwrap_err().to_string();
@@ -523,6 +606,31 @@ mod tests {
     }
 
     #[test]
+    fn configured_default_datastore_uses_default_role_with_separate_visibility_store() {
+        let mut config = persistence(Some(SqlConfig {
+            plugin_name: "sqlite".into(),
+            database_name: "primary.db".into(),
+            ..Default::default()
+        }));
+        config.visibility_store = "visibility".into();
+        config.datastores.insert(
+            "visibility".into(),
+            DatastoreConfig {
+                sql: Some(SqlConfig {
+                    plugin_name: "postgres".into(),
+                    database_name: "cadence_visibility".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+
+        let (name, datastore) = configured_default_datastore(&config).unwrap();
+        assert_eq!(name, "primary");
+        assert_eq!(datastore.sql.as_ref().unwrap().plugin_name, "sqlite");
+    }
+
+    #[test]
     fn configured_sqlite_exposes_native_and_legacy_views_of_one_store() {
         use cadence_common::go_string::GoString;
         use cadence_persistence::matching_native_task_store::TaskListKeyBytes;
@@ -536,19 +644,52 @@ mod tests {
             ..Default::default()
         }));
         let stores = open_configured_default_store(
-            &config, "active", Arc::new(|| false), Arc::new(|| "thriftrw".into()),
-        ).unwrap();
+            &config,
+            "active",
+            Arc::new(|| false),
+            Arc::new(|| "thriftrw".into()),
+        )
+        .unwrap();
         let legacy_key = TaskListKey {
-            domain_id: uuid::Uuid::from_u128(1), name: "shared".into(), task_type: 0,
+            domain_id: uuid::Uuid::from_u128(1),
+            name: "shared".into(),
+            task_type: 0,
         };
         let lease = stores.task_store.lease(&legacy_key, 0, 0, 1).unwrap();
         let key = TaskListKeyBytes::from(legacy_key.clone());
-        assert_eq!(stores.native_task_store.get_task_list(&key).unwrap().range_id, lease.range_id);
-        let renewed = stores.native_task_store.lease(&key, 0, lease.range_id, 2).unwrap();
-        assert_eq!(stores.task_store.get_task_list(&legacy_key).unwrap().range_id, renewed.range_id);
-        let raw_key = TaskListKeyBytes { name: GoString::from(&b"q\xff"[..]), ..key };
+        assert_eq!(
+            stores
+                .native_task_store
+                .get_task_list(&key)
+                .unwrap()
+                .range_id,
+            lease.range_id
+        );
+        let renewed = stores
+            .native_task_store
+            .lease(&key, 0, lease.range_id, 2)
+            .unwrap();
+        assert_eq!(
+            stores
+                .task_store
+                .get_task_list(&legacy_key)
+                .unwrap()
+                .range_id,
+            renewed.range_id
+        );
+        let raw_key = TaskListKeyBytes {
+            name: GoString::from(&b"q\xff"[..]),
+            ..key
+        };
         stores.native_task_store.lease(&raw_key, 0, 0, 3).unwrap();
-        assert_eq!(stores.native_task_store.get_task_list(&raw_key).unwrap().range_id, 1);
+        assert_eq!(
+            stores
+                .native_task_store
+                .get_task_list(&raw_key)
+                .unwrap()
+                .range_id,
+            1
+        );
     }
 
     #[test]

@@ -7,6 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 // ---------------------------------------------------------------------------
 // Cluster
 // ---------------------------------------------------------------------------
@@ -246,9 +250,24 @@ pub struct ListDynamicConfigResponse {
     pub entries: Vec<DynamicConfigEntry>,
 }
 
+// The operational-config Thrift messages have the same fields as their
+// regular-config counterparts; Go distinguishes them by the backing client
+// and namespace rather than by a different wire shape.
+pub type GetOperationalDynamicConfigRequest = GetDynamicConfigRequest;
+pub type GetOperationalDynamicConfigResponse = GetDynamicConfigResponse;
+pub type UpdateOperationalDynamicConfigRequest = UpdateDynamicConfigRequest;
+pub type UpdateOperationalDynamicConfigResponse = UpdateDynamicConfigResponse;
+pub type RestoreOperationalDynamicConfigRequest = RestoreDynamicConfigRequest;
+pub type RestoreOperationalDynamicConfigResponse = RestoreDynamicConfigResponse;
+pub type ListOperationalDynamicConfigRequest = ListDynamicConfigRequest;
+pub type ListOperationalDynamicConfigResponse = ListDynamicConfigResponse;
+
 // ---------------------------------------------------------------------------
 // Isolation groups
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetGlobalIsolationGroupsRequest {}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetGlobalIsolationGroupsResponse {
@@ -371,7 +390,11 @@ pub struct DescribeHistoryHostResponse {
     pub number_of_shards: i32,
     #[serde(rename = "shardIds", default, skip_serializing_if = "Vec::is_empty")]
     pub shard_ids: Vec<i32>,
-    #[serde(rename = "domainCache", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "domainCache",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub domain_cache: Option<DomainCacheInfo>,
     #[serde(
         rename = "shardControllerStatus",
@@ -482,11 +505,7 @@ pub struct DescribeQueueResponse {
 pub struct GetWorkflowExecutionRawHistoryV2Request {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
     #[serde(
         rename = "startEventId",
@@ -500,7 +519,11 @@ pub struct GetWorkflowExecutionRawHistoryV2Request {
         skip_serializing_if = "Option::is_none"
     )]
     pub start_event_version: Option<i64>,
-    #[serde(rename = "endEventId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "endEventId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub end_event_id: Option<i64>,
     #[serde(
         rename = "endEventVersion",
@@ -548,11 +571,7 @@ pub struct GetWorkflowExecutionRawHistoryV2Response {
 pub struct AdminDescribeWorkflowExecutionRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
 }
 
@@ -584,11 +603,7 @@ pub struct AdminDescribeWorkflowExecutionResponse {
 pub struct MaintainCorruptWorkflowRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::types::WorkflowExecution>,
 }
 
@@ -694,6 +709,26 @@ pub struct GetDomainReplicationMessagesRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicationMessages {
+    #[serde(
+        rename = "replicationTasks",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub replication_tasks: Vec<crate::types::ReplicationTask>,
+    #[serde(rename = "lastRetrievedMessageId", default)]
+    pub last_retrieved_message_id: i64,
+    #[serde(rename = "hasMore", default, skip_serializing_if = "is_false")]
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetDomainReplicationMessagesResponse {
+    #[serde(rename = "messages", default, skip_serializing_if = "Option::is_none")]
+    pub messages: Option<ReplicationMessages>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CountDLQMessagesRequest {
     #[serde(rename = "forceFetch", default)]
     pub force_fetch: bool,
@@ -701,7 +736,11 @@ pub struct CountDLQMessagesRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryDLQCountEntry {
-    #[serde(rename = "sourceCluster", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "sourceCluster",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub source_cluster: String,
     #[serde(rename = "messageCount", default)]
     pub message_count: i64,
@@ -735,6 +774,26 @@ pub struct ReadDLQMessagesRequest {
     pub inclusive_end_message_id: Option<i64>,
     #[serde(rename = "maximumPageSize", default)]
     pub maximum_page_size: i32,
+    #[serde(
+        rename = "nextPageToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
+    pub next_page_token: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadDLQMessagesResponse {
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub dlq_type: Option<crate::enums::DLQType>,
+    #[serde(
+        rename = "replicationTasks",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub replication_tasks: Vec<crate::types::ReplicationTask>,
     #[serde(
         rename = "nextPageToken",
         default,
@@ -840,7 +899,11 @@ pub struct ResendReplicationTasksRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub start_version: Option<i64>,
-    #[serde(rename = "endEventID", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "endEventID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub end_event_id: Option<i64>,
     #[serde(
         rename = "endVersion",

@@ -4,22 +4,28 @@
 //! implementation is in-memory so the Rust server runs standalone; durable
 //! backends (SQL/NoSQL) implement the same traits in follow-ups.
 
+pub mod cassandra;
+pub mod config_store;
+pub mod domain_audit;
 pub mod domain_replication;
 pub mod domain_update;
 pub mod domains;
 pub mod dynamic_config;
-pub mod config_store;
 pub mod executions;
 pub mod history_branch;
+pub mod history_reader;
 pub mod raw_history;
 pub mod schedules;
 pub mod semaphores;
 pub mod semaphores_native;
-pub mod cassandra;
 pub mod version_history;
 pub mod visibility;
+pub mod visibility_reader;
 
-pub use domains::{DomainRecord, FailoverError, InMemoryDomainStore};
+pub use domains::{
+    DomainRecord, FailoverError, FrontendDomainError, FrontendDomainManager, InMemoryDomainStore,
+    PersistedFrontendDomainManager,
+};
 pub use executions::{
     AsyncRequest, AsyncRequestKind, ExecutionRecord, HistoryPageError, InMemoryExecutionStore,
     MutableStateView, QueryError, RecordError, RecordedActivity, RecordedDecision, ResetError,
@@ -32,19 +38,20 @@ pub use semaphores::{
 };
 
 pub mod matching_blob;
-pub mod matching_mysql;
 pub mod matching_cassandra;
 pub mod matching_cassandra_exec;
+pub mod matching_mysql;
+pub mod matching_native_queue;
+pub mod matching_native_task_store;
 pub mod matching_postgres;
 pub mod matching_queue;
 pub mod matching_sqlite;
 pub mod matching_task_store;
-pub mod matching_native_task_store;
-pub mod matching_native_queue;
 pub mod matching_writer_actor;
 
 pub mod matching_gc;
 
+pub mod matching_domain_cassandra;
 pub mod matching_domain_metadata;
 pub mod matching_domain_mysql;
 pub mod matching_domain_postgres;

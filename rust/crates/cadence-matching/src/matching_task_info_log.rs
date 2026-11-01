@@ -86,7 +86,10 @@ mod tests {
         ))
     }
 
-    fn log(debug: bool, entries: Vec<DynamicConfigValue>) -> (TaskInfoLog, Arc<Mutex<Vec<String>>>) {
+    fn log(
+        debug: bool,
+        entries: Vec<DynamicConfigValue>,
+    ) -> (TaskInfoLog, Arc<Mutex<Vec<String>>>) {
         let lines = Arc::new(Mutex::new(Vec::new()));
         let sink_lines = lines.clone();
         let mut log = TaskInfoLog::new(overlay_with(entries), debug);
@@ -106,7 +109,10 @@ mod tests {
 
     #[test]
     fn info_requires_debug_mode_and_domain_id_flag_otherwise_dropped() {
-        let fields = [("wf-id", "w".to_owned()), ("wf-schedule-id", "5".to_owned())];
+        let fields = [
+            ("wf-id", "w".to_owned()),
+            ("wf-schedule-id", "5".to_owned()),
+        ];
         let (log, lines) = log(true, per_domain("d1"));
         log.emit("d1", "Received AddDecisionTask", &fields);
         log.emit("other", "Received AddDecisionTask", &fields);

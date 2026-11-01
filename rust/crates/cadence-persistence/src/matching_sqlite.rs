@@ -103,7 +103,9 @@ impl crate::matching_task_store::MatchingTaskStore for SqliteTaskStore {
 
 impl std::fmt::Debug for SqliteTaskStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("SqliteTaskStore").finish_non_exhaustive()
+        formatter
+            .debug_struct("SqliteTaskStore")
+            .finish_non_exhaustive()
     }
 }
 
@@ -116,12 +118,9 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
         size: i32,
         bucket_size: i32,
     ) -> std::result::Result<crate::SemaphoreMetadata, crate::SemaphoreError> {
-        crate::SqlUnsupportedSemaphorePersistence.create_semaphore(
-            domain,
-            name,
-            size,
-            bucket_size,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .create_semaphore(domain, name, size, bucket_size)
+            .await
     }
 
     async fn get_semaphore_metadata(
@@ -154,9 +153,9 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
         bucket: i32,
         token_id: i32,
     ) -> std::result::Result<String, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.get_semaphore_ownership_by_token(
-            domain_id, name, bucket, token_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .get_semaphore_ownership_by_token(domain_id, name, bucket, token_id)
+            .await
     }
 
     async fn grant_semaphore_token(
@@ -167,9 +166,9 @@ impl crate::SemaphorePersistence for SqliteTaskStore {
         token_id: i32,
         owner_id: &str,
     ) -> std::result::Result<crate::GrantOutcome, crate::AcquireError> {
-        crate::SqlUnsupportedSemaphorePersistence.grant_semaphore_token(
-            domain_id, name, bucket, token_id, owner_id,
-        ).await
+        crate::SqlUnsupportedSemaphorePersistence
+            .grant_semaphore_token(domain_id, name, bucket, token_id, owner_id)
+            .await
     }
 }
 
@@ -441,8 +440,13 @@ impl SqliteTaskStore {
         let mut connection = self.connection.lock().expect("matching SQL lock");
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for (domain, task) in tasks {
-            let data = task.data.for_sql().map_err(StorageError::MalformedSqlMatchingRunId)?;
-            let bytes = self.encoding.encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
+            let data = task
+                .data
+                .for_sql()
+                .map_err(StorageError::MalformedSqlMatchingRunId)?;
+            let bytes = self
+                .encoding
+                .encode(&blob::encode_task(&data).map_err(StorageError::BackendConfiguration)?)?;
             tx.execute("INSERT INTO tasks (domain_id,task_list_name,task_type,task_id,data,data_encoding) VALUES (?,?,?,?,?,?)",
                 params![domain.as_bytes().as_slice(),key.name,key.task_type,task.task_id,bytes,self.encoding.as_str()])?;
         }
@@ -715,21 +719,34 @@ mod tests {
     #[test]
     fn go_suite_get_tasks_paging_is_ascending_and_exclusive() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("a.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("a.db"), BlobEncoding::ThriftRW).unwrap();
         let key = key("page");
         store.lease(&key, 0, 0, 10).unwrap();
         // Inserted out of order; reads must still be ascending.
-        store.create_tasks(&key, 1, &[task(13), task(11), task(15), task(12), task(14)]).unwrap();
-        assert_eq!(ids(store.get_tasks(&key, -1, i64::MAX, 1).unwrap()), vec![11]);
-        assert_eq!(ids(store.get_tasks(&key, 11, i64::MAX, 2).unwrap()), vec![12, 13]);
-        assert_eq!(ids(store.get_tasks(&key, 13, i64::MAX, 5).unwrap()), vec![14, 15]);
+        store
+            .create_tasks(&key, 1, &[task(13), task(11), task(15), task(12), task(14)])
+            .unwrap();
+        assert_eq!(
+            ids(store.get_tasks(&key, -1, i64::MAX, 1).unwrap()),
+            vec![11]
+        );
+        assert_eq!(
+            ids(store.get_tasks(&key, 11, i64::MAX, 2).unwrap()),
+            vec![12, 13]
+        );
+        assert_eq!(
+            ids(store.get_tasks(&key, 13, i64::MAX, 5).unwrap()),
+            vec![14, 15]
+        );
     }
 
     /// Go TestGetTaskListSize (:143): size counts task_id > ack level.
     #[test]
     fn go_suite_task_list_size_counts_above_ack_level() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("b.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("b.db"), BlobEncoding::ThriftRW).unwrap();
         let key = key("size");
         assert_eq!(store.task_list_size(&key, 0).unwrap(), 0);
         store.lease(&key, 0, 0, 10).unwrap();
@@ -743,15 +760,22 @@ mod tests {
     #[test]
     fn go_suite_complete_tasks_less_than_limits_delete_lowest_first() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("c.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("c.db"), BlobEncoding::ThriftRW).unwrap();
         let key = key("range");
         store.lease(&key, 0, 0, 10).unwrap();
         let all: Vec<_> = (1..=6).map(|i| task(i * 10)).collect();
         store.create_tasks(&key, 1, &all).unwrap();
         assert_eq!(store.complete_tasks_less_than(&key, 60, 1).unwrap(), 1);
-        assert_eq!(ids(store.get_tasks(&key, 0, 100, 10).unwrap()), vec![20, 30, 40, 50, 60]);
+        assert_eq!(
+            ids(store.get_tasks(&key, 0, 100, 10).unwrap()),
+            vec![20, 30, 40, 50, 60]
+        );
         assert_eq!(store.complete_tasks_less_than(&key, 60, 2).unwrap(), 2);
-        assert_eq!(ids(store.get_tasks(&key, 0, 100, 10).unwrap()), vec![40, 50, 60]);
+        assert_eq!(
+            ids(store.get_tasks(&key, 0, 100, 10).unwrap()),
+            vec![40, 50, 60]
+        );
         assert_eq!(store.complete_tasks_less_than(&key, 60, 10).unwrap(), 3);
         assert!(store.get_tasks(&key, 0, 100, 10).unwrap().is_empty());
     }
@@ -762,15 +786,21 @@ mod tests {
     #[test]
     fn go_suite_lease_and_update_task_list_range_conditions() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("d.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("d.db"), BlobEncoding::ThriftRW).unwrap();
         let key = key("aaaaaaa");
         let first = store.lease(&key, 0, 0, 10).unwrap();
         assert_eq!((first.range_id, first.data.ack_level), (1, 0));
         assert!(first.data.adaptive_partition_config.is_none());
         let second = store.lease(&key, 0, 0, 20).unwrap();
         assert_eq!(second.range_id, 2);
-        assert!(matches!(store.lease(&key, 0, 1, 30), Err(StorageError::ConditionFailed(_))));
-        store.update_task_list(&key, 2, second.data.clone(), 40).unwrap();
+        assert!(matches!(
+            store.lease(&key, 0, 1, 30),
+            Err(StorageError::ConditionFailed(_))
+        ));
+        store
+            .update_task_list(&key, 2, second.data.clone(), 40)
+            .unwrap();
         assert_eq!(store.get_task_list(&key).unwrap().range_id, 2);
         assert!(matches!(
             store.update_task_list(&key, 3, second.data, 50),
@@ -784,8 +814,13 @@ mod tests {
     #[test]
     fn go_suite_sticky_and_ephemeral_kinds_lease_and_update() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("e.db"), BlobEncoding::ThriftRW).unwrap();
-        for (kind, expiry) in [(1_i16, 86_400_000_000_100_i64), (2, 86_400_000_000_100), (0, 0)] {
+        let store =
+            SqliteTaskStore::create(dir.path().join("e.db"), BlobEncoding::ThriftRW).unwrap();
+        for (kind, expiry) in [
+            (1_i16, 86_400_000_000_100_i64),
+            (2, 86_400_000_000_100),
+            (0, 0),
+        ] {
             let key = key(&format!("kind-{kind}"));
             let leased = store.lease(&key, kind, 0, 10).unwrap();
             assert_eq!((leased.range_id, leased.data.kind), (1, kind));
@@ -799,10 +834,13 @@ mod tests {
     #[test]
     fn go_suite_complete_task_removes_each_row() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SqliteTaskStore::create(dir.path().join("f.db"), BlobEncoding::ThriftRW).unwrap();
+        let store =
+            SqliteTaskStore::create(dir.path().join("f.db"), BlobEncoding::ThriftRW).unwrap();
         let key = key("complete");
         store.lease(&key, 0, 0, 10).unwrap();
-        store.create_tasks(&key, 1, &[task(1), task(2), task(3)]).unwrap();
+        store
+            .create_tasks(&key, 1, &[task(1), task(2), task(3)])
+            .unwrap();
         for t in store.get_tasks(&key, 0, 100, 5).unwrap() {
             store.complete_task(&key, t.task_id).unwrap();
         }

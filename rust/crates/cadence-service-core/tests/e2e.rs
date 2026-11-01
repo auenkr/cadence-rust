@@ -713,7 +713,9 @@ async fn async_start_is_consumed_into_a_run() {
     for request in store.drain_async_requests() {
         assert!(store.consume_async_request(&request));
     }
-    assert!(store.poll_decision("async-domain", "async-tl", "w").is_some());
+    assert!(store
+        .poll_decision("async-domain", "async-tl", "w")
+        .is_some());
 
     // The HTTP route validates and enqueues without starting synchronously.
     let (status, _) = call(
@@ -939,12 +941,25 @@ async fn refresh_tasks_and_diagnose_behave() {
 #[tokio::test]
 async fn failover_moves_global_domain_and_lists_history() {
     let mut state = AppState::default();
-    state.admin.dynamic_config.lock().unwrap().update(false, "frontend.failoverCoolDown", vec![cadence_api::admin::DynamicConfigValue {
-        value: Some(cadence_api::types::DataBlob { encoding_type: Some(cadence_api::enums::EncodingType::JSON), data: br#""0s""#.to_vec() }), filters: vec![],
-    }]);
-    state.cluster_metadata.clusters.insert("remote".into(), cadence_common::cluster::ClusterInformation {
-        enabled: true, initial_failover_version: 2, ..Default::default()
-    });
+    state.admin.dynamic_config.lock().unwrap().update(
+        false,
+        "frontend.failoverCoolDown",
+        vec![cadence_api::admin::DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data: br#""0s""#.to_vec(),
+            }),
+            filters: vec![],
+        }],
+    );
+    state.cluster_metadata.clusters.insert(
+        "remote".into(),
+        cadence_common::cluster::ClusterInformation {
+            enabled: true,
+            initial_failover_version: 2,
+            ..Default::default()
+        },
+    );
     let app = router(state);
     // Global domain starting active on a remote cluster.
     let (status, _) = call(
@@ -991,7 +1006,10 @@ async fn failover_moves_global_domain_and_lists_history() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{resp}");
-    assert_eq!(resp["replicationConfiguration"]["activeClusterName"], "cluster0");
+    assert_eq!(
+        resp["replicationConfiguration"]["activeClusterName"],
+        "cluster0"
+    );
     assert_eq!(resp["failoverVersion"], 10);
 
     // History lists the failover event; paging cursors work.
@@ -1096,7 +1114,10 @@ async fn schedule_crud_and_firing_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["message"].as_str().unwrap().contains("worker.enableScheduler"));
+    assert!(resp["message"]
+        .as_str()
+        .unwrap()
+        .contains("worker.enableScheduler"));
 
     let (status, resp) = call(
         app.clone(),
@@ -1236,7 +1257,10 @@ async fn semaphore_create_and_gate_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp["message"].as_str().unwrap().contains("system.enableDistributedSemaphore"));
+    assert!(resp["message"]
+        .as_str()
+        .unwrap()
+        .contains("system.enableDistributedSemaphore"));
 
     let (status, resp) = call(
         app.clone(),
@@ -1274,7 +1298,10 @@ async fn admin_cluster_config_and_workflow_maintenance() {
 
     let (status, cluster) = get(app.clone(), "/api/v1/admin/cluster/describe").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(cluster["membershipInfo"]["rings"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        cluster["membershipInfo"]["rings"].as_array().unwrap().len(),
+        4
+    );
     assert!(!cluster["membershipInfo"]["currentHost"]["Identity"]
         .as_str()
         .unwrap()

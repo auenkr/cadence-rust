@@ -95,8 +95,7 @@ fn rust_selector_consumes_pinned_original_go_selection_cases() {
         );
         assert_eq!(selector.options.parallelism, case.parallelism);
         assert_eq!(
-            selector.effective_size,
-            case.size,
+            selector.effective_size, case.size,
             "{} effective size",
             case.name
         );

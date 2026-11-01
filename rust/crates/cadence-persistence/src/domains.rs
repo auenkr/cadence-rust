@@ -19,6 +19,12 @@ pub struct DomainRecord {
     pub configuration: DomainConfiguration,
     pub replication: DomainReplicationConfiguration,
     pub failover_version: i64,
+    /// Go's domain notification version is stored in the flattened SQL blob
+    /// and is also used by SQL domain metadata transactions. Keep it in the
+    /// domain cache so a durable Frontend manager can round-trip it without
+    /// inventing a version during cache refresh.
+    #[serde(default)]
+    pub notification_version: i64,
     #[serde(default)]
     pub failover_notification_version: i64,
     pub is_global_domain: bool,
@@ -57,6 +63,149 @@ impl DomainRecord {
             is_global_domain: self.is_global_domain,
         }
     }
+
+    /// Serialize the in-memory frontend record into the exact logical fields
+    /// consumed by Go SQL/Cassandra domain persistence. Nested configuration
+    /// values use Cadence's JSON blob encoding, like the Go persistence
+    /// manager's `DataBlob` fields.
+    pub fn to_matching_metadata(
+        &self,
+        notification_version: i64,
+        serialization_encoding: &str,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainMetadata, String> {
+        use crate::matching_blob::BlobEncoding;
+        use crate::matching_domain_metadata::{GoDomainBlob, MatchingDomainMetadata};
+        use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
+
+        fn thrift_blob<T: ToThrift>(
+            value: &T,
+            encoding: BlobEncoding,
+        ) -> Result<GoDomainBlob, String> {
+            let mut writer = Writer::new();
+            write_struct(&mut writer, &value.to_thrift());
+            Ok(GoDomainBlob {
+                data: encoding
+                    .encode(&writer.into_bytes())
+                    .map_err(|error| error.to_string())?,
+                encoding: encoding.as_str().to_string(),
+            })
+        }
+
+        let encoding =
+            BlobEncoding::parse(serialization_encoding).map_err(|error| error.to_string())?;
+
+        let bad_binaries = self
+            .configuration
+            .bad_binaries
+            .as_ref()
+            .map(|value| thrift_blob(value, encoding))
+            .transpose()?;
+        let isolation_groups = self
+            .isolation_groups
+            .as_ref()
+            .map(|value| thrift_blob(value, encoding))
+            .transpose()?;
+        let async_workflow_config = self
+            .async_workflow_config
+            .as_ref()
+            .map(|value| thrift_blob(value, encoding))
+            .transpose()?;
+        let active_clusters_config = self
+            .replication
+            .active_clusters
+            .as_ref()
+            .map(|value| thrift_blob(value, BlobEncoding::ThriftRWSnappy))
+            .transpose()?;
+        let status_raw = self.info.status.unwrap_or(DomainStatus::Registered) as i32;
+        let history_archival_status_raw =
+            self.configuration
+                .history_archival_status
+                .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled) as i16;
+        let visibility_archival_status_raw =
+            self.configuration
+                .visibility_archival_status
+                .unwrap_or(cadence_api::enums::ArchivalStatus::Disabled) as i16;
+        Ok(MatchingDomainMetadata {
+            info: self.info.clone(),
+            configuration: self.configuration.clone(),
+            replication: self.replication.clone(),
+            is_global_domain: self.is_global_domain,
+            archival_bucket: self.archival_bucket.clone(),
+            status_raw,
+            archival_status_raw: 0,
+            history_archival_status_raw,
+            visibility_archival_status_raw,
+            config_version: self.config_version,
+            notification_version,
+            failover_notification_version: self.failover_notification_version,
+            failover_version: self.failover_version,
+            previous_failover_version: self.previous_failover_version,
+            failover_end_time_nanos: self.failover_end_time,
+            last_updated_time_nanos: self.last_updated_time_nanos,
+            bad_binaries,
+            isolation_groups,
+            async_workflow_config,
+            active_clusters_config,
+            decoded_bad_binaries: self.configuration.bad_binaries.clone(),
+            decoded_isolation_groups: self.isolation_groups.clone(),
+            decoded_async_workflow_config: self.async_workflow_config.clone(),
+            config_decode_error: None,
+        })
+    }
+
+    /// Build the Go-compatible domain replication task payload from a domain
+    /// snapshot. The queue codec wraps this model in ThriftRW before storage.
+    pub fn to_domain_replication_task(
+        &self,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<cadence_api::types::ReplicationTask, String> {
+        use cadence_api::{
+            enums::ReplicationTaskType,
+            types::{DomainTaskAttributes, ReplicationTask},
+        };
+
+        let status = self
+            .info
+            .status
+            .ok_or_else(|| format!("invalid domain status for domain {}", self.info.name))?;
+        if !matches!(status, DomainStatus::Registered | DomainStatus::Deprecated) {
+            return Err(format!(
+                "invalid domain status for domain {}",
+                self.info.name
+            ));
+        }
+        let mut configuration = self.configuration.clone();
+        configuration.isolation_groups = self.isolation_groups.clone();
+        configuration.async_workflow_config = self.async_workflow_config.clone();
+        Ok(ReplicationTask {
+            task_type: Some(ReplicationTaskType::Domain),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(operation),
+                id: self.info.uuid.clone(),
+                info: Some(self.info.clone()),
+                config: Some(configuration),
+                replication_config: Some(self.replication.clone()),
+                config_version: self.config_version,
+                failover_version: self.failover_version,
+                previous_failover_version: self.previous_failover_version,
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Encode a domain replication task with Cadence's ThriftRW wire protocol,
+    /// matching Go's `codec.NewThriftRWEncoder` used by the queue producer.
+    pub fn encode_domain_replication_task(
+        &self,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<Vec<u8>, String> {
+        use cadence_thrift::{protocol::Writer, value::write_struct, ToThrift};
+
+        let task = self.to_domain_replication_task(operation)?;
+        let mut writer = Writer::new();
+        write_struct(&mut writer, &task.to_thrift());
+        Ok(writer.into_bytes())
+    }
 }
 
 /// A recorded domain failover, mirroring Go's domain audit log rows for
@@ -74,7 +223,7 @@ pub(crate) struct FailoverAuditEntry {
     after_version: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Inner {
     by_name: HashMap<String, DomainRecord>,
     by_id: HashMap<String, String>, // uuid -> name
@@ -94,6 +243,69 @@ pub struct InMemoryDomainStore {
     failover_notifications: Arc<std::sync::Mutex<HashMap<String, tokio::sync::watch::Sender<u64>>>>,
 }
 
+/// Frontend's domain operations behind the persistence-manager boundary.
+/// Production adapters may keep an `InMemoryDomainStore` as the shared domain
+/// cache while committing every write through Go's configured domain store.
+pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
+    fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, FrontendDomainError>;
+
+    fn describe(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, EntityNotExistsError>;
+
+    fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError>;
+
+    fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError>;
+
+    fn update(
+        &self,
+        request: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError>;
+
+    fn failover(
+        &self,
+        request: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError>;
+
+    fn failover_history(
+        &self,
+        domain_id: &str,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError>;
+
+    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError>;
+
+    fn delete(&self, name: &str) -> Result<(), FrontendDomainError>;
+
+    /// Apply one incoming global-domain replication task. DLQ merge and the
+    /// live replication consumer share the same version-aware mutation path.
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError>;
+
+    fn list_page(
+        &self,
+        request: &cadence_api::service_types::ListDomainsRequest,
+    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError>;
+
+    fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64>;
+}
+
 /// Errors for domain failover: unknown domains are `EntityNotExists`,
 /// invalid requests are `BadRequest` with Go's exact messages.
 #[derive(Debug, thiserror::Error)]
@@ -104,6 +316,33 @@ pub enum FailoverError {
     Invalid(String),
     #[error("{0}")]
     Busy(String),
+    #[error("{0}")]
+    Persistence(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum FrontendDomainError {
+    #[error(transparent)]
+    AlreadyExists(#[from] DomainAlreadyExistsError),
+    #[error(transparent)]
+    NotFound(#[from] EntityNotExistsError),
+    #[error("{0}")]
+    Invalid(String),
+    #[error("{0}")]
+    Busy(String),
+    #[error("{0}")]
+    Persistence(String),
+}
+
+impl From<FailoverError> for FrontendDomainError {
+    fn from(error: FailoverError) -> Self {
+        match error {
+            FailoverError::NotFound(error) => Self::NotFound(error),
+            FailoverError::Invalid(message) => Self::Invalid(message),
+            FailoverError::Busy(message) => Self::Busy(message),
+            FailoverError::Persistence(message) => Self::Persistence(message),
+        }
+    }
 }
 impl From<crate::domain_update::UpdateError> for FailoverError {
     fn from(error: crate::domain_update::UpdateError) -> Self {
@@ -121,7 +360,93 @@ fn now_nanos() -> i64 {
         .unwrap_or(0)
 }
 
+fn is_active_active(replication: &DomainReplicationConfiguration) -> bool {
+    replication
+        .active_clusters
+        .as_ref()
+        .and_then(|active| active.active_clusters_by_cluster_attribute.as_ref())
+        .is_some_and(|scopes| !scopes.is_empty())
+}
+
+fn merge_active_clusters(
+    current: Option<cadence_api::types::ActiveClusters>,
+    incoming: Option<cadence_api::types::ActiveClusters>,
+) -> cadence_api::types::ActiveClusters {
+    fn merge_values(
+        target: &mut std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
+        incoming: std::collections::HashMap<String, cadence_api::types::ActiveClusterInfo>,
+    ) {
+        for (key, value) in incoming {
+            if target
+                .get(&key)
+                .is_none_or(|current| current.failover_version < value.failover_version)
+            {
+                target.insert(key, value);
+            }
+        }
+    }
+
+    let mut merged = current.unwrap_or_default();
+    let Some(incoming) = incoming else {
+        return merged;
+    };
+    let regions = merged
+        .active_clusters_by_region
+        .get_or_insert_with(Default::default);
+    if let Some(incoming_regions) = incoming.active_clusters_by_region {
+        merge_values(regions, incoming_regions);
+    }
+    let scopes = merged
+        .active_clusters_by_cluster_attribute
+        .get_or_insert_with(Default::default);
+    if let Some(incoming_scopes) = incoming.active_clusters_by_cluster_attribute {
+        for (scope_name, incoming_scope) in incoming_scopes {
+            let scope = scopes.entry(scope_name).or_default();
+            let attributes = scope
+                .cluster_attributes
+                .get_or_insert_with(Default::default);
+            if let Some(incoming_attributes) = incoming_scope.cluster_attributes {
+                merge_values(attributes, incoming_attributes);
+            }
+        }
+    }
+    merged
+}
+
 impl InMemoryDomainStore {
+    fn restore_record(&self, record: DomainRecord) {
+        let mut inner = self.inner.write().expect("domain store lock");
+        if let Some(old_name) = inner
+            .by_id
+            .insert(record.info.uuid.clone(), record.info.name.clone())
+        {
+            if old_name != record.info.name {
+                inner.by_name.remove(&old_name);
+            }
+        }
+        inner.by_name.insert(record.info.name.clone(), record);
+    }
+
+    pub fn record_by_id(&self, uuid: &str) -> Result<DomainRecord, EntityNotExistsError> {
+        let inner = self.inner.read().expect("domain store lock");
+        inner
+            .by_id
+            .get(uuid)
+            .and_then(|name| inner.by_name.get(name))
+            .cloned()
+            .ok_or_else(|| EntityNotExistsError::new(format!("Domain {uuid} does not exist.")))
+    }
+
+    pub fn record_by_name(&self, name: &str) -> Result<DomainRecord, EntityNotExistsError> {
+        self.inner
+            .read()
+            .expect("domain store lock")
+            .by_name
+            .get(name)
+            .cloned()
+            .ok_or_else(|| EntityNotExistsError::new(format!("Domain {name} does not exist.")))
+    }
+
     /// Publish metadata discovered by Matching only when this consumer has no
     /// record for the UUID. Cache lookups may race a refresh callback, so they
     /// must never replace metadata that the callback has already published.
@@ -138,6 +463,7 @@ impl InMemoryDomainStore {
             configuration: metadata.configuration.clone(),
             replication: metadata.replication.clone(),
             failover_version: metadata.failover_version,
+            notification_version: metadata.notification_version,
             failover_notification_version: metadata.failover_notification_version,
             is_global_domain: metadata.is_global_domain,
             archival_bucket: metadata.archival_bucket.clone(),
@@ -191,6 +517,7 @@ impl InMemoryDomainStore {
                 configuration: metadata.configuration.clone(),
                 replication: metadata.replication.clone(),
                 failover_version: metadata.failover_version,
+                notification_version: metadata.notification_version,
                 failover_notification_version: metadata.failover_notification_version,
                 is_global_domain: metadata.is_global_domain,
                 archival_bucket: metadata.archival_bucket.clone(),
@@ -247,8 +574,12 @@ impl InMemoryDomainStore {
         if !record.is_global_domain {
             return;
         }
-        let active_active = record.replication.active_clusters.as_ref().is_some_and(|active| {
-            active
+        let active_active = record
+            .replication
+            .active_clusters
+            .as_ref()
+            .is_some_and(|active| {
+                active
                     .active_clusters_by_cluster_attribute
                     .as_ref()
                     .is_some_and(|scopes| {
@@ -259,7 +590,7 @@ impl InMemoryDomainStore {
                                 .is_some_and(|attributes| !attributes.is_empty())
                         })
                     })
-        });
+            });
         if active_active {
             return;
         }
@@ -284,8 +615,8 @@ impl InMemoryDomainStore {
         configuration: DomainConfiguration,
         replication: DomainReplicationConfiguration,
         is_global_domain: bool,
-    ) -> Result<DescribeDomainResponse, DomainAlreadyExistsError> {
-        self.create_with_version(
+    ) -> Result<DescribeDomainResponse, FrontendDomainError> {
+        Ok(self.create_with_version(
             info,
             configuration,
             replication,
@@ -295,7 +626,7 @@ impl InMemoryDomainStore {
             } else {
                 crate::version_history::EMPTY_VERSION
             },
-        )
+        )?)
     }
 
     pub fn create_with_version(
@@ -317,6 +648,7 @@ impl InMemoryDomainStore {
             configuration,
             replication,
             failover_version,
+            notification_version: 0,
             failover_notification_version: 0,
             is_global_domain,
             archival_bucket: String::new(),
@@ -416,6 +748,16 @@ impl InMemoryDomainStore {
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
     ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
+        self.update_with_notification(req, metadata, policy, true)
+    }
+
+    fn update_with_notification(
+        &self,
+        req: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+        notify: bool,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FailoverError> {
         let mut inner = self.inner.write().expect("domain store lock");
         let current = inner.by_name.get(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
@@ -446,7 +788,7 @@ impl InMemoryDomainStore {
             is_global_domain: candidate.is_global_domain,
         };
         if prepared.write {
-            if prepared.failover {
+            if prepared.failover && notify {
                 self.notify_failover(&candidate);
             }
             inner.by_name.insert(req.name.clone(), candidate);
@@ -463,6 +805,17 @@ impl InMemoryDomainStore {
         current_cluster: &str,
         metadata: &cadence_common::cluster::Metadata,
         policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
+        self.failover_with_notification(req, current_cluster, metadata, policy, true)
+    }
+
+    fn failover_with_notification(
+        &self,
+        req: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+        notify: bool,
     ) -> Result<cadence_api::types::FailoverDomainResponse, FailoverError> {
         use cadence_api::enums::FailoverType;
         let mut inner = self.inner.write().expect("domain store lock");
@@ -557,7 +910,9 @@ impl InMemoryDomainStore {
             after_version: candidate.failover_version,
         });
         *record = candidate;
-        self.notify_failover(record);
+        if notify {
+            self.notify_failover(record);
+        }
         Ok(cadence_api::types::FailoverDomainResponse {
             domain_info: Some(record.info.clone()),
             configuration: Some(record.configuration.clone()),
@@ -768,13 +1123,16 @@ impl InMemoryDomainStore {
         Ok(())
     }
 
-    /// Mirrors Go `DeprecateDomain`: flips status to deprecated.
+    /// Mirrors Go `DeprecateDomain`: increments the domain config version,
+    /// updates its write timestamp, and flips status to deprecated.
     pub fn deprecate(&self, req: &DeprecateDomainRequest) -> Result<(), EntityNotExistsError> {
         let mut inner = self.inner.write().expect("domain store lock");
         let record = inner.by_name.get_mut(&req.name).ok_or_else(|| {
             EntityNotExistsError::new(format!("Domain {} does not exist.", req.name))
         })?;
         record.info.status = Some(DomainStatus::Deprecated);
+        record.config_version += 1;
+        record.last_updated_time_nanos = now_nanos();
         Ok(())
     }
 
@@ -786,6 +1144,144 @@ impl InMemoryDomainStore {
             .remove(name)
             .ok_or_else(|| EntityNotExistsError::new(format!("Domain {name} does not exist.")))?;
         inner.by_id.remove(&record.info.uuid);
+        Ok(())
+    }
+
+    /// Apply a validated Go domain replication task, dropping stale config
+    /// and failover versions while preserving unrelated local metadata.
+    pub fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        use cadence_api::enums::{DomainOperation, DomainStatus};
+
+        let invalid = |message: &str| FrontendDomainError::Invalid(message.to_string());
+        let operation = task
+            .domain_operation
+            .ok_or_else(|| invalid("invalid domain operation attribute"))?;
+        if task.id.is_empty() {
+            return Err(invalid("invalid domain ID attribute"));
+        }
+        let info = task
+            .info
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain info attribute"))?;
+        let configuration = task
+            .config
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain config attribute"))?;
+        let replication = task
+            .replication_config
+            .as_ref()
+            .ok_or_else(|| invalid("invalid domain replication config attribute"))?;
+        let status = match info.status {
+            Some(DomainStatus::Registered) => DomainStatus::Registered,
+            Some(DomainStatus::Deprecated) => DomainStatus::Deprecated,
+            _ => return Err(invalid("invalid domain status attribute")),
+        };
+        if info.name.is_empty() {
+            return Err(invalid("invalid domain info attribute"));
+        }
+
+        match operation {
+            DomainOperation::Create => {
+                if let Ok(existing) = self.record_by_name(&info.name) {
+                    if existing.info.uuid != task.id {
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
+                    }
+                    return Ok(());
+                }
+                if let Ok(existing) = self.record_by_id(&task.id) {
+                    if existing.info.name != info.name {
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
+                    }
+                    return Ok(());
+                }
+                let mut replicated_info = info.clone();
+                replicated_info.uuid = task.id.clone();
+                replicated_info.status = Some(status);
+                self.create_with_version(
+                    replicated_info,
+                    configuration.clone(),
+                    replication.clone(),
+                    true,
+                    task.failover_version,
+                )?;
+                let mut record = self
+                    .record_by_id(&task.id)
+                    .map_err(FrontendDomainError::NotFound)?;
+                record.config_version = task.config_version;
+                record.previous_failover_version = task.previous_failover_version;
+                record.isolation_groups = configuration.isolation_groups.clone();
+                record.async_workflow_config = configuration.async_workflow_config.clone();
+                self.restore_record(record);
+            }
+            DomainOperation::Update => {
+                let mut current = match self.record_by_id(&task.id) {
+                    Ok(record) => record,
+                    Err(_) => {
+                        return self.apply_replication_task(
+                            &cadence_api::types::DomainTaskAttributes {
+                                domain_operation: Some(DomainOperation::Create),
+                                ..task.clone()
+                            },
+                        );
+                    }
+                };
+                if current.info.name != info.name {
+                    return Err(invalid(
+                        "domain replication encounter name / UUID collision",
+                    ));
+                }
+                let old_failover_version = current.failover_version;
+                if current.config_version < task.config_version {
+                    current.info.name = info.name.clone();
+                    current.info.status = Some(status);
+                    current.info.description = info.description.clone();
+                    current.info.owner_email = info.owner_email.clone();
+                    current.info.data = info.data.clone();
+                    current.configuration = configuration.clone();
+                    current.replication.clusters = replication.clusters.clone();
+                    current.config_version = task.config_version;
+                    current.isolation_groups = configuration.isolation_groups.clone();
+                    current.async_workflow_config = configuration.async_workflow_config.clone();
+                }
+                if current.failover_version < task.failover_version {
+                    current.replication.active_cluster_name =
+                        replication.active_cluster_name.clone();
+                    current.replication.active_clusters = replication.active_clusters.clone();
+                    current.failover_version = task.failover_version;
+                    current.previous_failover_version = task.previous_failover_version;
+                    current.failover_end_time = None;
+                } else if is_active_active(&current.replication) || is_active_active(replication) {
+                    current.replication.active_clusters = Some(merge_active_clusters(
+                        current.replication.active_clusters.take(),
+                        replication.active_clusters.clone(),
+                    ));
+                }
+                current.last_updated_time_nanos = now_nanos();
+                self.restore_record(current.clone());
+                if current.failover_version > old_failover_version {
+                    self.notify_failover(&current);
+                }
+            }
+            DomainOperation::Delete => {
+                if let Ok(existing) = self.record_by_name(&info.name) {
+                    if existing.info.uuid != task.id {
+                        return Err(invalid(
+                            "domain replication encounter name / UUID collision",
+                        ));
+                    }
+                    self.delete(&info.name)
+                        .map_err(FrontendDomainError::NotFound)?;
+                }
+            }
+            _ => return Err(invalid("invalid domain operation attribute")),
+        }
         Ok(())
     }
 
@@ -901,6 +1397,448 @@ impl InMemoryDomainStore {
     }
 }
 
+impl FrontendDomainManager for InMemoryDomainStore {
+    fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, FrontendDomainError> {
+        InMemoryDomainStore::create_with_version(
+            self,
+            info,
+            configuration,
+            replication,
+            is_global_domain,
+            failover_version,
+        )
+        .map_err(Into::into)
+    }
+
+    fn describe(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, EntityNotExistsError> {
+        InMemoryDomainStore::describe(self, request)
+    }
+
+    fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
+        InMemoryDomainStore::domain_id(self, name)
+    }
+
+    fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
+        InMemoryDomainStore::is_active_in(self, uuid, cluster)
+    }
+
+    fn update(
+        &self,
+        request: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError> {
+        InMemoryDomainStore::update(self, request, metadata, policy).map_err(Into::into)
+    }
+
+    fn failover(
+        &self,
+        request: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError> {
+        InMemoryDomainStore::failover(self, request, current_cluster, metadata, policy)
+            .map_err(Into::into)
+    }
+
+    fn failover_history(
+        &self,
+        domain_id: &str,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError> {
+        InMemoryDomainStore::failover_history(self, domain_id, page_size, page_token)
+            .map_err(FrontendDomainError::from)
+    }
+
+    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
+        InMemoryDomainStore::deprecate(self, request).map_err(Into::into)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
+        InMemoryDomainStore::delete(self, name).map_err(Into::into)
+    }
+
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        InMemoryDomainStore::apply_replication_task(self, task)
+    }
+
+    fn list_page(
+        &self,
+        request: &cadence_api::service_types::ListDomainsRequest,
+    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError> {
+        InMemoryDomainStore::list_page(self, request)
+    }
+
+    fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
+        InMemoryDomainStore::subscribe_failover(self, uuid)
+    }
+}
+
+/// Frontend manager that commits domain mutations through the configured Go
+/// SQL metadata store while keeping the shared in-memory cache used by the
+/// other Rust services. Cache updates are reverted if persistence rejects a
+/// write so an RPC error cannot leave frontend-only metadata behind.
+pub struct PersistedFrontendDomainManager {
+    cache: InMemoryDomainStore,
+    persistence: Arc<dyn crate::matching_domain_metadata::DomainMetadataPersistence>,
+    serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+    mutation_lock: std::sync::Mutex<()>,
+}
+
+impl std::fmt::Debug for PersistedFrontendDomainManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistedFrontendDomainManager")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PersistedFrontendDomainManager {
+    pub fn new(
+        cache: InMemoryDomainStore,
+        persistence: Arc<dyn crate::matching_domain_metadata::DomainMetadataPersistence>,
+        serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+    ) -> Self {
+        Self {
+            cache,
+            persistence,
+            serialization_encoding,
+            mutation_lock: std::sync::Mutex::new(()),
+        }
+    }
+
+    fn current_metadata_version(&self) -> Result<i64, FrontendDomainError> {
+        self.persistence
+            .metadata_version()
+            .map_err(FrontendDomainError::Persistence)
+    }
+
+    fn persist_record(
+        &self,
+        record: &DomainRecord,
+        expected_version: i64,
+        create: bool,
+    ) -> Result<(), FrontendDomainError> {
+        let metadata = record
+            .to_matching_metadata(expected_version, &(self.serialization_encoding)())
+            .map_err(FrontendDomainError::Persistence)?;
+        let result = if create {
+            self.persistence.create_domain(&metadata, expected_version)
+        } else {
+            self.persistence.update_domain(&metadata, expected_version)
+        };
+        result.map_err(FrontendDomainError::Persistence)
+    }
+
+    fn publish_replication_task(
+        &self,
+        record: &DomainRecord,
+        operation: cadence_api::enums::DomainOperation,
+    ) -> Result<(), FrontendDomainError> {
+        if !record.is_global_domain {
+            return Ok(());
+        }
+        let payload = record
+            .encode_domain_replication_task(operation)
+            .map_err(FrontendDomainError::Persistence)?;
+        self.persistence
+            .enqueue_domain_replication_message(payload)
+            .map(|_| ())
+            .map_err(FrontendDomainError::Persistence)
+    }
+}
+
+impl PersistedFrontendDomainManager {
+    /// Append Go's `DomainAuditOperationTypeFailover` row after the domain row
+    /// commits. Backends without `domain_audit_log` keep the cache-only history.
+    fn record_failover_audit(
+        &self,
+        before: &DescribeDomainResponse,
+        before_failover_end: Option<i64>,
+        updated: &DomainRecord,
+    ) -> Result<(), FrontendDomainError> {
+        use crate::domain_audit::{
+            encode_domain_state, new_event_id, DomainAuditLog, DomainAuditState,
+            DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+        };
+        if !self.persistence.supports_domain_audit_log() {
+            return Ok(());
+        }
+        let after = self.cache.describe(&DescribeDomainRequest {
+            name: Some(updated.info.name.clone()),
+            uuid: None,
+        })?;
+        let now_nanos = updated.last_updated_time_nanos;
+        let state_before = DomainAuditState {
+            describe: before.clone(),
+            failover_expire_nanos: before_failover_end,
+        };
+        let state_after = DomainAuditState {
+            describe: after,
+            failover_expire_nanos: updated.failover_end_time,
+        };
+        let log = DomainAuditLog {
+            event_id: new_event_id(now_nanos),
+            domain_id: updated.info.uuid.clone(),
+            operation_type: DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+            created_time_nanos: now_nanos,
+            last_updated_time_nanos: now_nanos,
+            identity: String::new(),
+            identity_type: String::new(),
+            comment: "domain failover".into(),
+            state_before: encode_domain_state(&state_before)
+                .map_err(FrontendDomainError::Persistence)?,
+            state_after: encode_domain_state(&state_after)
+                .map_err(FrontendDomainError::Persistence)?,
+        };
+        self.persistence
+            .create_domain_audit_log(&log)
+            .map_err(FrontendDomainError::Persistence)
+    }
+}
+
+impl FrontendDomainManager for PersistedFrontendDomainManager {
+    fn create_with_version(
+        &self,
+        info: DomainInfo,
+        configuration: DomainConfiguration,
+        replication: DomainReplicationConfiguration,
+        is_global_domain: bool,
+        failover_version: i64,
+    ) -> Result<DescribeDomainResponse, FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let version = self.current_metadata_version()?;
+        let name = info.name.clone();
+        let response = self.cache.create_with_version(
+            info,
+            configuration,
+            replication,
+            is_global_domain,
+            failover_version,
+        )?;
+        let record = self
+            .cache
+            .record_by_name(&name)
+            .map_err(FrontendDomainError::NotFound)?;
+        if let Err(error) = self.persist_record(&record, version, true) {
+            let _ = self.cache.delete(&name);
+            return Err(error);
+        }
+        self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Create)?;
+        Ok(response)
+    }
+
+    fn describe(
+        &self,
+        request: &DescribeDomainRequest,
+    ) -> Result<DescribeDomainResponse, EntityNotExistsError> {
+        match self.cache.describe(request) {
+            Ok(response) => Ok(response),
+            Err(miss) => {
+                // Runtime cache miss: read the Go row like Go's DomainCache does.
+                // The insert never replaces an entry that appeared meanwhile.
+                let name = request.name.as_deref().filter(|value| !value.is_empty());
+                let id = request.uuid.as_deref().filter(|value| !value.is_empty());
+                let Ok(metadata) = self.persistence.get_domain(name, id) else {
+                    return Err(miss);
+                };
+                self.cache.insert_matching_metadata_if_missing(&metadata);
+                self.cache.describe(request)
+            }
+        }
+    }
+
+    fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
+        self.cache.domain_id(name)
+    }
+
+    fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
+        self.cache.is_active_in(uuid, cluster)
+    }
+
+    fn update(
+        &self,
+        request: &UpdateDomainRequest,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::service_types::UpdateDomainResponse, FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_name(&request.name)?;
+        let before = self.cache.describe(&DescribeDomainRequest {
+            name: Some(request.name.clone()),
+            uuid: None,
+        })?;
+        let version = self.current_metadata_version()?;
+        let response = self
+            .cache
+            .update_with_notification(request, metadata, policy, false)
+            .map_err(FrontendDomainError::from)?;
+        let updated = self.cache.record_by_name(&request.name)?;
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        if updated.failover_version != old.failover_version {
+            self.record_failover_audit(&before, old.failover_end_time, &updated)?;
+            self.cache.notify_failover(&updated);
+        }
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
+        Ok(response)
+    }
+
+    fn failover(
+        &self,
+        request: &cadence_api::types::FailoverDomainRequest,
+        current_cluster: &str,
+        metadata: &cadence_common::cluster::Metadata,
+        policy: &crate::domain_update::DomainPolicy,
+    ) -> Result<cadence_api::types::FailoverDomainResponse, FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_name(&request.domain_name)?;
+        let before = self.cache.describe(&DescribeDomainRequest {
+            name: Some(request.domain_name.clone()),
+            uuid: None,
+        })?;
+        let version = self.current_metadata_version()?;
+        let response = self
+            .cache
+            .failover_with_notification(request, current_cluster, metadata, policy, false)
+            .map_err(FrontendDomainError::from)?;
+        let updated = self.cache.record_by_name(&request.domain_name)?;
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        self.record_failover_audit(&before, old.failover_end_time, &updated)?;
+        self.cache.notify_failover(&updated);
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
+        Ok(response)
+    }
+
+    fn failover_history(
+        &self,
+        domain_id: &str,
+        page_size: usize,
+        page_token: &[u8],
+    ) -> Result<(Vec<cadence_api::types::FailoverEvent>, Vec<u8>), FrontendDomainError> {
+        if !self.persistence.supports_domain_audit_log() {
+            return self
+                .cache
+                .failover_history(domain_id, page_size, page_token)
+                .map_err(FrontendDomainError::from);
+        }
+        // Go reads the audit table directly (no domain lookup) and filters
+        // rows with no cluster change, so restarts keep the full history.
+        let token = (!page_token.is_empty()).then_some(page_token);
+        let page = self
+            .persistence
+            .get_domain_audit_logs(
+                domain_id,
+                crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+                page_size,
+                token,
+            )
+            .map_err(FrontendDomainError::Persistence)?;
+        let mut events = Vec::new();
+        for log in &page.logs {
+            let event = crate::domain_audit::failover_event(log)
+                .map_err(FrontendDomainError::Persistence)?;
+            events.extend(event);
+        }
+        Ok((events, page.next_page_token.unwrap_or_default()))
+    }
+
+    fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_name(&request.name)?;
+        let version = self.current_metadata_version()?;
+        self.cache.deprecate(request)?;
+        let updated = self.cache.record_by_name(&request.name)?;
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
+        Ok(())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let record = self.cache.record_by_name(name)?;
+        self.persistence
+            .delete_domain(&record.info.uuid)
+            .map_err(FrontendDomainError::Persistence)?;
+        self.cache.delete(name).map_err(FrontendDomainError::from)?;
+        self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Delete)
+    }
+
+    fn apply_replication_task(
+        &self,
+        task: &cadence_api::types::DomainTaskAttributes,
+    ) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        let old = self.cache.record_by_id(&task.id).ok();
+        let version = self.current_metadata_version()?;
+        if task.domain_operation == Some(cadence_api::enums::DomainOperation::Delete) {
+            if let Some(record) = old {
+                self.persistence
+                    .delete_domain(&record.info.uuid)
+                    .map_err(FrontendDomainError::Persistence)?;
+                self.cache.apply_replication_task(task)?;
+            } else {
+                self.cache.apply_replication_task(task)?;
+            }
+            return Ok(());
+        }
+
+        self.cache.apply_replication_task(task)?;
+        let updated = self
+            .cache
+            .record_by_id(&task.id)
+            .map_err(FrontendDomainError::NotFound)?;
+        if let Err(error) = self.persist_record(&updated, version, old.is_none()) {
+            if let Some(record) = old {
+                self.cache.restore_record(record);
+            } else {
+                let _ = self.cache.delete(&updated.info.name);
+            }
+            return Err(error);
+        }
+        if old
+            .as_ref()
+            .is_some_and(|record| updated.failover_version > record.failover_version)
+        {
+            self.cache.notify_failover(&updated);
+        }
+        Ok(())
+    }
+
+    fn list_page(
+        &self,
+        request: &cadence_api::service_types::ListDomainsRequest,
+    ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError> {
+        self.cache.list_page(request)
+    }
+
+    fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64> {
+        self.cache.subscribe_failover(uuid)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -935,6 +1873,143 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    fn replication_task(
+        operation: cadence_api::enums::DomainOperation,
+    ) -> cadence_api::types::DomainTaskAttributes {
+        let (info, config, replication_config) = sample("replicated", "domain-uuid");
+        cadence_api::types::DomainTaskAttributes {
+            domain_operation: Some(operation),
+            id: info.uuid.clone(),
+            info: Some(info),
+            config: Some(config),
+            replication_config: Some(replication_config),
+            config_version: 1,
+            failover_version: 10,
+            previous_failover_version: 9,
+        }
+    }
+
+    #[test]
+    fn incoming_domain_replication_is_idempotent_and_versioned() {
+        let store = InMemoryDomainStore::new();
+        let create = replication_task(cadence_api::enums::DomainOperation::Create);
+        store.apply_replication_task(&create).unwrap();
+        store.apply_replication_task(&create).unwrap();
+        let mut update = replication_task(cadence_api::enums::DomainOperation::Update);
+        update.config_version = 2;
+        update.failover_version = 9;
+        update.info.as_mut().unwrap().description = "replicated update".into();
+        update
+            .config
+            .as_mut()
+            .unwrap()
+            .workflow_execution_retention_period_in_days = 14;
+        update
+            .replication_config
+            .as_mut()
+            .unwrap()
+            .active_cluster_name = "stale".into();
+        store.apply_replication_task(&update).unwrap();
+        let record = store.record_by_id("domain-uuid").unwrap();
+        assert_eq!(record.config_version, 2);
+        assert_eq!(record.info.description, "replicated update");
+        assert_eq!(
+            record
+                .configuration
+                .workflow_execution_retention_period_in_days,
+            14
+        );
+        assert_eq!(record.replication.active_cluster_name, "active");
+
+        update.failover_version = 11;
+        update
+            .replication_config
+            .as_mut()
+            .unwrap()
+            .active_cluster_name = "standby".into();
+        store.apply_replication_task(&update).unwrap();
+        assert_eq!(
+            store
+                .record_by_id("domain-uuid")
+                .unwrap()
+                .replication
+                .active_cluster_name,
+            "standby"
+        );
+    }
+
+    #[test]
+    fn incoming_domain_delete_checks_identity_and_is_idempotent() {
+        let store = InMemoryDomainStore::new();
+        let create = replication_task(cadence_api::enums::DomainOperation::Create);
+        store.apply_replication_task(&create).unwrap();
+        let mut delete = replication_task(cadence_api::enums::DomainOperation::Delete);
+        delete.id = "different-uuid".into();
+        assert!(store.apply_replication_task(&delete).is_err());
+        delete.id = create.id;
+        store.apply_replication_task(&delete).unwrap();
+        store.apply_replication_task(&delete).unwrap();
+        assert!(store.record_by_name("replicated").is_err());
+    }
+
+    #[test]
+    fn domain_replication_task_carries_domain_snapshot_versions() {
+        let (info, configuration, replication) = sample("replicated", "domain-uuid");
+        let record = DomainRecord {
+            info,
+            configuration,
+            replication,
+            failover_version: 42,
+            notification_version: 9,
+            failover_notification_version: 3,
+            is_global_domain: true,
+            archival_bucket: String::new(),
+            failover_audit: Vec::new(),
+            config_version: 7,
+            last_updated_time_nanos: 123,
+            failover_end_time: None,
+            previous_failover_version: 41,
+            isolation_groups: None,
+            async_workflow_config: None,
+        };
+        let task = record
+            .to_domain_replication_task(cadence_api::enums::DomainOperation::Update)
+            .unwrap();
+        assert_eq!(
+            task.task_type,
+            Some(cadence_api::enums::ReplicationTaskType::Domain)
+        );
+        let attributes = task.domain_task_attributes.unwrap();
+        assert_eq!(attributes.id, "domain-uuid");
+        assert_eq!(
+            attributes.domain_operation,
+            Some(cadence_api::enums::DomainOperation::Update)
+        );
+        assert_eq!(attributes.config_version, 7);
+        assert_eq!(attributes.failover_version, 42);
+        assert_eq!(attributes.previous_failover_version, 41);
+        assert_eq!(
+            attributes.replication_config.unwrap().active_cluster_name,
+            "active"
+        );
+
+        let encoded = record
+            .encode_domain_replication_task(cadence_api::enums::DomainOperation::Update)
+            .unwrap();
+        let mut reader = cadence_thrift::protocol::Reader::new(&encoded);
+        let decoded = cadence_thrift::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        assert!(matches!(
+            decoded.get(10),
+            Some(cadence_thrift::value::Value::I32(0))
+        ));
+        // Field 20 is the nested DomainTaskAttributes struct; its info is field 30.
+        assert!(matches!(
+            decoded.get(20),
+            Some(cadence_thrift::value::Value::Struct(_))
+        ));
     }
 
     #[test]
@@ -1000,6 +2075,17 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
+            domains
+                .inner
+                .read()
+                .unwrap()
+                .by_name
+                .get("go-seeded")
+                .unwrap()
+                .notification_version,
+            6
+        );
+        assert_eq!(
             view.configuration
                 .unwrap()
                 .workflow_execution_retention_period_in_days,
@@ -1028,8 +2114,21 @@ mod tests {
         // An ordinary domain configuration publication has a newer metadata
         // notification but the same failover notification version.
         metadata.notification_version = 7;
-        metadata.configuration.workflow_execution_retention_period_in_days = 18;
+        metadata
+            .configuration
+            .workflow_execution_retention_period_in_days = 18;
         domains.sync_matching_metadata(&[metadata.clone()]);
+        assert_eq!(
+            domains
+                .inner
+                .read()
+                .unwrap()
+                .by_name
+                .get("go-seeded")
+                .unwrap()
+                .notification_version,
+            7
+        );
         assert!(!failover.has_changed().unwrap());
 
         // Go's IsActiveActive excludes attribute-scoped domains from the
@@ -1132,14 +2231,24 @@ mod tests {
         {
             let mut inner = store.inner.write().unwrap();
             let record = inner.by_name.get_mut("d").unwrap();
-            record.replication.active_clusters = Some(serde_json::from_value(serde_json::json!({
-                "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
-                    "r": {"activeClusterName": "passive"}
-                }}}
-            })).unwrap());
+            record.replication.active_clusters = Some(
+                serde_json::from_value(serde_json::json!({
+                    "activeClustersByClusterAttribute": {"region": {"clusterAttributes": {
+                        "r": {"activeClusterName": "passive"}
+                    }}}
+                }))
+                .unwrap(),
+            );
         }
         assert!(store.is_active_in("id", "passive").unwrap());
-        store.inner.write().unwrap().by_name.get_mut("d").unwrap().failover_end_time = Some(0);
+        store
+            .inner
+            .write()
+            .unwrap()
+            .by_name
+            .get_mut("d")
+            .unwrap()
+            .failover_end_time = Some(0);
         assert!(!store.is_active_in("id", "active").unwrap());
         assert!(!store.is_active_in("id", "passive").unwrap());
         assert!(store.is_active_in("missing", "active").is_err());
@@ -1253,6 +2362,30 @@ mod tests {
         let local = store.subscribe_failover("local-id");
         store.notify_failover(store.inner.read().unwrap().by_name.get("local").unwrap());
         assert!(!local.has_changed().unwrap());
+    }
+
+    #[test]
+    fn persisted_failover_notification_can_be_deferred_until_commit() {
+        let store = InMemoryDomainStore::new();
+        let (info, cfg, rep) = global_sample("g", "uuid-g");
+        store.create(info, cfg, rep, true).unwrap();
+        let mut watch = store.subscribe_failover("uuid-g");
+        let response = store
+            .failover_with_notification(
+                &failover_req("g", "standby"),
+                "standby",
+                &cluster_metadata(),
+                &test_policy(),
+                false,
+            )
+            .unwrap();
+        assert!(!watch.has_changed().unwrap());
+        let persisted = store.record_by_name("g").unwrap();
+        assert_eq!(response.failover_version, persisted.failover_version);
+
+        store.notify_failover(&persisted);
+        assert!(watch.has_changed().unwrap());
+        assert_eq!(*watch.borrow_and_update(), 1);
     }
 
     #[test]
@@ -1383,19 +2516,23 @@ mod tests {
         let (info, cfg, rep) = sample("d1", "uuid-1");
         store.create(info, cfg, rep, false).unwrap();
         let updated = store
-            .update(&UpdateDomainRequest {
-                name: "d1".into(),
-                updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
-                    description: Some("new".into()),
+            .update(
+                &UpdateDomainRequest {
+                    name: "d1".into(),
+                    updated_info: Some(cadence_api::service_types::UpdateDomainInfo {
+                        description: Some("new".into()),
+                        ..Default::default()
+                    }),
+                    configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
+                        history_archival_status: Some(ArchivalStatus::Enabled),
+                        history_archival_uri: Some("file:///tmp/history".into()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                configuration: Some(cadence_api::service_types::DomainConfigurationUpdate {
-                    history_archival_status: Some(ArchivalStatus::Enabled),
-                    history_archival_uri: Some("file:///tmp/history".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }, &cluster_metadata(), &test_policy())
+                },
+                &cluster_metadata(),
+                &test_policy(),
+            )
             .unwrap();
         let info = updated.domain_info.unwrap();
         assert_eq!(info.description, "new");
@@ -1410,6 +2547,7 @@ mod tests {
         let store = InMemoryDomainStore::new();
         let (info, cfg, rep) = sample("d1", "uuid-1");
         store.create(info, cfg, rep, false).unwrap();
+        let before = store.record_by_name("d1").unwrap().config_version;
         store
             .deprecate(&DeprecateDomainRequest {
                 name: "d1".into(),
@@ -1425,6 +2563,10 @@ mod tests {
         assert_eq!(
             got.domain_info.unwrap().status,
             Some(DomainStatus::Deprecated)
+        );
+        assert_eq!(
+            store.record_by_name("d1").unwrap().config_version,
+            before + 1
         );
     }
 }
@@ -1520,5 +2662,64 @@ mod page_tests {
             "delta"
         );
         assert!(second.next_page_token.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod go_sql_frontend_manager_tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_domain_manager_survives_cache_restart() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE domains (shard_id INTEGER, id BLOB, name TEXT, is_global BOOLEAN, data BLOB, data_encoding TEXT, PRIMARY KEY (shard_id, id));
+                 CREATE TABLE domain_metadata (id INTEGER PRIMARY KEY, notification_version INTEGER);
+                 INSERT INTO domain_metadata VALUES (1, 7);",
+            )
+            .unwrap();
+        let persistence = std::sync::Arc::new(
+            crate::matching_domain_metadata::MatchingDomainMetadataStore::from_connection(
+                connection,
+                "cluster-a",
+            ),
+        );
+        let manager = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+            std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+        );
+        let domain_id = uuid::Uuid::from_u128(0x1234).to_string();
+        let (mut info, config, replication) = super::tests::sample("durable", &domain_id);
+        info.uuid = domain_id.clone();
+
+        manager
+            .create_with_version(info, config, replication, false, 1)
+            .unwrap();
+        assert_eq!(persistence.get_metadata_version().unwrap(), 8);
+
+        // A fresh cache misses and must read the Go-format row through SQL.
+        let direct = persistence
+            .get_domain(Some("durable"), None)
+            .unwrap_or_else(|error| panic!("direct get_domain failed: {error:?}"));
+        assert_eq!(
+            (direct.info.name.as_str(), direct.info.uuid.as_str()),
+            ("durable", domain_id.as_str())
+        );
+        let restarted = PersistedFrontendDomainManager::new(
+            InMemoryDomainStore::new(),
+            persistence.clone(),
+            std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
+        );
+        let described = restarted
+            .describe(&DescribeDomainRequest {
+                name: Some("durable".into()),
+                uuid: None,
+            })
+            .unwrap();
+        assert_eq!(described.domain_info.unwrap().uuid, domain_id);
+        restarted.delete("durable").unwrap();
+        assert!(persistence.get_domain(Some("durable"), None).is_err());
     }
 }

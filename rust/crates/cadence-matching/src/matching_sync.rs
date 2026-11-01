@@ -787,7 +787,10 @@ mod tests {
         let (_stop, matcher) = fixture();
         let poller = matcher.clone();
         let poll = tokio::spawn(async move {
-            poller.poll("b").await.map(|received| received.finish(Ok(())))
+            poller
+                .poll("b")
+                .await
+                .map(|received| received.finish(Ok(())))
         });
         tokio::task::yield_now().await;
         assert!(
@@ -859,7 +862,10 @@ mod tests {
         let poller = matcher.clone();
         let poll = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            poller.poll("").await.map(|received| received.finish(Ok(())))
+            poller
+                .poll("")
+                .await
+                .map(|received| received.finish(Ok(())))
         });
         assert!(
             !matcher

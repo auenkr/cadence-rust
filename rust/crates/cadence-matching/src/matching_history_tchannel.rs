@@ -2630,80 +2630,146 @@ mod typed_codec_tests {
         let (peer, address) = GoPeer::start("raw");
         let client = TChannelHistoryClient::new(address);
         let execution = n::api::WorkflowExecution {
-            workflow_id: raw(b"workflow-\xfe"), run_id: raw(b"run-\xfd"),
+            workflow_id: raw(b"workflow-\xfe"),
+            run_id: raw(b"run-\xfd"),
         };
-        let task_list = n::api::TaskList { name: raw(b"queue-\xfa"), ..Default::default() };
-        client.refresh_workflow_tasks_native(
-            &n::history::RefreshWorkflowTasksRequest {
-                domain: raw(b"domain-name-\xf8"), domain_id: raw(b"domain-\xff"),
-                workflow_execution: Some(execution.clone()),
-            }, Duration::from_secs(3),
-        ).await.unwrap();
-        let described = client.describe_workflow_execution_native(
-            &n::history::DescribeWorkflowExecutionRequest {
-                domain_id: raw(b"domain-\xff"),
-                request: Some(n::api::DescribeWorkflowExecutionRequest {
-                    domain: raw(b"domain-name-\xf8"), workflow_execution: Some(execution.clone()),
-                    ..Default::default()
-                }),
-            }, Duration::from_secs(3),
-        ).await.unwrap();
+        let task_list = n::api::TaskList {
+            name: raw(b"queue-\xfa"),
+            ..Default::default()
+        };
+        client
+            .refresh_workflow_tasks_native(
+                &n::history::RefreshWorkflowTasksRequest {
+                    domain: raw(b"domain-name-\xf8"),
+                    domain_id: raw(b"domain-\xff"),
+                    workflow_execution: Some(execution.clone()),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        let described = client
+            .describe_workflow_execution_native(
+                &n::history::DescribeWorkflowExecutionRequest {
+                    domain_id: raw(b"domain-\xff"),
+                    request: Some(n::api::DescribeWorkflowExecutionRequest {
+                        domain: raw(b"domain-name-\xf8"),
+                        workflow_execution: Some(execution.clone()),
+                        ..Default::default()
+                    }),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
         assert_eq!(described.pending_decision.unwrap().schedule_id, 41);
         let info = described.workflow_execution_info.unwrap();
-        assert_eq!(info.workflow_execution.unwrap().workflow_id.as_bytes(), b"workflow-\xfe");
+        assert_eq!(
+            info.workflow_execution.unwrap().workflow_id.as_bytes(),
+            b"workflow-\xfe"
+        );
         assert_eq!(info.r#type.unwrap().name.as_bytes(), b"type-\xf7");
-        let mutable = client.get_mutable_state_native(
-            &n::history::GetMutableStateRequest {
-                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution.clone()),
-                expected_next_event_id: 9, current_branch_token: b"input-branch".to_vec(),
-                ..Default::default()
-            }, Duration::from_secs(3),
-        ).await.unwrap();
-        assert_eq!(mutable.workflow_execution.unwrap().run_id.as_bytes(), b"run-\xfd");
+        let mutable = client
+            .get_mutable_state_native(
+                &n::history::GetMutableStateRequest {
+                    domain_id: raw(b"domain-\xff"),
+                    workflow_execution: Some(execution.clone()),
+                    expected_next_event_id: 9,
+                    current_branch_token: b"input-branch".to_vec(),
+                    ..Default::default()
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            mutable.workflow_execution.unwrap().run_id.as_bytes(),
+            b"run-\xfd"
+        );
         assert_eq!(mutable.workflow_type.unwrap().name.as_bytes(), b"type-\xf7");
         assert_eq!(mutable.task_list.unwrap().name.as_bytes(), b"queue-\xfa");
-        assert_eq!(mutable.sticky_task_list.unwrap().name.as_bytes(), b"sticky-\xf6");
+        assert_eq!(
+            mutable.sticky_task_list.unwrap().name.as_bytes(),
+            b"sticky-\xf6"
+        );
         assert_eq!(mutable.client_library_version.as_bytes(), b"library-\xf5");
         assert_eq!(mutable.client_feature_version.as_bytes(), b"feature-\xf4");
         assert_eq!(mutable.client_impl.as_bytes(), b"impl-\xf3");
         assert_eq!(mutable.current_branch_token, [0xf2, 0]);
         assert_eq!(mutable.history_size, 42);
-        let decision = client.record_decision_task_started_native(
-            &n::history::RecordDecisionTaskStartedRequest {
-                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution.clone()),
-                schedule_id: 51, task_id: 52, request_id: raw(b"decision-\xfc"),
-                poll_request: Some(n::api::PollForDecisionTaskRequest {
-                    task_list: Some(task_list.clone()), identity: raw(b"worker-\xfb"), ..Default::default()
-                }),
-            }, Duration::from_secs(3),
-        ).await.unwrap();
-        assert_eq!(decision.workflow_type.unwrap().name.as_bytes(), b"type-\xff");
+        let decision = client
+            .record_decision_task_started_native(
+                &n::history::RecordDecisionTaskStartedRequest {
+                    domain_id: raw(b"domain-\xff"),
+                    workflow_execution: Some(execution.clone()),
+                    schedule_id: 51,
+                    task_id: 52,
+                    request_id: raw(b"decision-\xfc"),
+                    poll_request: Some(n::api::PollForDecisionTaskRequest {
+                        task_list: Some(task_list.clone()),
+                        identity: raw(b"worker-\xfb"),
+                        ..Default::default()
+                    }),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            decision.workflow_type.unwrap().name.as_bytes(),
+            b"type-\xff"
+        );
         let query = &decision.queries[&b"query-\xfe"[..]];
         assert_eq!(query.query_type.as_bytes(), b"query-type-\xfd");
         assert_eq!(query.query_args.as_ref().unwrap().data, [0xff, 0x00]);
-        let activity = client.record_activity_task_started_native(
-            &n::history::RecordActivityTaskStartedRequest {
-                domain_id: raw(b"domain-\xff"), workflow_execution: Some(execution),
-                schedule_id: 61, task_id: 62, request_id: raw(b"activity-\xfc"),
-                poll_request: Some(n::api::PollForActivityTaskRequest {
-                    task_list: Some(task_list), identity: raw(b"worker-\xfb"), ..Default::default()
-                }),
-            }, Duration::from_secs(3),
-        ).await.unwrap();
+        let activity = client
+            .record_activity_task_started_native(
+                &n::history::RecordActivityTaskStartedRequest {
+                    domain_id: raw(b"domain-\xff"),
+                    workflow_execution: Some(execution),
+                    schedule_id: 61,
+                    task_id: 62,
+                    request_id: raw(b"activity-\xfc"),
+                    poll_request: Some(n::api::PollForActivityTaskRequest {
+                        task_list: Some(task_list),
+                        identity: raw(b"worker-\xfb"),
+                        ..Default::default()
+                    }),
+                },
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
         assert_eq!(activity.workflow_domain.as_bytes(), b"workflow-domain-\xff");
         assert_eq!(activity.heartbeat_details.unwrap().data, [0xfe, 0x00]);
-        let Some(n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(attributes)) = activity.scheduled_event.unwrap().attributes else { panic!("missing activity attributes") };
+        let Some(n::api::history_event::Attributes::ActivityTaskScheduledEventAttributes(
+            attributes,
+        )) = activity.scheduled_event.unwrap().attributes
+        else {
+            panic!("missing activity attributes")
+        };
         assert_eq!(attributes.activity_id.as_bytes(), b"activity-\xfd");
         assert_eq!(attributes.input.unwrap().data, [0xfc, 0x00]);
         let retry = attributes.retry_policy.unwrap();
-        assert_eq!(retry.non_retryable_error_reasons[0].as_bytes(), b"reason-\xfb");
-        assert_eq!(retry.initial_interval, Some(prost_types::Duration { seconds: 0, nanos: 0 }));
+        assert_eq!(
+            retry.non_retryable_error_reasons[0].as_bytes(),
+            b"reason-\xfb"
+        );
+        assert_eq!(
+            retry.initial_interval,
+            Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 0
+            })
+        );
         assert_eq!(retry.maximum_interval, retry.initial_interval);
         assert_eq!(retry.expiration_interval, retry.initial_interval);
-        assert_eq!(attributes.header.unwrap().fields[&b"header-\xfa"[..]].data, [0xf9, 0x00]);
+        assert_eq!(
+            attributes.header.unwrap().fields[&b"header-\xfa"[..]].data,
+            [0xf9, 0x00]
+        );
         let calls = peer.stop_and_read();
         assert_eq!(calls.lines().filter(|line| !line.is_empty()).count(), 5);
-
     }
 
     #[test]

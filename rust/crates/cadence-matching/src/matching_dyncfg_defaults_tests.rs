@@ -26,62 +26,265 @@ fn assert_default(source: &'static str, key: &str, expected: &str) {
         .find(&quoted)
         .unwrap_or_else(|| panic!("{key}: no Rust reader found"));
     let window = &source[start..(start + WINDOW).min(source.len())];
-    assert!(window.contains(expected), "{key}: expected default `{expected}` near reader");
+    assert!(
+        window.contains(expected),
+        "{key}: expected default `{expected}` near reader"
+    );
 }
 
 #[test]
 fn reader_defaults_match_go_table() {
     let table: &[(&str, &str, &str)] = &[
-        (include_str!("grpc_matching.rs"), "matching.numTasklistWritePartitions", "1,"),
-        (include_str!("grpc_matching.rs"), "matching.numTasklistReadPartitions", "1,"),
-        (include_str!("grpc_matching.rs"), "matching.localTaskWaitTime", "10_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.localPollWaitTime", "10_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.enableGetNumberOfPartitionsFromCache", "false"),
-        (include_str!("grpc_matching.rs"), "matching.qpsTrackerInterval", "DEFAULT_QPS_TRACKER_INTERVAL_NANOS"),
-        (include_str!("grpc_matching.rs"), "matching.forwarderMaxChildrenPerNode", "20"),
-        (include_str!("grpc_matching.rs"), "matching.forwarderMaxOutstandingPolls", "1,"),
-        (include_str!("grpc_matching.rs"), "matching.forwarderMaxOutstandingTasks", "1,"),
-        (include_str!("grpc_matching.rs"), "matching.forwarderMaxRatePerSecond", "10,"),
-        (include_str!("grpc_matching.rs"), "matching.getTasksBatchSize", "DEFAULT_TASKS_BATCH_SIZE"),
-        (include_str!("grpc_matching.rs"), "matching.readRangeSize", "DEFAULT_READ_RANGE_SIZE"),
-        (include_str!("grpc_matching.rs"), "matching.asyncTaskDispatchTimeout", "DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS"),
-        (include_str!("grpc_matching.rs"), "matching.appendTaskTimeout", "5_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.maxTaskBatchSize", "100"),
-        (include_str!("grpc_matching.rs"), "matching.outstandingTaskAppendsThreshold", "250"),
-        (include_str!("grpc_matching.rs"), "matching.maxTaskDeleteBatchSize", "100"),
-        (include_str!("grpc_matching.rs"), "matching.updateAckInterval", "DEFAULT_UPDATE_ACK_INTERVAL_NANOS"),
-        (include_str!("grpc_matching.rs"), "matching.recordTaskStartedTimeout", "DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS"),
-        (include_str!("grpc_matching.rs"), "matching.minTaskThrottlingBurstSize", "MIN_TASK_THROTTLING_BURST_SIZE"),
-        (include_str!("grpc_matching.rs"), "matching.idleTasklistCheckInterval", "300_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.adaptiveScalerUpdateInterval", "15_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.enableAdaptiveScaler", "false"),
-        (include_str!("grpc_matching.rs"), "matching.partitionUpscaleRPS", "200"),
-        (include_str!("grpc_matching.rs"), "matching.partitionDownscaleFactor", "0.75"),
-        (include_str!("grpc_matching.rs"), "matching.partitionUpscaleSustainedDuration", "60_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.partitionDownscaleSustainedDuration", "120_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.taskListMinimumWritePartitions", "1"),
-        (include_str!("grpc_matching.rs"), "matching.enablePartitionIsolationGroupAssignment", "false"),
-        (include_str!("grpc_matching.rs"), "matching.enablePartitionEmptyCheck", "false"),
-        (include_str!("grpc_matching.rs"), "matching.isolationGroupUpscaleSustainedDuration", "60_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.isolationGroupDownscaleSustainedDuration", "120_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.isolationGroupHasPollersSustainedDuration", "60_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.isolationGroupNoPollersSustainedDuration", "60_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.isolationGroupsPerPartition", "2"),
-        (include_str!("grpc_matching.rs"), "matching.taskIsolationPollerWindow", "2_000_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.taskIsolationDuration", "200_000_000"),
-        (include_str!("grpc_matching.rs"), "matching.enableStandbyTaskCompletion", "true"),
-        (include_str!("grpc_matching.rs"), "matching.enableClientAutoConfig", "false"),
-        (include_str!("grpc_matching.rs"), "matching.overrideTaskListRps", "0.0"),
-        (include_str!("grpc_matching.rs"), "matching.matchingReturnAllTaskListKinds", "false"),
-        (include_str!("grpc_matching.rs"), "system.enableTasklistIsolation", "false"),
-        (include_str!("grpc_matching.rs"), "system.enableDistributedSemaphore", "false"),
-        (include_str!("launcher.rs"), "matching.excludeShortLivedTaskListsFromShardManager", "true"),
-        (include_str!("launcher.rs"), "matching.percentageOnboardedToShardManager", "0"),
-        (include_str!("launcher.rs"), "system.enableDebugMode", "false"),
-        (include_str!("matching_persistence_limiter.rs"), "matching.persistenceMaxQPS", "HOST_QPS_DEFAULT"),
-        (include_str!("matching_persistence_limiter.rs"), "matching.persistenceGlobalMaxQPS", "GLOBAL_QPS_DEFAULT"),
-        (include_str!("matching_throttled_logger.rs"), "matching.throttledLogRPS", "None, 20"),
-        (include_str!("matching_task_info_log.rs"), "matching.enableTaskInfoLogByDomainID", "false"),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.numTasklistWritePartitions",
+            "1,",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.numTasklistReadPartitions",
+            "1,",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.localTaskWaitTime",
+            "10_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.localPollWaitTime",
+            "10_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enableGetNumberOfPartitionsFromCache",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.qpsTrackerInterval",
+            "DEFAULT_QPS_TRACKER_INTERVAL_NANOS",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.forwarderMaxChildrenPerNode",
+            "20",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.forwarderMaxOutstandingPolls",
+            "1,",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.forwarderMaxOutstandingTasks",
+            "1,",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.forwarderMaxRatePerSecond",
+            "10,",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.getTasksBatchSize",
+            "DEFAULT_TASKS_BATCH_SIZE",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.readRangeSize",
+            "DEFAULT_READ_RANGE_SIZE",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.asyncTaskDispatchTimeout",
+            "DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.appendTaskTimeout",
+            "5_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.maxTaskBatchSize",
+            "100",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.outstandingTaskAppendsThreshold",
+            "250",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.maxTaskDeleteBatchSize",
+            "100",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.updateAckInterval",
+            "DEFAULT_UPDATE_ACK_INTERVAL_NANOS",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.recordTaskStartedTimeout",
+            "DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.minTaskThrottlingBurstSize",
+            "MIN_TASK_THROTTLING_BURST_SIZE",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.idleTasklistCheckInterval",
+            "300_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.adaptiveScalerUpdateInterval",
+            "15_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enableAdaptiveScaler",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.partitionUpscaleRPS",
+            "200",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.partitionDownscaleFactor",
+            "0.75",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.partitionUpscaleSustainedDuration",
+            "60_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.partitionDownscaleSustainedDuration",
+            "120_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.taskListMinimumWritePartitions",
+            "1",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enablePartitionIsolationGroupAssignment",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enablePartitionEmptyCheck",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.isolationGroupUpscaleSustainedDuration",
+            "60_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.isolationGroupDownscaleSustainedDuration",
+            "120_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.isolationGroupHasPollersSustainedDuration",
+            "60_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.isolationGroupNoPollersSustainedDuration",
+            "60_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.isolationGroupsPerPartition",
+            "2",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.taskIsolationPollerWindow",
+            "2_000_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.taskIsolationDuration",
+            "200_000_000",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enableStandbyTaskCompletion",
+            "true",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.enableClientAutoConfig",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.overrideTaskListRps",
+            "0.0",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "matching.matchingReturnAllTaskListKinds",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "system.enableTasklistIsolation",
+            "false",
+        ),
+        (
+            include_str!("grpc_matching.rs"),
+            "system.enableDistributedSemaphore",
+            "false",
+        ),
+        (
+            include_str!("launcher.rs"),
+            "matching.excludeShortLivedTaskListsFromShardManager",
+            "true",
+        ),
+        (
+            include_str!("launcher.rs"),
+            "matching.percentageOnboardedToShardManager",
+            "0",
+        ),
+        (
+            include_str!("launcher.rs"),
+            "system.enableDebugMode",
+            "false",
+        ),
+        (
+            include_str!("matching_persistence_limiter.rs"),
+            "matching.persistenceMaxQPS",
+            "HOST_QPS_DEFAULT",
+        ),
+        (
+            include_str!("matching_persistence_limiter.rs"),
+            "matching.persistenceGlobalMaxQPS",
+            "GLOBAL_QPS_DEFAULT",
+        ),
+        (
+            include_str!("matching_throttled_logger.rs"),
+            "matching.throttledLogRPS",
+            "None, 20",
+        ),
+        (
+            include_str!("matching_task_info_log.rs"),
+            "matching.enableTaskInfoLogByDomainID",
+            "false",
+        ),
     ];
     for (source, key, expected) in table {
         assert_default(source, key, expected);
@@ -92,11 +295,23 @@ fn reader_defaults_match_go_table() {
 fn shared_default_constants_match_go() {
     assert_eq!(crate::matching_reader::DEFAULT_TASKS_BATCH_SIZE, 1000);
     assert_eq!(crate::matching_reader::DEFAULT_READ_RANGE_SIZE, 50000);
-    assert_eq!(crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS, 3_000_000_000);
-    assert_eq!(crate::matching_reader::DEFAULT_UPDATE_ACK_INTERVAL_NANOS, 60_000_000_000);
-    assert_eq!(crate::matching_history::DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS, 1_000_000_000);
+    assert_eq!(
+        crate::matching_reader::DEFAULT_ASYNC_TASK_DISPATCH_TIMEOUT_NANOS,
+        3_000_000_000
+    );
+    assert_eq!(
+        crate::matching_reader::DEFAULT_UPDATE_ACK_INTERVAL_NANOS,
+        60_000_000_000
+    );
+    assert_eq!(
+        crate::matching_history::DEFAULT_RECORD_TASK_STARTED_TIMEOUT_NANOS,
+        1_000_000_000
+    );
     assert_eq!(crate::matching_limiter::MIN_TASK_THROTTLING_BURST_SIZE, 1);
-    assert_eq!(crate::matching_registry::DEFAULT_QPS_TRACKER_INTERVAL_NANOS, 10_000_000_000);
+    assert_eq!(
+        crate::matching_registry::DEFAULT_QPS_TRACKER_INTERVAL_NANOS,
+        10_000_000_000
+    );
     let limiter = include_str!("matching_persistence_limiter.rs");
     assert!(limiter.contains("const HOST_QPS_DEFAULT: i64 = 3000;"));
     assert!(limiter.contains("const GLOBAL_QPS_DEFAULT: i64 = 0;"));

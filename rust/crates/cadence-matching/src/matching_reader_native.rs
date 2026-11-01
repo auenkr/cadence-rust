@@ -330,8 +330,9 @@ struct Inner {
 pub type NativeBacklogForwardResult = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<(), crate::matching_forward::ForwardError>> + Send>,
 >;
-pub type NativeBacklogForwardCall =
-    Arc<dyn Fn(AllocatedTaskBytes, tokio::time::Instant) -> NativeBacklogForwardResult + Send + Sync>;
+pub type NativeBacklogForwardCall = Arc<
+    dyn Fn(AllocatedTaskBytes, tokio::time::Instant) -> NativeBacklogForwardResult + Send + Sync,
+>;
 #[derive(Clone)]
 pub struct NativeBacklogForward {
     /// Go `fwdrAddReqTokenC`: a token is taken before each forward attempt.
@@ -754,7 +755,9 @@ impl NativeTaskReader {
                                 let forward_deadline = outer_deadline.map_or_else(
                                     || tokio::time::Instant::now() + Duration::from_secs(2),
                                     |parent| {
-                                        parent.min(tokio::time::Instant::now() + Duration::from_secs(2))
+                                        parent.min(
+                                            tokio::time::Instant::now() + Duration::from_secs(2),
+                                        )
                                     },
                                 );
                                 let forward_started = std::time::Instant::now();

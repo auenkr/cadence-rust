@@ -103,7 +103,11 @@ impl AppError {
 
     fn busy(message: String) -> Self {
         let error = cadence_api::errors::ServiceBusyError::new(message.clone());
-        Self { exc_name: "ServiceBusyError", value: error.to_thrift(), message }
+        Self {
+            exc_name: "ServiceBusyError",
+            value: error.to_thrift(),
+            message,
+        }
     }
 
     fn entity_not_exists(message: String) -> Self {
@@ -111,6 +115,25 @@ impl AppError {
         Self {
             exc_name: "EntityNotExistsError",
             value: e.to_thrift(),
+            message,
+        }
+    }
+
+    fn internal(message: String) -> Self {
+        let error = cadence_api::errors::InternalServiceError::new(message.clone());
+        Self {
+            exc_name: "InternalServiceError",
+            value: error.to_thrift(),
+            message,
+        }
+    }
+
+    fn workflow_already_completed(message: String) -> Self {
+        let error =
+            cadence_api::errors::WorkflowExecutionAlreadyCompletedError::new(message.clone());
+        Self {
+            exc_name: "WorkflowExecutionAlreadyCompletedError",
+            value: error.to_thrift(),
             message,
         }
     }
@@ -155,7 +178,7 @@ fn require_task_domain_thrift(state: &AppState, bytes: &[u8]) -> Result<(), AppE
         ));
     }
     state
-        .domains
+        .domain_manager
         .describe(&DescribeDomainRequest {
             name: None,
             uuid: Some(token.domain_id),
@@ -172,9 +195,14 @@ async fn handle_delete_domain(state: &AppState, body: &Struct) -> HandlerResult 
         ));
     }
     state
-        .domains
+        .domain_manager
         .delete(&req.name)
-        .map_err(|e| AppError::entity_not_exists(e.message))?;
+        .map_err(|error| match error {
+            cadence_persistence::FrontendDomainError::NotFound(error) => {
+                AppError::entity_not_exists(error.message)
+            }
+            other => AppError::internal(other.to_string()),
+        })?;
     state.executions.unregister_domain(&req.name);
     Ok(Struct { fields: Vec::new() })
 }
@@ -205,7 +233,7 @@ async fn handle_start(state: &AppState, body: &Struct) -> HandlerResult {
 }
 
 async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::enums::DomainStatus;
+    use cadence_api::enums::{ArchivalStatus, DomainStatus};
     use cadence_api::types::RegisterDomainRequest;
     let req: RegisterDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -214,9 +242,60 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             "Domain not set on request.".to_string(),
         ));
     }
-    if req.workflow_execution_retention_period_in_days < state.domain_policy(&req.name).min_retention_days {
+    // Match common/domain.handlerImpl.RegisterDomain ordering: a global
+    // registration is rejected on a secondary before existence/name checks,
+    // and an existing name wins over malformed-name validation.
+    if req.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return Err(AppError::bad_request(
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .to_string(),
+        ));
+    }
+    if state
+        .domains
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .is_ok()
+    {
+        return Err(AppError {
+            exc_name: "DomainAlreadyExistsError",
+            value: cadence_api::errors::DomainAlreadyExistsError {
+                message: "Domain already exists.".to_string(),
+            }
+            .to_thrift(),
+            message: "Domain already exists.".to_string(),
+        });
+    }
+    if !req
+        .name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return Err(AppError::bad_request(
+            "Domain name can only include alphanumeric and dash characters.".to_string(),
+        ));
+    }
+    if req.name.len() > state.limits.ids.domain_max {
+        return Err(AppError::bad_request(
+            "Domain length exceeds limit.".to_string(),
+        ));
+    }
+    if req.workflow_execution_retention_period_in_days
+        < state.domain_policy(&req.name).min_retention_days
+    {
         return Err(AppError::bad_request(
             "A valid retention period is not set on request.".to_string(),
+        ));
+    }
+    if (req.history_archival_status == Some(ArchivalStatus::Enabled)
+        && req.history_archival_uri.is_empty())
+        || (req.visibility_archival_status == Some(ArchivalStatus::Enabled)
+            && req.visibility_archival_uri.is_empty())
+    {
+        return Err(AppError::bad_request(
+            "Invalid to enable archival without specifying a uri.".to_string(),
         ));
     }
     let info = cadence_api::types::DomainInfo {
@@ -225,7 +304,7 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
         description: req.description.clone(),
         owner_email: req.owner_email.clone(),
         data: req.data.clone(),
-        uuid: uuid::Uuid::new_v4().to_string(),
+        uuid: uuid::Uuid::now_v7().to_string(),
     };
     let configuration = cadence_api::types::DomainConfiguration {
         workflow_execution_retention_period_in_days: req
@@ -240,25 +319,32 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     let replication = crate::handlers::domain_replication(state, &req)
         .map_err(|e| AppError::bad_request(e.message))?;
     let failover_version = if req.is_global_domain {
-        state.cluster_metadata.next_failover_version(&replication.active_cluster_name, 0, false)
+        state
+            .cluster_metadata
+            .next_failover_version(&replication.active_cluster_name, 0, false)
             .map_err(AppError::bad_request)?
-    } else { cadence_persistence::version_history::EMPTY_VERSION };
-    match state
-        .domains
-        .create_with_version(info, configuration, replication, req.is_global_domain, failover_version)
-    {
+    } else {
+        cadence_persistence::version_history::EMPTY_VERSION
+    };
+    match state.domain_manager.create_with_version(
+        info,
+        configuration,
+        replication,
+        req.is_global_domain,
+        failover_version,
+    ) {
         Ok(_) => {
             state.executions.register_domain(
                 &req.name,
                 &state
-                    .domains
+                    .domain_manager
                     .domain_id(&req.name)
                     .expect("registered domain"),
             );
             // void method: empty success struct.
             Ok(Struct { fields: vec![] })
         }
-        Err(e) => Err(AppError {
+        Err(cadence_persistence::FrontendDomainError::AlreadyExists(e)) => Err(AppError {
             exc_name: "DomainAlreadyExistsError",
             value: cadence_api::errors::DomainAlreadyExistsError {
                 message: e.message.clone(),
@@ -266,6 +352,10 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
             .to_thrift(),
             message: e.message,
         }),
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
+        Err(error) => Err(AppError::bad_request(error.to_string())),
     }
 }
 
@@ -278,7 +368,7 @@ async fn handle_describe_domain(state: &AppState, body: &Struct) -> HandlerResul
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.describe(&req) {
+    match state.domain_manager.describe(&req) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(e) => Err(AppError::entity_not_exists(e.message)),
     }
@@ -288,7 +378,7 @@ async fn handle_list_domains(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::service_types::ListDomainsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(e.to_string()))?;
     let response = state
-        .domains
+        .domain_manager
         .list_page(&request)
         .map_err(|e| AppError::bad_request(e.message))?;
     Ok(wrap_success(&response))
@@ -402,11 +492,25 @@ async fn handle_update_domain(state: &AppState, body: &Struct) -> HandlerResult 
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.update(&req, &state.cluster_metadata, &state.domain_policy(&req.name)) {
+    match state.domain_manager.update(
+        &req,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => Err(AppError::entity_not_exists(e.message)),
-        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => Err(AppError::bad_request(message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            Err(AppError::busy(message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
+            Err(AppError::bad_request(message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -419,9 +523,537 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
             "Domain not set on request.".to_string(),
         ));
     }
-    match state.domains.deprecate(&req) {
+    let current = state
+        .domain_manager
+        .describe(&DescribeDomainRequest {
+            name: Some(req.name.clone()),
+            uuid: None,
+        })
+        .map_err(|e| AppError::entity_not_exists(e.message))?;
+    if current.is_global_domain && !state.cluster_metadata.is_primary_cluster() {
+        return Err(AppError::bad_request(
+            "Cluster is not primary cluster, cannot do domain registration or domain update."
+                .to_string(),
+        ));
+    }
+    match state.domain_manager.deprecate(&req) {
         Ok(()) => Ok(Struct { fields: vec![] }),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
+    }
+}
+
+fn handle_get_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
+    let req: cadence_api::admin::GetDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    let overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
+    let value = overlay
+        .get(operational, &req.config_name, &req.filters)
+        .ok_or_else(|| {
+            AppError::internal(format!(
+                "Failed to get dynamic config {:?} for the given filters.",
+                req.config_name
+            ))
+        })?;
+    Ok(wrap_success(
+        &cadence_api::admin::GetDynamicConfigResponse { value: value.value },
+    ))
+}
+
+fn handle_update_dynamic_config(
+    state: &AppState,
+    body: &Struct,
+    operational: bool,
+) -> HandlerResult {
+    let req: cadence_api::admin::UpdateDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .update(operational, &req.config_name, req.config_values);
+    Ok(wrap_success(
+        &cadence_api::admin::UpdateDynamicConfigResponse {},
+    ))
+}
+
+fn handle_restore_dynamic_config(
+    state: &AppState,
+    body: &Struct,
+    operational: bool,
+) -> HandlerResult {
+    let req: cadence_api::admin::RestoreDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    if req.config_name.is_empty() {
+        return Err(AppError::bad_request(
+            "ConfigName is not set on request.".to_string(),
+        ));
+    }
+    state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .restore(operational, &req.config_name, &req.filters);
+    Ok(wrap_success(
+        &cadence_api::admin::RestoreDynamicConfigResponse {},
+    ))
+}
+
+fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
+    let req: cadence_api::admin::ListDynamicConfigRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let entries = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock")
+        .list(operational, &req.config_name);
+    Ok(wrap_success(
+        &cadence_api::admin::ListDynamicConfigResponse { entries },
+    ))
+}
+
+fn handle_add_search_attribute(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::AddSearchAttributeRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let mut overlay = state
+        .admin
+        .dynamic_config
+        .lock()
+        .expect("admin config lock");
+    if cadence_persistence::dynamic_config::boolean(
+        overlay.property_values("history.enableAdminProtection"),
+        None,
+        false,
+    ) {
+        let token = cadence_persistence::dynamic_config::string(
+            overlay.property_values("history.adminOperationToken"),
+            "",
+        );
+        if req.security_token.is_empty() || req.security_token != token {
+            return Err(AppError::bad_request(
+                "No permission to do this operation.".to_string(),
+            ));
+        }
+    }
+    let attrs = req
+        .search_attribute
+        .filter(|attrs| !attrs.is_empty())
+        .ok_or_else(|| AppError::bad_request("SearchAttributes are not provided".to_string()))?;
+    const CONFIG_NAME: &str = "frontend.validSearchAttributes";
+    let mut valid = match overlay
+        .get(false, CONFIG_NAME, &[])
+        .and_then(|value| value.value)
+    {
+        Some(blob) => serde_json::from_slice::<std::collections::HashMap<String, i32>>(&blob.data)
+            .map_err(|error| {
+                AppError::internal(format!("Failed to get dynamic config, err: {error}"))
+            })?,
+        None => cadence_api::search_attributes::default_indexed_keys()
+            .into_iter()
+            .map(|(name, value)| (name, value.value()))
+            .collect(),
+    };
+    for (name, value_type) in &attrs {
+        if cadence_api::search_attributes::is_system_indexed_key(name) {
+            return Err(AppError::bad_request(format!(
+                "Key [{name}] is reserved by system"
+            )));
+        }
+        if valid
+            .get(name)
+            .is_some_and(|existing| *existing != value_type.value())
+        {
+            return Err(AppError::bad_request(format!(
+                "Key [{name}] is already whitelisted as a different type"
+            )));
+        }
+        valid.insert(name.clone(), value_type.value());
+    }
+    let data = serde_json::to_vec(&valid).map_err(|error| {
+        AppError::internal(format!("Failed to encode dynamic config, err: {error}"))
+    })?;
+    overlay.update(
+        false,
+        CONFIG_NAME,
+        vec![cadence_api::admin::DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+                data,
+            }),
+            filters: Vec::new(),
+        }],
+    );
+    drop(overlay);
+    state
+        .admin
+        .custom_search_attributes
+        .lock()
+        .expect("admin attributes lock")
+        .extend(attrs);
+    Ok(Struct { fields: vec![] })
+}
+
+fn handle_describe_cluster() -> HandlerResult {
+    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
+    Ok(wrap_success(&crate::admin::describe_cluster_response(
+        &hostname,
+    )))
+}
+
+fn handle_get_domain_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::GetDomainReplicationMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::domain_replication_messages_response(state, request)
+        .map(|response| wrap_success(&response))
+        .map_err(AppError::internal)
+}
+
+fn require_domain_dlq_type(dlq_type: Option<cadence_api::enums::DLQType>) -> Result<(), AppError> {
+    match dlq_type {
+        None => Err(AppError::bad_request("Queue type is not set.".to_string())),
+        Some(cadence_api::enums::DLQType::Invalid) => Err(AppError::bad_request(
+            "The DLQ type is not supported.".to_string(),
+        )),
+        Some(cadence_api::enums::DLQType::Domain) => Ok(()),
+        Some(_) => Err(AppError::internal(
+            "History Admin client is not configured.".to_string(),
+        )),
+    }
+}
+
+fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::ReadDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    require_domain_dlq_type(request.dlq_type)?;
+    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
+        AppError::internal(
+            "domain replication DLQ is unavailable for this persistence backend".to_string(),
+        )
+    })?;
+    let ack_levels = persistence
+        .get_domain_replication_dlq_ack_levels()
+        .map_err(AppError::internal)?;
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    let first_message_id = crate::admin::decode_domain_dlq_page_token(&request.next_page_token)
+        .map_err(AppError::internal)?
+        .unwrap_or(ack_level);
+    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let page_size = crate::admin::read_dlq_page_size(request.maximum_page_size);
+    let rows = persistence
+        .read_domain_replication_dlq(first_message_id, end_message_id, page_size)
+        .map_err(AppError::internal)?;
+    let mut tasks = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let thrift = cadence_thrift::value::read_struct(
+            &mut cadence_thrift::protocol::Reader::new(&row.payload),
+        )
+        .map_err(|error| AppError::internal(error.to_string()))?;
+        let mut task =
+            <cadence_api::types::ReplicationTask as cadence_thrift::FromThrift>::from_thrift(
+                &thrift,
+            )
+            .map_err(|error| AppError::internal(error.to_string()))?;
+        task.source_task_id = Some(row.id);
+        tasks.push(task);
+    }
+    let next_page_token = if rows.len() >= page_size {
+        crate::admin::encode_domain_dlq_page_token(
+            rows.last().map_or(first_message_id, |row| row.id),
+        )
+    } else {
+        Vec::new()
+    };
+    Ok(wrap_success(&cadence_api::admin::ReadDLQMessagesResponse {
+        dlq_type: None,
+        replication_tasks: tasks,
+        next_page_token,
+    }))
+}
+
+fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::PurgeDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    require_domain_dlq_type(request.dlq_type)?;
+    let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
+        AppError::internal(
+            "domain replication DLQ is unavailable for this persistence backend".to_string(),
+        )
+    })?;
+    let end_message_id = request.inclusive_end_message_id.unwrap_or(i64::MAX - 1);
+    let ack_levels = persistence
+        .get_domain_replication_dlq_ack_levels()
+        .map_err(AppError::internal)?;
+    let ack_level = ack_levels.get("domainReplication").copied().unwrap_or(-1);
+    persistence
+        .delete_domain_replication_dlq_range(ack_level, end_message_id)
+        .map_err(AppError::internal)?;
+    // Go logs and ignores an ack metadata update failure after the delete.
+    let _ = persistence
+        .update_domain_replication_dlq_ack_level("domainReplication".to_string(), end_message_id);
+    Ok(wrap_success(
+        &cadence_api::admin::PurgeDLQMessagesResponse {},
+    ))
+}
+
+async fn handle_reset_queue(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::ResetQueueRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
+    let task_type = req
+        .task_type
+        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+    if req.cluster_name.is_empty() {
+        return Err(AppError::bad_request(
+            "Cluster name is not set.".to_string(),
+        ));
+    }
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    client
+        .reset_queue(crate::admin::history_admin_request(
+            cadence_proto::history::ResetQueueRequest {
+                shard_id: req.shard_id,
+                cluster_name: req.cluster_name,
+                task_type,
+            },
+        ))
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?;
+    Ok(wrap_success(&cadence_api::admin::ResetQueueResponse {}))
+}
+
+async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::DescribeQueueRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin::check_shard_id(state, req.shard_id)
+        .map_err(|error| AppError::bad_request(error.message))?;
+    let task_type = req
+        .task_type
+        .ok_or_else(|| AppError::bad_request("TaskType is not set on request.".to_string()))?;
+    if req.cluster_name.is_empty() {
+        return Err(AppError::bad_request(
+            "Cluster name is not set.".to_string(),
+        ));
+    }
+    let channel = state
+        .history_admin_channel
+        .clone()
+        .ok_or_else(|| AppError::internal("History client is not configured.".to_string()))?;
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    let response = client
+        .describe_queue(crate::admin::history_admin_request(
+            cadence_proto::history::DescribeQueueRequest {
+                shard_id: req.shard_id,
+                cluster_name: req.cluster_name,
+                task_type,
+            },
+        ))
+        .await
+        .map_err(|error| AppError::internal(error.message().to_string()))?
+        .into_inner();
+    Ok(wrap_success(&cadence_api::admin::DescribeQueueResponse {
+        processing_queue_states: response.processing_queue_states,
+    }))
+}
+
+fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::MergeDLQMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let Some(dlq_type) = req.dlq_type else {
+        return Err(AppError::bad_request("Queue type is not set.".to_string()));
+    };
+    if dlq_type == cadence_api::enums::DLQType::Invalid {
+        return Err(AppError::bad_request(
+            "The DLQ type is not supported.".to_string(),
+        ));
+    }
+    if dlq_type != cadence_api::enums::DLQType::Domain {
+        return Err(AppError::internal(
+            "History Admin client is not configured.".to_string(),
+        ));
+    }
+    let response =
+        crate::admin::merge_domain_dlq_messages(state, req).map_err(AppError::internal)?;
+    Ok(wrap_success(&response))
+}
+
+fn handle_delete_workflow(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::DeleteWorkflowRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let execution = req.workflow_execution.unwrap_or_default();
+    if execution.workflow_id.is_empty() {
+        return Err(AppError::bad_request(
+            "Execution is not set on request.".to_string(),
+        ));
+    }
+    let executions = require_domain_thrift(state, &req.domain)?;
+    match executions.delete_run(&req.domain, &execution) {
+        Ok((history_deleted, executions_deleted, visibility_deleted)) => {
+            Ok(wrap_success(&cadence_api::admin::DeleteWorkflowResponse {
+                history_deleted,
+                executions_deleted,
+                visibility_deleted,
+            }))
+        }
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
+}
+
+fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
+    let req: cadence_api::admin::RefreshWorkflowTasksRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    let domain = if req.domain.is_empty() {
+        state
+            .domains
+            .describe(&DescribeDomainRequest {
+                name: None,
+                uuid: Some(req.domain_id.clone()),
+            })
+            .map_err(|error| AppError::entity_not_exists(error.message))?
+            .domain_info
+            .map(|info| info.name)
+            .unwrap_or_default()
+    } else {
+        req.domain
+    };
+    if domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
+    let execution = req.workflow_execution.unwrap_or_default();
+    cadence_api::validation::check_execution(Some(&execution))
+        .map_err(|error| AppError::bad_request(error.message))?;
+    let executions = require_domain_thrift(state, &domain)?;
+    match executions.refresh_tasks(&domain, &execution) {
+        Ok(()) => Ok(Struct { fields: Vec::new() }),
+        Err(cadence_persistence::WorkflowMutationError::NotFound(error)) => {
+            Err(AppError::entity_not_exists(error.message))
+        }
+        Err(cadence_persistence::WorkflowMutationError::AlreadyCompleted(error)) => {
+            Err(AppError::workflow_already_completed(error.message))
+        }
+    }
+}
+
+fn handle_raw_history_v2(state: &AppState, body: &Struct) -> HandlerResult {
+    use cadence_api::admin::{
+        GetWorkflowExecutionRawHistoryV2Request as Request,
+        GetWorkflowExecutionRawHistoryV2Response as Response,
+    };
+    use cadence_persistence::raw_history::{self, RawHistoryToken};
+
+    let mut req: Request = decode_args(body).map_err(AppError::bad_request)?;
+    raw_history::validate_request(&req).map_err(|error| AppError::bad_request(error.message))?;
+    let execution = req.execution.clone().unwrap_or_default();
+    let mut persistence_execution = execution.clone();
+    persistence_execution.run_id = raw_history::canonical_run_id(&persistence_execution.run_id);
+    let executions = require_domain_thrift(state, &req.domain)?;
+    let mut persistence_token = Vec::new();
+    let mut continuation = None;
+    let histories = if req.next_page_token.is_empty() {
+        let view = executions
+            .mutable_state_view(&req.domain, &execution)
+            .map_err(|error| AppError::entity_not_exists(error.message))?;
+        view.version_histories
+            .ok_or_else(|| AppError::bad_request("Invalid version histories.".to_string()))?
+    } else {
+        let token = RawHistoryToken::from_bytes(&req.next_page_token)
+            .map_err(|error| AppError::bad_request(error.message))?;
+        persistence_token = token.persistence_token.clone().unwrap_or_default();
+        raw_history::validate_persistence_token(&persistence_token)
+            .map_err(|error| AppError::bad_request(error.message))?;
+        continuation = Some(token.clone());
+        token.version_histories.unwrap_or_default()
+    };
+    if histories.histories.is_empty() {
+        return Err(AppError::bad_request(
+            "Invalid version histories.".to_string(),
+        ));
+    }
+    let target_history = raw_history::select_history(&mut req, &histories)
+        .map_err(|error| AppError::bad_request(error.message))?
+        .clone();
+    if let Some(token) = continuation {
+        token
+            .validate(&req)
+            .map_err(|error| AppError::bad_request(error.message))?;
+    }
+    if req.start_event_id.unwrap_or(0) + 1 == req.end_event_id.unwrap_or(0) {
+        return Ok(wrap_success(&Response {
+            next_page_token: Vec::new(),
+            history_batches: Vec::new(),
+            version_history: Some(target_history),
+        }));
+    }
+    match executions.raw_history(
+        &req.domain,
+        &persistence_execution,
+        req.start_event_id,
+        req.end_event_id,
+        req.maximum_page_size as usize,
+        &persistence_token,
+    ) {
+        Ok((events, next)) => {
+            let next_page_token = if next.is_empty() {
+                Vec::new()
+            } else {
+                RawHistoryToken {
+                    domain_name: req.domain.clone(),
+                    workflow_id: execution.workflow_id.clone(),
+                    run_id: execution.run_id.clone(),
+                    start_event_id: req.start_event_id.unwrap_or(0),
+                    start_event_version: req.start_event_version.unwrap_or(0),
+                    end_event_id: req.end_event_id.unwrap_or(0),
+                    end_event_version: req.end_event_version.unwrap_or(0),
+                    persistence_token: Some(next),
+                    version_histories: Some(histories),
+                }
+                .to_bytes()
+                .unwrap_or_default()
+            };
+            Ok(wrap_success(&Response {
+                next_page_token,
+                history_batches: vec![cadence_api::types::DataBlob {
+                    encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
+                    data: cadence_thrift::history_blob::encode(events).data,
+                }],
+                version_history: Some(target_history),
+            }))
+        }
+        Err(_) => Ok(wrap_success(&Response {
+            next_page_token: Vec::new(),
+            history_batches: Vec::new(),
+            version_history: Some(target_history),
+        })),
     }
 }
 
@@ -808,13 +1440,15 @@ async fn handle_record_heartbeat(state: &AppState, body: &Struct) -> HandlerResu
 }
 
 async fn handle_start_async(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::types::{StartWorkflowExecutionAsyncRequest, StartWorkflowExecutionAsyncResponse};
+    use cadence_api::types::{
+        StartWorkflowExecutionAsyncRequest, StartWorkflowExecutionAsyncResponse,
+    };
     use cadence_api::validation::{self, Limits};
     let req: StartWorkflowExecutionAsyncRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let inner = req.request.ok_or_else(|| {
-        AppError::bad_request("Start request is not set.".to_string())
-    })?;
+    let inner = req
+        .request
+        .ok_or_else(|| AppError::bad_request("Start request is not set.".to_string()))?;
     let executions = require_domain_thrift(state, &inner.domain)?;
     validation::validate_start_workflow_execution_request(Some(&inner), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
@@ -824,8 +1458,7 @@ async fn handle_start_async(state: &AppState, body: &Struct) -> HandlerResult {
 
 async fn handle_signal_with_start_async(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::service_types::{
-        SignalWithStartWorkflowExecutionAsyncRequest,
-        SignalWithStartWorkflowExecutionAsyncResponse,
+        SignalWithStartWorkflowExecutionAsyncRequest, SignalWithStartWorkflowExecutionAsyncResponse,
     };
     use cadence_api::validation::{self, Limits};
     let req: SignalWithStartWorkflowExecutionAsyncRequest =
@@ -837,22 +1470,9 @@ async fn handle_signal_with_start_async(state: &AppState, body: &Struct) -> Hand
     validation::validate_signal_with_start_request(Some(&inner), &Limits::cadence_default())
         .map_err(|e| AppError::bad_request(e.message))?;
     executions.enqueue_async_signal_with_start(inner);
-    Ok(wrap_success(&SignalWithStartWorkflowExecutionAsyncResponse {}))
-}
-
-async fn handle_refresh_workflow_tasks(state: &AppState, body: &Struct) -> HandlerResult {
-    use cadence_api::types::RefreshWorkflowTasksRequest;
-    use cadence_api::validation;
-    let req: RefreshWorkflowTasksRequest =
-        decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
-    validation::check_execution(req.execution.as_ref())
-        .map_err(|e| AppError::bad_request(e.message))?;
-    let execution = req.execution.clone().unwrap_or_default();
-    executions
-        .refresh_tasks(&req.domain, &execution)
-        .map_err(mutation_error)?;
-    Ok(Struct { fields: vec![] })
+    Ok(wrap_success(
+        &SignalWithStartWorkflowExecutionAsyncResponse {},
+    ))
 }
 
 async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResult {
@@ -862,15 +1482,26 @@ async fn handle_failover_domain(state: &AppState, body: &Struct) -> HandlerResul
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     validation::validate_failover_domain_request(Some(&req))
         .map_err(|e| AppError::bad_request(e.message))?;
-    match state.domains.failover(&req, &state.current_cluster_name, &state.cluster_metadata, &state.domain_policy(&req.domain_name)) {
+    match state.domain_manager.failover(
+        &req,
+        &state.current_cluster_name,
+        &state.cluster_metadata,
+        &state.domain_policy(&req.domain_name),
+    ) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(cadence_persistence::FailoverError::NotFound(e)) => {
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::FailoverError::Busy(message)) => Err(AppError::busy(message)),
-        Err(cadence_persistence::FailoverError::Invalid(message)) => {
+        Err(cadence_persistence::FrontendDomainError::Busy(message)) => {
+            Err(AppError::busy(message))
+        }
+        Err(cadence_persistence::FrontendDomainError::Invalid(message)) => {
             Err(AppError::bad_request(message))
         }
+        Err(cadence_persistence::FrontendDomainError::Persistence(message)) => {
+            Err(AppError::internal(message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -898,14 +1529,17 @@ async fn handle_list_failover_history(state: &AppState, body: &Struct) -> Handle
         .map(|p| p.next_page_token.clone())
         .unwrap_or_default();
     match state
-        .domains
+        .domain_manager
         .failover_history(&domain_id, page_size, &page_token)
     {
         Ok((events, next_page_token)) => Ok(wrap_success(&ListFailoverHistoryResponse {
             failover_events: events,
             next_page_token,
         })),
-        Err(e) => Err(AppError::entity_not_exists(e.message)),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => {
+            Err(AppError::entity_not_exists(e.message))
+        }
+        Err(error) => Err(AppError::internal(error.to_string())),
     }
 }
 
@@ -920,9 +1554,7 @@ fn schedule_gate(state: &AppState, domain: &str) -> Result<(), AppError> {
 
 fn schedule_error(e: cadence_persistence::ScheduleError) -> AppError {
     match e {
-        cadence_persistence::ScheduleError::NotFound(e) => {
-            AppError::entity_not_exists(e.message)
-        }
+        cadence_persistence::ScheduleError::NotFound(e) => AppError::entity_not_exists(e.message),
         cadence_persistence::ScheduleError::Invalid(message)
         | cadence_persistence::ScheduleError::Exists(message) => AppError::bad_request(message),
     }
@@ -934,29 +1566,34 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
     let req: CreateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
     schedule_gate(state, &req.domain)?;
-    let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
         ));
     }
-    let spec = req.spec.as_ref().ok_or_else(|| {
-        AppError::bad_request("Spec is not set on request.".to_string())
-    })?;
+    let spec = req
+        .spec
+        .as_ref()
+        .ok_or_else(|| AppError::bad_request("Spec is not set on request.".to_string()))?;
     if spec.cron_expression.is_empty() {
         return Err(AppError::bad_request(
             "CronExpression is not set on request.".to_string(),
         ));
     }
     validate_schedule_cron_thrift(&spec.cron_expression)?;
-    validation::validate_schedule_spec(Some(spec))
-        .map_err(|e| AppError::bad_request(e.message))?;
+    validation::validate_schedule_spec(Some(spec)).map_err(|e| AppError::bad_request(e.message))?;
+    if req.action.is_none() {
+        return Err(AppError::bad_request(
+            "Action is not set on request.".to_string(),
+        ));
+    }
     validation::validate_schedule_action_complete(req.action.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_policies(req.policies.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .create_schedule(&req.domain, &req)
         .map(|id| wrap_success(&CreateScheduleResponse { schedule_id: id }))
@@ -979,7 +1616,6 @@ async fn handle_describe_schedule(state: &AppState, body: &Struct) -> HandlerRes
     use cadence_api::schedule::DescribeScheduleRequest;
     let req: DescribeScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -996,9 +1632,12 @@ async fn handle_list_schedules(state: &AppState, body: &Struct) -> HandlerResult
     use cadence_api::schedule::{ListSchedulesRequest, ListSchedulesResponse};
     let req: ListSchedulesRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
-    let page_size = if req.page_size <= 0 { 10 } else { req.page_size as usize };
+    let page_size = if req.page_size <= 0 {
+        10
+    } else {
+        req.page_size as usize
+    };
     let (schedules, next_page_token) =
         executions.list_schedules(&req.domain, page_size, &req.next_page_token);
     Ok(wrap_success(&ListSchedulesResponse {
@@ -1011,7 +1650,6 @@ async fn handle_delete_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::schedule::{DeleteScheduleRequest, DeleteScheduleResponse};
     let req: DeleteScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1028,7 +1666,6 @@ async fn handle_pause_schedule(state: &AppState, body: &Struct) -> HandlerResult
     use cadence_api::schedule::{PauseScheduleRequest, PauseScheduleResponse};
     let req: PauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1050,7 +1687,6 @@ async fn handle_unpause_schedule(state: &AppState, body: &Struct) -> HandlerResu
     use cadence_api::schedule::{UnpauseScheduleRequest, UnpauseScheduleResponse};
     let req: UnpauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1067,7 +1703,6 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct) -> HandlerRes
     use cadence_api::schedule::{BackfillScheduleRequest, BackfillScheduleResponse};
     let req: BackfillScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
     let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
@@ -1115,8 +1750,6 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
     use cadence_api::validation;
     let req: UpdateScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    schedule_gate(state, &req.domain)?;
-    let executions = require_domain_thrift(state, &req.domain)?;
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1132,6 +1765,8 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
                 .to_string(),
         ));
     }
+    validation::validate_schedule_policies(req.policies.as_ref())
+        .map_err(|e| AppError::bad_request(e.message))?;
     if let Some(spec) = req.spec.as_ref() {
         if !spec.cron_expression.is_empty() {
             validate_schedule_cron_thrift(&spec.cron_expression)?;
@@ -1143,10 +1778,9 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
         validation::validate_schedule_action_complete(req.action.as_ref())
             .map_err(|e| AppError::bad_request(e.message))?;
     }
-    validation::validate_schedule_policies(req.policies.as_ref())
-        .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .update_schedule(&req)
         .map(|()| wrap_success(&UpdateScheduleResponse {}))
@@ -1173,12 +1807,15 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
     let (semaphores, domain_id) = state
         .semaphore_store_for_domain(&req.domain)
         .map_err(|e| AppError::entity_not_exists(e.message))?;
-    match semaphores.create_semaphore(
-        &domain_id,
-        &req.semaphore_name,
-        req.capacity,
-        req.bucket_capacity,
-    ).await {
+    match semaphores
+        .create_semaphore(
+            &domain_id,
+            &req.semaphore_name,
+            req.capacity,
+            req.bucket_capacity,
+        )
+        .await
+    {
         Ok(meta) => Ok(wrap_success(&CreateSemaphoreResponse {
             semaphore: Some(Semaphore {
                 semaphore_name: req.semaphore_name.clone(),
@@ -1201,9 +1838,15 @@ async fn handle_create_semaphore(state: &AppState, body: &Struct) -> HandlerResu
         }
         Err(cadence_persistence::SemaphoreError::Internal(message)) => {
             let error = cadence_api::errors::InternalServiceError::new(message.clone());
-            Err(AppError { exc_name: "InternalServiceError", value: error.to_thrift(), message })
+            Err(AppError {
+                exc_name: "InternalServiceError",
+                value: error.to_thrift(),
+                message,
+            })
         }
-        Err(cadence_persistence::SemaphoreError::Throttled(message)) => Err(AppError::busy(message)),
+        Err(cadence_persistence::SemaphoreError::Throttled(message)) => {
+            Err(AppError::busy(message))
+        }
     }
 }
 
@@ -1269,9 +1912,10 @@ async fn handle_diagnose(state: &AppState, body: &Struct) -> HandlerResult {
         Err(cadence_persistence::StartError::AlreadyStarted(e)) => {
             Ok(wrap_success(&DiagnoseWorkflowExecutionResponse {
                 domain: system_domain.to_string(),
-                diagnostic_workflow_execution: Some(
-                    cadence_api::types::WorkflowExecution::new(diagnostic_id, e.run_id),
-                ),
+                diagnostic_workflow_execution: Some(cadence_api::types::WorkflowExecution::new(
+                    diagnostic_id,
+                    e.run_id,
+                )),
             }))
         }
         Err(cadence_persistence::StartError::InvalidArgument(message)) => {
@@ -1339,9 +1983,7 @@ async fn handle_respond_query_completed(state: &AppState, body: &Struct) -> Hand
         Err(cadence_persistence::QueryError::NotFound(e)) => {
             Err(AppError::entity_not_exists(e.message))
         }
-        Err(cadence_persistence::QueryError::Invalid(e)) => {
-            Err(AppError::bad_request(e.message))
-        }
+        Err(cadence_persistence::QueryError::Invalid(e)) => Err(AppError::bad_request(e.message)),
         Err(cadence_persistence::QueryError::Rejected(_)) => Err(AppError::bad_request(
             "Query task was rejected.".to_string(),
         )),
@@ -1360,21 +2002,16 @@ async fn handle_describe_task_list(state: &AppState, body: &Struct) -> HandlerRe
     }
     match crate::handlers::describe_task_list_response(state, &executions, &req) {
         Ok(resp) => Ok(wrap_success(&resp)),
-        Err(crate::handlers::DescribeTaskListError::TaskListNotSet) => {
-            Err(AppError::bad_request(
-                "TaskList is not set on request.".to_string(),
-            ))
-        }
-        Err(crate::handlers::DescribeTaskListError::DomainGone) => {
-            Err(AppError::entity_not_exists("Domain does not exist.".to_string()))
-        }
+        Err(crate::handlers::DescribeTaskListError::TaskListNotSet) => Err(AppError::bad_request(
+            "TaskList is not set on request.".to_string(),
+        )),
+        Err(crate::handlers::DescribeTaskListError::DomainGone) => Err(
+            AppError::entity_not_exists("Domain does not exist.".to_string()),
+        ),
     }
 }
 
-async fn handle_get_task_lists_by_domain(
-    state: &AppState,
-    body: &Struct,
-) -> HandlerResult {
+async fn handle_get_task_lists_by_domain(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::tasks::{GetTaskListsByDomainRequest, GetTaskListsByDomainResponse};
     let req: GetTaskListsByDomainRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -1436,10 +2073,7 @@ async fn handle_get_task_lists_by_domain(
     }))
 }
 
-async fn handle_list_task_list_partitions(
-    state: &AppState,
-    body: &Struct,
-) -> HandlerResult {
+async fn handle_list_task_list_partitions(state: &AppState, body: &Struct) -> HandlerResult {
     use cadence_api::tasks::{ListTaskListPartitionsRequest, ListTaskListPartitionsResponse};
     let req: ListTaskListPartitionsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
@@ -1562,12 +2196,43 @@ pub async fn dispatch(
     body: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    dispatch_with_headers(state, method, body, deadline, Default::default()).await
+}
+
+/// Like [`dispatch`], forwarding the caller's request headers (lower-cased
+/// names) to the WorkflowService hook.
+pub async fn dispatch_with_headers(
+    state: &AppState,
+    method: &str,
+    body: &Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    if let Some(api) = &state.workflow_api {
+        let ctx = crate::workflow_api::CallerContext {
+            deadline: Some(deadline),
+            headers: caller_headers,
+        };
+        if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
+            return Ok(reply);
+        }
+    }
     let outcome: HandlerResult = match method {
         "health" => Ok(Struct {
             fields: vec![(
                 0,
                 Value::Struct(Struct {
-                    fields: vec![(1, Value::Bool(true)), (2, Value::Bytes(b"OK".to_vec()))],
+                    fields: vec![
+                        (
+                            1,
+                            Value::Bool(
+                                state
+                                    .frontend_ready
+                                    .load(std::sync::atomic::Ordering::Acquire),
+                            ),
+                        ),
+                        (2, Value::Bytes(b"OK".to_vec())),
+                    ],
                 }),
             )],
         }),
@@ -1581,7 +2246,26 @@ pub async fn dispatch(
         "ListClosedWorkflowExecutions" => handle_visibility_closed(state, body).await,
         "ListArchivedWorkflowExecutions" => handle_visibility_archived(state, body).await,
         "CountWorkflowExecutions" => handle_visibility_count(state, body).await,
-        "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes())),
+        "GetSearchAttributes" => Ok(wrap_success(&crate::handlers::search_attributes(state))),
+        "AddSearchAttribute" => handle_add_search_attribute(state, body),
+        "DescribeCluster" => handle_describe_cluster(),
+        "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
+        "ReadDLQMessages" => handle_read_dlq_messages(state, body),
+        "PurgeDLQMessages" => handle_purge_dlq_messages(state, body),
+        "ResetQueue" => handle_reset_queue(state, body).await,
+        "DescribeQueue" => handle_describe_queue(state, body).await,
+        "MergeDLQMessages" => handle_merge_dlq_messages(state, body),
+        "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
+        "DeleteWorkflow" => handle_delete_workflow(state, body),
+        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),
+        "GetDynamicConfig" => handle_get_dynamic_config(state, body, false),
+        "UpdateDynamicConfig" => handle_update_dynamic_config(state, body, false),
+        "RestoreDynamicConfig" => handle_restore_dynamic_config(state, body, false),
+        "ListDynamicConfig" => handle_list_dynamic_config(state, body, false),
+        "GetOperationalDynamicConfig" => handle_get_dynamic_config(state, body, true),
+        "UpdateOperationalDynamicConfig" => handle_update_dynamic_config(state, body, true),
+        "RestoreOperationalDynamicConfig" => handle_restore_dynamic_config(state, body, true),
+        "ListOperationalDynamicConfig" => handle_list_dynamic_config(state, body, true),
         "UpdateDomain" => handle_update_domain(state, body).await,
         "DeprecateDomain" => handle_deprecate_domain(state, body).await,
         "DeleteDomain" => handle_delete_domain(state, body).await,
@@ -1593,7 +2277,6 @@ pub async fn dispatch(
         "TerminateWorkflowExecution" => handle_terminate(state, body).await,
         "RestartWorkflowExecution" => handle_restart(state, body).await,
         "ResetWorkflowExecution" => handle_reset(state, body).await,
-        "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body).await,
         "DiagnoseWorkflowExecution" => handle_diagnose(state, body).await,
         "CreateSemaphore" => handle_create_semaphore(state, body).await,
         "CreateSchedule" => handle_create_schedule(state, body).await,
@@ -1607,7 +2290,9 @@ pub async fn dispatch(
         "FailoverDomain" => handle_failover_domain(state, body).await,
         "ListFailoverHistory" => handle_list_failover_history(state, body).await,
         "StartWorkflowExecutionAsync" => handle_start_async(state, body).await,
-        "SignalWithStartWorkflowExecutionAsync" => handle_signal_with_start_async(state, body).await,
+        "SignalWithStartWorkflowExecutionAsync" => {
+            handle_signal_with_start_async(state, body).await
+        }
         "RequestCancelWorkflowExecution" => handle_request_cancel(state, body).await,
         "ResetStickyTaskList" => handle_reset_sticky(state, body).await,
         "PollForDecisionTask" => handle_poll_decision(state, body, deadline).await,
@@ -1700,7 +2385,16 @@ pub async fn yarpc_handler(
         }
     };
     let deadline = ttl_deadline(&headers, Duration::from_secs(60));
-    match dispatch(&state, &method, &args, deadline).await {
+    // YARPC/HTTP carries application headers as `Rpc-Header-<name>`.
+    let caller_headers = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.as_str().to_ascii_lowercase();
+            let name = name.strip_prefix("rpc-header-").unwrap_or(&name).to_owned();
+            Some((name, value.to_str().ok()?.to_owned()))
+        })
+        .collect();
+    match dispatch_with_headers(&state, &method, &args, deadline, caller_headers).await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
     }

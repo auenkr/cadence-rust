@@ -138,7 +138,9 @@ impl EmaQpsTracker {
         Self {
             clock,
             start,
-            interval: i64::try_from(bucket_interval.as_nanos()).unwrap_or(i64::MAX).max(1),
+            interval: i64::try_from(bucket_interval.as_nanos())
+                .unwrap_or(i64::MAX)
+                .max(1),
             exp,
             state: Mutex::new(Inner::default()),
         }
@@ -197,7 +199,10 @@ impl EmaQpsTracker {
     pub fn group_qps(&self, group: &str) -> f64 {
         let mut state = self.lock();
         self.advance(&mut state);
-        state.groups.get(group).map_or(0.0, |accumulator| accumulator.qps)
+        state
+            .groups
+            .get(group)
+            .map_or(0.0, |accumulator| accumulator.qps)
     }
 
     /// Go's ticker body `report()`: fold the window that is currently open.
@@ -229,7 +234,10 @@ mod tests {
     }
 
     fn close(expected: f64, actual: f64) {
-        assert!((expected - actual).abs() < RESOLUTION, "expected {expected}, got {actual}");
+        assert!(
+            (expected - actual).abs() < RESOLUTION,
+            "expected {expected}, got {actual}"
+        );
     }
 
     /// Go `TestEmaFixedWindowQPSTracker`.

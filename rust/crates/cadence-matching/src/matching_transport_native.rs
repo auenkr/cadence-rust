@@ -59,11 +59,11 @@ impl SharedNativeMatching {
             return self.0.list_task_list_partitions(request).await;
         }
 
-        let Ok(request_id) = LIST_PARTITIONS_TRACE_ID.try_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |id| (id <= 64).then_some(id + 1),
-        ) else {
+        let Ok(request_id) =
+            LIST_PARTITIONS_TRACE_ID.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| {
+                (id <= 64).then_some(id + 1)
+            })
+        else {
             return self.0.list_task_list_partitions(request).await;
         };
         let started = Instant::now();

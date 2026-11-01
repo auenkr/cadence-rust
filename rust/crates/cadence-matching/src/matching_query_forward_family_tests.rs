@@ -78,9 +78,7 @@ impl MatchingApi for FamilyQueryParent {
     }
 }
 
-async fn serve_family_parent(
-    parent: FamilyQueryParent,
-) -> (String, tokio::task::JoinHandle<()>) {
+async fn serve_family_parent(parent: FamilyQueryParent) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap().to_string();
     let server = tokio::spawn(async move {
@@ -396,11 +394,7 @@ async fn query_forward_family_parent_error_is_returned_without_local_wait() {
     let started = tokio::time::Instant::now();
     let error = tokio::time::timeout(
         Duration::from_secs(5),
-        child.query_workflow(family_query(
-            domain,
-            child_list(1),
-            Duration::from_secs(3),
-        )),
+        child.query_workflow(family_query(domain, child_list(1), Duration::from_secs(3))),
     )
     .await
     .expect("parent error should return before the RPC deadline")
@@ -479,7 +473,10 @@ async fn absent_query_case(
             .expect_err("poll of an absent-field query must fail");
         if empty_list {
             assert_eq!(poll_error.code(), tonic::Code::Aborted);
-            assert!(poll_error.message().ends_with("Tasklist: "), "{poll_error:?}");
+            assert!(
+                poll_error.message().ends_with("Tasklist: "),
+                "{poll_error:?}"
+            );
             return;
         }
         assert_eq!(poll_error.code(), tonic::Code::Unknown);
@@ -515,11 +512,7 @@ async fn absent_query_fields_absent_task_list_poller_fails_and_query_waits() {
 
 #[tokio::test]
 async fn absent_query_fields_absent_query_poller_fails_and_query_waits() {
-    absent_query_case(
-        |r| r.request.as_mut().unwrap().query = None,
-        child_list(0),
-    )
-    .await;
+    absent_query_case(|r| r.request.as_mut().unwrap().query = None, child_list(0)).await;
 }
 
 #[tokio::test]

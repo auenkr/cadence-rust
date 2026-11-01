@@ -405,7 +405,21 @@ name = "cadence-frontend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cadence-api",
+ "cadence-common",
+ "cadence-matching",
+ "cadence-persistence",
+ "cadence-proto",
  "cadence-service-core",
+ "cadence-thrift",
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tonic",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -457,6 +471,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-reflection",
+ "tracing",
  "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
@@ -499,6 +514,7 @@ dependencies = [
 name = "cadence-proto"
 version = "0.1.0"
 dependencies = [
+ "cadence-api",
  "cadence-common",
  "heck",
  "prost",

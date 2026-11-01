@@ -1852,7 +1852,7 @@ mod tests {
                 0,
                 tokio::time::Instant::now() + Duration::from_secs(2),
             )
-                .await,
+            .await,
             Err(crate::matching_forward::ForwardError::NoParent)
         ));
         assert!(api.decisions.lock().unwrap().is_empty());
@@ -1891,24 +1891,23 @@ mod tests {
             },
             Arc::new(|| 10),
             Arc::new(crate::matching_forward::RequestTokens::new(Arc::new(|| 10))),
-            Arc::new(crate::matching_forward::ForwardRate::new(Arc::new(|| 100), now())),
+            Arc::new(crate::matching_forward::ForwardRate::new(
+                Arc::new(|| 100),
+                now(),
+            )),
             gs(b"/__cadence_sys/q/1"),
             Arc::new(|| 0),
         );
         let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
         state
-            .forward_backlog_task(
-                raw_task(b"r"),
-                &gs(b"d"),
-                &gs(b"d"),
-                0,
-                0,
-                deadline,
-            )
+            .forward_backlog_task(raw_task(b"r"), &gs(b"d"), &gs(b"d"), 0, 0, deadline)
             .await
             .unwrap();
         assert_eq!(api.deadlines.lock().unwrap().as_slice(), &[deadline]);
-        assert_eq!(deadline.duration_since(tokio::time::Instant::now()), Duration::from_millis(20));
+        assert_eq!(
+            deadline.duration_since(tokio::time::Instant::now()),
+            Duration::from_millis(20)
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -1924,9 +1923,11 @@ mod tests {
             .await
             .is_err());
         assert_eq!(tokio::time::Instant::now(), deadline);
-        assert!(tokio::time::timeout(Duration::from_millis(1), matcher.poll(&GoString::default()))
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), matcher.poll(&GoString::default()))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

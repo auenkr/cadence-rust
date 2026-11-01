@@ -137,12 +137,20 @@ impl TaskListLimiter {
     }
     /// Current backing limit, reported by `DescribeTaskList.status.rate_per_second`.
     pub fn limit(&self) -> f64 {
-        self.inner.lock().expect("matching limiter lock").bucket.limit()
+        self.inner
+            .lock()
+            .expect("matching limiter lock")
+            .bucket
+            .limit()
     }
     /// Current backing burst size (`max(ceil(rate), minTaskThrottlingBurstSize)`,
     /// capped for a zero rate), mirroring the bucket Go builds in `tryUpdate`.
     pub fn burst(&self) -> i64 {
-        self.inner.lock().expect("matching limiter lock").bucket.burst()
+        self.inner
+            .lock()
+            .expect("matching limiter lock")
+            .bucket
+            .burst()
     }
     /// Current monotonic-anchored time in Unix nanoseconds.
     pub fn now(&self) -> i64 {
@@ -158,16 +166,17 @@ impl TaskListLimiter {
         let before = inner.rate.snapshot();
         let now = (self.clock)();
         let elapsed = now.saturating_sub(before.last_update);
-        let within_ttl_update = elapsed < self.ttl
-            && rps <= before.value
-            && (before.value - rps).abs() >= 0.001;
+        let within_ttl_update =
+            elapsed < self.ttl && rps <= before.value && (before.value - rps).abs() >= 0.001;
         let ttl_elapsed = elapsed >= self.ttl;
         if inner
             .rate
             .report_with_clock(rps, || clock(), || count_partitions())
         {
             let snapshot = inner.rate.snapshot();
-            inner.bucket.set_limit_and_burst(snapshot.limit, snapshot.burst);
+            inner
+                .bucket
+                .set_limit_and_burst(snapshot.limit, snapshot.burst);
         }
         let after = inner.rate.snapshot();
         (within_ttl_update || ttl_elapsed).then_some(after.value)
@@ -376,7 +385,10 @@ mod tests {
         let now = Arc::new(AtomicI64::new(0));
         let limiter = limiter(TASK_DISPATCH_RPS, &now);
         let (_stop, stopped) = watch::channel(true);
-        assert_eq!(limiter.wait_until(stopped, None).await, WaitOutcome::Stopped);
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Stopped
+        );
         // The still-available burst token was not consumed.
         let (_stop2, stopped2) = watch::channel(false);
         assert_eq!(
@@ -465,7 +477,10 @@ mod tests {
             stop.send_replace(true);
         });
         let start = Instant::now();
-        assert_eq!(limiter.wait_until(stopped, None).await, WaitOutcome::Stopped);
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Stopped
+        );
         assert_elapsed(GRANULARITY / 2, start.elapsed());
         advance(&now, GRANULARITY / 2);
         assert_eq!(available_tokens(&limiter, &now).await, 0);
@@ -478,7 +493,10 @@ mod tests {
         advance(&now, GRANULARITY);
         let (_stop, stopped) = watch::channel(true);
         let start = Instant::now();
-        assert_eq!(limiter.wait_until(stopped, None).await, WaitOutcome::Stopped);
+        assert_eq!(
+            limiter.wait_until(stopped, None).await,
+            WaitOutcome::Stopped
+        );
         assert_elapsed(Duration::ZERO, start.elapsed());
         assert_eq!(available_tokens(&limiter, &now).await, 1);
     }
@@ -530,8 +548,8 @@ mod tests {
         assert_eq!(available_tokens(&limiter, &now).await, 0);
     }
     #[tokio::test]
-    async fn ratelimit_matrix_canceling_while_waiting_with_deadline_stops_and_returns_unused_tokens()
-    {
+    async fn ratelimit_matrix_canceling_while_waiting_with_deadline_stops_and_returns_unused_tokens(
+    ) {
         let now = Arc::new(AtomicI64::new(0));
         let limiter = limiter(RATE_PER_SECOND, &now);
         drain(&limiter, &now).await;

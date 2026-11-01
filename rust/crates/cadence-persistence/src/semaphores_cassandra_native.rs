@@ -10,7 +10,10 @@ use crate::{
         AcquireError, GrantOutcome, SemaphoreError, SemaphoreMetadata, DEFAULT_BUCKET_SIZE,
         MAX_BUCKET_SIZE, SEMAPHORE_SCAN_PAGE_SIZE_MESSAGE,
     },
-    semaphores_native::{SemaphoreBucketPageBytes, SemaphoreCallContext, SemaphorePersistenceBytes, SemaphoreRowBytes},
+    semaphores_native::{
+        SemaphoreBucketPageBytes, SemaphoreCallContext, SemaphorePersistenceBytes,
+        SemaphoreRowBytes,
+    },
 };
 use async_trait::async_trait;
 use cadence_common::go_string::GoString;
@@ -522,7 +525,10 @@ mod tests {
     #[tokio::test]
     async fn caller_io_cancels_pending_and_keeps_ready_result() {
         let (tx, rx) = tokio::sync::watch::channel(false);
-        let context = SemaphoreCallContext { cancelled: Some(rx), ..Default::default() };
+        let context = SemaphoreCallContext {
+            cancelled: Some(rx),
+            ..Default::default()
+        };
         let entered = std::sync::Arc::new(tokio::sync::Notify::new());
         let signal = entered.clone();
         let pending = async move {
@@ -532,11 +538,19 @@ mod tests {
         let task = tokio::spawn(async move { caller_io(&context, pending).await });
         entered.notified().await;
         tx.send(true).unwrap();
-        assert!(matches!(task.await.unwrap(), Err(AcquireError::Internal(_))));
+        assert!(matches!(
+            task.await.unwrap(),
+            Err(AcquireError::Internal(_))
+        ));
 
         let (_tx, rx) = tokio::sync::watch::channel(true);
-        let context = SemaphoreCallContext { cancelled: Some(rx), ..Default::default() };
-        let result = caller_io(&context, async { Ok(GrantOutcome::Applied) }).await.unwrap();
+        let context = SemaphoreCallContext {
+            cancelled: Some(rx),
+            ..Default::default()
+        };
+        let result = caller_io(&context, async { Ok(GrantOutcome::Applied) })
+            .await
+            .unwrap();
         assert!(matches!(result, GrantOutcome::Applied));
     }
 

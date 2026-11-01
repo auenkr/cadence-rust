@@ -2616,22 +2616,41 @@ mod tests {
                 "panic object is not error: \"non-positive interval for NewTicker\""
             );
             let lease = registry.store.get_task_list(&task_key).unwrap().range_id;
-            let lookup = (task_key.domain_id, task_key.name.clone(), task_key.task_type);
-            let owner = registry.state.lock().unwrap().owners.get(&lookup).unwrap().clone();
+            let lookup = (
+                task_key.domain_id,
+                task_key.name.clone(),
+                task_key.task_type,
+            );
+            let owner = registry
+                .state
+                .lock()
+                .unwrap()
+                .owners
+                .get(&lookup)
+                .unwrap()
+                .clone();
             assert!(owner.ticker_start_failed);
 
             configured.store(60_000_000_000, Ordering::SeqCst);
-            let reused = registry.get(task_key.clone(), 0, registry_now()).await.unwrap();
+            let reused = registry
+                .get(task_key.clone(), 0, registry_now())
+                .await
+                .unwrap();
             assert!(Arc::ptr_eq(&owner.queue, &reused.queue));
-            assert_eq!(registry.store.get_task_list(&task_key).unwrap().range_id, lease);
+            assert_eq!(
+                registry.store.get_task_list(&task_key).unwrap().range_id,
+                lease
+            );
 
             let mut shutdown = tokio::spawn({
                 let registry = registry.clone();
                 async move { registry.shutdown(registry_now()).await }
             });
-            assert!(tokio::time::timeout(Duration::from_millis(100), &mut shutdown)
-                .await
-                .is_err());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), &mut shutdown)
+                    .await
+                    .is_err()
+            );
             assert!(!owner.queue.is_stopped());
             assert!(registry.state.lock().unwrap().owners.is_empty());
             shutdown.abort();
@@ -2641,8 +2660,12 @@ mod tests {
         }
 
         let (_dir, registry) = fixture();
-        let healthy = registry.with_idle_tasklist_check_interval(Arc::new(|_, _, _| 60_000_000_000));
-        let handle = healthy.get(key(b"valid-idle-ticker"), 0, registry_now()).await.unwrap();
+        let healthy =
+            registry.with_idle_tasklist_check_interval(Arc::new(|_, _, _| 60_000_000_000));
+        let handle = healthy
+            .get(key(b"valid-idle-ticker"), 0, registry_now())
+            .await
+            .unwrap();
         healthy.shutdown(registry_now()).await.unwrap();
         assert!(handle.queue.is_stopped());
     }

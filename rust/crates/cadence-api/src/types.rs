@@ -269,6 +269,18 @@ pub struct DomainConfiguration {
     )]
     pub bad_binaries: Option<BadBinaries>,
     #[serde(
+        rename = "isolationGroups",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub isolation_groups: Option<IsolationGroupConfiguration>,
+    #[serde(
+        rename = "asyncWorkflowConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub async_workflow_config: Option<AsyncWorkflowConfiguration>,
+    #[serde(
         rename = "historyArchivalStatus",
         default,
         skip_serializing_if = "Option::is_none"
@@ -361,7 +373,7 @@ pub struct IsolationGroupConfiguration {
     pub isolation_groups: Vec<IsolationGroupPartition>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsyncWorkflowConfiguration {
     #[serde(rename = "enabled", default)]
     pub enabled: bool,
@@ -395,7 +407,11 @@ pub struct ClusterAttribute {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailoverDomainRequest {
-    #[serde(rename = "domainName", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "domainName",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub domain_name: String,
     #[serde(
         rename = "domainActiveClusterName",
@@ -423,7 +439,11 @@ pub struct FailoverDomainRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailoverDomainResponse {
-    #[serde(rename = "domainInfo", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "domainInfo",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub domain_info: Option<DomainInfo>,
     #[serde(
         rename = "configuration",
@@ -445,7 +465,11 @@ pub struct FailoverDomainResponse {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClusterFailover {
-    #[serde(rename = "fromCluster", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "fromCluster",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub from_cluster: Option<ActiveClusterInfo>,
     #[serde(rename = "toCluster", default, skip_serializing_if = "Option::is_none")]
     pub to_cluster: Option<ActiveClusterInfo>,
@@ -461,9 +485,17 @@ pub struct ClusterFailover {
 pub struct FailoverEvent {
     #[serde(rename = "id", default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    #[serde(rename = "createdTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "createdTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub created_time: Option<i64>,
-    #[serde(rename = "failoverType", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failoverType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failover_type: Option<crate::enums::FailoverType>,
     #[serde(
         rename = "clusterFailovers",
@@ -497,7 +529,11 @@ pub struct ListFailoverHistoryRequestFilters {
 pub struct ListFailoverHistoryRequest {
     #[serde(rename = "filters", default, skip_serializing_if = "Option::is_none")]
     pub filters: Option<ListFailoverHistoryRequestFilters>,
-    #[serde(rename = "pagination", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "pagination",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pagination: Option<PaginationOptions>,
 }
 
@@ -537,6 +573,65 @@ pub struct DomainReplicationConfiguration {
     pub active_clusters: Option<ActiveClusters>,
 }
 
+/// Domain replication payload carried by Go's `ReplicationTask` queue.
+/// These fields mirror `go/common/types/replicator.go`; queue persistence
+/// encodes the enclosing task with ThriftRW rather than JSON.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainTaskAttributes {
+    #[serde(
+        rename = "domainOperation",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_operation: Option<crate::enums::DomainOperation>,
+    #[serde(rename = "id", default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
+    #[serde(rename = "info", default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<DomainInfo>,
+    #[serde(rename = "config", default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<DomainConfiguration>,
+    #[serde(
+        rename = "replicationConfig",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replication_config: Option<DomainReplicationConfiguration>,
+    #[serde(rename = "configVersion", default, skip_serializing_if = "is_zero_i64")]
+    pub config_version: i64,
+    #[serde(
+        rename = "failoverVersion",
+        default,
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub failover_version: i64,
+    #[serde(
+        rename = "previousFailoverVersion",
+        default,
+        skip_serializing_if = "is_zero_i64"
+    )]
+    pub previous_failover_version: i64,
+}
+
+/// Domain-only fields from Go's envelope. Other replication task payloads are
+/// added alongside their service ports when those task queues are migrated.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicationTask {
+    #[serde(rename = "taskType", default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<crate::enums::ReplicationTaskType>,
+    #[serde(
+        rename = "sourceTaskId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_task_id: Option<i64>,
+    #[serde(
+        rename = "domainTaskAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub domain_task_attributes: Option<DomainTaskAttributes>,
+}
+
 // ---------------------------------------------------------------------------
 // History types
 // ---------------------------------------------------------------------------
@@ -561,8 +656,12 @@ pub struct HistoryBranch {
     pub ancestors: Vec<HistoryBranchRange>,
 }
 
-fn is_zero_i64(value: &i64) -> bool { *value == 0 }
-fn is_zero_i32(value: &i32) -> bool { *value == 0 }
+fn is_zero_i64(value: &i64) -> bool {
+    *value == 0
+}
+fn is_zero_i32(value: &i32) -> bool {
+    *value == 0
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistoryItem {
@@ -574,8 +673,13 @@ pub struct VersionHistoryItem {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistory {
-    #[serde(rename = "branchToken", default, skip_serializing_if = "Vec::is_empty",
-        serialize_with = "crate::b64::serialize_bytes", deserialize_with = "crate::b64::deserialize_bytes")]
+    #[serde(
+        rename = "branchToken",
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "crate::b64::serialize_bytes",
+        deserialize_with = "crate::b64::deserialize_bytes"
+    )]
     pub branch_token: Vec<u8>,
     #[serde(rename = "items", default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<VersionHistoryItem>,
@@ -583,7 +687,11 @@ pub struct VersionHistory {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionHistories {
-    #[serde(rename = "currentVersionHistoryIndex", default, skip_serializing_if = "is_zero_i32")]
+    #[serde(
+        rename = "currentVersionHistoryIndex",
+        default,
+        skip_serializing_if = "is_zero_i32"
+    )]
     pub current_version_history_index: i32,
     #[serde(rename = "histories", default, skip_serializing_if = "Vec::is_empty")]
     pub histories: Vec<VersionHistory>,
@@ -910,11 +1018,7 @@ pub struct CreateSemaphoreResponse {
 pub struct RefreshWorkflowTasksRequest {
     #[serde(rename = "domain", default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
-    #[serde(
-        rename = "execution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "execution", default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<WorkflowExecution>,
 }
 
@@ -958,7 +1062,11 @@ pub struct ResetWorkflowExecutionRequest {
     pub reason: String,
     #[serde(rename = "decisionFinishEventId", default)]
     pub decision_finish_event_id: i64,
-    #[serde(rename = "requestId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "requestId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub request_id: String,
     #[serde(rename = "skipSignalReapply", default)]
     pub skip_signal_reapply: bool,
@@ -1111,5 +1219,29 @@ mod tests {
     fn task_list_kind_defaults_to_normal() {
         let t = TaskList::default();
         assert_eq!(t.kind_or_default(), TaskListKind::Normal);
+    }
+
+    #[test]
+    fn domain_replication_task_uses_go_field_names_and_enum_values() {
+        let task = ReplicationTask {
+            task_type: Some(crate::enums::ReplicationTaskType::Domain),
+            domain_task_attributes: Some(DomainTaskAttributes {
+                domain_operation: Some(crate::enums::DomainOperation::Create),
+                id: "domain-id".into(),
+                config_version: 2,
+                failover_version: 17,
+                previous_failover_version: -1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(task).unwrap();
+        assert_eq!(json["taskType"], 0);
+        assert_eq!(json["domainTaskAttributes"]["domainOperation"], 0);
+        assert_eq!(json["domainTaskAttributes"]["id"], "domain-id");
+        assert_eq!(json["domainTaskAttributes"]["configVersion"], 2);
+        assert_eq!(json["domainTaskAttributes"]["failoverVersion"], 17);
+        assert_eq!(json["domainTaskAttributes"]["previousFailoverVersion"], -1);
+        assert!(json.get("sourceTaskId").is_none());
     }
 }
