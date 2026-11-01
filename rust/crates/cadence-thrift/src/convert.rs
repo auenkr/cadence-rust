@@ -2497,11 +2497,8 @@ impl ToThrift for StartWorkflowExecutionAsyncRequest {
 }
 
 impl FromThrift for StartWorkflowExecutionAsyncResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -2528,11 +2525,8 @@ impl ToThrift for SignalWithStartWorkflowExecutionAsyncRequest {
 }
 
 impl FromThrift for SignalWithStartWorkflowExecutionAsyncResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3293,11 +3287,8 @@ impl ToThrift for DeleteScheduleRequest {
 }
 
 impl FromThrift for DeleteScheduleResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3330,11 +3321,8 @@ impl ToThrift for PauseScheduleRequest {
 }
 
 impl FromThrift for PauseScheduleResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3367,11 +3355,8 @@ impl ToThrift for UnpauseScheduleRequest {
 }
 
 impl FromThrift for UnpauseScheduleResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3408,11 +3393,8 @@ impl ToThrift for BackfillScheduleRequest {
 }
 
 impl FromThrift for BackfillScheduleResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3449,11 +3431,8 @@ impl ToThrift for UpdateScheduleRequest {
 }
 
 impl FromThrift for UpdateScheduleResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
@@ -3562,11 +3541,8 @@ impl ToThrift for RespondQueryTaskCompletedRequest {
 }
 
 impl FromThrift for RespondQueryTaskCompletedResponse {
-    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
-        Ok(Self {
-            page_size: s.opt_i32(10)?,
-            page_id: s.opt_i32(20)?,
-        })
+    fn from_thrift(_s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {})
     }
 }
 
