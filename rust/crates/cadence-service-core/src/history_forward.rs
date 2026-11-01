@@ -6,7 +6,10 @@
 //! mapping shared by the Thrift/TChannel and JSON/gRPC bridges. Shard owner
 //! lookup is the `HistoryPeers` seam: the launcher installs a static peer today
 //! and the ringpop-backed resolver when Frontend joins membership.
-use cadence_api::{errors::WorkflowExecutionAlreadyStartedError, service_types as st, types as t};
+use cadence_api::{
+    enums as e, errors::WorkflowExecutionAlreadyStartedError, service_types as st, tasks as tk,
+    types as t,
+};
 use cadence_proto::{api as p, convert as cv, history as h};
 use prost::Message;
 use std::sync::Arc;
@@ -300,10 +303,205 @@ impl HistoryForward {
     }
 }
 
+fn en<T>(value: i32, from: fn(i32) -> Option<T>) -> Option<T> {
+    if value <= 0 {
+        None
+    } else {
+        from(value - 1)
+    }
+}
+
+fn secs(d: Option<prost_types::Duration>) -> Option<i32> {
+    d.map(|d| d.seconds as i32)
+}
+
+fn payload_map(
+    fields: std::collections::HashMap<String, p::Payload>,
+) -> std::collections::HashMap<String, Vec<u8>> {
+    fields.into_iter().map(|(k, v)| (k, v.data)).collect()
+}
+
+fn info_in(v: p::WorkflowExecutionInfo) -> st::WorkflowExecutionInfo {
+    let parent = v.parent_execution_info;
+    st::WorkflowExecutionInfo {
+        execution: v.workflow_execution.map(cv::execution),
+        workflow_type: v.r#type.map(|x| t::WorkflowType { name: x.name }),
+        start_time: millis_nanos(v.start_time),
+        close_time: millis_nanos(v.close_time),
+        close_status: en(v.close_status, e::WorkflowExecutionCloseStatus::from_i32),
+        history_length: v.history_length,
+        memo: v.memo.map(|m| t::Memo {
+            fields: Some(payload_map(m.fields)),
+        }),
+        parent_domain: parent.as_ref().map(|x| x.domain_name.clone()),
+        parent_execution: parent
+            .as_ref()
+            .and_then(|x| x.workflow_execution.clone())
+            .map(cv::execution),
+        parent_initiated_id: parent.as_ref().map(|x| x.initiated_id),
+        execution_time: millis_nanos(v.execution_time),
+        search_attributes: v.search_attributes.map(|m| t::SearchAttributes {
+            indexed_fields: Some(
+                m.indexed_fields
+                    .into_iter()
+                    .map(|(k, v)| (k, v.data))
+                    .collect(),
+            ),
+        }),
+        task_list: v
+            .task_list_info
+            .and_then(|x| cv::task_list(x).ok())
+            .or_else(|| {
+                (!v.task_list.is_empty()).then(|| t::TaskList {
+                    name: v.task_list.clone(),
+                    ..Default::default()
+                })
+            }),
+        is_cron: v.is_cron,
+        cron_schedule: (!v.cron_schedule.is_empty()).then_some(v.cron_schedule),
+        cron_overlap_policy: en(v.cron_overlap_policy, e::CronOverlapPolicy::from_i32),
+        update_time: millis_nanos(v.update_time),
+        partition_config: (!v.partition_config.is_empty()).then_some(v.partition_config),
+        execution_status: en(v.execution_status, e::WorkflowExecutionStatus::from_i32),
+        scheduled_execution_time: millis_nanos(v.scheduled_execution_time),
+    }
+}
+
+/// `start_time`/`close_time` etc. are nanoseconds in the Thrift model
+/// (Go `UnixNano`), carried in `api.v1` as a Timestamp.
+fn millis_nanos(ts: Option<prost_types::Timestamp>) -> Option<i64> {
+    ts.map(|t| t.seconds * 1_000_000_000 + i64::from(t.nanos))
+}
+
+/// `api.v1` describe response -> Thrift (inverse of `cv::describe`).
+pub fn describe_in(v: p::DescribeWorkflowExecutionResponse) -> st::DescribeWorkflowExecutionResponse {
+    st::DescribeWorkflowExecutionResponse {
+        execution_configuration: v.execution_configuration.map(|c| {
+            st::WorkflowExecutionConfiguration {
+                task_list: c.task_list.and_then(|x| cv::task_list(x).ok()),
+                execution_start_to_close_timeout_seconds: secs(c.execution_start_to_close_timeout),
+                task_start_to_close_timeout_seconds: secs(c.task_start_to_close_timeout),
+            }
+        }),
+        workflow_execution_info: v.workflow_execution_info.map(info_in),
+        pending_activities: v
+            .pending_activities
+            .into_iter()
+            .map(|a| tk::PendingActivityInfo {
+                activity_id: a.activity_id,
+                activity_type: a.activity_type.map(|x| t::ActivityType { name: x.name }),
+                state: en(a.state, e::PendingActivityState::from_i32),
+                attempt: a.attempt,
+                scheduled_timestamp: millis_nanos(a.scheduled_time),
+                last_started_timestamp: millis_nanos(a.last_started_time),
+                heartbeat_details: cv::data(a.heartbeat_details),
+                maximum_attempts: a.maximum_attempts,
+                schedule_id: a.schedule_id,
+                last_failure_reason: a.last_failure.map(|f| f.reason),
+                ..Default::default()
+            })
+            .collect(),
+        pending_children: v
+            .pending_children
+            .into_iter()
+            .map(|c| {
+                let execution = c.workflow_execution.unwrap_or_default();
+                tk::PendingChildExecutionInfo {
+                    domain: c.domain,
+                    workflow_id: execution.workflow_id,
+                    run_id: execution.run_id,
+                    workflow_type_name: c.workflow_type_name,
+                    initiated_id: c.initiated_id,
+                    parent_close_policy: en(c.parent_close_policy, e::ParentClosePolicy::from_i32),
+                }
+            })
+            .collect(),
+        pending_decision: v.pending_decision.map(|d| tk::PendingDecisionInfo {
+            state: en(d.state, e::PendingDecisionState::from_i32),
+            scheduled_timestamp: millis_nanos(d.scheduled_time),
+            started_timestamp: millis_nanos(d.started_time),
+            attempt: i64::from(d.attempt),
+            schedule_id: d.schedule_id,
+            original_scheduled_timestamp: millis_nanos(d.original_scheduled_time),
+        }),
+    }
+}
+
+impl HistoryForward {
+    pub async fn describe(
+        &self,
+        domain_id: &str,
+        req: &st::DescribeWorkflowExecutionRequest,
+    ) -> Result<st::DescribeWorkflowExecutionResponse, ForwardError> {
+        let execution = req.execution.clone().unwrap_or_default();
+        let mut client = self.client(&execution.workflow_id)?;
+        let response = client
+            .describe_workflow_execution(Self::request(h::DescribeWorkflowExecutionRequest {
+                request: Some(p::DescribeWorkflowExecutionRequest {
+                    domain: req.domain.clone(),
+                    workflow_execution: Some(cv::execution_out(execution)),
+                    query_consistency_level: pb_enum(
+                        req.query_consistency_level.map(|x| x as i32),
+                    ),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?
+            .into_inner();
+        Ok(describe_in(h_describe(response)))
+    }
+
+    pub async fn query(
+        &self,
+        domain_id: &str,
+        req: &tk::QueryWorkflowRequest,
+    ) -> Result<tk::QueryWorkflowResponse, ForwardError> {
+        let execution = req.execution.clone().unwrap_or_default();
+        let query = req.query.clone().unwrap_or_default();
+        let mut client = self.client(&execution.workflow_id)?;
+        let response = client
+            .query_workflow(Self::request(h::QueryWorkflowRequest {
+                request: Some(p::QueryWorkflowRequest {
+                    domain: req.domain.clone(),
+                    workflow_execution: Some(cv::execution_out(execution)),
+                    query: Some(p::WorkflowQuery {
+                        query_type: query.query_type,
+                        query_args: cv::payload(query.query_args),
+                    }),
+                    query_reject_condition: pb_enum(req.query_reject_condition.map(|x| x as i32)),
+                    query_consistency_level: pb_enum(
+                        req.query_consistency_level.map(|x| x as i32),
+                    ),
+                }),
+                domain_id: domain_id.to_owned(),
+            }))
+            .await
+            .map_err(|s| map_status(&s))?
+            .into_inner();
+        Ok(tk::QueryWorkflowResponse {
+            query_result: cv::data(response.query_result),
+            query_rejected: response.query_rejected.map(|r| cadence_api::errors::QueryRejected {
+                close_status: en(r.close_status, e::WorkflowExecutionCloseStatus::from_i32),
+            }),
+        })
+    }
+}
+
+/// History wraps the public describe response field-for-field.
+fn h_describe(v: h::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflowExecutionResponse {
+    p::DescribeWorkflowExecutionResponse {
+        execution_configuration: v.execution_configuration,
+        workflow_execution_info: v.workflow_execution_info,
+        pending_activities: v.pending_activities,
+        pending_children: v.pending_children,
+        pending_decision: v.pending_decision,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadence_api::enums as e;
 
     #[test]
     fn start_out_maps_seconds_enums_and_payload() {

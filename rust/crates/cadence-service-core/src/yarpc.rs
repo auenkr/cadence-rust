@@ -1244,6 +1244,14 @@ async fn handle_describe_workflow(state: &AppState, body: &Struct) -> HandlerRes
     let executions = require_domain_thrift(state, &req.domain)?;
     let execution = req.execution.clone().unwrap_or_default();
     validation::check_execution(Some(&execution)).map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        return forward
+            .describe(&domain_id, &req)
+            .await
+            .map(|resp| wrap_success(&resp))
+            .map_err(forward_error);
+    }
     match executions.describe(&req.domain, &execution) {
         Ok(resp) => Ok(wrap_success(&resp)),
         Err(e) => Err(AppError::entity_not_exists(e.message)),
@@ -2189,6 +2197,14 @@ async fn handle_query(state: &AppState, body: &Struct, deadline: Instant) -> Han
             ));
         }
     };
+    if let Some(forward) = &state.history_forward {
+        let domain_id = forward_domain_id(state, &req.domain)?;
+        return forward
+            .query(&domain_id, &req)
+            .await
+            .map(|resp| wrap_success(&resp))
+            .map_err(forward_error);
+    }
     let query_id = match executions.buffer_query(
         &req.domain,
         &execution,
