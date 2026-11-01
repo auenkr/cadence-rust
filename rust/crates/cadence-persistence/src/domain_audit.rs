@@ -164,7 +164,10 @@ pub fn decode_domain_state(blob: &GoDomainBlob) -> Result<DomainAuditState, Stri
     if reader.remaining() != 0 {
         return Err("trailing domain audit ThriftRW bytes".into());
     }
-    let describe = DescribeDomainResponse::from_thrift(&value).map_err(|error| error.to_string())?;
+    let mut describe =
+        DescribeDomainResponse::from_thrift(&value).map_err(|error| error.to_string())?;
+    // The persisted failover info is carried as `failover_expire_nanos`.
+    describe.failover_info = None;
     let failover_expire_nanos = match value
         .fields
         .iter()
