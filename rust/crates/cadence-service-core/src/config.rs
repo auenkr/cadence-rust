@@ -1803,7 +1803,7 @@ shard-distributor-matching:
         assert!(persistence
             .store_name_for(PersistenceStoreRole::Default)
             .unwrap_err()
-            .contains("' primary '"));
+            .contains("\" primary \""));
         persistence.default_store.clear();
         assert!(persistence
             .store_name_for(PersistenceStoreRole::Default)
