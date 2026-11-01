@@ -565,15 +565,23 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn describe_history_host(
         &self,
-        _request: Request<a::DescribeHistoryHostRequest>,
+        request: Request<a::DescribeHistoryHostRequest>,
     ) -> Result<Response<a::DescribeHistoryHostResponse>, Status> {
-        // Single host owns every shard and execution, so all oneof selectors
-        // (host address, shard ID, workflow execution) resolve here.
+        use a::describe_history_host_request::DescribeBy;
+        let mut input = cadence_api::admin::DescribeHistoryHostRequest::default();
+        match request.into_inner().describe_by {
+            Some(DescribeBy::HostAddress(address)) => input.host_address = Some(address),
+            Some(DescribeBy::ShardId(id)) => input.shard_id_for_host = Some(id),
+            Some(DescribeBy::WorkflowExecution(execution)) => {
+                input.execution_for_host = Some(cadence_api::types::WorkflowExecution {
+                    workflow_id: execution.workflow_id,
+                    run_id: execution.run_id,
+                });
+            }
+            None => {}
+        }
         let v: cadence_api::admin::DescribeHistoryHostResponse = self
-            .call(
-                "/api/v1/admin/history-host/describe",
-                &serde_json::json!({}),
-            )
+            .call("/api/v1/admin/history-host/describe", &input)
             .await?;
         Ok(Response::new(a::DescribeHistoryHostResponse {
             number_of_shards: v.number_of_shards,

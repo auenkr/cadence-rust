@@ -1469,11 +1469,20 @@ async fn admin_shard_queue_history_and_maintain_flow() {
     let app = router(AppState::default());
     setup_domain(app.clone()).await;
 
-    let (status, host) = call(
+    let (status, _) = call(
         app.clone(),
         Method::POST,
         "/api/v1/admin/history-host/describe",
         json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, host) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/history-host/describe",
+        json!({"shardIdForHost": 1}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
