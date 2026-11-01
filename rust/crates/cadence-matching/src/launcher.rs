@@ -1908,12 +1908,62 @@ async fn run_with_lifecycle(
                         crate::grpc::serve(grpc_addr, grpc_state).await,
                     )
                 });
-                serving.spawn(async move {
-                    (
-                        "Frontend TChannel",
-                        crate::tchannel::serve(tchannel_addr, tchannel_state).await,
-                    )
-                });
+                // Go Frontend joins the Ringpop ring as `cadence-frontend` on
+                // its TChannel port so History/Matching see it as a member and
+                // answer /protocol/join on that port. Embedded development
+                // and combined Matching processes keep the plain listener.
+                if !run_matching && !embedded_development {
+                    let listener = tokio::net::TcpListener::bind(tchannel_addr).await?;
+                    let provider = std::sync::Arc::new(
+                        crate::matching_ringpop_provider::MatchingRingpopProvider::new(
+                            cfg.ringpop.clone(),
+                            "cadence-frontend",
+                            listener.local_addr()?,
+                            grpc_addr.port(),
+                        )?,
+                    );
+                    let handler = provider.handler();
+                    let membership = crate::matching_membership::Membership::new(
+                        provider.local_identity().to_owned(),
+                        Vec::new(),
+                    );
+                    let mut lifecycle =
+                        crate::matching_membership_lifecycle::MatchingMembershipLifecycle::new(
+                            "cadence-frontend",
+                            provider,
+                            membership,
+                        );
+                    let (done_tx, mut done_rx) = tokio::sync::oneshot::channel();
+                    tokio::spawn(async move {
+                        let result = crate::tchannel::serve_with_ringpop_listener(
+                            listener,
+                            tchannel_state,
+                            handler,
+                        )
+                        .await;
+                        let _ = done_tx.send(result);
+                    });
+                    eprintln!("Frontend startup: starting Ringpop membership");
+                    tokio::select! {
+                        result = lifecycle.start() => result.map_err(|error| anyhow::anyhow!("starting Frontend Ringpop membership: {error}"))?,
+                        result = &mut done_rx => anyhow::bail!("Frontend TChannel/Ringpop listener stopped during bootstrap: {result:?}"),
+                    }
+                    serving.spawn(async move {
+                        let result = match done_rx.await {
+                            Ok(result) => result,
+                            Err(error) => Err(anyhow::Error::new(error)),
+                        };
+                        let _lifecycle = lifecycle;
+                        ("Frontend TChannel/Ringpop", result)
+                    });
+                } else {
+                    serving.spawn(async move {
+                        (
+                            "Frontend TChannel",
+                            crate::tchannel::serve(tchannel_addr, tchannel_state).await,
+                        )
+                    });
+                }
             }
             if run_history {
                 serving.spawn(async move {

@@ -707,6 +707,15 @@ pub async fn serve_matching_with_ringpop_listener(
     )
     .await
 }
+/// Serve Frontend Thrift and Ringpop JSON methods on a caller-bound listener
+/// so the advertised Ringpop address is known before JOIN begins.
+pub async fn serve_with_ringpop_listener(
+    listener: TcpListener,
+    state: AppState,
+    ringpop: RingpopHandler,
+) -> Result<()> {
+    serve_listener(listener, state, None, Some(ringpop)).await
+}
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
 }
