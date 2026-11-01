@@ -284,8 +284,10 @@ mod tests {
 
     #[test]
     fn plan_follows_go_order_and_gates() {
-        let mut c = crate::config::Config::default();
-        c.enable_batcher = false;
+        let mut c = crate::config::Config {
+            enable_batcher: false,
+            ..Default::default()
+        };
         let plan = startup_plan(&c);
         let names: Vec<_> = plan.iter().map(|m| m.name).collect();
         assert_eq!(names[0], "scanner");

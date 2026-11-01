@@ -181,19 +181,22 @@ pub fn history_error(status: &tonic::Status) -> HistoryError {
     }
 }
 
+/// Resolves the Frontend client of a remote cluster by name.
+pub type RemoteResolver = Arc<dyn Fn(&str) -> Option<CadenceClient> + Send + Sync>;
+
 /// Production backend over gRPC.
 pub struct GrpcBackend {
     pub history: HistoryClient,
     pub local: CadenceClient,
     /// Resolves the Frontend client of a remote cluster by name.
-    pub remote: Arc<dyn Fn(&str) -> Option<CadenceClient> + Send + Sync>,
+    pub remote: RemoteResolver,
 }
 
 impl GrpcBackend {
     pub fn new(
         channel: Channel,
         local: CadenceClient,
-        remote: Arc<dyn Fn(&str) -> Option<CadenceClient> + Send + Sync>,
+        remote: RemoteResolver,
     ) -> Self {
         Self {
             history: HistoryClient::new(channel),
@@ -202,6 +205,7 @@ impl GrpcBackend {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     async fn describe(
         &self,
         by: pb::describe_domain_request::DescribeBy,
