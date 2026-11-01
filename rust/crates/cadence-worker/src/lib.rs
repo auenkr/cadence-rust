@@ -21,6 +21,7 @@ pub mod replicator;
 pub mod runtime;
 pub mod scanner;
 pub mod scheduler;
+pub mod sdk;
 pub mod service;
 pub mod workercommon;
 
