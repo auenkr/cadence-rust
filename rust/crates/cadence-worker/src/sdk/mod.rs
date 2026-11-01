@@ -13,13 +13,18 @@
 //!   and returns the decisions for the final batch plus query answers.
 //! * `decision_poller` / `activity`: pollers on the Frontend gRPC WorkerAPI.
 //!
-//! Not yet supported: child workflows, signal/cancel of external workflows,
-//! search attribute upserts, local activities, sessions, sticky execution.
+//! * `features`: child workflows, signal/cancel of external workflows, search
+//!   attribute upserts (incl. the `GetVersion` change-version upsert) and
+//!   local activities (run in-process, recorded as `LocalActivity` markers).
+//!
+//! Not yet supported: sessions, sticky execution, mutable side effects, local
+//! activity retry backoff timers and cancellation.
 
 pub mod activity;
 pub mod converter;
 pub mod core;
 pub mod decision_poller;
+pub mod features;
 pub mod registry;
 pub mod replay;
 

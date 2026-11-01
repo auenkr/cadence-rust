@@ -37,6 +37,17 @@ pub enum DKey {
     Fail,
     ContinueAsNew,
     Cancel,
+    /// Child workflow start, keyed by child workflow id.
+    Child(String),
+    /// Cancellation request for a child workflow (child workflow id).
+    CancelChild(String),
+    /// Signal of an external workflow, keyed by the signal id (decision `control`).
+    SignalExternal(String),
+    /// Cancellation of an external workflow, keyed by the cancellation id.
+    CancelExternal(String),
+    /// Search attribute upsert. History events carry no id, so any two
+    /// upserts compare equal when matching decisions to events.
+    Upsert(String),
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +113,9 @@ pub struct WorkflowInfo {
     pub task_list: String,
     pub execution_start_to_close_seconds: i32,
     pub task_start_to_close_seconds: i32,
+    pub original_run_id: String,
+    /// Indexed search attributes (raw JSON payload bytes), updated by upserts.
+    pub search_attributes: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -148,19 +162,29 @@ pub struct Core {
     pub side_effects: HashMap<i32, Vec<u8>>,
     pub versions: HashMap<String, i32>,
     pub cancel_requested: bool,
+    pub children: HashMap<String, super::features::ChildState>,
+    /// Signal id -> outcome of `SignalExternalWorkflow`.
+    pub external_signals: HashMap<String, Option<Result<(), super::features::ExternalError>>>,
+    pub signal_by_initiated: HashMap<i64, String>,
+    /// Cancellation id -> outcome of `RequestCancelExternalWorkflow`.
+    pub external_cancels: HashMap<String, Option<Result<(), super::features::ExternalError>>>,
+    /// Initiated event id -> cancellation id (`None` for child workflow cancels).
+    pub cancel_by_initiated: HashMap<i64, Option<String>>,
+    pub(crate) local_pending: std::collections::VecDeque<super::features::LocalTask>,
+    pub local_results: HashMap<String, Option<ActivityResult>>,
     pub(crate) query_handlers: HashMap<String, QueryHandler>,
 }
 
 pub type CoreRef = Rc<RefCell<Core>>;
 
-fn dur(d: Duration) -> Option<prost_types::Duration> {
+pub(crate) fn dur(d: Duration) -> Option<prost_types::Duration> {
     Some(prost_types::Duration {
         seconds: d.as_secs() as i64 + i64::from(d.subsec_nanos() > 0),
         nanos: 0,
     })
 }
 
-fn secs_ceil(d: Duration) -> i64 {
+pub(crate) fn secs_ceil(d: Duration) -> i64 {
     d.as_secs() as i64 + i64::from(d.subsec_nanos() > 0)
 }
 
@@ -179,7 +203,7 @@ impl Core {
         id
     }
 
-    fn push(&mut self, key: DKey, attributes: DA) {
+    pub(crate) fn push(&mut self, key: DKey, attributes: DA) {
         self.decisions.push(PendingDecision {
             key,
             decision: pb::Decision {
@@ -188,7 +212,7 @@ impl Core {
         });
     }
 
-    fn remove_unsent(&mut self, key: &DKey) -> bool {
+    pub(crate) fn remove_unsent(&mut self, key: &DKey) -> bool {
         if let Some(pos) = self.decisions.iter().position(|d| &d.key == key) {
             self.decisions.remove(pos);
             true
@@ -380,7 +404,7 @@ impl Core {
     }
 }
 
-fn convert_retry_policy(p: &RetryPolicy) -> Result<pb::RetryPolicy, ActivityError> {
+pub(crate) fn convert_retry_policy(p: &RetryPolicy) -> Result<pb::RetryPolicy, ActivityError> {
     // convertRetryPolicy + validateRetryPolicy
     let initial = secs_ceil(p.initial_interval);
     if initial <= 0 {
@@ -550,8 +574,8 @@ impl WorkflowContext {
         Ok(value)
     }
 
-    /// Go `workflow.GetVersion`. The `CadenceChangeVersion` search attribute
-    /// upsert Go emits alongside the marker is not produced yet.
+    /// Go `workflow.GetVersion`: the first call outside replay records a
+    /// `Version` marker and upserts the `CadenceChangeVersion` search attribute.
     pub fn get_version(
         &self,
         change_id: &str,
@@ -559,25 +583,35 @@ impl WorkflowContext {
         max_supported: i32,
     ) -> Result<i32, WorkflowError> {
         let mut core = self.core.borrow_mut();
-        let version = if let Some(v) = core.versions.get(change_id).copied() {
-            v
-        } else if core.replaying {
+        let validate = |version: i32| {
+            if version < min_supported || version > max_supported {
+                Err(WorkflowError::generic(format!(
+                    "Version {version} of changeID {change_id} is not supported, supported version is between {min_supported} and {max_supported}"
+                )))
+            } else {
+                Ok(version)
+            }
+        };
+        if let Some(v) = core.versions.get(change_id).copied() {
+            return validate(v);
+        }
+        let version = if core.replaying {
             DEFAULT_VERSION
         } else {
+            max_supported
+        };
+        validate(version)?;
+        if !core.replaying && version != DEFAULT_VERSION {
             let details = converter::encode_args(&[
                 serde_json::json!(change_id),
-                serde_json::json!(max_supported),
+                serde_json::json!(version),
             ])
             .map_err(|e| WorkflowError::generic(e.to_string()))?;
             core.record_marker(VERSION_MARKER, details);
-            max_supported
-        };
-        core.versions.insert(change_id.to_owned(), version);
-        if version < min_supported || version > max_supported {
-            return Err(WorkflowError::generic(format!(
-                "Version {version} of changeID {change_id} is not supported, supported version is between {min_supported} and {max_supported}"
-            )));
+            core.upsert_change_version(change_id, version)
+                .map_err(WorkflowError::generic)?;
         }
+        core.versions.insert(change_id.to_owned(), version);
         Ok(version)
     }
 

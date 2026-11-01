@@ -10,6 +10,7 @@ use cadence_proto::api::history_event::Attributes as A;
 
 use super::converter;
 use super::core::*;
+use super::features::{apply_local_marker, run_pending_local_activity, CADENCE_CHANGE_VERSION, LOCAL_ACTIVITY_MARKER};
 use super::registry::{Registry, WorkflowFuture};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +113,25 @@ fn decision_key(e: &pb::HistoryEvent) -> Option<DKey> {
         A::WorkflowExecutionFailedEventAttributes(_) => DKey::Fail,
         A::WorkflowExecutionCanceledEventAttributes(_) => DKey::Cancel,
         A::WorkflowExecutionContinuedAsNewEventAttributes(_) => DKey::ContinueAsNew,
+        A::StartChildWorkflowExecutionInitiatedEventAttributes(a) => {
+            DKey::Child(a.workflow_id.clone())
+        }
+        A::SignalExternalWorkflowExecutionInitiatedEventAttributes(a) => {
+            DKey::SignalExternal(String::from_utf8_lossy(&a.control).into_owned())
+        }
+        A::RequestCancelExternalWorkflowExecutionInitiatedEventAttributes(a) => {
+            if a.control.is_empty() {
+                DKey::CancelChild(
+                    a.workflow_execution
+                        .as_ref()
+                        .map(|w| w.workflow_id.clone())
+                        .unwrap_or_default(),
+                )
+            } else {
+                DKey::CancelExternal(String::from_utf8_lossy(&a.control).into_owned())
+            }
+        }
+        A::UpsertWorkflowSearchAttributesEventAttributes(_) => DKey::Upsert(String::new()),
         _ => return None,
     })
 }
@@ -122,6 +142,28 @@ struct Run {
 }
 
 impl Run {
+    /// Poll the workflow, then settle local activities like Go does: replayed
+    /// `LocalActivity` markers resolve pending tasks, live batches run them.
+    fn drive(&mut self, replaying: bool, decision_events: &[pb::HistoryEvent]) -> Result<(), ReplayError> {
+        self.poll_once();
+        if replaying {
+            for e in decision_events {
+                if let Some(A::MarkerRecordedEventAttributes(m)) = attrs(e) {
+                    if m.marker_name == LOCAL_ACTIVITY_MARKER
+                        && apply_local_marker(&self.core, m).map_err(ReplayError::NonDeterministic)?
+                    {
+                        self.poll_once();
+                    }
+                }
+            }
+        } else {
+            while run_pending_local_activity(&self.core) {
+                self.poll_once();
+            }
+        }
+        Ok(())
+    }
+
     fn poll_once(&mut self) {
         let Some(fut) = self.fut.as_mut() else {
             return;
@@ -153,8 +195,8 @@ impl Run {
     }
 }
 
-fn apply_reply_event(core: &mut Core, e: &pb::HistoryEvent) {
-    let Some(a) = attrs(e) else { return };
+fn apply_reply_event(core: &mut Core, e: &pb::HistoryEvent) -> Result<(), ReplayError> {
+    let Some(a) = attrs(e) else { return Ok(()) };
     match a {
         A::DecisionTaskStartedEventAttributes(_) => core.now_nanos = event_nanos(e),
         A::ActivityTaskCompletedEventAttributes(a) => resolve_activity(
@@ -195,8 +237,11 @@ fn apply_reply_event(core: &mut Core, e: &pb::HistoryEvent) {
                 .push_back(a.input.as_ref().map(|p| p.data.clone()).unwrap_or_default());
         }
         A::WorkflowExecutionCancelRequestedEventAttributes(_) => core.cancel_requested = true,
-        _ => {}
+        other => core
+            .apply_feature_reply_event(other)
+            .map_err(|m| ReplayError::NonDeterministic(format!("event {}: {m}", e.event_id)))?,
     }
+    Ok(())
 }
 
 fn resolve_activity(core: &mut Core, scheduled_event_id: i64, result: ActivityResult) {
@@ -249,17 +294,8 @@ fn match_decision_event(core: &mut Core, e: &pb::HistoryEvent) -> Result<(), Rep
             e.event_id
         )));
     };
-    // Go state machines match by decision id, not by queue head: a cancelled
-    // sibling may have been removed, but the recorded order is the creation order.
-    // Go creates the Version marker state machine lazily from the recorded
-    // event, so a replayed marker needs no pending decision.
-    if key == DKey::Marker(VERSION_MARKER.to_owned())
-        && core.decisions.first().map(|d| &d.key) != Some(&key)
-    {
-        return Ok(());
-    }
     match core.decisions.first() {
-        Some(d) if d.key == key => {
+        Some(d) if keys_match(&d.key, &key) => {
             core.decisions.remove(0);
         }
         Some(d) => {
@@ -283,7 +319,39 @@ fn match_decision_event(core: &mut Core, e: &pb::HistoryEvent) -> Result<(), Rep
         Some(A::TimerStartedEventAttributes(a)) => {
             core.timer_by_started.insert(e.event_id, a.timer_id.clone());
         }
-        _ => {}
+        Some(a) => core.on_decision_event_matched(a, e.event_id),
+        None => {}
+    }
+    Ok(())
+}
+
+fn keys_match(pending: &DKey, recorded: &DKey) -> bool {
+    matches!((pending, recorded), (DKey::Upsert(_), DKey::Upsert(_))) || pending == recorded
+}
+
+/// Go skips the deterministic check for `Version` markers (and the
+/// `CadenceChangeVersion` upsert that follows one).
+fn is_version_marker(e: &pb::HistoryEvent) -> bool {
+    matches!(attrs(e), Some(A::MarkerRecordedEventAttributes(m)) if m.marker_name == VERSION_MARKER)
+}
+
+fn is_change_version_upsert(e: &pb::HistoryEvent) -> bool {
+    matches!(attrs(e), Some(A::UpsertWorkflowSearchAttributesEventAttributes(u))
+        if u.search_attributes.as_ref().is_some_and(|s| s.indexed_fields.contains_key(CADENCE_CHANGE_VERSION)))
+}
+
+fn match_decision_events(core: &mut Core, events: &[pb::HistoryEvent]) -> Result<(), ReplayError> {
+    let mut k = 0;
+    while k < events.len() {
+        if is_version_marker(&events[k]) {
+            k += 1;
+            if k < events.len() && is_change_version_upsert(&events[k]) {
+                k += 1;
+            }
+            continue;
+        }
+        match_decision_event(core, &events[k])?;
+        k += 1;
     }
     Ok(())
 }
@@ -318,6 +386,17 @@ pub fn process_decision_task(
             .unwrap_or_default(),
         execution_start_to_close_seconds: secs(&started.execution_start_to_close_timeout),
         task_start_to_close_seconds: secs(&started.task_start_to_close_timeout),
+        original_run_id: started.original_execution_run_id.clone(),
+        search_attributes: started
+            .search_attributes
+            .as_ref()
+            .map(|s| {
+                s.indexed_fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.data.clone()))
+                    .collect()
+            })
+            .unwrap_or_default(),
     });
     let workflow_input = started
         .input
@@ -385,16 +464,14 @@ pub fn process_decision_task(
                 apply_marker(&mut c, e)?;
             }
             for e in &events[i..reply_end] {
-                apply_reply_event(&mut c, e);
+                apply_reply_event(&mut c, e)?;
             }
         }
-        run.poll_once();
+        run.drive(replaying, &events[decision_start..decision_end])?;
         ran_any = true;
         if replaying {
             let mut c = core.borrow_mut();
-            for e in &events[decision_start..decision_end] {
-                match_decision_event(&mut c, e)?;
-            }
+            match_decision_events(&mut c, &events[decision_start..decision_end])?;
             if let Some(d) = c.decisions.first() {
                 return Err(ReplayError::NonDeterministic(format!(
                     "workflow produced decision {:?} that is missing from history",
@@ -407,7 +484,7 @@ pub fn process_decision_task(
         }
     }
     if !ran_any {
-        run.poll_once();
+        run.drive(false, &[])?;
     }
 
     let mut query_results = Vec::new();
