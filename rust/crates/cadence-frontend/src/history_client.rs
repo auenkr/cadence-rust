@@ -295,6 +295,139 @@ impl HistoryClient {
             .map(tonic::Response::into_inner)
     }
 
+    /// Admin delegation methods (Go `adminHandlerImpl` proxies these to History).
+    pub async fn close_shard(
+        &self,
+        request: cadence_proto::history::CloseShardRequest,
+    ) -> Result<cadence_proto::history::CloseShardResponse, tonic::Status> {
+        self.client
+            .clone()
+            .close_shard(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn remove_task(
+        &self,
+        request: cadence_proto::history::RemoveTaskRequest,
+    ) -> Result<cadence_proto::history::RemoveTaskResponse, tonic::Status> {
+        self.client
+            .clone()
+            .remove_task(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn reset_queue(
+        &self,
+        request: cadence_proto::history::ResetQueueRequest,
+    ) -> Result<cadence_proto::history::ResetQueueResponse, tonic::Status> {
+        self.client
+            .clone()
+            .reset_queue(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn describe_queue(
+        &self,
+        request: cadence_proto::history::DescribeQueueRequest,
+    ) -> Result<cadence_proto::history::DescribeQueueResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_queue(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn describe_history_host(
+        &self,
+        request: cadence_proto::history::DescribeHistoryHostRequest,
+    ) -> Result<cadence_proto::history::DescribeHistoryHostResponse, tonic::Status> {
+        self.client
+            .clone()
+            .describe_history_host(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn reapply_events(
+        &self,
+        request: cadence_proto::history::ReapplyEventsRequest,
+    ) -> Result<cadence_proto::history::ReapplyEventsResponse, tonic::Status> {
+        self.client
+            .clone()
+            .reapply_events(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn get_replication_messages(
+        &self,
+        request: cadence_proto::history::GetReplicationMessagesRequest,
+    ) -> Result<cadence_proto::history::GetReplicationMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .get_replication_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn get_dlq_replication_messages(
+        &self,
+        request: cadence_proto::history::GetDlqReplicationMessagesRequest,
+    ) -> Result<cadence_proto::history::GetDlqReplicationMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .get_dlq_replication_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn count_dlq_messages(
+        &self,
+        request: cadence_proto::history::CountDlqMessagesRequest,
+    ) -> Result<cadence_proto::history::CountDlqMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .count_dlq_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn read_dlq_messages(
+        &self,
+        request: cadence_proto::history::ReadDlqMessagesRequest,
+    ) -> Result<cadence_proto::history::ReadDlqMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .read_dlq_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn purge_dlq_messages(
+        &self,
+        request: cadence_proto::history::PurgeDlqMessagesRequest,
+    ) -> Result<cadence_proto::history::PurgeDlqMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .purge_dlq_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
+    pub async fn merge_dlq_messages(
+        &self,
+        request: cadence_proto::history::MergeDlqMessagesRequest,
+    ) -> Result<cadence_proto::history::MergeDlqMessagesResponse, tonic::Status> {
+        self.client
+            .clone()
+            .merge_dlq_messages(self.request(request))
+            .await
+            .map(tonic::Response::into_inner)
+    }
+
     pub async fn record_activity_task_heartbeat(
         &self,
         request: cadence_proto::history::RecordActivityTaskHeartbeatRequest,

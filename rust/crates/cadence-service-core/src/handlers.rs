@@ -2144,13 +2144,32 @@ fn require_scheduler(state: &AppState, domain: &str) -> Option<Response> {
     ))
 }
 
-fn schedule_not_found(e: cadence_persistence::ScheduleError) -> Response {
-    use cadence_persistence::ScheduleError;
+fn cadence_error_response(e: cadence_api::errors::CadenceError) -> Response {
+    use cadence_api::errors::CadenceError;
     match e {
-        ScheduleError::NotFound(e) => entity_not_exists(e),
-        ScheduleError::Invalid(message) | ScheduleError::Exists(message) => {
-            error_response("BadRequestError", StatusCode::BAD_REQUEST, message)
+        CadenceError::BadRequest(b) => bad_request(b),
+        CadenceError::EntityNotExists(n) => entity_not_exists(n),
+        CadenceError::WorkflowAlreadyCompleted(c) => error_response(
+            "WorkflowExecutionAlreadyCompletedError",
+            StatusCode::CONFLICT,
+            c.message,
+        ),
+        CadenceError::WorkflowAlreadyStarted(a) => error_response(
+            "WorkflowExecutionAlreadyStartedError",
+            StatusCode::CONFLICT,
+            a.message,
+        ),
+        CadenceError::QueryFailed(q) => {
+            error_response("QueryFailedError", StatusCode::BAD_REQUEST, q.message)
         }
+        CadenceError::ServiceBusy(b) => {
+            error_response("ServiceBusyError", StatusCode::TOO_MANY_REQUESTS, b.message)
+        }
+        other => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            other.to_string(),
+        ),
     }
 }
 
@@ -2218,13 +2237,13 @@ async fn create_schedule(
     {
         return bad_request(e);
     }
-    match executions.create_schedule(&req.domain, &req) {
+    match crate::schedule_flow::start_scheduler(&executions, &req) {
         Ok(id) => (
             StatusCode::OK,
             Json(cadence_api::schedule::CreateScheduleResponse { schedule_id: id }),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2258,9 +2277,10 @@ async fn describe_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.describe_schedule(&req.domain, &req.schedule_id) {
+    match crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id).await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2282,12 +2302,16 @@ async fn list_schedules(
         Err(error) => return entity_not_exists(error),
     };
     let page_size = if req.page_size <= 0 {
-        10
+        crate::schedule_flow::DEFAULT_LIST_PAGE_SIZE
     } else {
         req.page_size as usize
     };
-    let (schedules, next_page_token) =
-        executions.list_schedules(&req.domain, page_size, &req.next_page_token);
+    let (schedules, next_page_token) = crate::schedule_flow::list_schedulers(
+        &executions,
+        &req.domain,
+        page_size,
+        &req.next_page_token,
+    );
     (
         StatusCode::OK,
         Json(cadence_api::schedule::ListSchedulesResponse {
@@ -2318,13 +2342,13 @@ async fn delete_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.delete_schedule(&req.domain, &req.schedule_id) {
+    match crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::DeleteScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2348,20 +2372,19 @@ async fn pause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    // Go derives the actor from identity headers; the JSON surface carries it
-    // in the request identity field.
-    let actor = if req.identity.is_empty() {
-        "unknown".to_string()
-    } else {
-        req.identity.clone()
-    };
-    match executions.pause_schedule(&req.domain, &req.schedule_id, &req.reason, &actor) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_PAUSE,
+        crate::scheduler_wire::pause_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::PauseScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2385,13 +2408,19 @@ async fn unpause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match executions.unpause_schedule(&req.domain, &req.schedule_id, req.catch_up_policy) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_UNPAUSE,
+        crate::scheduler_wire::unpause_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UnpauseScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2437,25 +2466,20 @@ async fn backfill_schedule(
             "EndTime must be after StartTime.".to_string(),
         );
     }
-    let backfill_id = if req.backfill_id.trim().is_empty() {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        req.backfill_id.trim().to_string()
-    };
-    match executions.backfill_schedule(
+    let backfill_id = crate::schedule_flow::resolve_backfill_id(&req.backfill_id);
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
         &req.domain,
         &req.schedule_id,
-        start,
-        end,
-        req.overlap_policy,
-        &backfill_id,
+        crate::scheduler_wire::SIGNAL_BACKFILL,
+        crate::scheduler_wire::backfill_signal(&req, &backfill_id),
     ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::BackfillScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2513,13 +2537,19 @@ async fn update_schedule(
     {
         return bad_request(e);
     }
-    match executions.update_schedule(&req) {
+    match crate::schedule_flow::signal_scheduler(
+        &executions,
+        &req.domain,
+        &req.schedule_id,
+        crate::scheduler_wire::SIGNAL_UPDATE,
+        crate::scheduler_wire::update_signal(&req),
+    ) {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UpdateScheduleResponse {}),
         )
             .into_response(),
-        Err(e) => schedule_not_found(e),
+        Err(e) => cadence_error_response(e),
     }
 }
 
@@ -2810,7 +2840,7 @@ pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttri
 mod frontend_drain_tests {
     use super::*;
     use axum::body::Body;
-    use http::{Request, StatusCode};
+    use axum::http::{Request, StatusCode};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
 

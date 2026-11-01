@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::Json;
 use axum::response::{IntoResponse, Response};
 use cadence_api::errors::{BadRequestError, EntityNotExistsError};
 use cadence_api::service_types::{DeleteDomainRequest, DescribeDomainRequest};
@@ -2188,6 +2190,61 @@ fn mutation_to_thrift(r: Result<(), cadence_persistence::WorkflowMutationError>)
 // Dispatch
 // ---------------------------------------------------------------------------
 
+/// Map a JSON admin handler `Response` back to a Thrift application error,
+/// keeping only exceptions the method declares.
+async fn bridge_response(method: &str, response: Response) -> Result<Option<Bytes>, AppError> {
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?;
+    if status.is_success() {
+        return Ok(Some(bytes));
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    let kind = value["type"].as_str().unwrap_or("");
+    let message = value["message"].as_str().unwrap_or("").to_string();
+    let declared = find_method(method)
+        .is_some_and(|def| cadence_thrift::service::exception_field(def, kind).is_some());
+    Err(match kind {
+        "BadRequestError" if declared => AppError::bad_request(message),
+        "EntityNotExistsError" if declared => AppError::entity_not_exists(message),
+        "ServiceBusyError" if declared => AppError::busy(message),
+        "WorkflowExecutionAlreadyCompletedError" if declared => {
+            AppError::workflow_already_completed(message)
+        }
+        _ => AppError::internal(message),
+    })
+}
+
+/// Run a JSON admin handler for a Thrift request and return its typed body.
+async fn bridge_value<Req, Resp, F, Fut>(method: &str, body: &Struct, call: F) -> HandlerResult
+where
+    Req: FromThrift,
+    Resp: serde::de::DeserializeOwned + ToThrift,
+    F: FnOnce(Req) -> Fut,
+    Fut: std::future::Future<Output = Response>,
+{
+    let req: Req = decode_args(body).map_err(AppError::bad_request)?;
+    let bytes = bridge_response(method, call(req).await)
+        .await?
+        .unwrap_or_default();
+    let response: Resp = serde_json::from_slice(&bytes)
+        .map_err(|error| AppError::internal(format!("admin response decode: {error}")))?;
+    Ok(wrap_success(&response))
+}
+
+/// Like `bridge_value` for Thrift `void` methods (empty REPLY struct).
+async fn bridge_void<Req, F, Fut>(method: &str, body: &Struct, call: F) -> HandlerResult
+where
+    Req: FromThrift,
+    F: FnOnce(Req) -> Fut,
+    Fut: std::future::Future<Output = Response>,
+{
+    let req: Req = decode_args(body).map_err(AppError::bad_request)?;
+    bridge_response(method, call(req).await).await?;
+    Ok(Struct::default())
+}
+
 /// Dispatch one Thrift call; returns the REPLY body struct plus an optional
 /// application error (exception name + details for headers).
 pub async fn dispatch(
@@ -2217,7 +2274,11 @@ pub async fn dispatch_with_headers(
             return Ok(reply);
         }
     }
-    let outcome: HandlerResult = match method {
+    // Admin handlers share the axum `State<Arc<AppState>>` extractor shape.
+    let shared = || Arc::new(state.clone());
+    let admin = method.starts_with("AdminService::");
+    let name = method.rsplit("::").next().unwrap_or(method);
+    let outcome: HandlerResult = match name {
         "health" => Ok(Struct {
             fields: vec![(
                 0,
@@ -2236,6 +2297,139 @@ pub async fn dispatch_with_headers(
                 }),
             )],
         }),
+        "DescribeWorkflowExecution" if admin => {
+            bridge_value::<_, cadence_api::admin::AdminDescribeWorkflowExecutionResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::AdminDescribeWorkflowExecutionRequest| {
+                    crate::admin::describe_workflow_execution_admin(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "DescribeHistoryHost" => {
+            bridge_value::<_, cadence_api::admin::DescribeHistoryHostResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::DescribeHistoryHostRequest| {
+                    crate::admin::describe_history_host(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "DescribeShardDistribution" => {
+            bridge_value::<_, cadence_api::admin::DescribeShardDistributionResponse, _, _>(
+                method,
+                body,
+                |_: cadence_api::admin::DescribeShardDistributionRequest| {
+                    crate::admin::describe_shard_distribution(State(shared()))
+                },
+            )
+            .await
+        }
+        "CloseShard" => {
+            bridge_void(method, body, |req: cadence_api::admin::CloseShardRequest| {
+                crate::admin::close_shard(State(shared()), Json(req))
+            })
+            .await
+        }
+        "RemoveTask" => {
+            bridge_void(method, body, |req: cadence_api::admin::RemoveTaskRequest| {
+                crate::admin::remove_task(State(shared()), Json(req))
+            })
+            .await
+        }
+        "ReapplyEvents" => {
+            bridge_void(
+                method,
+                body,
+                |req: cadence_api::admin::ReapplyEventsRequest| {
+                    crate::admin::reapply_events(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "MaintainCorruptWorkflow" => {
+            bridge_value::<_, cadence_api::admin::MaintainCorruptWorkflowResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::MaintainCorruptWorkflowRequest| {
+                    crate::admin::maintain_corrupt_workflow(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "GetGlobalIsolationGroups" => {
+            bridge_value::<_, cadence_api::admin::GetGlobalIsolationGroupsResponse, _, _>(
+                method,
+                body,
+                |_: cadence_api::admin::GetGlobalIsolationGroupsRequest| {
+                    crate::admin::get_global_isolation_groups(State(shared()))
+                },
+            )
+            .await
+        }
+        "UpdateGlobalIsolationGroups" => {
+            bridge_value::<_, cadence_api::admin::UpdateGlobalIsolationGroupsResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::UpdateGlobalIsolationGroupsRequest| {
+                    crate::admin::update_global_isolation_groups(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "GetDomainIsolationGroups" => {
+            bridge_value::<_, cadence_api::admin::GetDomainIsolationGroupsResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::GetDomainIsolationGroupsRequest| {
+                    crate::admin::get_domain_isolation_groups(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "UpdateDomainIsolationGroups" => {
+            bridge_value::<_, cadence_api::admin::UpdateDomainIsolationGroupsResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::UpdateDomainIsolationGroupsRequest| {
+                    crate::admin::update_domain_isolation_groups(State(shared()), Json(req))
+                },
+            )
+            .await
+        }
+        "GetDomainAsyncWorkflowConfiguraton" => {
+            bridge_value::<_, cadence_api::admin::GetDomainAsyncWorkflowConfiguratonResponse, _, _>(
+                method,
+                body,
+                |req: cadence_api::admin::GetDomainAsyncWorkflowConfiguratonRequest| {
+                    crate::admin::get_domain_async_workflow_configuration(
+                        State(shared()),
+                        Json(req),
+                    )
+                },
+            )
+            .await
+        }
+        "UpdateDomainAsyncWorkflowConfiguraton" => {
+            bridge_value::<
+                _,
+                cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse,
+                _,
+                _,
+            >(
+                method,
+                body,
+                |req: cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonRequest| {
+                    crate::admin::update_domain_async_workflow_configuration(
+                        State(shared()),
+                        Json(req),
+                    )
+                },
+            )
+            .await
+        }
         "RegisterDomain" => handle_register(state, body).await,
         "DescribeDomain" => handle_describe_domain(state, body).await,
         "ListDomains" => handle_list_domains(state, body).await,
@@ -2369,11 +2563,17 @@ pub async fn yarpc_handler(
             format!("unknown procedure {procedure}"),
         );
     }
-    let method = procedure
-        .rsplit("::")
-        .next()
-        .unwrap_or(procedure)
-        .to_string();
+    // Admin procedures keep their service qualifier so same-named
+    // WorkflowService methods do not shadow them.
+    let method = if procedure.starts_with("AdminService::") {
+        procedure.to_string()
+    } else {
+        procedure
+            .rsplit("::")
+            .next()
+            .unwrap_or(procedure)
+            .to_string()
+    };
     let mut r = Reader::new(&body);
     let args = match read_struct(&mut r) {
         Ok(v) => v,

@@ -17,6 +17,8 @@ pub mod matching_metrics_runtime;
 pub mod matching_metrics_statsd;
 pub mod matching_quota;
 pub mod openfeature;
+pub mod schedule_flow;
+pub mod scheduler_wire;
 pub mod ringpop_discovery;
 pub mod ringpop_tchannel;
 pub mod service;

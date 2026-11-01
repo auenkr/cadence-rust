@@ -1177,13 +1177,55 @@ fn shard_count(state: &AppState) -> i32 {
     state.num_history_shards.max(1)
 }
 
-/// Single-host shard introspection, mirroring Go admin `DescribeHistoryHost`.
-/// This host owns every shard; there is no separate shard controller.
+/// Go admin `DescribeHistoryHost`: validate the selector, then ask History
+/// (which answers for the host it serves). Without a configured History
+/// channel this host answers for itself, owning every shard.
 pub async fn describe_history_host(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::DescribeHistoryHostRequest>,
 ) -> Response {
-    let _ = req;
+    if req.shard_id_for_host.is_none()
+        && req.execution_for_host.is_none()
+        && req.host_address.is_none()
+    {
+        return bad_request(BadRequestError::new("Request is nil."));
+    }
+    if let Some(execution) = &req.execution_for_host {
+        if execution.workflow_id.is_empty() {
+            return bad_request(BadRequestError::new("WorkflowId is not set on request."));
+        }
+        if !execution.run_id.is_empty() && uuid::Uuid::parse_str(&execution.run_id).is_err() {
+            return bad_request(BadRequestError::new("RunId is not valid UUID."));
+        }
+    }
+    if let Some(channel) = state.history_admin_channel.clone() {
+        let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+        return match client
+            .describe_history_host(history_admin_request(
+                cadence_proto::history::DescribeHistoryHostRequest {},
+            ))
+            .await
+        {
+            Ok(response) => {
+                let v = response.into_inner();
+                ok_json(cadence_api::admin::DescribeHistoryHostResponse {
+                    number_of_shards: v.number_of_shards,
+                    shard_ids: v.shard_ids,
+                    domain_cache: v.domain_cache.map(|d| cadence_api::admin::DomainCacheInfo {
+                        num_of_items_in_cache_by_id: d.num_of_items_in_cache_by_id,
+                        num_of_items_in_cache_by_name: d.num_of_items_in_cache_by_name,
+                    }),
+                    shard_controller_status: v.shard_controller_status,
+                    address: v.address,
+                })
+            }
+            Err(error) => error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error.message().to_string(),
+            ),
+        };
+    }
     let count = shard_count(&state);
     let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
     let domains = state.domains.len() as i64;

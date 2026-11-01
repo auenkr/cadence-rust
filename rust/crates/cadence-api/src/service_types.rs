@@ -43,6 +43,27 @@ pub struct DescribeDomainResponse {
     pub failover_version: i64,
     #[serde(rename = "isGlobalDomain", default)]
     pub is_global_domain: bool,
+    #[serde(
+        rename = "failoverInfo",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub failover_info: Option<FailoverInfo>,
+}
+
+/// Go `types.FailoverInfo`: reported for a graceful failover in progress.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailoverInfo {
+    #[serde(rename = "failoverVersion", default)]
+    pub failover_version: i64,
+    #[serde(rename = "failoverStartTimestamp", default)]
+    pub failover_start_timestamp: i64,
+    #[serde(rename = "failoverExpireTimestamp", default)]
+    pub failover_expire_timestamp: i64,
+    #[serde(rename = "completedShardCount", default)]
+    pub completed_shard_count: i32,
+    #[serde(rename = "pendingShards", default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_shards: Vec<i32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

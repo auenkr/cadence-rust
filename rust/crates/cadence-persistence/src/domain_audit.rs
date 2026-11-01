@@ -21,6 +21,11 @@ use cadence_thrift::{
 /// Go `DomainAuditOperationTypeFailover`, the `operation_type` column value
 /// that `ListFailoverHistory` filters on.
 pub const DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER: i32 = 5;
+/// Go `DomainAuditOperationType` values (iota after `Invalid`).
+pub const DOMAIN_AUDIT_OPERATION_TYPE_CREATE: i32 = 1;
+pub const DOMAIN_AUDIT_OPERATION_TYPE_UPDATE: i32 = 2;
+pub const DOMAIN_AUDIT_OPERATION_TYPE_DEPRECATE: i32 = 3;
+pub const DOMAIN_AUDIT_OPERATION_TYPE_DELETE: i32 = 4;
 
 /// Thrift field of `DescribeDomainResponse.failoverInfo` and its
 /// `failoverExpireTimestamp`, from `shared.thrift`.
@@ -118,6 +123,9 @@ fn encode_domain_state_with(
     encoding: BlobEncoding,
 ) -> Result<GoDomainBlob, String> {
     let mut value = state.describe.to_thrift();
+    // The audit snapshot carries Go's persisted FailoverInfo (version+expiry)
+    // only, not the describe-time info with a derived start timestamp.
+    value.fields.retain(|(id, _)| *id != FAILOVER_INFO_FIELD);
     if let Some(expire) = state.failover_expire_nanos {
         let info = Struct {
             fields: vec![
@@ -159,8 +167,10 @@ pub fn decode_domain_state(blob: &GoDomainBlob) -> Result<DomainAuditState, Stri
     if reader.remaining() != 0 {
         return Err("trailing domain audit ThriftRW bytes".into());
     }
-    let describe =
+    let mut describe =
         DescribeDomainResponse::from_thrift(&value).map_err(|error| error.to_string())?;
+    // The persisted failover info is carried as `failover_expire_nanos`.
+    describe.failover_info = None;
     let failover_expire_nanos = match value
         .fields
         .iter()
@@ -339,6 +349,7 @@ mod tests {
             }),
             failover_version: version,
             is_global_domain: true,
+            failover_info: None,
         }
     }
 
@@ -402,6 +413,15 @@ mod tests {
     fn failover_operation_matches_go_enum_value() {
         // Go: Invalid=0, Create=1, Update=2, Deprecate=3, Delete=4, Failover=5.
         assert_eq!(DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER, 5);
+        assert_eq!(
+            [
+                DOMAIN_AUDIT_OPERATION_TYPE_CREATE,
+                DOMAIN_AUDIT_OPERATION_TYPE_UPDATE,
+                DOMAIN_AUDIT_OPERATION_TYPE_DEPRECATE,
+                DOMAIN_AUDIT_OPERATION_TYPE_DELETE
+            ],
+            [1, 2, 3, 4]
+        );
     }
 
     #[test]

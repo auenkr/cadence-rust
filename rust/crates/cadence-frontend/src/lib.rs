@@ -7,6 +7,7 @@
 
 pub mod config;
 pub mod handler_admin;
+pub mod handler_admin_history;
 pub mod handler_domain;
 pub mod handler_schedule;
 pub mod handler_workflow;
@@ -20,6 +21,7 @@ pub mod request_validator;
 pub mod workflow_backend;
 pub mod workflow_matching;
 pub mod workflow_visibility;
+pub use cadence_service_core::scheduler_wire;
 pub mod wrappers;
 
 /// Service name as used by `--services` and the Go service registry.

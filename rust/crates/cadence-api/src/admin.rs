@@ -415,6 +415,14 @@ pub struct DomainCacheInfo {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DescribeShardDistributionRequest {
+    #[serde(rename = "pageSize", default, skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<i32>,
+    #[serde(rename = "pageID", default, skip_serializing_if = "Option::is_none")]
+    pub page_id: Option<i32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DescribeShardDistributionResponse {
     #[serde(rename = "numberOfShards", default)]
     pub number_of_shards: i32,

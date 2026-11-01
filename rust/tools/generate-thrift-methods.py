@@ -26,6 +26,17 @@ for name,args,errors in matching_methods:
  arg=re.search(r'1\s*:\s*(?:shared\.)?(\w+)',args)
  exceptions=', '.join(f'("{typ}", {number})' for number,typ in re.findall(r'(\d+)\s*:\s*shared\.(\w+)',errors))
  output.append(f'    MethodDef {{ service:"MatchingService", method:"{name}", arg_type:"{arg[1] if arg else ""}", exceptions:&[{exceptions}] }},')
+# AdminService (admin.thrift) procedures are addressed as "AdminService::<Method>".
+admin_source=(ROOT/'go/idls/thrift/admin.thrift').read_text()
+admin_source=re.sub(r'/\*.*?\*/','',admin_source,flags=re.S)
+admin_source=re.sub(r'//[^\n]*','',admin_source)
+admin_source=admin_source[admin_source.index('service AdminService'):]
+admin_methods=re.findall(r'^\s*(?:void|[\w.]+)\s+(\w+)\(([^)]*)\)\s*(?:throws\s*\((.*?)\))?',admin_source,re.M|re.S)
+if len(admin_methods) != 37: raise RuntimeError('AdminService method inventory changed')
+for name,args,errors in admin_methods:
+ arg=re.search(r'1\s*:\s*(?:\w+\.)?(\w+)\s',args)
+ exceptions=', '.join(f'("{typ}", {number})' for number,typ in re.findall(r'(\d+)\s*:\s*[\w.]*?(\w+Error)',errors or ''))
+ output.append(f'    MethodDef {{ service:"AdminService", method:"{name}", arg_type:"{arg[1] if arg else ""}", exceptions:&[{exceptions}] }},')
 output.append('    MethodDef { service:"Meta", method:"health", arg_type:"", exceptions:&[] },')
 output+= ['];', '''pub fn find_method(procedure:&str)->Option<&'static MethodDef> {
     match procedure.split_once("::") {

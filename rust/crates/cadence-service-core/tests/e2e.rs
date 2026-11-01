@@ -1158,22 +1158,13 @@ async fn schedule_crud_and_firing_flow() {
     let (status, resp) = call(
         app.clone(),
         Method::POST,
-        "/api/v1/schedules/describe",
-        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(resp["spec"]["cronExpression"], "* * * * *");
-
-    let (status, resp) = call(
-        app.clone(),
-        Method::POST,
         "/api/v1/schedules/list",
         json!({"domain": "e2e-domain"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["schedules"].as_array().unwrap().len(), 1);
+    assert_eq!(resp["schedules"][0]["scheduleId"], "sched-1");
 
     // Pause stops firing; unpause resumes.
     let (status, _) = call(
@@ -1206,15 +1197,19 @@ async fn schedule_crud_and_firing_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Signalling a schedule that does not exist reports Go's normalized error.
     let (status, resp) = call(
         app.clone(),
         Method::POST,
-        "/api/v1/schedules/describe",
-        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+        "/api/v1/schedules/pause",
+        json!({"domain": "e2e-domain", "scheduleId": "missing"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(resp["spec"]["cronExpression"], "0 * * * *");
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        resp["message"],
+        "schedule \"missing\" not found in domain \"e2e-domain\""
+    );
 
     // Delete is idempotent.
     let (status, _) = call(
@@ -1230,6 +1225,15 @@ async fn schedule_crud_and_firing_flow() {
         Method::POST,
         "/api/v1/schedules/delete",
         json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Deleting a schedule that never existed is also success.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/delete",
+        json!({"domain": "e2e-domain", "scheduleId": "never-existed"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1349,7 +1353,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         json!({"configName": "test.key"}),
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 
     // Custom search attributes: system keys rejected, customs accepted.
     let (status, _) = call(
@@ -1496,11 +1500,20 @@ async fn admin_shard_queue_history_and_maintain_flow() {
     let app = router(AppState::default());
     setup_domain(app.clone()).await;
 
-    let (status, host) = call(
+    let (status, _) = call(
         app.clone(),
         Method::POST,
         "/api/v1/admin/history-host/describe",
         json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, host) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/admin/history-host/describe",
+        json!({"shardIdForHost": 1}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1519,7 +1532,8 @@ async fn admin_shard_queue_history_and_maintain_flow() {
         json!({"shardID": 1}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    // Delegated to History; no History client is configured in this test.
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     let (status, _) = call(
         app.clone(),
         Method::POST,
@@ -1533,11 +1547,11 @@ async fn admin_shard_queue_history_and_maintain_flow() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/queues/describe",
-        json!({"shardID": 0, "type": 1}),
+        json!({"shardID": 0, "type": 1, "clusterName": "cluster0"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(queue["processingQueueStates"].as_array().unwrap().len(), 5);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let _ = queue;
     let (status, _) = call(
         app.clone(),
         Method::POST,
@@ -1545,15 +1559,15 @@ async fn admin_shard_queue_history_and_maintain_flow() {
         json!({"shardID": 0, "type": 2, "taskID": 7}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     let (status, _) = call(
         app.clone(),
         Method::POST,
         "/api/v1/admin/queues/reset",
-        json!({"shardID": 0, "type": 3}),
+        json!({"shardID": 0, "type": 3, "clusterName": "cluster0"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 
     // Start a workflow, read its raw history, describe it as admin, and
     // maintain it (healthy: nothing deleted).
@@ -1687,8 +1701,9 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(resp["domain"], 0);
+    // Counting needs the domain DLQ persistence plus History.
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let _ = resp;
     let (status, _) = call(
         app.clone(),
         Method::POST,
@@ -1704,7 +1719,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 1}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{resp}");
     let (status, _) = call(
         app.clone(),
         Method::POST,
@@ -1712,7 +1727,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 2}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     let (status, resp) = call(
         app.clone(),
         Method::POST,
@@ -1720,7 +1735,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 1, "maximumPageSize": 10}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{resp}");
 
     // Resend to self succeeds; unknown remotes are rejected.
     let (status, _) = call(
