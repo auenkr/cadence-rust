@@ -70,3 +70,9 @@ head 0826c242681a80a3e87f94b245280b9f03def636 — conclusion: success.
 - describe → probe + query (NotCompletedCleanly), 5x1s retry on ContinuedAsNew / "decision task".
 - list → open scheduler workflows, prefix stripped, internal search attrs filtered, default page 10.
 - Not yet validated against a real Go Worker scheduler workflow (mixed-cluster gate pending).
+
+## Admin transport slice (YARPC AdminService)
+- cadence-thrift method table now includes all 37 `AdminService` procedures (generator updated); `Rpc-Procedure: AdminService::X` keeps its qualifier so admin `DescribeWorkflowExecution` is not shadowed by WorkflowService.
+- New YARPC arms bridging to `crate::admin::*`: CloseShard, RemoveTask, ReapplyEvents, MaintainCorruptWorkflow, Get/Update Global/Domain IsolationGroups, Get/Update DomainAsyncWorkflowConfiguraton, admin DescribeWorkflowExecution, DescribeHistoryHost, DescribeShardDistribution (+ Thrift converters). Declared-exception mapping via `bridge_response`.
+- CI: run https://github.com/auenkr/cadence-rust/actions/runs/41324390824, head 8672abd81, conclusion success (full workspace).
+- Remaining gaps: Thrift converters/arms for GetReplicationMessages, GetDLQReplicationMessages, ResendReplicationTasks, GetCrossClusterTasks, RespondCrossClusterTasksCompleted, CountDLQMessages (not in the pinned admin.thrift subset used by SDK/Worker); replication-type DLQ read/purge/merge still need History proxy + proto<->API replication task conversion; DescribeCluster real membership; search-attribute persistence; audit identity from request context; no mixed Go-Worker validation yet.
