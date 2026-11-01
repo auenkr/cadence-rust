@@ -217,3 +217,89 @@ mod tests {
         assert_eq!(failure_root_cause(HEARTBEAT_BLOB_SIZE_LIMIT), None);
     }
 }
+
+// ---- timeout ----
+pub const TIMEOUT_TYPE_EXECUTION: &str = "The Workflow Execution has timed out";
+pub const TIMEOUT_TYPE_ACTIVITY: &str = "Activity task has timed out";
+pub const TIMEOUT_TYPE_DECISION: &str = "Decision task has timed out";
+pub const TIMEOUT_TYPE_CHILD_WORKFLOW: &str = "Child Workflow Execution has timed out";
+
+/// Poller-based root cause once the tasklist description is known
+/// (`checkTasklist` plus the ScheduleToClose substitution in `RootCause`).
+pub fn poller_root_cause(poller_count: usize, is_schedule_to_close: bool) -> &'static str {
+    if poller_count == 0 {
+        return root_cause::MISSING_POLLERS;
+    }
+    if is_schedule_to_close {
+        root_cause::SCHEDULE_TO_CLOSE_TIMEOUT_POLLERS_STATUS
+    } else {
+        root_cause::POLLERS_STATUS
+    }
+}
+
+/// Port of `checkHeartbeatStatus`. `timeout_type` is the Cadence enum name
+/// (for example "SCHEDULE_TO_START", "HEARTBEAT").
+pub fn heartbeat_root_cause(
+    heartbeat_timeout: i64,
+    timeout_type: &str,
+    has_retry_policy: bool,
+) -> Option<&'static str> {
+    let started = timeout_type != "SCHEDULE_TO_START";
+    if heartbeat_timeout == 0 && started {
+        return Some(if has_retry_policy {
+            root_cause::HEARTBEATING_NOT_ENABLED_WITH_RETRY_POLICY
+        } else {
+            root_cause::NO_HEARTBEAT_TIMEOUT_NO_RETRY_POLICY
+        });
+    }
+    if heartbeat_timeout > 0 && timeout_type == "HEARTBEAT" {
+        return Some(if has_retry_policy {
+            root_cause::HEARTBEATING_ENABLED_MISSING_HEARTBEAT
+        } else {
+            root_cause::HEARTBEATING_ENABLED_WITHOUT_RETRY_POLICY
+        });
+    }
+    None
+}
+
+// ---- antipatterns ----
+pub const ANTIPATTERN_ACTIVITY_SCHEDULE_BURST: &str =
+    "A burst of activities was scheduled within a short time window, which can cause hot-shard contention.";
+pub const ANTIPATTERN_CONTINUE_AS_NEW_IN_CRON: &str = "The workflow continued-as-new from workflow code while running under a cron schedule, which can interfere with server-managed cron scheduling.";
+
+#[cfg(test)]
+mod tests_timeout {
+    use super::*;
+
+    #[test]
+    fn poller_causes() {
+        assert_eq!(poller_root_cause(0, true), root_cause::MISSING_POLLERS);
+        assert_eq!(poller_root_cause(2, false), root_cause::POLLERS_STATUS);
+        assert_eq!(
+            poller_root_cause(2, true),
+            root_cause::SCHEDULE_TO_CLOSE_TIMEOUT_POLLERS_STATUS
+        );
+    }
+
+    #[test]
+    fn heartbeat_causes() {
+        assert_eq!(
+            heartbeat_root_cause(0, "START_TO_CLOSE", true),
+            Some(root_cause::HEARTBEATING_NOT_ENABLED_WITH_RETRY_POLICY)
+        );
+        assert_eq!(
+            heartbeat_root_cause(0, "START_TO_CLOSE", false),
+            Some(root_cause::NO_HEARTBEAT_TIMEOUT_NO_RETRY_POLICY)
+        );
+        assert_eq!(heartbeat_root_cause(0, "SCHEDULE_TO_START", true), None);
+        assert_eq!(
+            heartbeat_root_cause(5, "HEARTBEAT", false),
+            Some(root_cause::HEARTBEATING_ENABLED_WITHOUT_RETRY_POLICY)
+        );
+        assert_eq!(
+            heartbeat_root_cause(5, "HEARTBEAT", true),
+            Some(root_cause::HEARTBEATING_ENABLED_MISSING_HEARTBEAT)
+        );
+        assert_eq!(heartbeat_root_cause(5, "START_TO_CLOSE", true), None);
+    }
+}
