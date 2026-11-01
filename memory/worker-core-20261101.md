@@ -12,3 +12,4 @@ classification and root cause map, timeout poller/heartbeat root causes and type
 detection (sliding window, merge of overlapping clusters) and strings. Not ported: history traversal and
 metadata JSON (needs HistoryEvent bindings), cron continue-as-new check, DescribeTaskList call, workflow bodies.
 CI: https://github.com/auenkr/cadence-rust/actions/runs/41286623128 — success at `f8aac499a` (before burst detection; rerun below).
+Burst detection CI: https://github.com/auenkr/cadence-rust/actions/runs/41286926955 — success at `57a00a8cf`.
