@@ -462,15 +462,80 @@ async fn handle_visibility_archived(_state: &AppState, body: &Struct) -> Handler
     ))
 }
 
+
+/// Durable visibility list (Go `ListOpen/ClosedWorkflowExecutions` over the
+/// configured visibility store). Validation reuses the in-memory evaluator's
+/// messages; domain resolution is by ID like Go.
+fn durable_visibility_list(
+    state: &AppState,
+    manager: &Arc<dyn cadence_persistence::visibility_store::VisibilityManager>,
+    domain: &str,
+    closed: bool,
+    start_time_filter: Option<&cadence_api::service_types::StartTimeFilter>,
+    page_size: i32,
+    next_page_token: &[u8],
+    filter: cadence_persistence::visibility_store::ListFilter,
+) -> Result<cadence_persistence::visibility_store::VisibilityListResponse, AppError> {
+    use cadence_persistence::visibility_store::{VisibilityError, VisibilityListRequest};
+    if domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
+    cadence_persistence::visibility::filter_start_time(&mut Vec::new(), start_time_filter)
+        .map_err(|e| AppError::bad_request(e.message))?;
+    if page_size > 10000 {
+        return Err(AppError::bad_request("Pagesize is larger than allow 10000".into()));
+    }
+    let domain_id = forward_domain_id(state, domain)?;
+    let window = start_time_filter.expect("validated above");
+    let request = VisibilityListRequest {
+        domain_id,
+        earliest_time_ns: window.earliest_time.unwrap_or_default(),
+        latest_time_ns: window.latest_time.unwrap_or_default(),
+        page_size: if page_size <= 0 { 1000 } else { page_size },
+        next_page_token: next_page_token.to_vec(),
+        closed,
+        filter,
+    };
+    manager.list(&request).map_err(|e| match e {
+        VisibilityError::EntityNotExists(m) => AppError::entity_not_exists(m),
+        VisibilityError::BadRequest(m) => AppError::bad_request(m),
+        VisibilityError::Internal(m) => AppError::bad_request(m),
+    })
+}
+
 async fn handle_visibility_open(state: &AppState, body: &Struct) -> HandlerResult {
     let r: cadence_api::service_types::ListOpenWorkflowExecutionsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(e.to_string()))?;
-    let executions = require_domain_thrift(state, &r.domain)?;
     if r.execution_filter.is_some() && r.type_filter.is_some() {
         return Err(AppError::bad_request(
             "Only one of ExecutionFilter or TypeFilter is allowed".into(),
         ));
     }
+    if let Some(manager) = &state.visibility_manager {
+        use cadence_persistence::visibility_store::ListFilter;
+        let filter = match (&r.execution_filter, &r.type_filter) {
+            (Some(f), _) => ListFilter::WorkflowId(f.workflow_id.clone()),
+            (_, Some(f)) => ListFilter::WorkflowType(f.name.clone()),
+            _ => ListFilter::None,
+        };
+        let v = durable_visibility_list(
+            state,
+            manager,
+            &r.domain,
+            false,
+            r.start_time_filter.as_ref(),
+            r.maximum_page_size,
+            &r.next_page_token,
+            filter,
+        )?;
+        return Ok(wrap_success(
+            &cadence_api::service_types::ListOpenWorkflowExecutionsResponse {
+                executions: v.executions,
+                next_page_token: v.next_page_token,
+            },
+        ));
+    }
+    let executions = require_domain_thrift(state, &r.domain)?;
     let mut rows = executions.list_filtered(
         &r.domain,
         true,
@@ -494,7 +559,6 @@ async fn handle_visibility_open(state: &AppState, body: &Struct) -> HandlerResul
 async fn handle_visibility_closed(state: &AppState, body: &Struct) -> HandlerResult {
     let r: cadence_api::service_types::ListClosedWorkflowExecutionsRequest =
         decode_args(body).map_err(|e| AppError::bad_request(e.to_string()))?;
-    let executions = require_domain_thrift(state, &r.domain)?;
     if u8::from(r.execution_filter.is_some())
         + u8::from(r.type_filter.is_some())
         + u8::from(r.status_filter.is_some())
@@ -504,6 +568,32 @@ async fn handle_visibility_closed(state: &AppState, body: &Struct) -> HandlerRes
             "Only one of ExecutionFilter, TypeFilter or StatusFilter is allowed".into(),
         ));
     }
+    if let Some(manager) = &state.visibility_manager {
+        use cadence_persistence::visibility_store::ListFilter;
+        let filter = match (&r.execution_filter, &r.type_filter, r.status_filter) {
+            (Some(f), _, _) => ListFilter::WorkflowId(f.workflow_id.clone()),
+            (_, Some(f), _) => ListFilter::WorkflowType(f.name.clone()),
+            (_, _, Some(s)) => ListFilter::CloseStatus(s as i32),
+            _ => ListFilter::None,
+        };
+        let v = durable_visibility_list(
+            state,
+            manager,
+            &r.domain,
+            true,
+            r.start_time_filter.as_ref(),
+            r.maximum_page_size,
+            &r.next_page_token,
+            filter,
+        )?;
+        return Ok(wrap_success(
+            &cadence_api::service_types::ListClosedWorkflowExecutionsResponse {
+                executions: v.executions,
+                next_page_token: v.next_page_token,
+            },
+        ));
+    }
+    let executions = require_domain_thrift(state, &r.domain)?;
     let mut rows = executions.list_filtered(
         &r.domain,
         false,

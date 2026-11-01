@@ -1470,6 +1470,13 @@ async fn run_with_lifecycle(
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());
+            if run_frontend && !embedded_development {
+                state.visibility_manager =
+                    crate::visibility_factory::open_configured_visibility_store(
+                        &cfg.persistence,
+                        false,
+                    )?;
+            }
             if run_frontend {
                 if let Some(source) = configured_matching_stores
                     .as_ref()

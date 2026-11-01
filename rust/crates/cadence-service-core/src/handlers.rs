@@ -121,6 +121,9 @@ pub struct AppState {
     pub domain_metadata_persistence:
         Option<Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence>>,
     pub executions: InMemoryExecutionStore,
+    /// Durable visibility store; None keeps the in-memory visibility fallback.
+    pub visibility_manager:
+        Option<Arc<dyn cadence_persistence::visibility_store::VisibilityManager>>,
     /// Optional backend-specific semaphore persistence. None is the embedded
     /// in-memory implementation; configured SQL installs Go's unsupported
     /// backend adapter because Cadence SQL has no semaphore schema.
@@ -157,6 +160,7 @@ impl Default for AppState {
             domain_manager: Arc::new(domains),
             domain_metadata_persistence: None,
             executions: InMemoryExecutionStore::new(),
+            visibility_manager: None,
             semaphore_persistence: None,
             limits: Limits::cadence_default(),
             pollers: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

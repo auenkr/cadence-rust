@@ -1131,7 +1131,7 @@ impl fmt::Debug for CassandraVisibilityStore {
 }
 
 fn cql_ts(ns: Option<i64>) -> scylla::value::CqlTimestamp {
-    scylla::value::CqlTimestamp(ns.map_or(GO_ZERO_TIME_NANOS, |n| n).div_euclid(1_000_000))
+    scylla::value::CqlTimestamp(ns.unwrap_or(GO_ZERO_TIME_NANOS).div_euclid(1_000_000))
 }
 
 fn cql_uuid(value: &str, what: &str) -> VisibilityResult<uuid::Uuid> {

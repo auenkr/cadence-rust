@@ -123,6 +123,7 @@ pub mod matching_sync;
 pub mod matching_sync_native;
 pub mod matching_task_info_log;
 pub mod matching_task_store;
+pub mod visibility_factory;
 pub mod matching_throttled_logger;
 #[allow(clippy::result_large_err)]
 mod matching_transport_native;

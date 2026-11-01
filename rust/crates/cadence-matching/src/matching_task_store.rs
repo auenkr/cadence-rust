@@ -86,7 +86,7 @@ fn validate_sql_shards(sql: &crate::config::SqlConfig) -> anyhow::Result<()> {
 }
 
 /// Open Matching's configured default store.
-fn cassandra_config(
+pub(crate) fn cassandra_config(
     nosql: &crate::config::NosqlConfig,
 ) -> anyhow::Result<cadence_persistence::cassandra::CassandraSessionConfig> {
     let proto_version = if nosql.proto_version == 0 {
