@@ -18,3 +18,15 @@ NOTE: `frontend-mixed-gate.yml` defaults `rust_ref=fe-integ`; pass `-f rust_ref=
 - Workflows start but decisions never complete: echo workflow TIMED_OUT, query/describe-open/list-open deadline-exceeded.
 - Rust Frontend gRPC DescribeDomain read `state.domains` directly (not the persisted manager) so Go-created domains
   (cadence-system, cadence-batcher, default) returned not-found to Go workers; changed to `domain_manager` (grpc.rs).
+
+## Final state of this chunk
+- rust-ci (cadence-matching) https://github.com/auenkr/cadence-rust/actions/runs/41338414827 success at the grpc.rs fix head.
+- Mixed gate https://github.com/auenkr/cadence-rust/actions/runs/41338967394 (rust_ref=fe-domain-visible): FAILED overall, but
+  domain visibility is fixed: 23 GATE ok incl. sdk-describe-domain, sdk-worker-start, sdk-start-echo, sdk-start-signal-query.
+- Still failing (next distinct blocker, NOT domain related): after start, no decision task completes
+  (sdk-complete-echo "history not found", describe-closed TIMED_OUT) and later gRPC Frontend calls
+  (query/describe-open/list-open/list-closed/signal) hit client deadline-exceeded; CLI tchannel list-open fails.
+  Rust Frontend/Matching logs contain no RPC-level diagnostics, so the hang point (Frontend->Matching poll, Frontend->History,
+  or blocking MySQL call on the async runtime for visibility reads) is unproven. Next step: add request-level tracing to Frontend
+  gRPC handlers (poll/start/list) and dump matching task_list/tasks tables in the lane before container removal.
+- sdk-list-closed therefore not yet passing; likely downstream of the same hang (no workflow ever closes normally).
