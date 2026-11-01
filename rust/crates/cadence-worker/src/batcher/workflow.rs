@@ -1,7 +1,7 @@
 //! Port of Go `batcher.BatchWorkflow` (v1) and `BatchWorkflowV2` on the SDK
 //! runtime.
 
-use std::future::poll_fn;
+use std::future::{poll_fn, Future};
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
