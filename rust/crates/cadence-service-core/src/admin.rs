@@ -772,6 +772,7 @@ pub fn domain_replication_messages_response(
             replication_tasks: tasks,
             last_retrieved_message_id: cursor,
             has_more: false,
+            sync_shard_status: None,
         }),
     })
 }
