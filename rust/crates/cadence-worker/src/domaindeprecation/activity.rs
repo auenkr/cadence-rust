@@ -191,7 +191,7 @@ pub fn register_activities<B: Backend>(registry: &mut ActivityRegistry, backend:
 pub struct GrpcBackend {
     local: Channel,
     current_cluster: String,
-    remote: Arc<dyn Fn(&str) -> Option<Channel> + Send + Sync>,
+    remote: crate::batcher::grpc::AdminResolver,
     _client: CadenceClient,
 }
 
@@ -199,7 +199,7 @@ impl GrpcBackend {
     pub fn new(
         local: Channel,
         current_cluster: String,
-        remote: Arc<dyn Fn(&str) -> Option<Channel> + Send + Sync>,
+        remote: crate::batcher::grpc::AdminResolver,
         client: CadenceClient,
     ) -> Self {
         Self { local, current_cluster, remote, _client: client }
