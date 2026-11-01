@@ -10,7 +10,8 @@ leave test), `0f4155fef729c74f59af61dc17377d6501dc5085` (CI formatting
 artifact), and `da88b2bf64bb6bc19e12547c787490f3b4b6e1b3` (generated gRPC
 trait import required by existing hook tests), `71c70ab2e` (Clippy initializer
 fix), and merge `a80592e491fa893cdacd0acab615e4eedee0f1c4` from `origin/master`
-on `t3/frontend-ringpop-lifecycle`.
+plus `079139dc4` (order Frontend leave coverage after Matching recovery) on
+`t3/frontend-ringpop-lifecycle`.
 
 ## Source and behavior evidence
 
@@ -57,10 +58,14 @@ on `t3/frontend-ringpop-lifecycle`.
   `format-all-patch` artifact was inspected with `git apply --stat` and
   `git apply --check`, then applied with `git apply`; it formatted the touched
   launcher code plus two existing hook expressions in `grpc.rs`.
+- CI run 41329817593 passed Clippy and formatting, then failed one focused
+  Ringpop test: the Frontend member was stopped before the existing Matching
+  recovery assertion, removing its bootstrap peer. The test now checks
+  Frontend self-eviction after Matching recovery.
 - Current GitHub Actions `rust-ci.yml` run:
-  https://github.com/auenkr/cadence-rust/actions/runs/41329817593
+  https://github.com/auenkr/cadence-rust/actions/runs/41330331495
   dispatched for `cadence-matching` with `format_all=true` at head
-  `a80592e491fa893cdacd0acab615e4eedee0f1c4`. It was pending at the latest
+  `079139dc4c88ce18c19def1e7ef5e9431410ad65`. It was pending at the latest
   observation. Retrieve its terminal result and inspect/apply any new format
   artifact before treating this slice as validated.
 - CI run 41329314627 reached Clippy and failed on the hook test's
