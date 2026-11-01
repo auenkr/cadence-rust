@@ -34,12 +34,18 @@ passed locally. No Cargo, rustfmt, or Go command was run locally.
 Package CI was dispatched on branch `t3/frontend-visibility-store` with
 `package=cadence-matching` and `format_all=true`:
 
-- Run: https://github.com/auenkr/cadence-rust/actions/runs/41332399218
-- Head: `ba115d791b7d6558c01412ee01c60a94948f196f`
-- Result: failed at Clippy with a missing `n_shards` binding in the new MySQL
-  visibility constructor (`matching_task_store.rs:457` at that head). The
-  uploaded `format-all-patch` was inspected; all formatting hunks for owned
-  files were applied manually. The binding is corrected and CI is being rerun.
+- Initial run: https://github.com/auenkr/cadence-rust/actions/runs/41332399218
+  at `ba115d791b7d6558c01412ee01c60a94948f196f` failed Clippy because the new
+  MySQL visibility constructor referenced an unbound `n_shards`. The uploaded
+  `format-all-patch` was inspected and all owned formatting hunks were applied.
+- Corrected package run: https://github.com/auenkr/cadence-rust/actions/runs/41332715567
+  at `9fc07553122d613c0b6cf275a5e0f8b0b1f4f47b`, attempt 2, passed Clippy,
+  Formatting, and Tests. It reported 992 cadence-matching tests passed, 2
+  ignored. A prior attempt stopped before Clippy with a GitHub Actions internal
+  runner error and was retried.
+- Fresh-target confirmation: https://github.com/auenkr/cadence-rust/actions/runs/41333561851
+  at the same code head, passed Clippy, Formatting, and Tests using
+  `clean_target=true`. No source changed between these two passing runs.
 
 ## Remaining evidence and limits
 
