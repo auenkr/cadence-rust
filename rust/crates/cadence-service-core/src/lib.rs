@@ -12,6 +12,7 @@ pub mod ringpop_discovery;
 pub mod ringpop_tchannel;
 pub mod service;
 pub mod tchannel_json_client;
+pub mod workflow_api;
 pub mod yarpc;
 pub mod matching_metrics;
 mod matching_metrics_rollup;

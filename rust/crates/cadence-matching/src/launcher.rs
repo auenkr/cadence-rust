@@ -555,7 +555,7 @@ pub async fn run(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
 ) -> anyhow::Result<()> {
-    run_with_lifecycle(bin_name, only, false).await
+    run_with_lifecycle(bin_name, only, false, None).await
 }
 
 /// Run the shared launcher with Go Frontend's readiness and request-drain
@@ -564,13 +564,37 @@ pub async fn run_frontend(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
 ) -> anyhow::Result<()> {
-    run_with_lifecycle(bin_name, only, true).await
+    run_with_lifecycle(bin_name, only, true, None).await
+}
+
+/// Inputs the Frontend gets when it builds its production WorkflowService.
+pub struct FrontendHookContext {
+    pub state: handlers::AppState,
+    pub config: cadence_service_core::config::Config,
+}
+
+pub type FrontendHookFactory = Box<
+    dyn FnOnce(
+            FrontendHookContext,
+        ) -> anyhow::Result<cadence_service_core::workflow_api::SharedWorkflowApi>
+        + Send,
+>;
+
+/// Like `run_frontend`, installing the production WorkflowService built by
+/// `factory` into the gRPC and TChannel transports.
+pub async fn run_frontend_with_hook(
+    bin_name: &'static str,
+    only: Option<&'static [service::ServiceName]>,
+    factory: FrontendHookFactory,
+) -> anyhow::Result<()> {
+    run_with_lifecycle(bin_name, only, true, Some(factory)).await
 }
 
 async fn run_with_lifecycle(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
     frontend_lifecycle: bool,
+    mut frontend_hook: Option<FrontendHookFactory>,
 ) -> anyhow::Result<()> {
     crate::grpc_tls::install_tls_crypto_provider();
     let cli = Cli::parse_as(bin_name);
@@ -1889,6 +1913,17 @@ async fn run_with_lifecycle(
                             .map_err(anyhow::Error::from),
                     )
                 });
+            }
+            let (mut grpc_state, mut tchannel_state) = (grpc_state, tchannel_state);
+            if run_frontend {
+                if let Some(factory) = frontend_hook.take() {
+                    let api = factory(FrontendHookContext {
+                        state: state.clone(),
+                        config: cfg.clone(),
+                    })?;
+                    grpc_state.workflow_api = Some(api.clone());
+                    tchannel_state.workflow_api = Some(api);
+                }
             }
             if run_frontend {
                 serving.spawn(async move {

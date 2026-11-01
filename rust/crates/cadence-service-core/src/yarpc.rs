@@ -2196,6 +2196,15 @@ pub async fn dispatch(
     body: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    if let Some(api) = &state.workflow_api {
+        let ctx = crate::workflow_api::CallerContext {
+            deadline: Some(deadline),
+            headers: Default::default(),
+        };
+        if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
+            return Ok(reply);
+        }
+    }
     let outcome: HandlerResult = match method {
         "health" => Ok(Struct {
             fields: vec![(

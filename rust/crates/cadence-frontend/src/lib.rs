@@ -17,6 +17,7 @@ pub mod lifecycle;
 pub mod matching_client;
 pub mod matching_task_list_backend;
 pub mod request_validator;
+pub mod workflow_backend;
 pub mod wrappers;
 
 /// Service name as used by `--services` and the Go service registry.
@@ -26,9 +27,10 @@ pub const SERVICE_NAME: &str = "frontend";
 /// lifecycle. The shared runtime owns public gRPC, TChannel/Thrift, optional
 /// HTTP and health endpoints on the addresses from the Go service config.
 pub async fn run() -> anyhow::Result<()> {
-    cadence_matching::launcher::run_frontend(
+    cadence_matching::launcher::run_frontend_with_hook(
         "cadence-frontend",
         Some(&[cadence_service_core::service::ServiceName::Frontend]),
+        Box::new(workflow_backend::build_workflow_api),
     )
     .await
 }

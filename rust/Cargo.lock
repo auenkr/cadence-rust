@@ -412,6 +412,7 @@ dependencies = [
  "cadence-proto",
  "cadence-service-core",
  "cadence-thrift",
+ "chrono",
  "serde",
  "serde_json",
  "serde_yaml",

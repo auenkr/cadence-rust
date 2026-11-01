@@ -127,6 +127,9 @@ pub struct AppState {
     /// Shard-distributor namespaces and ownership. Memory-only like Go's
     /// cached coordination state; namespaces appear on first heartbeat.
     pub shard_distributor: Arc<std::sync::Mutex<crate::grpc_shard::ShardDistributorState>>,
+    /// Production WorkflowService installed by the Frontend; when set, the
+    /// Thrift and gRPC transports route workflow operations through it.
+    pub workflow_api: Option<crate::workflow_api::SharedWorkflowApi>,
 }
 
 impl Default for AppState {
@@ -159,6 +162,7 @@ impl Default for AppState {
             shard_distributor: Arc::new(std::sync::Mutex::new(
                 crate::grpc_shard::ShardDistributorState::default(),
             )),
+            workflow_api: None,
         }
     }
 }
