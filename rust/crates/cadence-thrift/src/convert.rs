@@ -6567,21 +6567,6 @@ mod tests {
         out
     }
 
-    fn assert_pinned_binary_fixture<T>(fixture: Struct, expected: &T)
-    where
-        T: ToThrift + FromThrift + PartialEq + std::fmt::Debug,
-    {
-        let mut writer = crate::protocol::Writer::new();
-        crate::value::write_struct(&mut writer, &fixture);
-        let bytes = writer.into_bytes();
-        let mut reader = crate::protocol::Reader::new(&bytes);
-        let decoded = crate::value::read_struct(&mut reader).unwrap();
-        assert_eq!(reader.remaining(), 0);
-        assert_eq!(decoded, fixture);
-        assert_eq!(T::from_thrift(&decoded).unwrap(), *expected);
-        assert_eq!(expected.to_thrift(), fixture);
-    }
-
     #[test]
     fn primitives_round_trip() {
         round_trip(&WorkflowExecution::new("wf-1", "run-1"));
@@ -7292,6 +7277,21 @@ impl ToThrift for ChildWorkflowExecutionTimedOutEventAttributes {
 mod timeout_wire_tests {
     use super::*;
 
+    fn assert_pinned_binary_fixture<T>(fixture: Struct, expected: &T)
+    where
+        T: ToThrift + FromThrift + PartialEq + std::fmt::Debug,
+    {
+        let mut writer = crate::protocol::Writer::new();
+        crate::value::write_struct(&mut writer, &fixture);
+        let bytes = writer.into_bytes();
+        let mut reader = crate::protocol::Reader::new(&bytes);
+        let decoded = crate::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        assert_eq!(decoded, fixture);
+        assert_eq!(T::from_thrift(&decoded).unwrap(), *expected);
+        assert_eq!(expected.to_thrift(), fixture);
+    }
+
     #[test]
     fn dlq_response_decoder_uses_go_thrift_enum_values() {
         let mut fields = Fields::new();
@@ -7748,6 +7748,13 @@ mod timeout_wire_tests {
         assert_eq!(info.scheduled_id, 6);
         assert!(ReplicationTaskInfo::from_thrift(&Struct {
             fields: vec![(40, Value::I32(1))]
+        })
+        .is_err());
+        // Thrift allows future enum discriminants. The current API enum is
+        // closed, so reject an unknown task type instead of silently mapping
+        // it to another task (or dropping it).
+        assert!(ReplicationTask::from_thrift(&Struct {
+            fields: vec![(10, Value::I32(99))]
         })
         .is_err());
         assert!(GetReplicationMessagesResponse::from_thrift(&Struct {
