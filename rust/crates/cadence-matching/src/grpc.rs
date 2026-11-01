@@ -2518,20 +2518,20 @@ mod workflow_hook_tests {
         assert_eq!(calls[0].1["request"]["domain"], "sample-domain");
         assert_eq!(
             calls[0].1["request"]["memo"]["fields"]["memo-key"],
-            serde_json::json!([1, 2, 3])
+            "AQID"
         );
         assert_eq!(
             calls[0].1["request"]["header"]["fields"]["header-key"],
-            serde_json::json!([4, 5])
+            "BAU="
         );
         assert_eq!(calls[1].0, "SignalWithStartWorkflowExecutionAsync");
         assert_eq!(calls[1].1["request"]["domain"], "sample-domain");
         assert_eq!(calls[1].1["request"]["signalName"], "async-signal");
         assert_eq!(
             calls[1].1["request"]["signalInput"],
-            serde_json::json!([6, 7])
+            "Bgc="
         );
-        assert_eq!(calls[1].1["request"]["control"], serde_json::json!([8, 9]));
+        assert_eq!(calls[1].1["request"]["control"], "CAk=");
         for (_, request, context) in calls.iter() {
             assert!(request["request"].is_object());
             assert_eq!(context.headers["x-cadence-caller"], "sdk-worker");
