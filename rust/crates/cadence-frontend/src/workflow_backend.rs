@@ -241,6 +241,8 @@ impl ProductionBackend {
         let mut writer = Writer::new();
         write_struct(&mut writer, &args);
         let procedure = format!("{thrift_service}::{method}");
+        let __t0 = std::time::Instant::now();
+        eprintln!("BACKEND-TRACE begin {addr} {procedure}");
         let response = call_thrift(
             addr,
             service,
@@ -250,7 +252,9 @@ impl ProductionBackend {
             &writer.into_bytes(),
             timeout,
         )
-        .await
+        .await;
+        eprintln!("BACKEND-TRACE end {procedure} {}ms {}", __t0.elapsed().as_millis(), match &response { Ok(r) => format!("ok app_err={}", r.application_error), Err(e) => format!("err {e}") });
+        let response = response
         .map_err(|error| match error {
             JsonCallError::Application(message) => {
                 internal(format!("{service} {method}: {message}"))
