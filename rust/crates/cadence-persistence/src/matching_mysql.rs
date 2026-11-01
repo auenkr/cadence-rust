@@ -482,7 +482,8 @@ impl MySqlTaskStore {
         if config.n_shards == 0 || config.n_shards > i32::MAX as usize {
             return Err(StorageError::BackendConfiguration(format!(
                 "MySQL Matching nShards must be in 1..={}, got {}",
-                i32::MAX, config.n_shards
+                i32::MAX,
+                config.n_shards
             )));
         }
         let pools = Self::create_mysql_pools(&config)?;

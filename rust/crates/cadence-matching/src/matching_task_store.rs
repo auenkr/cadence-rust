@@ -278,8 +278,6 @@ pub fn open_configured_default_store(
         }
         "mysql" => {
             validate_sql_shards(sql)?;
-            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
-            if n_shards < 1 { anyhow::bail!("Frontend MySQL visibilityStore nShards must be positive, got {n_shards}"); }
             if !sql.use_multiple_databases && sql.database_name.is_empty() {
                 anyhow::bail!("Matching MySQL SQL persistence databaseName cannot be empty");
             }
@@ -423,7 +421,11 @@ pub fn open_configured_visibility_store(
     let Some((name, datastore)) = persistence
         .store_name_for(PersistenceStoreRole::Visibility)
         .map_err(anyhow::Error::msg)?
-        .zip(persistence.datastore_for(PersistenceStoreRole::Visibility).map_err(anyhow::Error::msg)?)
+        .zip(
+            persistence
+                .datastore_for(PersistenceStoreRole::Visibility)
+                .map_err(anyhow::Error::msg)?,
+        )
     else {
         return Ok(None);
     };
@@ -436,6 +438,10 @@ pub fn open_configured_visibility_store(
     let store: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> = match sql.plugin_name.as_str() {
         "mysql" => {
             validate_sql_shards(sql)?;
+            let n_shards = if sql.n_shards == 0 { 1 } else { sql.n_shards };
+            if n_shards < 1 {
+                anyhow::bail!("Frontend MySQL visibilityStore nShards must be positive, got {n_shards}");
+            }
             if !sql.use_multiple_databases && (sql.database_name.is_empty() || sql.connect_addr.is_empty()) {
                 anyhow::bail!("Frontend MySQL visibilityStore requires databaseName and connectAddr");
             }
@@ -700,7 +706,11 @@ mod tests {
         let (visibility_name, visibility) = config
             .store_name_for(crate::config::PersistenceStoreRole::Visibility)
             .unwrap()
-            .zip(config.datastore_for(crate::config::PersistenceStoreRole::Visibility).unwrap())
+            .zip(
+                config
+                    .datastore_for(crate::config::PersistenceStoreRole::Visibility)
+                    .unwrap(),
+            )
             .unwrap();
         assert_eq!(visibility_name, "visibility");
         assert_eq!(visibility.sql.as_ref().unwrap().plugin_name, "postgres");
@@ -713,7 +723,9 @@ mod tests {
         assert!(open_configured_visibility_store(&config).unwrap().is_none());
         let mut invalid = config;
         invalid.visibility_store = "missing".into();
-        let error = open_configured_visibility_store(&invalid).unwrap_err().to_string();
+        let error = open_configured_visibility_store(&invalid)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("missing"), "{error}");
     }
 
@@ -721,12 +733,18 @@ mod tests {
     fn visibility_constructor_does_not_require_task_schema() {
         let config = crate::config::PersistenceConfig {
             visibility_store: "vis".into(),
-            datastores: HashMap::from([("vis".into(), DatastoreConfig {
-                sql: Some(SqlConfig {
-                    plugin_name: "mysql".into(), database_name: "visibility_only".into(),
-                    connect_addr: "127.0.0.1:1".into(), ..Default::default()
-                }), ..Default::default()
-            })]),
+            datastores: HashMap::from([(
+                "vis".into(),
+                DatastoreConfig {
+                    sql: Some(SqlConfig {
+                        plugin_name: "mysql".into(),
+                        database_name: "visibility_only".into(),
+                        connect_addr: "127.0.0.1:1".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )]),
             ..Default::default()
         };
         // Pool construction is lazy and must not run task_lists/tasks schema

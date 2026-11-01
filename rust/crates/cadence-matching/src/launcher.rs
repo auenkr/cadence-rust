@@ -1555,10 +1555,14 @@ async fn run_with_lifecycle(
                         .and_then(|stores| stores.visibility_store.clone());
                 } else {
                     state.visibility_store = tokio::task::spawn_blocking(move || {
-                        crate::matching_task_store::open_configured_visibility_store(&visibility_config)
+                        crate::matching_task_store::open_configured_visibility_store(
+                            &visibility_config,
+                        )
                     })
                     .await
-                    .map_err(|error| anyhow::anyhow!("joining Frontend visibility store startup: {error}"))??;
+                    .map_err(|error| {
+                        anyhow::anyhow!("joining Frontend visibility store startup: {error}")
+                    })??;
                 }
             }
             state.domain_metadata_persistence = configured_matching_stores

@@ -303,14 +303,28 @@ impl PostgresTaskStore {
                 "n_shards exceeds FarmHash routing range".into(),
             ));
         }
-        let max_open = if config.max_conns <= 0 { usize::MAX } else { usize::try_from(config.max_conns).unwrap_or(usize::MAX) };
-        let configured_idle = if config.max_idle_conns > 0 { usize::try_from(config.max_idle_conns).unwrap_or(usize::MAX) } else { DEFAULT_MAX_IDLE_CONNS };
+        let max_open = if config.max_conns <= 0 {
+            usize::MAX
+        } else {
+            usize::try_from(config.max_conns).unwrap_or(usize::MAX)
+        };
+        let configured_idle = if config.max_idle_conns > 0 {
+            usize::try_from(config.max_idle_conns).unwrap_or(usize::MAX)
+        } else {
+            DEFAULT_MAX_IDLE_CONNS
+        };
         let max_idle = configured_idle.min(max_open);
         let max_lifetime = config.max_conn_lifetime.filter(|value| !value.is_zero());
         let mut pools = Vec::with_capacity(config.shards.len());
         for shard in config.shards {
             let (options, tls) = postgres_options(&shard)?;
-            pools.push(PostgresConnectionPool::new(options, tls, max_open, max_idle, max_lifetime));
+            pools.push(PostgresConnectionPool::new(
+                options,
+                tls,
+                max_open,
+                max_idle,
+                max_lifetime,
+            ));
         }
         Ok(Self {
             pools,
