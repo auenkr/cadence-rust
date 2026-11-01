@@ -798,6 +798,8 @@ impl MatchingHistoryClient {
             request_id: Uuid::new_v4().to_string(),
             poll_request: Some(poll),
         };
+        eprintln!("HIST-TRACE begin RecordDecisionTaskStarted sched={}", task.data.schedule_id);
+        let __t0 = std::time::Instant::now();
         let started = self
             .instrument_history(
                 "RecordDecisionTaskStarted",
@@ -821,7 +823,9 @@ impl MatchingHistoryClient {
                     },
                 ),
             )
-            .await?;
+            .await;
+        eprintln!("HIST-TRACE end RecordDecisionTaskStarted {}ms err={:?}", __t0.elapsed().as_millis(), started.as_ref().err());
+        let started = started?;
         let token = TaskToken {
             domain_id: domain_id.into(),
             workflow_id: execution.workflow_id.clone(),
