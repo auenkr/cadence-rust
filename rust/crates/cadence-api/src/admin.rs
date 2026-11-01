@@ -672,14 +672,12 @@ pub struct GetReplicationMessagesRequest {
 pub struct ReplicationTaskInfo {
     #[serde(rename = "domainId", default, skip_serializing_if = "String::is_empty")]
     pub domain_id: String,
-    #[serde(
-        rename = "workflowExecution",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub workflow_execution: Option<crate::types::WorkflowExecution>,
+    #[serde(rename = "workflowId", default, skip_serializing_if = "String::is_empty")]
+    pub workflow_id: String,
+    #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
+    pub run_id: String,
     #[serde(rename = "taskType", default)]
-    pub task_type: i32,
+    pub task_type: i16,
     #[serde(rename = "taskId", default)]
     pub task_id: i64,
     #[serde(rename = "version", default)]
@@ -732,17 +730,30 @@ pub struct ReplicationMessages {
     pub last_retrieved_message_id: i64,
     #[serde(rename = "hasMore", default, skip_serializing_if = "is_false")]
     pub has_more: bool,
-    #[serde(rename = "syncShardStatus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "syncShardStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sync_shard_status: Option<SyncShardStatus>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SyncShardStatus { #[serde(default, skip_serializing_if = "Option::is_none")] pub timestamp: Option<i64> }
+pub struct SyncShardStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetReplicationMessagesResponse { #[serde(rename="messagesByShard", default)] pub messages_by_shard: std::collections::HashMap<i32, ReplicationMessages> }
+pub struct GetReplicationMessagesResponse {
+    #[serde(rename = "messagesByShard", default, skip_serializing_if = "Option::is_none")]
+    pub messages_by_shard: Option<std::collections::HashMap<i32, ReplicationMessages>>,
+}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GetDLQReplicationMessagesResponse { #[serde(rename="replicationTasks", default)] pub replication_tasks: Vec<crate::types::ReplicationTask> }
+pub struct GetDLQReplicationMessagesResponse {
+    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Option::is_none")]
+    pub replication_tasks: Option<Vec<crate::types::ReplicationTask>>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetDomainReplicationMessagesResponse {
