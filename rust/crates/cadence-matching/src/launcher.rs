@@ -1136,9 +1136,6 @@ async fn run_with_lifecycle(
                     }
                 }
             });
-            let grpc_state = state.clone();
-            let history_state = state.clone();
-            let tchannel_state = state.clone();
             let run_frontend = wanted.contains(&service::ServiceName::Frontend);
             if run_frontend {
                 state
@@ -1165,11 +1162,6 @@ async fn run_with_lifecycle(
                     shutdown,
                 ));
             }
-            let app = if run_frontend {
-                handlers::router(state.clone())
-            } else {
-                handlers::health_router()
-            };
             // Go creates an HTTP transport only when `rpc.http` is configured, so a
             // Matching-only process binds the legacy JSON API port only on request.
             let http_port = port.or_else(|| {
@@ -1544,6 +1536,14 @@ async fn run_with_lifecycle(
             state.visibility_store = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.visibility_store.clone());
+            if run_frontend && !embedded_development {
+                let visibility_config = cfg.persistence.clone();
+                state.visibility_store = tokio::task::spawn_blocking(move || {
+                    crate::matching_task_store::open_configured_visibility_store(&visibility_config)
+                })
+                .await
+                .map_err(|error| anyhow::anyhow!("joining Frontend visibility store startup: {error}"))??;
+            }
             state.domain_metadata_persistence = configured_matching_stores
                 .as_ref()
                 .and_then(|stores| stores.domain_metadata_persistence.clone());
@@ -1951,6 +1951,26 @@ async fn run_with_lifecycle(
                 runtime.mark_started();
             }
             eprintln!("Matching startup stage: admission opened");
+            // Install persistence and the shared workflow API before any
+            // transport captures AppState. Every Frontend transport must see
+            // the same domain manager and visibility reader.
+            if run_frontend {
+                if let Some(factory) = frontend_hook.take() {
+                    let api = factory(FrontendHookContext {
+                        state: state.clone(),
+                        config: cfg.clone(),
+                    })?;
+                    state.workflow_api = Some(api);
+                }
+            }
+            let grpc_state = state.clone();
+            let history_state = state.clone();
+            let tchannel_state = state.clone();
+            let app = if run_frontend {
+                handlers::router(state.clone())
+            } else {
+                handlers::health_router()
+            };
             let app = if run_matching {
                 if matching_http_addr.is_some() {
                     app
@@ -1977,17 +1997,6 @@ async fn run_with_lifecycle(
                             .map_err(anyhow::Error::from),
                     )
                 });
-            }
-            let (mut grpc_state, mut tchannel_state) = (grpc_state, tchannel_state);
-            if run_frontend {
-                if let Some(factory) = frontend_hook.take() {
-                    let api = factory(FrontendHookContext {
-                        state: state.clone(),
-                        config: cfg.clone(),
-                    })?;
-                    grpc_state.workflow_api = Some(api.clone());
-                    tchannel_state.workflow_api = Some(api);
-                }
             }
             // The listener accepts Ringpop JOIN before provider bootstrap
             // starts. Use the final Frontend state, including its workflow
