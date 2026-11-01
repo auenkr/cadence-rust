@@ -1,0 +1,22 @@
+# Frontend integration — 2026-11-01
+
+Frontend is incomplete. User retains Go Worker, uses Rust Matching, and now permits at most two workers at normal speed: Luna for implementation; gpt-6.1-terra only to unblock difficult issues (at most medium reasoning). This supersedes the earlier Claude restart instructions. The prior restart automation was disabled when work resumed.
+
+## Integrated source
+
+Branch frontend-integration-20261101, merge head ace9aefd49431bdb709d66be77c036797e5200d9, combines master with origin/fe-workflow-service (d9dff7484, including unverified caller-header propagation) and origin/fe-admin-domain (0d55d29cd).
+
+Merge resolutions preserve workflow backend/matching/visibility modules plus scheduler wiring, shared matching infrastructure plus schedule modules, admin qualified dispatch plus caller-header forwarding, and the Admin branch's domain audit failover-info handling. No source branch was deleted. Existing untracked progress-dashboard.html was untouched.
+
+CI https://github.com/auenkr/cadence-rust/actions/runs/41327276590 tests cadence-frontend with format_all=true at ace9aefd49431bdb709d66be77c036797e5200d9. Authoritative observation at 16:38 UTC: in_progress. This is not evidence of success. Obtain its result, inspect/apply formatting artifact if needed, fix integration failures, then validate Matching and the full workspace as appropriate. All Cargo/Go validation remains CI-only.
+
+## Assigned independent slices
+
+- Luna medium, serviceTier default: t3/e6c456a1, worktree /home/auenkr/.t3/worktrees/cadence-rust/t3-e6c456a1. Owns synchronous gRPC StartWorkflowExecution and SignalWithStartWorkflowExecution routing through WorkflowApi, plus focused tests. Delegate ae067989-ea62-4e95-bb25-5d5fcc5d3bb7 (command namespace 8fb5dc75-901f-4600-9ec7-e385efe369a5).
+- Luna medium, serviceTier default: t3/dfe56271, worktree /home/auenkr/.t3/worktrees/cadence-rust/t3-dfe56271. Owns Admin GetReplicationMessages and GetDLQReplicationMessages handlers/transports/converters, plus focused tests. Delegate 558f4985-8f2d-41ad-8b9f-96f965e356be (same namespace).
+
+Both launched successfully after earlier parent_not_active errors. Follow completion notifications; do not poll delegate runs or start replacements without terminal evidence. Neither slice establishes overall Frontend parity.
+
+## Required continuation
+
+Integrate focused worker commits after checking actual diffs and CI evidence. Remaining scope includes asynchronous/gRPC history/visibility hook routing, advanced/archived and Cassandra persistence, History routing/discovery, wrappers, remaining Admin replication/DLQ/cross-cluster and config/membership/audit gaps, SDK and Go Worker compatibility, restart/recovery. Reconcile branch-local gap lists against current code. Run existing frontend-mixed-gate with Rust Frontend+Matching and Go History+Worker (no Go Frontend/Matching); record binary SHA256 and actual failure artifacts. Prior gate failures are in frontend-mixed-gate-20261101.md. Full parity audit and fresh CI clippy then workspace tests remain necessary before completion.
