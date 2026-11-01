@@ -90,6 +90,185 @@ fn query(path: &str, pairs: &[(&str, &str)]) -> String {
     )
 }
 
+fn status_from_error_type(kind: &str, message: &str) -> Status {
+    match kind {
+        "AccessDeniedError" => Status::permission_denied(message),
+        "DomainNotActiveError" | "ClientVersionNotSupportedError" => {
+            Status::failed_precondition(message)
+        }
+        "LimitExceededError" => Status::resource_exhausted(message),
+        "CancellationAlreadyRequestedError" => Status::already_exists(message),
+        "BadRequestError" => Status::invalid_argument(message),
+        "EntityNotExistsError" => detailed_status(
+            tonic::Code::NotFound,
+            message,
+            "EntityNotExistsError",
+            p::EntityNotExistsError::default(),
+        ),
+        "WorkflowExecutionAlreadyCompletedError" => detailed_status(
+            tonic::Code::NotFound,
+            message,
+            "WorkflowExecutionAlreadyCompletedError",
+            p::WorkflowExecutionAlreadyCompletedError {},
+        ),
+        "DomainAlreadyExistsError" => detailed_status(
+            tonic::Code::AlreadyExists,
+            message,
+            "DomainAlreadyExistsError",
+            p::DomainAlreadyExistsError {},
+        ),
+        "WorkflowExecutionAlreadyStartedError" => Status::already_exists(message),
+        "ServiceBusyError" => detailed_status(
+            tonic::Code::ResourceExhausted,
+            message,
+            "ServiceBusyError",
+            p::ServiceBusyError {
+                reason: String::new(),
+            },
+        ),
+        "QueryFailedError" => detailed_status(
+            tonic::Code::InvalidArgument,
+            message,
+            "QueryFailedError",
+            p::QueryFailedError {},
+        ),
+        _ => Status::internal(message),
+    }
+}
+
+tokio::task_local! {
+    /// Inbound gRPC request headers and deadline for the current request.
+    pub(crate) static GRPC_CALLER: (std::collections::HashMap<String, String>, Option<std::time::Instant>);
+}
+
+fn parse_grpc_timeout(value: &str) -> Option<std::time::Duration> {
+    let (digits, unit) = value.split_at(value.len().checked_sub(1)?);
+    let n: u64 = digits.parse().ok()?;
+    Some(match unit {
+        "H" => std::time::Duration::from_secs(n.saturating_mul(3600)),
+        "M" => std::time::Duration::from_secs(n.saturating_mul(60)),
+        "S" => std::time::Duration::from_secs(n),
+        "m" => std::time::Duration::from_millis(n),
+        "u" => std::time::Duration::from_micros(n),
+        "n" => std::time::Duration::from_nanos(n),
+        _ => return None,
+    })
+}
+
+/// Tower layer that records caller headers and the `grpc-timeout` deadline
+/// for the Frontend hook (Go: request headers and context deadline).
+#[derive(Clone)]
+pub(crate) struct CallerScope<S>(pub(crate) S);
+
+impl<S, B> tower::Service<axum::http::Request<B>> for CallerScope<S>
+where
+    S: tower::Service<axum::http::Request<B>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    S::Response: Send + 'static,
+    S::Error: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<S::Response, S::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: axum::http::Request<B>) -> Self::Future {
+        let mut headers = std::collections::HashMap::new();
+        for (name, value) in request.headers() {
+            if let Ok(value) = value.to_str() {
+                headers.insert(name.as_str().to_ascii_lowercase(), value.to_owned());
+            }
+        }
+        let deadline = headers
+            .get("grpc-timeout")
+            .and_then(|value| parse_grpc_timeout(value))
+            .map(|timeout| std::time::Instant::now() + timeout);
+        let clone = self.0.clone();
+        let mut inner = std::mem::replace(&mut self.0, clone);
+        Box::pin(GRPC_CALLER.scope((headers, deadline), async move {
+            inner.call(request).await
+        }))
+    }
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&value[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Map a legacy in-process route to the Frontend hook operation name and, for
+/// GET routes, the request JSON built from the query string.
+fn hook_operation(method: &Method, path: &str) -> Option<(&'static str, Option<serde_json::Value>)> {
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let param = |name: &str| {
+        query
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| percent_decode(value))
+            .unwrap_or_default()
+    };
+    let op = match (method.as_str(), route) {
+        ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
+        ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
+        ("POST", "/api/v1/workflows/terminate") => "TerminateWorkflowExecution",
+        ("POST", "/api/v1/workflows/restart") => "RestartWorkflowExecution",
+        ("POST", "/api/v1/workflows/reset") => "ResetWorkflowExecution",
+        ("POST", "/api/v1/workflows/refresh-tasks") => "RefreshWorkflowTasks",
+        ("POST", "/api/v1/workflows/diagnose") => "DiagnoseWorkflowExecution",
+        ("POST", "/api/v1/workflows/request-cancel") => "RequestCancelWorkflowExecution",
+        ("POST", "/api/v1/tasklists/describe") => "DescribeTaskList",
+        ("POST", "/api/v1/tasklists/by-domain") => "GetTaskListsByDomain",
+        ("POST", "/api/v1/tasklists/partitions") => "ListTaskListPartitions",
+        ("POST", "/api/v1/tasks/reset-sticky") => "ResetStickyTaskList",
+        ("POST", "/api/v1/tasks/poll-decision") => "PollForDecisionTask",
+        ("POST", "/api/v1/tasks/poll-activity") => "PollForActivityTask",
+        ("POST", "/api/v1/tasks/respond-decision-complete") => "RespondDecisionTaskCompleted",
+        ("POST", "/api/v1/tasks/respond-decision-failed") => "RespondDecisionTaskFailed",
+        ("POST", "/api/v1/tasks/respond-query-completed") => "RespondQueryTaskCompleted",
+        ("POST", "/api/v1/tasks/respond-activity-complete") => "RespondActivityTaskCompleted",
+        ("POST", "/api/v1/tasks/respond-activity-failed") => "RespondActivityTaskFailed",
+        ("POST", "/api/v1/tasks/respond-activity-canceled") => "RespondActivityTaskCanceled",
+        ("POST", "/api/v1/tasks/record-activity-heartbeat") => "RecordActivityTaskHeartbeat",
+        ("GET", "/api/v1/workflows/describe") => {
+            return Some((
+                "DescribeWorkflowExecution",
+                Some(serde_json::json!({
+                    "domain": param("domain"),
+                    "execution": {"workflowId": param("workflowId"), "runId": param("runId")},
+                })),
+            ))
+        }
+        ("GET", "/api/v1/search-attributes") => {
+            return Some(("GetSearchAttributes", Some(serde_json::json!({}))))
+        }
+        _ => return None,
+    };
+    Some((op, None))
+}
+
 #[derive(Clone)]
 pub struct Frontend {
     pub state: crate::handlers::AppState,
@@ -175,6 +354,34 @@ impl Frontend {
         input: &T,
         headers: &[(&str, &str)],
     ) -> Result<R, Status> {
+        if let Some(api) = self.state.workflow_api.clone() {
+            if let Some((operation, override_request)) = hook_operation(&method, path) {
+                if api.serves(operation) {
+                    let request = match override_request {
+                        Some(value) => value,
+                        None => serde_json::to_value(input)
+                            .map_err(|e| Status::internal(e.to_string()))?,
+                    };
+                    let (mut caller_headers, deadline) = GRPC_CALLER
+                        .try_with(|(headers, deadline)| (headers.clone(), *deadline))
+                        .unwrap_or_default();
+                    for (name, value) in headers {
+                        caller_headers.insert(name.to_ascii_lowercase(), (*value).to_owned());
+                    }
+                    let ctx = cadence_service_core::workflow_api::CallerContext {
+                        deadline,
+                        headers: caller_headers,
+                    };
+                    let value = api.call(operation, request, ctx).await.map_err(|error| {
+                        let (name, _, message) =
+                            cadence_service_core::workflow_api::error_to_thrift(&error);
+                        status_from_error_type(name, &message)
+                    })?;
+                    return serde_json::from_value(value)
+                        .map_err(|e| Status::internal(e.to_string()));
+                }
+            }
+        }
         let body = if method == Method::GET {
             Vec::new()
         } else {
@@ -204,43 +411,10 @@ impl Frontend {
             let message = error["message"]
                 .as_str()
                 .unwrap_or("Cadence request failed");
-            return Err(match error["type"].as_str().unwrap_or("") {
-                "BadRequestError" => Status::invalid_argument(message),
-                "EntityNotExistsError" => detailed_status(
-                    tonic::Code::NotFound,
-                    message,
-                    "EntityNotExistsError",
-                    p::EntityNotExistsError::default(),
-                ),
-                "WorkflowExecutionAlreadyCompletedError" => detailed_status(
-                    tonic::Code::NotFound,
-                    message,
-                    "WorkflowExecutionAlreadyCompletedError",
-                    p::WorkflowExecutionAlreadyCompletedError {},
-                ),
-                "DomainAlreadyExistsError" => detailed_status(
-                    tonic::Code::AlreadyExists,
-                    message,
-                    "DomainAlreadyExistsError",
-                    p::DomainAlreadyExistsError {},
-                ),
-                "WorkflowExecutionAlreadyStartedError" => Status::already_exists(message),
-                "ServiceBusyError" => detailed_status(
-                    tonic::Code::ResourceExhausted,
-                    message,
-                    "ServiceBusyError",
-                    p::ServiceBusyError {
-                        reason: String::new(),
-                    },
-                ),
-                "QueryFailedError" => detailed_status(
-                    tonic::Code::InvalidArgument,
-                    message,
-                    "QueryFailedError",
-                    p::QueryFailedError {},
-                ),
-                _ => Status::internal(message),
-            });
+            return Err(status_from_error_type(
+                error["type"].as_str().unwrap_or(""),
+                message,
+            ));
         }
         serde_json::from_slice(if bytes.is_empty() { b"null" } else { &bytes })
             .map_err(|e| Status::internal(e.to_string()))
@@ -1901,6 +2075,7 @@ pub async fn serve(
         .with_service_name("uber.cadence.sharddistributor.v1.ShardDistributorExecutorCanaryAPI")
         .build_v1()?;
     tonic::transport::Server::builder()
+        .layer(tower::layer::layer_fn(CallerScope))
         .add_service(reflection)
         .add_service(
             tonic::service::interceptor::InterceptedService::new(
