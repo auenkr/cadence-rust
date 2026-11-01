@@ -672,7 +672,11 @@ pub struct GetReplicationMessagesRequest {
 pub struct ReplicationTaskInfo {
     #[serde(rename = "domainId", default, skip_serializing_if = "String::is_empty")]
     pub domain_id: String,
-    #[serde(rename = "workflowId", default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        rename = "workflowId",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
     pub workflow_id: String,
     #[serde(rename = "runId", default, skip_serializing_if = "String::is_empty")]
     pub run_id: String,
@@ -746,12 +750,20 @@ pub struct SyncShardStatus {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetReplicationMessagesResponse {
-    #[serde(rename = "messagesByShard", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "messagesByShard",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub messages_by_shard: Option<std::collections::HashMap<i32, ReplicationMessages>>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetDLQReplicationMessagesResponse {
-    #[serde(rename = "replicationTasks", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "replicationTasks",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub replication_tasks: Option<Vec<crate::types::ReplicationTask>>,
 }
 

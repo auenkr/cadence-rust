@@ -629,21 +629,45 @@ pub struct ReplicationTask {
         skip_serializing_if = "Option::is_none"
     )]
     pub domain_task_attributes: Option<DomainTaskAttributes>,
-    #[serde(rename = "syncShardStatusTaskAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "syncShardStatusTaskAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sync_shard_status_task_attributes: Option<SyncShardStatusTaskAttributes>,
-    #[serde(rename = "syncActivityTaskAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "syncActivityTaskAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sync_activity_task_attributes: Option<SyncActivityTaskAttributes>,
-    #[serde(rename = "historyTaskV2Attributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "historyTaskV2Attributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub history_task_v2_attributes: Option<HistoryTaskV2Attributes>,
-    #[serde(rename = "failoverMarkerAttributes", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failoverMarkerAttributes",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failover_marker_attributes: Option<FailoverMarkerAttributes>,
-    #[serde(rename = "creationTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "creationTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub creation_time: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncShardStatusTaskAttributes {
-    #[serde(rename = "sourceCluster", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "sourceCluster",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub source_cluster: Option<String>,
     #[serde(rename = "shardId", default, skip_serializing_if = "Option::is_none")]
     pub shard_id: Option<i64>,
@@ -654,21 +678,41 @@ pub struct SyncShardStatusTaskAttributes {
 pub struct SyncActivityTaskAttributes {
     #[serde(rename = "domainId", default, skip_serializing_if = "Option::is_none")]
     pub domain_id: Option<String>,
-    #[serde(rename = "workflowId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "workflowId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub workflow_id: Option<String>,
     #[serde(rename = "runId", default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     #[serde(rename = "version", default, skip_serializing_if = "Option::is_none")]
     pub version: Option<i64>,
-    #[serde(rename = "scheduledId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "scheduledId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scheduled_id: Option<i64>,
-    #[serde(rename = "scheduledTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "scheduledTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub scheduled_time: Option<i64>,
     #[serde(rename = "startedId", default, skip_serializing_if = "Option::is_none")]
     pub started_id: Option<i64>,
-    #[serde(rename = "startedTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "startedTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub started_time: Option<i64>,
-    #[serde(rename = "lastHeartbeatTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastHeartbeatTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_heartbeat_time: Option<i64>,
     #[serde(
         rename = "details",
@@ -680,9 +724,17 @@ pub struct SyncActivityTaskAttributes {
     pub details: Option<Vec<u8>>,
     #[serde(rename = "attempt", default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<i32>,
-    #[serde(rename = "lastFailureReason", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastFailureReason",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_failure_reason: Option<String>,
-    #[serde(rename = "lastWorkerIdentity", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastWorkerIdentity",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_worker_identity: Option<String>,
     #[serde(
         rename = "lastFailureDetails",
@@ -692,9 +744,17 @@ pub struct SyncActivityTaskAttributes {
         deserialize_with = "crate::b64::deserialize_opt_bytes"
     )]
     pub last_failure_details: Option<Vec<u8>>,
-    #[serde(rename = "lastFailureOptions", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastFailureOptions",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_failure_options: Option<FailureOptions>,
-    #[serde(rename = "versionHistory", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "versionHistory",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub version_history: Option<VersionHistory>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -703,24 +763,44 @@ pub struct HistoryTaskV2Attributes {
     pub task_id: Option<i64>,
     #[serde(rename = "domainId", default, skip_serializing_if = "Option::is_none")]
     pub domain_id: Option<String>,
-    #[serde(rename = "workflowId", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "workflowId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub workflow_id: Option<String>,
     #[serde(rename = "runId", default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
-    #[serde(rename = "versionHistoryItems", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "versionHistoryItems",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub version_history_items: Option<Vec<VersionHistoryItem>>,
     #[serde(rename = "events", default, skip_serializing_if = "Option::is_none")]
     pub events: Option<DataBlob>,
-    #[serde(rename = "newRunEvents", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "newRunEvents",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub new_run_events: Option<DataBlob>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailoverMarkerAttributes {
     #[serde(rename = "domainId", default, skip_serializing_if = "Option::is_none")]
     pub domain_id: Option<String>,
-    #[serde(rename = "failoverVersion", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "failoverVersion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub failover_version: Option<i64>,
-    #[serde(rename = "creationTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "creationTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub creation_time: Option<i64>,
 }
 
