@@ -7664,7 +7664,7 @@ mod timeout_wire_tests {
             (5, Value::I64(0)), (10, Value::Bytes(b"d".to_vec())),
             (20, Value::Bytes(b"wf".to_vec())), (30, Value::Bytes(b"run".to_vec())),
             (40, Value::List(vec![Value::Struct(Struct { fields: vec![(10, Value::I64(0)), (20, Value::I64(-2))] })])),
-            (50, Value::Struct(Struct { fields: vec![(10, Value::I32(0)), (20, Value::Bytes(vec![0,255])] })),
+            (50, Value::Struct(Struct { fields: vec![(10, Value::I32(0)), (20, Value::Bytes(vec![0, 255]))] })),
             (70, Value::Struct(Struct { fields: vec![(10, Value::I32(1))] })),
         ] };
         assert_pinned_binary_fixture(history_fixture.clone(), &history);
