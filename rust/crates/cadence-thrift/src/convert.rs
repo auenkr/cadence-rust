@@ -1529,7 +1529,47 @@ impl FromThrift for DescribeDomainResponse {
             replication_configuration: s.opt_struct(30)?,
             failover_version: s.opt_i64(40)?.unwrap_or(0),
             is_global_domain: s.opt_bool(50)?.unwrap_or(false),
+            failover_info: s.opt_struct(60)?,
         })
+    }
+}
+
+impl FromThrift for FailoverInfo {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        let pending_shards = match s.get(50) {
+            Some(Value::List(items)) => items
+                .iter()
+                .filter_map(|v| match v {
+                    Value::I32(n) => Some(*n),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        Ok(Self {
+            failover_version: s.opt_i64(10)?.unwrap_or(0),
+            failover_start_timestamp: s.opt_i64(20)?.unwrap_or(0),
+            failover_expire_timestamp: s.opt_i64(30)?.unwrap_or(0),
+            completed_shard_count: s.opt_i32(40)?.unwrap_or(0),
+            pending_shards,
+        })
+    }
+}
+
+impl ToThrift for FailoverInfo {
+    fn to_thrift(&self) -> Struct {
+        let mut f = Fields::new();
+        f.fields.push((10, Value::I64(self.failover_version)));
+        f.fields.push((20, Value::I64(self.failover_start_timestamp)));
+        f.fields.push((30, Value::I64(self.failover_expire_timestamp)));
+        f.fields.push((40, Value::I32(self.completed_shard_count)));
+        if !self.pending_shards.is_empty() {
+            f.fields.push((
+                50,
+                Value::List(self.pending_shards.iter().map(|n| Value::I32(*n)).collect()),
+            ));
+        }
+        f.finish()
     }
 }
 
@@ -1543,6 +1583,7 @@ impl ToThrift for DescribeDomainResponse {
             f.fields.push((40, Value::I64(self.failover_version)));
         }
         f.obool(50, self.is_global_domain);
+        f.ostruct(60, self.failover_info.as_ref());
         f.finish()
     }
 }

@@ -323,6 +323,13 @@ fn domain_response(v: st::DescribeDomainResponse) -> p::Domain {
     let mut result = p::Domain {
         failover_version: v.failover_version,
         is_global_domain: v.is_global_domain,
+        failover_info: v.failover_info.map(|i| p::FailoverInfo {
+            failover_version: i.failover_version,
+            failover_start_timestamp: Some(cv::timestamp_nanos(i.failover_start_timestamp)),
+            failover_expire_timestamp: Some(cv::timestamp_nanos(i.failover_expire_timestamp)),
+            completed_shard_count: i.completed_shard_count,
+            pending_shards: i.pending_shards,
+        }),
         ..Default::default()
     };
     if let Some(info) = v.domain_info {
@@ -500,6 +507,7 @@ impl p::domain_api_server::DomainApi for Frontend {
                 replication_configuration: v.replication_configuration,
                 failover_version: v.failover_version,
                 is_global_domain: v.is_global_domain,
+                failover_info: None,
             })),
         }))
     }
@@ -608,6 +616,7 @@ impl p::domain_api_server::DomainApi for Frontend {
                 replication_configuration: v.replication_configuration,
                 failover_version: v.failover_version,
                 is_global_domain: v.is_global_domain,
+                failover_info: None,
             })),
         }))
     }

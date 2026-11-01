@@ -61,6 +61,17 @@ impl DomainRecord {
             replication_configuration: Some(self.replication.clone()),
             failover_version: self.failover_version,
             is_global_domain: self.is_global_domain,
+            // Go `describeDomain`: only a graceful failover reports info; the
+            // start is the last domain update time.
+            failover_info: self.failover_end_time.map(|expire| {
+                cadence_api::service_types::FailoverInfo {
+                    failover_version: self.failover_version,
+                    failover_start_timestamp: self.last_updated_time_nanos,
+                    failover_expire_timestamp: expire,
+                    completed_shard_count: 0,
+                    pending_shards: Vec::new(),
+                }
+            }),
         }
     }
 
@@ -1563,51 +1574,84 @@ impl PersistedFrontendDomainManager {
 }
 
 impl PersistedFrontendDomainManager {
-    /// Append Go's `DomainAuditOperationTypeFailover` row after the domain row
-    /// commits. Backends without `domain_audit_log` keep the cache-only history.
+    /// Snapshot of a cached domain as Go's `GetDomainResponse` audit state.
+    fn audit_state(
+        &self,
+        record: &DomainRecord,
+    ) -> Option<crate::domain_audit::DomainAuditState> {
+        let describe = self
+            .cache
+            .describe(&DescribeDomainRequest {
+                name: Some(record.info.name.clone()),
+                uuid: None,
+            })
+            .ok()?;
+        Some(crate::domain_audit::DomainAuditState {
+            describe,
+            failover_expire_nanos: record.failover_end_time,
+        })
+    }
+
+    /// Go `updateDomainAuditLog`: append one audit row after the domain write
+    /// commits. A nil state is stored as an empty `GetDomainResponse`. Like Go
+    /// the write is best effort; a failure never fails the domain operation.
+    /// Backends without `domain_audit_log` keep the cache-only history.
+    fn write_audit(
+        &self,
+        domain_id: &str,
+        operation_type: i32,
+        comment: &str,
+        now_nanos: i64,
+        before: Option<&crate::domain_audit::DomainAuditState>,
+        after: Option<&crate::domain_audit::DomainAuditState>,
+    ) {
+        use crate::domain_audit::{encode_domain_state, new_event_id, DomainAuditLog};
+        if !self.persistence.supports_domain_audit_log() {
+            return;
+        }
+        let empty = crate::domain_audit::DomainAuditState::default();
+        let (Ok(state_before), Ok(state_after)) = (
+            encode_domain_state(before.unwrap_or(&empty)),
+            encode_domain_state(after.unwrap_or(&empty)),
+        ) else {
+            return;
+        };
+        let log = DomainAuditLog {
+            event_id: new_event_id(now_nanos),
+            domain_id: domain_id.to_string(),
+            operation_type,
+            created_time_nanos: now_nanos,
+            last_updated_time_nanos: now_nanos,
+            identity: String::new(),
+            identity_type: String::new(),
+            comment: comment.to_string(),
+            state_before,
+            state_after,
+        };
+        let _ = self.persistence.create_domain_audit_log(&log);
+    }
+
+    /// Go `DomainAuditOperationTypeFailover` row after the domain row commits.
     fn record_failover_audit(
         &self,
         before: &DescribeDomainResponse,
         before_failover_end: Option<i64>,
         updated: &DomainRecord,
     ) -> Result<(), FrontendDomainError> {
-        use crate::domain_audit::{
-            encode_domain_state, new_event_id, DomainAuditLog, DomainAuditState,
-            DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
-        };
-        if !self.persistence.supports_domain_audit_log() {
-            return Ok(());
-        }
-        let after = self.cache.describe(&DescribeDomainRequest {
-            name: Some(updated.info.name.clone()),
-            uuid: None,
-        })?;
-        let now_nanos = updated.last_updated_time_nanos;
-        let state_before = DomainAuditState {
+        let state_before = crate::domain_audit::DomainAuditState {
             describe: before.clone(),
             failover_expire_nanos: before_failover_end,
         };
-        let state_after = DomainAuditState {
-            describe: after,
-            failover_expire_nanos: updated.failover_end_time,
-        };
-        let log = DomainAuditLog {
-            event_id: new_event_id(now_nanos),
-            domain_id: updated.info.uuid.clone(),
-            operation_type: DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
-            created_time_nanos: now_nanos,
-            last_updated_time_nanos: now_nanos,
-            identity: String::new(),
-            identity_type: String::new(),
-            comment: "domain failover".into(),
-            state_before: encode_domain_state(&state_before)
-                .map_err(FrontendDomainError::Persistence)?,
-            state_after: encode_domain_state(&state_after)
-                .map_err(FrontendDomainError::Persistence)?,
-        };
-        self.persistence
-            .create_domain_audit_log(&log)
-            .map_err(FrontendDomainError::Persistence)
+        let state_after = self.audit_state(updated);
+        self.write_audit(
+            &updated.info.uuid,
+            crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_FAILOVER,
+            "domain failover",
+            updated.last_updated_time_nanos,
+            Some(&state_before),
+            state_after.as_ref(),
+        );
+        Ok(())
     }
 }
 
@@ -1638,6 +1682,14 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             let _ = self.cache.delete(&name);
             return Err(error);
         }
+        self.write_audit(
+            &record.info.uuid,
+            crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_CREATE,
+            "domain created",
+            record.last_updated_time_nanos,
+            None,
+            self.audit_state(&record).as_ref(),
+        );
         self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Create)?;
         Ok(response)
     }
@@ -1695,6 +1747,19 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         if updated.failover_version != old.failover_version {
             self.record_failover_audit(&before, old.failover_end_time, &updated)?;
             self.cache.notify_failover(&updated);
+        } else {
+            let before_state = crate::domain_audit::DomainAuditState {
+                describe: before.clone(),
+                failover_expire_nanos: old.failover_end_time,
+            };
+            self.write_audit(
+                &updated.info.uuid,
+                crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_UPDATE,
+                "domain updated",
+                updated.last_updated_time_nanos,
+                Some(&before_state),
+                self.audit_state(&updated).as_ref(),
+            );
         }
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(response)
@@ -1765,6 +1830,7 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     fn deprecate(&self, request: &DeprecateDomainRequest) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let old = self.cache.record_by_name(&request.name)?;
+        let before_state = self.audit_state(&old);
         let version = self.current_metadata_version()?;
         self.cache.deprecate(request)?;
         let updated = self.cache.record_by_name(&request.name)?;
@@ -1772,6 +1838,14 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
             self.cache.restore_record(old);
             return Err(error);
         }
+        self.write_audit(
+            &updated.info.uuid,
+            crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_DEPRECATE,
+            "domain deprecated",
+            updated.last_updated_time_nanos,
+            before_state.as_ref(),
+            self.audit_state(&updated).as_ref(),
+        );
         self.publish_replication_task(&updated, cadence_api::enums::DomainOperation::Update)?;
         Ok(())
     }
@@ -1779,10 +1853,22 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     fn delete(&self, name: &str) -> Result<(), FrontendDomainError> {
         let _guard = self.mutation_lock.lock().expect("domain manager lock");
         let record = self.cache.record_by_name(name)?;
+        let before_state = self.audit_state(&record);
         self.persistence
             .delete_domain(&record.info.uuid)
             .map_err(FrontendDomainError::Persistence)?;
         self.cache.delete(name).map_err(FrontendDomainError::from)?;
+        self.write_audit(
+            &record.info.uuid,
+            crate::domain_audit::DOMAIN_AUDIT_OPERATION_TYPE_DELETE,
+            "domain deleted",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or_default(),
+            before_state.as_ref(),
+            None,
+        );
         self.publish_replication_task(&record, cadence_api::enums::DomainOperation::Delete)
     }
 
