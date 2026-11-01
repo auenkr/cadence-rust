@@ -21,3 +21,5 @@ Combined cadence-matching run https://github.com/auenkr/cadence-rust/actions/run
 Replacement fresh workspace run: https://github.com/auenkr/cadence-rust/actions/runs/41328465892 at 2ebb61117. Pending actual conclusion. Earlier master validation is superseded by this source fix; branch concurrency cancels obsolete master runs.
 
 Replication wire run 41327938225 also FAILED compilation (including missing FromThrift for FailoverMarkerAttributes); its code has not been integrated into master. The assigned replication wire worker owns completing models/converters and pinned fixtures.
+
+Downloaded `format-all-patch` from 41328113275 to /tmp/frontend-ci-format-41328113275. Applied its two grpc.rs hunks after `git apply --check`; `git diff --check` passed. Commit f2b312fee contains only this CI-produced formatting (no local Cargo/rustfmt). Fresh uncached workspace validation for that exact code: https://github.com/auenkr/cadence-rust/actions/runs/41328560112. Prior master runs are superseded by branch concurrency. Mixed gate 41327590981 was verified still executing the Gate step during this continuation; do not restart or claim a terminal outcome from elapsed time.
