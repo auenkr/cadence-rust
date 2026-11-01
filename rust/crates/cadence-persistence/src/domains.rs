@@ -1712,11 +1712,31 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
     }
 
     fn domain_id(&self, name: &str) -> Result<String, EntityNotExistsError> {
-        self.cache.domain_id(name)
+        match self.cache.domain_id(name) {
+            Ok(id) => Ok(id),
+            Err(miss) => {
+                // Domains created by other services (Go system domains) are
+                // only in persistence; load on demand like Go's DomainCache.
+                let Ok(metadata) = self.persistence.get_domain(Some(name), None) else {
+                    return Err(miss);
+                };
+                self.cache.insert_matching_metadata_if_missing(&metadata);
+                self.cache.domain_id(name)
+            }
+        }
     }
 
     fn is_active_in(&self, uuid: &str, cluster: &str) -> Result<bool, EntityNotExistsError> {
-        self.cache.is_active_in(uuid, cluster)
+        match self.cache.is_active_in(uuid, cluster) {
+            Ok(v) => Ok(v),
+            Err(miss) => {
+                let Ok(metadata) = self.persistence.get_domain(None, Some(uuid)) else {
+                    return Err(miss);
+                };
+                self.cache.insert_matching_metadata_if_missing(&metadata);
+                self.cache.is_active_in(uuid, cluster)
+            }
+        }
     }
 
     fn update(
