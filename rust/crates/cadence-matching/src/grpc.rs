@@ -234,6 +234,8 @@ fn hook_operation(
             .unwrap_or_default()
     };
     let op = match (method.as_str(), route) {
+        ("POST", "/api/v1/workflows/start") => "StartWorkflowExecution",
+        ("POST", "/api/v1/workflows/signal-with-start") => "SignalWithStartWorkflowExecution",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
         ("POST", "/api/v1/workflows/terminate") => "TerminateWorkflowExecution",
@@ -875,6 +877,24 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         request: tonic::Request<p::StartWorkflowExecutionRequest>,
     ) -> Result<Response<p::StartWorkflowExecutionResponse>, Status> {
         let input = cv::start(request.into_inner())?;
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("StartWorkflowExecution"))
+        {
+            let result: t::StartWorkflowExecutionResponse = self
+                .call_with_headers(
+                    Method::POST,
+                    "/api/v1/workflows/start",
+                    &input,
+                    &[],
+                )
+                .await?;
+            return Ok(Response::new(p::StartWorkflowExecutionResponse {
+                run_id: result.run_id,
+            }));
+        }
         let executions = self.domain(&input.domain)?;
         cadence_api::validation::validate_start_workflow_execution_request(
             Some(&input),
@@ -1022,6 +1042,24 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             signal_input: cv::data(r.signal_input),
             control: r.control,
         };
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("SignalWithStartWorkflowExecution"))
+        {
+            let result: t::StartWorkflowExecutionResponse = self
+                .call_with_headers(
+                    Method::POST,
+                    "/api/v1/workflows/signal-with-start",
+                    &input,
+                    &[],
+                )
+                .await?;
+            return Ok(Response::new(p::SignalWithStartWorkflowExecutionResponse {
+                run_id: result.run_id,
+            }));
+        }
         let executions = self.domain(&input.domain)?;
         cadence_api::validation::validate_signal_with_start_request(
             Some(&input),
@@ -2185,5 +2223,122 @@ fn frontend_admission_interceptor(
         } else {
             Err(tonic::Status::unavailable("Frontend is shutting down."))
         }
+    }
+}
+
+#[cfg(test)]
+mod workflow_hook_tests {
+    use super::*;
+    use cadence_service_core::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug)]
+    struct RecordingApi {
+        calls: Mutex<Vec<(String, serde_json::Value, CallerContext)>>,
+        result: serde_json::Value,
+        error: bool,
+    }
+
+    impl WorkflowApi for RecordingApi {
+        fn serves(&self, operation: &str) -> bool {
+            matches!(
+                operation,
+                "StartWorkflowExecution" | "SignalWithStartWorkflowExecution"
+            )
+        }
+
+        fn call<'a>(
+            &'a self,
+            operation: &'a str,
+            request: serde_json::Value,
+            ctx: CallerContext,
+        ) -> ApiFuture<'a> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((operation.to_owned(), request, ctx));
+            Box::pin(async move {
+                if self.error {
+                    Err(cadence_api::errors::CadenceError::Unknown(
+                        "hook failure".to_owned(),
+                    ))
+                } else {
+                    Ok(self.result.clone())
+                }
+            })
+        }
+    }
+
+    fn frontend(api: Arc<RecordingApi>) -> Frontend {
+        let mut state = crate::handlers::AppState::default();
+        state.workflow_api = Some(api);
+        Frontend { state }
+    }
+
+    #[tokio::test]
+    async fn synchronous_start_operations_use_workflow_hook_context_and_run_id() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::json!({"runId": "hook-run"}),
+            error: false,
+        });
+        let frontend = frontend(api.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+        let headers = std::collections::HashMap::from([(
+            "x-cadence-caller".to_owned(),
+            "sdk-worker".to_owned(),
+        )]);
+        let start = frontend
+            .start_workflow_execution(tonic::Request::new(
+                p::StartWorkflowExecutionRequest::default(),
+            ));
+        let start_result = GRPC_CALLER
+            .scope((headers.clone(), Some(deadline)), start)
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(start_result.run_id, "hook-run");
+
+        let signal_start = frontend.signal_with_start_workflow_execution(tonic::Request::new(
+            p::SignalWithStartWorkflowExecutionRequest {
+                start_request: Some(p::StartWorkflowExecutionRequest::default()),
+                ..Default::default()
+            },
+        ));
+        let signal_result = GRPC_CALLER
+            .scope((headers, Some(deadline)), signal_start)
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(signal_result.run_id, "hook-run");
+
+        let calls = api.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "StartWorkflowExecution");
+        assert_eq!(calls[1].0, "SignalWithStartWorkflowExecution");
+        for (_, request, context) in calls.iter() {
+            assert!(request.is_object());
+            assert_eq!(context.headers["x-cadence-caller"], "sdk-worker");
+            assert_eq!(context.deadline, Some(deadline));
+        }
+    }
+
+    #[tokio::test]
+    async fn synchronous_start_hook_errors_become_grpc_errors() {
+        let api = Arc::new(RecordingApi {
+            calls: Mutex::new(Vec::new()),
+            result: serde_json::Value::Null,
+            error: true,
+        });
+        let frontend = frontend(api.clone());
+        let result = frontend
+            .start_workflow_execution(tonic::Request::new(
+                p::StartWorkflowExecutionRequest::default(),
+            ))
+            .await;
+        let error = result.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("hook failure"));
+        assert_eq!(api.calls.lock().unwrap().len(), 1);
     }
 }
