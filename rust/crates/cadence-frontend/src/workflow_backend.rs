@@ -36,21 +36,22 @@ const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone, Debug)]
 pub struct ProductionBackend {
     history_addr: String,
-    #[allow(dead_code)]
     matching_addr: String,
+    pub(crate) history_access: Option<crate::workflow_matching::HistoryAccess>,
+    pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
 }
 
 type BackendFuture<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, CadenceError>> + Send + 'a>>;
 
-fn bad_request(message: impl Into<String>) -> CadenceError {
+pub(crate) fn bad_request(message: impl Into<String>) -> CadenceError {
     CadenceError::BadRequest(BadRequestError::new(message))
 }
 
-fn internal(message: impl Into<String>) -> CadenceError {
+pub(crate) fn internal(message: impl Into<String>) -> CadenceError {
     CadenceError::Internal(InternalServiceError::new(message))
 }
 
-fn domain_uuid(envelope: &serde_json::Value, key: &str) -> Result<Value, CadenceError> {
+pub(crate) fn domain_uuid(envelope: &serde_json::Value, key: &str) -> Result<Value, CadenceError> {
     let id = envelope
         .get(key)
         .and_then(serde_json::Value::as_str)
@@ -58,12 +59,12 @@ fn domain_uuid(envelope: &serde_json::Value, key: &str) -> Result<Value, Cadence
     Ok(Value::Bytes(id.as_bytes().to_vec()))
 }
 
-fn typed<T: DeserializeOwned>(envelope: &serde_json::Value, key: &str) -> Result<T, CadenceError> {
+pub(crate) fn typed<T: DeserializeOwned>(envelope: &serde_json::Value, key: &str) -> Result<T, CadenceError> {
     let inner = envelope.get(key).cloned().unwrap_or(serde_json::Value::Null);
     serde_json::from_value(inner).map_err(|e| bad_request(format!("invalid {key}: {e}")))
 }
 
-fn to_json<T: Serialize>(value: &T) -> Result<serde_json::Value, CadenceError> {
+pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<serde_json::Value, CadenceError> {
     serde_json::to_value(value).map_err(|e| internal(e.to_string()))
 }
 
@@ -142,12 +143,35 @@ impl ProductionBackend {
         Self {
             history_addr,
             matching_addr,
+            history_access: None,
+            domains: None,
         }
+    }
+
+    pub fn with_history_access(mut self, access: crate::workflow_matching::HistoryAccess) -> Self {
+        self.history_access = Some(access);
+        self
+    }
+
+    pub fn with_domains(
+        mut self,
+        domains: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>,
+    ) -> Self {
+        self.domains = Some(domains);
+        self
+    }
+
+    pub(crate) fn history_addr(&self) -> &str {
+        &self.history_addr
+    }
+
+    pub(crate) fn matching_addr(&self) -> &str {
+        &self.matching_addr
     }
 
     /// One History call: `envelope` is the single IDL argument. Returns the
     /// success struct (empty for `void` methods).
-    async fn history(&self, method: &str, envelope: Struct) -> Result<Struct, CadenceError> {
+    pub(crate) async fn history(&self, method: &str, envelope: Struct) -> Result<Struct, CadenceError> {
         self.call(&self.history_addr, HISTORY_SERVICE, "HistoryService", method, envelope)
             .await
     }
@@ -159,6 +183,19 @@ impl ProductionBackend {
         thrift_service: &str,
         method: &str,
         envelope: Struct,
+    ) -> Result<Struct, CadenceError> {
+        self.call_with_timeout(addr, service, thrift_service, method, envelope, HISTORY_TIMEOUT)
+            .await
+    }
+
+    pub(crate) async fn call_with_timeout(
+        &self,
+        addr: &str,
+        service: &str,
+        thrift_service: &str,
+        method: &str,
+        envelope: Struct,
+        timeout: Duration,
     ) -> Result<Struct, CadenceError> {
         let args = Struct {
             fields: vec![(1, Value::Struct(envelope))],
@@ -173,7 +210,7 @@ impl ProductionBackend {
             CALLER,
             &[],
             &writer.into_bytes(),
-            HISTORY_TIMEOUT,
+            timeout,
         )
         .await
         .map_err(|error| match error {
@@ -344,6 +381,14 @@ impl ProductionBackend {
                 self.history_void("RespondDecisionTaskFailed", env(inner.to_thrift(), vec![])?)
                     .await
             }
+            Op::PollForDecisionTask => self.poll_decision(&request).await,
+            Op::PollForActivityTask => self.poll_activity(&request).await,
+            Op::RespondDecisionTaskCompleted => self.respond_decision_completed(&request).await,
+            Op::RespondQueryTaskCompleted => self.respond_query_completed(&request).await,
+            Op::DescribeTaskList => self.describe_task_list(&request).await,
+            Op::ListTaskListPartitions => self.list_task_list_partitions(&request).await,
+            Op::GetTaskListsByDomain => self.get_task_lists_by_domain(&request).await,
+            Op::GetWorkflowExecutionHistory => self.get_workflow_execution_history(request).await,
             other => Err(crate::handler_workflow::unimplemented_operation(other.name()).into()),
         }
     }
@@ -465,11 +510,17 @@ pub fn build_workflow_api(
 ) -> anyhow::Result<cadence_service_core::workflow_api::SharedWorkflowApi> {
     let history = service_addr(&ctx.config, "history", "CADENCE_HISTORY_TCHANNEL_ADDR", 7934);
     let matching = service_addr(&ctx.config, "matching", "CADENCE_MATCHING_TCHANNEL_ADDR", 7935);
-    let backend = ProductionBackend::new(history, matching);
-    let handler = crate::handler_workflow::Handler::new(backend).with_domain_lookup(
+    let lookup: std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup> =
         std::sync::Arc::new(crate::handler_workflow::PersistenceWorkflowDomainLookup::new(
             ctx.state.domain_manager.clone(),
-        )),
-    );
+        ));
+    let mut backend = ProductionBackend::new(history, matching).with_domains(lookup.clone());
+    if let Some(store) = ctx.state.history_node_store.clone() {
+        backend = backend.with_history_access(crate::workflow_matching::HistoryAccess::new(
+            store,
+            ctx.config.persistence.num_history_shards,
+        ));
+    }
+    let handler = crate::handler_workflow::Handler::new(backend).with_domain_lookup(lookup);
     Ok(std::sync::Arc::new(HandlerApi { handler }))
 }

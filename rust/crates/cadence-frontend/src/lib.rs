@@ -18,6 +18,7 @@ pub mod matching_client;
 pub mod matching_task_list_backend;
 pub mod request_validator;
 pub mod workflow_backend;
+pub mod workflow_matching;
 pub mod wrappers;
 
 /// Service name as used by `--services` and the Go service registry.

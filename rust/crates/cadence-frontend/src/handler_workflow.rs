@@ -2230,6 +2230,8 @@ fn shape_activity_poll_response(matching_response: Value) -> Value {
         "taskToken",
         "workflowExecution",
         "activityID",
+        // The Rust API types serialize this field as `activityId`.
+        "activityId",
         "activityType",
         "input",
         "scheduledTimestamp",
@@ -2275,6 +2277,10 @@ fn shape_decision_poll_response(matching_response: Value) -> Value {
         "workflowType",
         "previousStartedEventID",
         "startedEventID",
+        // Spellings used by the Rust API types' JSON.
+        "previousStartedEventId",
+        "startedEventId",
+        "nextEventId",
         "query",
         "backlogCountHint",
         "attempt",
