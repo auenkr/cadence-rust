@@ -23,7 +23,7 @@ jobs:
         with:
           ref: ${{ inputs.rust_ref }}
           path: rustsrc
-          submodules: false
+          submodules: true
       - name: IDL submodule
         run: git submodule update --init go/idls
       - uses: actions/setup-go@v5
