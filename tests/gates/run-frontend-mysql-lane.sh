@@ -18,8 +18,8 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   if (( STARTED )); then
-    docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 -e \
-      "SELECT shard_id, HEX(id) id_hex, name, is_global, data_encoding, LENGTH(data) data_len, HEX(LEFT(data,24)) data_head FROM cadence.domains; SELECT * FROM cadence.domain_metadata; SELECT domain_id, workflow_id, status FROM cadence_visibility.executions_visibility LIMIT 20;" \
+    docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 --force -e \
+      "SELECT shard_id, HEX(id) id_hex, name, is_global, data_encoding, LENGTH(data) data_len, HEX(LEFT(data,24)) data_head FROM cadence.domains; SELECT * FROM cadence.domain_metadata; SELECT HEX(domain_id) d, name, task_type, range_id FROM cadence.task_lists; SELECT HEX(domain_id) d, task_list_name, task_type, task_id FROM cadence.tasks LIMIT 50; SELECT shard_id, HEX(domain_id) d, workflow_id, HEX(run_id) r, state, close_status FROM cadence.executions LIMIT 20; SELECT domain_id, workflow_id, close_status FROM cadence_visibility.executions_visibility LIMIT 20;" \
       > "$ARTIFACTS/mysql-domains-dump.txt" 2>&1 || true
     docker logs "$CONTAINER" > "$ARTIFACTS/mysql-container.log" 2>&1 || true
     docker rm --force "$CONTAINER" > "$ARTIFACTS/mysql-container-cleanup.txt" 2>&1 || true

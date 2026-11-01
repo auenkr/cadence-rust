@@ -360,6 +360,29 @@ impl Frontend {
         input: &T,
         headers: &[(&str, &str)],
     ) -> Result<R, Status> {
+        // Request-level tracing (gate diagnostics): begin/end with elapsed time.
+        let trace_start = std::time::Instant::now();
+        eprintln!("FE-TRACE begin {method} {path}");
+        let result = self.call_with_headers_inner(method.clone(), path, input, headers).await;
+        match &result {
+            Ok(_) => eprintln!("FE-TRACE end ok {method} {path} {}ms", trace_start.elapsed().as_millis()),
+            Err(status) => eprintln!(
+                "FE-TRACE end err {method} {path} {}ms code={:?} msg={}",
+                trace_start.elapsed().as_millis(),
+                status.code(),
+                status.message()
+            ),
+        }
+        result
+    }
+
+    async fn call_with_headers_inner<T: Serialize, R: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        input: &T,
+        headers: &[(&str, &str)],
+    ) -> Result<R, Status> {
         if let Some(api) = self.state.workflow_api.clone() {
             if let Some((operation, override_request)) = hook_operation(&method, path) {
                 if api.serves(operation) {
