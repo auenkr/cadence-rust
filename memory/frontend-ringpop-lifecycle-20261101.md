@@ -9,8 +9,10 @@ TChannel dispatch), `7b62ddc9ab38fdf9e344f8ec6996afd4213d0963` (Frontend
 leave test), `0f4155fef729c74f59af61dc17377d6501dc5085` (CI formatting
 artifact), and `da88b2bf64bb6bc19e12547c787490f3b4b6e1b3` (generated gRPC
 trait import required by existing hook tests), `71c70ab2e` (Clippy initializer
-fix), and merge `a80592e491fa893cdacd0acab615e4eedee0f1c4` from `origin/master`
-plus `079139dc4` (order Frontend leave coverage after Matching recovery) on
+fix), merge `a80592e491fa893cdacd0acab615e4eedee0f1c4` from `origin/master`,
+`079139dc4` (order Frontend leave coverage after Matching recovery),
+`c0e558cd617f47f55c844a0538bf19dcd41bb2d7` (owned listener abort/join and
+bound-port test), and `c6c011c3b` (Clippy fix) on
 `t3/frontend-ringpop-lifecycle`.
 
 ## Source and behavior evidence
@@ -62,12 +64,30 @@ plus `079139dc4` (order Frontend leave coverage after Matching recovery) on
   Ringpop test: the Frontend member was stopped before the existing Matching
   recovery assertion, removing its bootstrap peer. The test now checks
   Frontend self-eviction after Matching recovery.
+- Parent review found the Frontend TChannel task handle was moved into a
+  JoinSet wrapper; aborting the wrapper would detach the inner listener. The
+  implementation now retains the actual listener `JoinHandle`, reports its
+  result over a oneshot, and explicitly aborts/joins it on startup failure and
+  both shutdown paths. A regression cancels the wrapper, verifies the bound
+  port remains owned until explicit cleanup, then rebinds the same port.
+- CI run 41330331495 completed SUCCESS at
+  `079139dc4c88ce18c19def1e7ef5e9431410ad65`, validating Clippy, formatting,
+  and crate tests including Frontend role/ports, self-eviction, and Matching
+  restart recovery. It predates the task ownership fix.
+- CI run 41331009654 failed Clippy on one unnecessary `mut` in the new bound
+  port test. Fixed in `c6c011c3b` without lint suppression.
+- CI run 41331347247 completed SUCCESS at
+  `c6c011c3b4fc8573b3419032760944ff9b23d861`: Clippy, formatting, and
+  `cadence-matching` tests all passed. The listener ownership regression and
+  Frontend role/leave/recovery test each passed; crate test summary was 988
+  passed, 0 failed, 2 ignored. Its `format-all-patch` artifact was downloaded
+  and inspected; it was empty (0 bytes), so there was no additional patch to
+  apply.
 - Current GitHub Actions `rust-ci.yml` run:
-  https://github.com/auenkr/cadence-rust/actions/runs/41330331495
+  https://github.com/auenkr/cadence-rust/actions/runs/41331347247
   dispatched for `cadence-matching` with `format_all=true` at head
-  `079139dc4c88ce18c19def1e7ef5e9431410ad65`. It was pending at the latest
-  observation. Retrieve its terminal result and inspect/apply any new format
-  artifact before treating this slice as validated.
+  `c6c011c3b4fc8573b3419032760944ff9b23d861`; conclusion SUCCESS. The code head
+  is validated. A docs-only commit updated this evidence afterwards.
 - CI run 41329314627 reached Clippy and failed on the hook test's
   `field_reassign_with_default`; `71c70ab2e` fixes it without a lint
   suppression. The branch then merged `origin/master` at
