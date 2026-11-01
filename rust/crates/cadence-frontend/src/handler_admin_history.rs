@@ -196,8 +196,7 @@ mod tests {
     use super::*;
 
     fn proxy() -> HistoryProxy {
-        let channel =
-            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
+        let channel = tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy();
         HistoryProxy::new(HistoryClient::from_channel(channel, 1024))
     }
 
