@@ -528,16 +528,20 @@ impl WorkflowContext {
     {
         let mut core = self.core.borrow_mut();
         let id = core.generate_sequence();
-        if let Some(data) = core.side_effects.get(&id).cloned() {
-            return converter::decode(&data).map_err(|e| WorkflowError::generic(e.to_string()));
-        }
-        if core.replaying {
+        // Go always records the marker decision, also when the value comes
+        // from history, so replay matches the recorded MarkerRecorded event.
+        let (value, encoded) = if let Some(data) = core.side_effects.get(&id).cloned() {
+            let v = converter::decode(&data).map_err(|e| WorkflowError::generic(e.to_string()))?;
+            (v, data)
+        } else if core.replaying {
             return Err(WorkflowError::generic(format!(
                 "No cached result found for side effectID={id}. KnownSideEffects="
             )));
-        }
-        let value = f();
-        let encoded = converter::encode(&value).map_err(|e| WorkflowError::generic(e.to_string()))?;
+        } else {
+            let v = f();
+            let e = converter::encode(&v).map_err(|e| WorkflowError::generic(e.to_string()))?;
+            (v, e)
+        };
         let b64 = base64::engine::general_purpose::STANDARD.encode(&encoded);
         let details = converter::encode_args(&[serde_json::json!(id), serde_json::json!(b64)])
             .map_err(|e| WorkflowError::generic(e.to_string()))?;

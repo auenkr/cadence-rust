@@ -251,6 +251,13 @@ fn match_decision_event(core: &mut Core, e: &pb::HistoryEvent) -> Result<(), Rep
     };
     // Go state machines match by decision id, not by queue head: a cancelled
     // sibling may have been removed, but the recorded order is the creation order.
+    // Go creates the Version marker state machine lazily from the recorded
+    // event, so a replayed marker needs no pending decision.
+    if key == DKey::Marker(VERSION_MARKER.to_owned())
+        && core.decisions.first().map(|d| &d.key) != Some(&key)
+    {
+        return Ok(());
+    }
     match core.decisions.first() {
         Some(d) if d.key == key => {
             core.decisions.remove(0);
