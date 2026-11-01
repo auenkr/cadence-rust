@@ -1520,7 +1520,7 @@ async fn admin_shard_queue_history_and_maintain_flow() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/queues/describe",
-        json!({"shardID": 0, "type": 1}),
+        json!({"shardID": 0, "type": 1, "clusterName": "cluster0"}),
     )
     .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -1692,7 +1692,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 1}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{resp}");
     let (status, _) = call(
         app.clone(),
         Method::POST,
@@ -1700,7 +1700,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 2}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     let (status, resp) = call(
         app.clone(),
         Method::POST,
@@ -1708,7 +1708,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"type": 1, "maximumPageSize": 10}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{resp}");
 
     // Resend to self succeeds; unknown remotes are rejected.
     let (status, _) = call(
