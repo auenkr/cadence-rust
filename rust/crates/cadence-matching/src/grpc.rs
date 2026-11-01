@@ -2229,6 +2229,7 @@ fn frontend_admission_interceptor(
 #[cfg(test)]
 mod workflow_hook_tests {
     use super::*;
+    use cadence_proto::api::workflow_api_server::WorkflowApi as _;
     use cadence_service_core::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
     use std::sync::{Arc, Mutex};
 
