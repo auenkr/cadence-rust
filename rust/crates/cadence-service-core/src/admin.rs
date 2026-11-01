@@ -777,27 +777,38 @@ pub async fn reapply_events(
     }
 }
 
-/// Single-host replication surface: no replication streams exist, so message
-/// fetches are empty. Request validation mirrors Go.
-pub async fn get_replication_messages(
-    State(_state): State<StdArc<AppState>>,
-    Json(req): Json<cadence_api::admin::GetReplicationMessagesRequest>,
-) -> Response {
-    if req.cluster_name.is_empty() {
-        return bad_request(BadRequestError::new("Cluster name is not set."));
+fn proxy_error_response(error: crate::admin_replication::ProxyError) -> Response {
+    match error {
+        crate::admin_replication::ProxyError::BadRequest(message) => {
+            bad_request(BadRequestError::new(message))
+        }
+        crate::admin_replication::ProxyError::Internal(message) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
     }
-    ok_json(serde_json::json!({ "shardMessages": {} }))
 }
 
-/// Single-host DLQ replication surface: no dead-letter queues exist.
+/// Proxies to History like Go's admin handler.
+pub async fn get_replication_messages(
+    State(state): State<StdArc<AppState>>,
+    Json(req): Json<cadence_api::admin::GetReplicationMessagesRequest>,
+) -> Response {
+    match crate::admin_replication::get_replication_messages(&state, req).await {
+        Ok(response) => ok_json(response),
+        Err(error) => proxy_error_response(error),
+    }
+}
+
 pub async fn get_dlq_replication_messages(
-    State(_state): State<StdArc<AppState>>,
+    State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetDLQReplicationMessagesRequest>,
 ) -> Response {
-    if req.task_infos.is_empty() {
-        return bad_request(BadRequestError::new("Replication task info is not set."));
+    match crate::admin_replication::get_dlq_replication_messages(&state, req).await {
+        Ok(response) => ok_json(response),
+        Err(error) => proxy_error_response(error),
     }
-    ok_json(serde_json::json!({ "replicationTasks": [] }))
 }
 
 /// Domain replication requires the domain replication queue, which does not
@@ -872,65 +883,17 @@ pub fn domain_replication_messages_response(
     })
 }
 
-/// Single-host DLQ counts: no dead letters exist.
 pub async fn count_dlq_messages(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::CountDLQMessagesRequest>,
 ) -> Response {
-    let Some(persistence) = state.domain_metadata_persistence.as_ref() else {
-        return crate::handlers::error_response(
-            "InternalServiceError",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "domain replication DLQ is unavailable for this persistence backend".into(),
-        );
-    };
-    let domain = match persistence.domain_replication_dlq_size() {
-        Ok(count) => count,
-        Err(error) => {
-            return crate::handlers::error_response(
-                "InternalServiceError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error,
-            )
-        }
-    };
-    let Some(channel) = state.history_admin_channel.clone() else {
-        return crate::handlers::error_response(
-            "InternalServiceError",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "History client is not configured.".to_string(),
-        );
-    };
-    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    let response = match client
-        .count_dlq_messages(history_admin_request(
-            cadence_proto::history::CountDlqMessagesRequest {
-                force_fetch: req.force_fetch,
-            },
-        ))
-        .await
-    {
-        Ok(response) => response.into_inner(),
-        Err(error) => {
-            return crate::handlers::error_response(
-                "InternalServiceError",
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error.message().to_string(),
-            )
-        }
-    };
-    ok_json(cadence_api::admin::CountDLQMessagesResponse {
-        history: history_dlq_count_entries(
-            response
-                .entries
-                .into_iter()
-                .map(|entry| (entry.source_cluster, entry.count)),
-        ),
-        domain,
-    })
+    match crate::admin_replication::count_dlq_messages(&state, req).await {
+        Ok(response) => ok_json(response),
+        Err(error) => proxy_error_response(error),
+    }
 }
 
-fn history_dlq_count_entries(
+pub(crate) fn history_dlq_count_entries(
     entries: impl IntoIterator<Item = (String, i64)>,
 ) -> Vec<cadence_api::admin::HistoryDLQCountEntry> {
     entries
@@ -954,6 +917,12 @@ pub async fn read_dlq_messages(
     }
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
+    }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return match crate::admin_replication::read_dlq_messages(&state, req).await {
+            Ok(response) => ok_json(response),
+            Err(error) => proxy_error_response(error),
+        };
     }
     if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
         return crate::handlers::error_response(
@@ -1048,6 +1017,12 @@ pub async fn purge_dlq_messages(
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
     }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return match crate::admin_replication::purge_dlq_messages(&state, req).await {
+            Ok(response) => ok_json(response),
+            Err(error) => proxy_error_response(error),
+        };
+    }
     if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
         return crate::handlers::error_response(
             "InternalServiceError",
@@ -1127,6 +1102,12 @@ pub async fn merge_dlq_messages(
     }
     if req.dlq_type == Some(cadence_api::enums::DLQType::Invalid) {
         return bad_request(BadRequestError::new("The DLQ type is not supported."));
+    }
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return match crate::admin_replication::merge_dlq_messages(&state, req).await {
+            Ok(response) => ok_json(response),
+            Err(error) => proxy_error_response(error),
+        };
     }
     if req.dlq_type != Some(cadence_api::enums::DLQType::Domain) {
         return crate::handlers::error_response(
@@ -1514,7 +1495,7 @@ pub async fn describe_queue(
     }
 }
 
-pub(crate) fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
+pub fn history_admin_request<T>(payload: T) -> tonic::Request<T> {
     let mut request = tonic::Request::new(payload);
     request.metadata_mut().insert(
         "rpc-service",

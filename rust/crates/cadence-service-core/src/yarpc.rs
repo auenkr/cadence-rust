@@ -677,9 +677,42 @@ fn require_domain_dlq_type(dlq_type: Option<cadence_api::enums::DLQType>) -> Res
     }
 }
 
-fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+fn proxy_app_error(error: crate::admin_replication::ProxyError) -> AppError {
+    match error {
+        crate::admin_replication::ProxyError::BadRequest(message) => {
+            AppError::bad_request(message)
+        }
+        crate::admin_replication::ProxyError::Internal(message) => AppError::internal(message),
+    }
+}
+
+async fn handle_get_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::GetReplicationMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin_replication::get_replication_messages(state, request)
+        .await
+        .map(|response| wrap_success(&response))
+        .map_err(proxy_app_error)
+}
+
+async fn handle_get_dlq_replication_messages(state: &AppState, body: &Struct) -> HandlerResult {
+    let request: cadence_api::admin::GetDLQReplicationMessagesRequest =
+        decode_args(body).map_err(AppError::bad_request)?;
+    crate::admin_replication::get_dlq_replication_messages(state, request)
+        .await
+        .map(|response| wrap_success(&response))
+        .map_err(proxy_app_error)
+}
+
+async fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::admin::ReadDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
+    if request.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return crate::admin_replication::read_dlq_messages(state, request)
+            .await
+            .map(|response| wrap_success(&response))
+            .map_err(proxy_app_error);
+    }
     require_domain_dlq_type(request.dlq_type)?;
     let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
         AppError::internal(
@@ -726,9 +759,15 @@ fn handle_read_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     }))
 }
 
-fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_purge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     let request: cadence_api::admin::PurgeDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
+    if request.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return crate::admin_replication::purge_dlq_messages(state, request)
+            .await
+            .map(|response| wrap_success(&response))
+            .map_err(proxy_app_error);
+    }
     require_domain_dlq_type(request.dlq_type)?;
     let persistence = state.domain_metadata_persistence.as_ref().ok_or_else(|| {
         AppError::internal(
@@ -816,9 +855,15 @@ async fn handle_describe_queue(state: &AppState, body: &Struct) -> HandlerResult
     }))
 }
 
-fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_merge_dlq_messages(state: &AppState, body: &Struct) -> HandlerResult {
     let req: cadence_api::admin::MergeDLQMessagesRequest =
         decode_args(body).map_err(AppError::bad_request)?;
+    if req.dlq_type == Some(cadence_api::enums::DLQType::Replication) {
+        return crate::admin_replication::merge_dlq_messages(state, req)
+            .await
+            .map(|response| wrap_success(&response))
+            .map_err(proxy_app_error);
+    }
     let Some(dlq_type) = req.dlq_type else {
         return Err(AppError::bad_request("Queue type is not set.".to_string()));
     };
@@ -2382,11 +2427,13 @@ pub async fn dispatch_with_headers(
         "AddSearchAttribute" => handle_add_search_attribute(state, body),
         "DescribeCluster" => handle_describe_cluster(state),
         "GetDomainReplicationMessages" => handle_get_domain_replication_messages(state, body),
-        "ReadDLQMessages" => handle_read_dlq_messages(state, body),
-        "PurgeDLQMessages" => handle_purge_dlq_messages(state, body),
+        "GetReplicationMessages" => handle_get_replication_messages(state, body).await,
+        "GetDLQReplicationMessages" => handle_get_dlq_replication_messages(state, body).await,
+        "ReadDLQMessages" => handle_read_dlq_messages(state, body).await,
+        "PurgeDLQMessages" => handle_purge_dlq_messages(state, body).await,
         "ResetQueue" => handle_reset_queue(state, body).await,
         "DescribeQueue" => handle_describe_queue(state, body).await,
-        "MergeDLQMessages" => handle_merge_dlq_messages(state, body),
+        "MergeDLQMessages" => handle_merge_dlq_messages(state, body).await,
         "GetWorkflowExecutionRawHistoryV2" => handle_raw_history_v2(state, body),
         "DeleteWorkflow" => handle_delete_workflow(state, body),
         "RefreshWorkflowTasks" => handle_refresh_workflow_tasks(state, body),

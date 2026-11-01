@@ -12,6 +12,21 @@ pub struct Admin {
 }
 
 impl Admin {
+    fn history_client(
+        &self,
+    ) -> Result<
+        cadence_proto::history::history_api_client::HistoryApiClient<tonic::transport::Channel>,
+        Status,
+    > {
+        let channel = self
+            .frontend
+            .state
+            .history_admin_channel
+            .clone()
+            .ok_or_else(|| Status::internal("History client is not configured."))?;
+        Ok(cadence_proto::history::history_api_client::HistoryApiClient::new(channel))
+    }
+
     async fn call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -843,9 +858,18 @@ impl a::admin_api_server::AdminApi for Admin {
         if r.cluster_name.is_empty() {
             return Err(Status::invalid_argument("Cluster name is not set."));
         }
-        // Single host produces no replication streams.
+        let mut history = self.history_client()?;
+        let response = history
+            .get_replication_messages(crate::admin::history_admin_request(
+                cadence_proto::history::GetReplicationMessagesRequest {
+                    tokens: r.tokens,
+                    cluster_name: r.cluster_name,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(a::GetReplicationMessagesResponse {
-            shard_messages: Default::default(),
+            shard_messages: response.shard_messages,
         }))
     }
 
@@ -853,9 +877,23 @@ impl a::admin_api_server::AdminApi for Admin {
         &self,
         request: Request<a::GetDlqReplicationMessagesRequest>,
     ) -> Result<Response<a::GetDlqReplicationMessagesResponse>, Status> {
-        let _ = request;
+        let r = request.into_inner();
+        if r.task_infos.is_empty() {
+            return Err(Status::invalid_argument(
+                "Replication task info is not set.",
+            ));
+        }
+        let mut history = self.history_client()?;
+        let response = history
+            .get_dlq_replication_messages(crate::admin::history_admin_request(
+                cadence_proto::history::GetDlqReplicationMessagesRequest {
+                    task_infos: r.task_infos,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(a::GetDlqReplicationMessagesResponse {
-            replication_tasks: vec![],
+            replication_tasks: response.replication_tasks,
         }))
     }
 
@@ -870,11 +908,32 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn count_dlq_messages(
         &self,
-        _request: Request<a::CountDlqMessagesRequest>,
+        request: Request<a::CountDlqMessagesRequest>,
     ) -> Result<Response<a::CountDlqMessagesResponse>, Status> {
+        let r = request.into_inner();
+        let persistence = self
+            .frontend
+            .state
+            .domain_metadata_persistence
+            .as_ref()
+            .ok_or_else(|| {
+                Status::internal(
+                    "domain replication DLQ is unavailable for this persistence backend",
+                )
+            })?;
+        let domain = persistence.domain_replication_dlq_size().map_err(Status::internal)?;
+        let mut history = self.history_client()?;
+        let response = history
+            .count_dlq_messages(crate::admin::history_admin_request(
+                cadence_proto::history::CountDlqMessagesRequest {
+                    force_fetch: r.force_fetch,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(a::CountDlqMessagesResponse {
-            history: vec![],
-            domain: 0,
+            history: response.entries,
+            domain,
         }))
     }
 
@@ -883,14 +942,40 @@ impl a::admin_api_server::AdminApi for Admin {
         request: Request<a::ReadDlqMessagesRequest>,
     ) -> Result<Response<a::ReadDlqMessagesResponse>, Status> {
         let r = request.into_inner();
-        if r.r#type == 0 {
-            return Err(Status::invalid_argument("Queue type is not set."));
+        match r.r#type {
+            0 => return Err(Status::invalid_argument("Queue type is not set.")),
+            1 => {}
+            2 => {
+                return Ok(Response::new(a::ReadDlqMessagesResponse {
+                    r#type: r.r#type,
+                    replication_tasks: vec![],
+                    replication_tasks_info: vec![],
+                    next_page_token: vec![],
+                }))
+            }
+            _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
+        let mut history = self.history_client()?;
+        let response = history
+            .read_dlq_messages(crate::admin::history_admin_request(
+                cadence_proto::history::ReadDlqMessagesRequest {
+                    r#type: r.r#type,
+                    shard_id: r.shard_id,
+                    source_cluster: r.source_cluster,
+                    inclusive_end_message_id: Some(
+                        r.inclusive_end_message_id.unwrap_or(i64::MAX - 1),
+                    ),
+                    page_size: if r.page_size <= 0 { 1000 } else { r.page_size },
+                    next_page_token: r.next_page_token,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(a::ReadDlqMessagesResponse {
-            r#type: r.r#type,
-            replication_tasks: vec![],
-            replication_tasks_info: vec![],
-            next_page_token: vec![],
+            r#type: response.r#type,
+            replication_tasks: response.replication_tasks,
+            replication_tasks_info: response.replication_tasks_info,
+            next_page_token: response.next_page_token,
         }))
     }
 
@@ -899,9 +984,25 @@ impl a::admin_api_server::AdminApi for Admin {
         request: Request<a::PurgeDlqMessagesRequest>,
     ) -> Result<Response<a::PurgeDlqMessagesResponse>, Status> {
         let r = request.into_inner();
-        if r.r#type == 0 {
-            return Err(Status::invalid_argument("Queue type is not set."));
+        match r.r#type {
+            0 => return Err(Status::invalid_argument("Queue type is not set.")),
+            1 => {}
+            2 => return Ok(Response::new(a::PurgeDlqMessagesResponse {})),
+            _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
+        let mut history = self.history_client()?;
+        history
+            .purge_dlq_messages(crate::admin::history_admin_request(
+                cadence_proto::history::PurgeDlqMessagesRequest {
+                    r#type: r.r#type,
+                    shard_id: r.shard_id,
+                    source_cluster: r.source_cluster,
+                    inclusive_end_message_id: Some(
+                        r.inclusive_end_message_id.unwrap_or(i64::MAX - 1),
+                    ),
+                },
+            ))
+            .await?;
         Ok(Response::new(a::PurgeDlqMessagesResponse {}))
     }
 
@@ -910,11 +1011,34 @@ impl a::admin_api_server::AdminApi for Admin {
         request: Request<a::MergeDlqMessagesRequest>,
     ) -> Result<Response<a::MergeDlqMessagesResponse>, Status> {
         let r = request.into_inner();
-        if r.r#type == 0 {
-            return Err(Status::invalid_argument("Queue type is not set."));
+        match r.r#type {
+            0 => return Err(Status::invalid_argument("Queue type is not set.")),
+            1 => {}
+            2 => {
+                return Ok(Response::new(a::MergeDlqMessagesResponse {
+                    next_page_token: vec![],
+                }))
+            }
+            _ => return Err(Status::invalid_argument("The DLQ type is not supported.")),
         }
+        let mut history = self.history_client()?;
+        let response = history
+            .merge_dlq_messages(crate::admin::history_admin_request(
+                cadence_proto::history::MergeDlqMessagesRequest {
+                    r#type: r.r#type,
+                    shard_id: r.shard_id,
+                    source_cluster: r.source_cluster,
+                    inclusive_end_message_id: Some(
+                        r.inclusive_end_message_id.unwrap_or(i64::MAX - 1),
+                    ),
+                    page_size: r.page_size,
+                    next_page_token: r.next_page_token,
+                },
+            ))
+            .await?
+            .into_inner();
         Ok(Response::new(a::MergeDlqMessagesResponse {
-            next_page_token: vec![],
+            next_page_token: response.next_page_token,
         }))
     }
 
