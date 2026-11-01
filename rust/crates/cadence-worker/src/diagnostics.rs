@@ -1,4 +1,5 @@
 //! Diagnostics workflow wire names and invariant analyzer boundary.
+pub mod invariants;
 pub const TASK_LIST: &str = "diagnostics-wf-tasklist";
 pub const WORKFLOW_TYPE: &str = "diagnostics-workflow";
 pub const STARTER_WORKFLOW_TYPE: &str = "diagnostics-starter-workflow";
