@@ -19,6 +19,7 @@ pub mod semaphores;
 pub mod semaphores_native;
 pub mod version_history;
 pub mod visibility;
+pub mod visibility_store;
 
 pub use domains::{
     DomainRecord, FailoverError, FrontendDomainError, FrontendDomainManager, InMemoryDomainStore,

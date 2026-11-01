@@ -413,6 +413,15 @@ pub(crate) fn normalize_mysql_error_on_lease(
     normalize_mysql_error(error)
 }
 
+impl ConnectionLease {
+    /// Poison this lease when `error` shows the socket is unusable.
+    pub(crate) fn discard_on_connectivity_error(&self, error: &MySqlError) {
+        if error.is_connectivity_error() {
+            self.discard.store(true, Ordering::Release);
+        }
+    }
+}
+
 impl Deref for ConnectionLease {
     type Target = Conn;
     fn deref(&self) -> &Self::Target {

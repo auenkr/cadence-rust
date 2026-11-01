@@ -223,7 +223,7 @@ pub(crate) struct PostgresLease {
 }
 
 impl PostgresLease {
-    fn poison_if_closed(&mut self, error: &postgres::Error) {
+    pub(crate) fn poison_if_closed(&mut self, error: &postgres::Error) {
         self.discard |= error.is_closed();
     }
 }
@@ -861,6 +861,34 @@ impl crate::SemaphorePersistence for PostgresTaskStore {
     }
 }
 
+
+/// Open one lazily connecting pool for a non-task database such as the
+/// visibility store. No task-schema validation is performed.
+pub(crate) fn create_postgres_pool(
+    shard: &PostgresShardConfig,
+    max_conns: i64,
+    max_idle_conns: i64,
+    max_conn_lifetime: Option<Duration>,
+) -> Result<Arc<PostgresConnectionPool>> {
+    let max_open = if max_conns <= 0 {
+        usize::MAX
+    } else {
+        usize::try_from(max_conns).unwrap_or(usize::MAX)
+    };
+    let configured_idle = if max_idle_conns > 0 {
+        usize::try_from(max_idle_conns).unwrap_or(usize::MAX)
+    } else {
+        DEFAULT_MAX_IDLE_CONNS
+    };
+    let (options, tls) = postgres_options(shard)?;
+    Ok(PostgresConnectionPool::new(
+        options,
+        tls,
+        max_open,
+        configured_idle.min(max_open),
+        max_conn_lifetime.filter(|value| !value.is_zero()),
+    ))
+}
 
 fn postgres_options(
     shard: &PostgresShardConfig,
