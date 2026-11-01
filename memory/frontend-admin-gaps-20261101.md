@@ -9,3 +9,4 @@ Items (one commit each, all validated only on GitHub Actions):
 CI evidence:
 - run 41334800943 (cadence-matching, commit 1): FAILED at rustfmt check (formatting only).
 - run 41335898015 (cadence-matching, format_all=true, head 3cc0fda54): success (clippy + tests); rustfmt patch applied in follow-up commit.
+- run 41336600237 (cadence-frontend, head 8ea349c40): success (fmt check, clippy, tests).
