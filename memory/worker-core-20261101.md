@@ -26,3 +26,10 @@ Design:
 Known gaps: child workflows, external signal/cancel, search attribute upsert (Version marker), local activities, sessions, sticky execution, activity WaitForCancellation.
 
 Status: steps 1-4 and parentclosepolicy workflow done. CI green: https://github.com/auenkr/cadence-rust/actions/runs/41288651422 (head 1dedcdd7e, package=cadence-worker).
+
+## Steps 1-3 (Message 4)
+- parentclosepolicy ProcessorActivity ported; WorkerService::start() starts enabled pollers in Go order, unported modules disabled with log.
+- SDK features (sdk/features.rs): child workflows (start/cancel/deferred cancel/results), signal/cancel external, search attribute upsert, Go-faithful GetVersion (Version marker + CadenceChangeVersion upsert), local activities (LocalActivity marker, replay from marker). Replay tests in sdk/tests.rs.
+- Known gaps: sessions, sticky, mutable side effects, LA backoff timers/cancellation.
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/41290487002 success (package=cadence-worker).
+- Pending: step 4 (batcher, scanner workflows).
