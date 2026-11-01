@@ -45,4 +45,6 @@ RecordActivityTaskHeartbeat, RespondActivityTask{Completed,Failed,Canceled}, Res
 |---|---|---|---|
 | https://github.com/auenkr/cadence-rust/actions/runs/41314182425 | 21647b8441ba3be0fabe246fac25a8afca09fbe3 | cadence-frontend | failure (op! macro arm order; fixed in 28ea37e96) |
 | https://github.com/auenkr/cadence-rust/actions/runs/41314489059 | 28ea37e96b22d690a6851b9ebe89e34406258317 | cadence-frontend | failure (result_large_err; fixed in 8ea626d09) |
-| https://github.com/auenkr/cadence-rust/actions/runs/41314823718 | 8ea626d097a8dffb213b8d456baf5a7c21d1ed45 | cadence-frontend | in_progress (update) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41314823718 | 8ea626d097a8dffb213b8d456baf5a7c21d1ed45 | cadence-frontend | failure (rustfmt only) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41319101002 | 64427e1aa | cadence-frontend format_all | success (patch produced) |
+| https://github.com/auenkr/cadence-rust/actions/runs/41319515360 | 4108543cebdadd66a972ee6380c58c9e374610fb | cadence-frontend format_all (chunk 3: polls/respond/task-list/history) | in_progress (update) |
