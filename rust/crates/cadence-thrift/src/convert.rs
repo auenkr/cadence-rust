@@ -6622,9 +6622,9 @@ mod tests {
             domain_task_attributes: Some(DomainTaskAttributes {
                 domain_operation: Some(DomainOperation::Update),
                 id: "domain-uuid".into(),
-                info: None,
-                config: None,
-                replication_config: None,
+                info: Some(DomainInfo::default()),
+                config: Some(DomainConfiguration::default()),
+                replication_config: Some(DomainReplicationConfiguration::default()),
                 config_version: 0,
                 failover_version: 8,
                 previous_failover_version: -1,
@@ -6643,6 +6643,9 @@ mod tests {
         assert!(matches!(attributes.get(50), Some(Value::I64(0))));
         assert!(matches!(attributes.get(60), Some(Value::I64(8))));
         assert!(matches!(attributes.get(70), Some(Value::I64(-1))));
+        assert!(matches!(attributes.get(20), Some(Value::Struct(_))));
+        assert!(matches!(attributes.get(30), Some(Value::Struct(_))));
+        assert!(matches!(attributes.get(40), Some(Value::Struct(_))));
         assert_eq!(ReplicationTask::from_thrift(&thrift).unwrap(), task);
     }
 
