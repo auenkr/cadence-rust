@@ -221,7 +221,7 @@ async fn describe_once(
         }
         Err(QueryError::Invalid(e)) => return DescribeOnce::Fail(CadenceError::BadRequest(e)),
         Err(QueryError::Rejected(status)) => {
-            return closed_outcome(Some(status), schedule_id, domain)
+            return closed_outcome(status, schedule_id, domain)
         }
     };
     let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;

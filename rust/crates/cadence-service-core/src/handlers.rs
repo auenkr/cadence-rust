@@ -2830,7 +2830,7 @@ pub fn search_attributes(state: &AppState) -> cadence_api::tasks::GetSearchAttri
 mod frontend_drain_tests {
     use super::*;
     use axum::body::Body;
-    use http::{Request, StatusCode};
+    use axum::http::{Request, StatusCode};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
 
