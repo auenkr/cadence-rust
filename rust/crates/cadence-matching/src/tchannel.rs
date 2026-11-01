@@ -530,15 +530,7 @@ async fn handle_call(
         bail!("Unknown Cadence procedure");
     }
     let definition = cadence_thrift::service::find_method(procedure)
-        .filter(|definition| {
-            definition.service == "Meta"
-                || definition.service
-                    == if matching.is_some() {
-                        "MatchingService"
-                    } else {
-                        "WorkflowService"
-                    }
-        })
+        .filter(|definition| accepts_thrift_service(definition.service, matching.is_some()))
         .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
     let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
@@ -612,6 +604,15 @@ async fn handle_call(
         write_frame(&mut writer, frame).await?;
     }
     Ok(())
+}
+
+fn accepts_thrift_service(service: &str, has_matching_handler: bool) -> bool {
+    service == "Meta"
+        || if has_matching_handler {
+            service == "MatchingService"
+        } else {
+            matches!(service, "WorkflowService" | "AdminService")
+        }
 }
 
 async fn connection(
@@ -741,6 +742,16 @@ pub async fn serve_matching_with_ringpop_listener(
     )
     .await
 }
+/// Serve Frontend workflow/admin methods and Ringpop JSON methods on the
+/// Frontend's shared TChannel listener. Frontend must not install a Matching
+/// Thrift handler on this endpoint.
+pub async fn serve_frontend_with_ringpop_listener(
+    listener: TcpListener,
+    state: AppState,
+    ringpop: RingpopHandler,
+) -> Result<()> {
+    serve_listener(listener, state, None, Some(ringpop)).await
+}
 pub async fn serve_ringpop(addr: std::net::SocketAddr, handler: RingpopHandler) -> Result<()> {
     serve_with(addr, AppState::default(), None, Some(handler)).await
 }
@@ -789,6 +800,19 @@ async fn serve_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn frontend_tchannel_accepts_admin_while_matching_service_set_is_unchanged() {
+        assert!(accepts_thrift_service("WorkflowService", false));
+        assert!(accepts_thrift_service("AdminService", false));
+        assert!(accepts_thrift_service("Meta", false));
+        assert!(!accepts_thrift_service("MatchingService", false));
+
+        assert!(accepts_thrift_service("MatchingService", true));
+        assert!(accepts_thrift_service("Meta", true));
+        assert!(!accepts_thrift_service("AdminService", true));
+        assert!(!accepts_thrift_service("WorkflowService", true));
+    }
+
     fn assemble(frames: Vec<Frame>, kind: u8) -> Result<[Vec<u8>; 3]> {
         let mut call = Call {
             started: Instant::now(),
