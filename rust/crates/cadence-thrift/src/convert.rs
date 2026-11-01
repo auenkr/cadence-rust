@@ -6153,7 +6153,6 @@ mod tests {
                 failover_version: 8,
                 previous_failover_version: -1,
             }),
-            ..Default::default()
         };
         let thrift = task.to_thrift();
         assert!(matches!(thrift.get(10), Some(Value::I32(0))));

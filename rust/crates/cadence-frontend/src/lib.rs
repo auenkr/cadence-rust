@@ -18,7 +18,7 @@ pub mod lifecycle;
 pub mod matching_client;
 pub mod matching_task_list_backend;
 pub mod request_validator;
-pub mod scheduler_wire;
+pub use cadence_service_core::scheduler_wire;
 pub mod wrappers;
 
 /// Service name as used by `--services` and the Go service registry.
