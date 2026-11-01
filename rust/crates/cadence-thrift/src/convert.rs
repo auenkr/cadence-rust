@@ -2118,6 +2118,7 @@ impl FromThrift for GetWorkflowExecutionHistoryResponse {
     fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
         Ok(Self {
             history: s.opt_struct(10)?,
+            raw_history: s.opt_list::<DataBlob>(11)?.unwrap_or_default(),
             next_page_token: s.bytes_or_empty(20)?,
             archived: s.opt_bool(30)?.unwrap_or(false),
         })
@@ -2128,6 +2129,7 @@ impl ToThrift for GetWorkflowExecutionHistoryResponse {
     fn to_thrift(&self) -> Struct {
         let mut f = Fields::new();
         f.ostruct(10, self.history.as_ref());
+        f.olist(11, &self.raw_history);
         f.sbytes(20, &self.next_page_token);
         f.obool(30, self.archived);
         f.finish()

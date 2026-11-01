@@ -769,6 +769,7 @@ impl ProductionBackend {
             .unwrap_or_default();
         to_json(&st::GetWorkflowExecutionHistoryResponse {
             history: Some(history),
+            raw_history: Vec::new(),
             next_page_token,
             archived: false,
         })

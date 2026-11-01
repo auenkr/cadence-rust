@@ -2744,6 +2744,7 @@ impl InMemoryExecutionStore {
                 history: Some(History {
                     events: r.history.clone(),
                 }),
+                raw_history: Vec::new(),
                 next_page_token: Vec::new(),
                 archived: false,
             })
@@ -6020,6 +6021,7 @@ impl InMemoryExecutionStore {
         }
         Ok(GetWorkflowExecutionHistoryResponse {
             history: Some(History { events: page }),
+            raw_history: Vec::new(),
             next_page_token: token,
             archived: false,
         })
