@@ -33,3 +33,9 @@ Status: steps 1-4 and parentclosepolicy workflow done. CI green: https://github.
 - Known gaps: sessions, sticky, mutable side effects, LA backoff timers/cancellation.
 - CI: https://github.com/auenkr/cadence-rust/actions/runs/41290487002 success (package=cadence-worker).
 - Pending: step 4 (batcher, scanner workflows).
+
+## Step 4a: batcher (done)
+- rust/crates/cadence-worker/src/batcher/{workflow,activity,grpc}.rs: v1 + v2 workflows, both activities (shared run_batch), gRPC backend (frontend, visibility, admin resend), wired into WorkerService::start under enable_batcher on domain cadence-batcher / task list cadence-sys-batcher-tasklist.
+- SDK additions: ActivityOptions.wait_for_cancellation, ActivityFailure::CanceledWith(details), ActivityFuture::get_detailed (cancel details).
+- Tests: workflow replay (v1 options/result, invalid params, v2 tune-signal cancel + restart with progress), activity logic with fake backend.
+- CI: https://github.com/auenkr/cadence-rust/actions/runs/41291322183 success.
