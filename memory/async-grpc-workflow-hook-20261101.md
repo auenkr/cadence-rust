@@ -14,9 +14,10 @@ Tests added to `workflow_hook_tests` cover both operation names, wrapper and nes
 
 - Local `git diff --check`: passed.
 - Cargo, rustfmt, and Go validation are intentionally CI-only.
-- CI run URL: pending.
-- Tested head SHA: pending.
-- CI conclusion: pending.
+- First CI run: https://github.com/auenkr/cadence-rust/actions/runs/41331044962
+- First tested head SHA: `9f41dd962251013acd4f2ba4f1f56067ef2a331e`.
+- First CI conclusion: failed because the test expected `data` properties on serialized byte vectors, while the API model serializes those vectors directly as JSON arrays. Clippy and formatting completed successfully; the test assertion is corrected to check the complete byte arrays. The workspace formatter's patch was inspected, and its `grpc.rs` hunks were applied without taking unrelated hunks.
+- Corrected CI run URL, tested head SHA, and conclusion: pending.
 
 ## Limitation
 

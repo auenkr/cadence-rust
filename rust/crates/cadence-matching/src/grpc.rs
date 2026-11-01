@@ -237,7 +237,9 @@ fn hook_operation(
         ("POST", "/api/v1/workflows/start") => "StartWorkflowExecution",
         ("POST", "/api/v1/workflows/start-async") => "StartWorkflowExecutionAsync",
         ("POST", "/api/v1/workflows/signal-with-start") => "SignalWithStartWorkflowExecution",
-        ("POST", "/api/v1/workflows/signal-with-start-async") => "SignalWithStartWorkflowExecutionAsync",
+        ("POST", "/api/v1/workflows/signal-with-start-async") => {
+            "SignalWithStartWorkflowExecutionAsync"
+        }
         ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
@@ -956,12 +958,7 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
                 request: Some(inner.clone()),
             };
             let _: t::StartWorkflowExecutionAsyncResponse = self
-                .call_with_headers(
-                    Method::POST,
-                    "/api/v1/workflows/start-async",
-                    &input,
-                    &[],
-                )
+                .call_with_headers(Method::POST, "/api/v1/workflows/start-async", &input, &[])
                 .await?;
             return Ok(Response::new(p::StartWorkflowExecutionAsyncResponse {}));
         }
@@ -2481,7 +2478,9 @@ mod workflow_hook_tests {
                 memo: Some(p::Memo {
                     fields: std::collections::HashMap::from([(
                         "memo-key".to_owned(),
-                        p::Payload { data: vec![1, 2, 3] },
+                        p::Payload {
+                            data: vec![1, 2, 3],
+                        },
                     )]),
                 }),
                 header: Some(p::Header {
@@ -2506,8 +2505,8 @@ mod workflow_hook_tests {
             .scope((headers.clone(), Some(deadline)), start_call)
             .await
             .unwrap();
-        let signal_call = frontend
-            .signal_with_start_workflow_execution_async(tonic::Request::new(signal));
+        let signal_call =
+            frontend.signal_with_start_workflow_execution_async(tonic::Request::new(signal));
         GRPC_CALLER
             .scope((headers, Some(deadline)), signal_call)
             .await
@@ -2517,13 +2516,22 @@ mod workflow_hook_tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].0, "StartWorkflowExecutionAsync");
         assert_eq!(calls[0].1["request"]["domain"], "sample-domain");
-        assert_eq!(calls[0].1["request"]["memo"]["fields"]["memo-key"]["data"], "AQID");
-        assert_eq!(calls[0].1["request"]["header"]["fields"]["header-key"]["data"], "BAU=");
+        assert_eq!(
+            calls[0].1["request"]["memo"]["fields"]["memo-key"],
+            serde_json::json!([1, 2, 3])
+        );
+        assert_eq!(
+            calls[0].1["request"]["header"]["fields"]["header-key"],
+            serde_json::json!([4, 5])
+        );
         assert_eq!(calls[1].0, "SignalWithStartWorkflowExecutionAsync");
         assert_eq!(calls[1].1["request"]["domain"], "sample-domain");
         assert_eq!(calls[1].1["request"]["signalName"], "async-signal");
-        assert_eq!(calls[1].1["request"]["signalInput"]["data"], "Bgc=");
-        assert_eq!(calls[1].1["request"]["control"], "CAk=");
+        assert_eq!(
+            calls[1].1["request"]["signalInput"],
+            serde_json::json!([6, 7])
+        );
+        assert_eq!(calls[1].1["request"]["control"], serde_json::json!([8, 9]));
         for (_, request, context) in calls.iter() {
             assert!(request["request"].is_object());
             assert_eq!(context.headers["x-cadence-caller"], "sdk-worker");
@@ -2548,7 +2556,10 @@ mod workflow_hook_tests {
         assert_eq!(missing_start.code(), tonic::Code::InvalidArgument);
         assert_eq!(missing_start.message(), "Request is not set.");
 
-        for request in [None, Some(p::SignalWithStartWorkflowExecutionRequest::default())] {
+        for request in [
+            None,
+            Some(p::SignalWithStartWorkflowExecutionRequest::default()),
+        ] {
             let error = frontend
                 .signal_with_start_workflow_execution_async(tonic::Request::new(
                     p::SignalWithStartWorkflowExecutionAsyncRequest { request },
