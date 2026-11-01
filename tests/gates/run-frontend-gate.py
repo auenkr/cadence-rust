@@ -124,6 +124,11 @@ rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yam
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
 rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--data-dir', work / 'rust-frontend-data']
+frontend_env = {
+    **os.environ,
+    'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
+    'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT"]}',
+}
 cli_t = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT"]}', '--transport', 'tchannel']
 cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc']
 status = 0
@@ -133,7 +138,7 @@ try:
     record('go-history-listening', wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker'))
     start('rust-matching', rust_matching())
     record('rust-matching-listening', wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching'))
-    start('rust-frontend', rust_frontend())
+    start('rust-frontend', rust_frontend(), env=frontend_env)
     fe_t = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend')
     fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
     record('rust-frontend-tchannel-listening', fe_t)
@@ -164,7 +169,7 @@ try:
             kill('rust-frontend')
             record('rust-frontend-killed', True)
             time.sleep(3)
-            start('rust-frontend', rust_frontend())
+            start('rust-frontend', rust_frontend(), env=frontend_env)
             ok = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
             record('rust-frontend-restarted-listening', ok)
             time.sleep(15)
