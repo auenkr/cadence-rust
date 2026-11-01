@@ -603,10 +603,35 @@ jobs:
             if [ "$result" -ne 0 ]; then exit "$result"; fi
             export MATCHING_GO_PANIC_ORACLE="$evidence/go-1.25.14-quote.txt"
           fi
+          if [ "$PKG" = "cadence-frontend" ] || [ -z "$PKG" ]; then
+            export FRONTEND_ASYNC_WIRE_EVIDENCE="$RUNNER_TEMP/frontend-async-wire"
+          fi
           cargo test $SEL 2>&1 | tee test.log
           result=${PIPESTATUS[0]}
           echo "$result" > test.exit
           exit "$result"
+      - name: Decode Rust async payloads with original Go consumer codec
+        if: env.PKG == 'cadence-frontend' || env.PKG == ''
+        working-directory: go
+        run: |
+          evidence="$RUNNER_TEMP/frontend-async-wire"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/source-sha.txt"
+          gofmt -w ../tests/frontend-async-wire-oracle.go
+          git diff --binary -- ../tests/frontend-async-wire-oracle.go > "$evidence/go-format.patch"
+          set +e
+          go run ../tests/frontend-async-wire-oracle.go "$evidence" > "$evidence/go-decode.json" 2> "$evidence/go-decode.log"
+          result=$?
+          echo "$result" > "$evidence/go-decode.exit"
+          cat "$evidence/go-decode.log" "$evidence/go-decode.json"
+          exit "$result"
+      - name: Upload Frontend async wire evidence
+        if: always() && (env.PKG == 'cadence-frontend' || env.PKG == '')
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-async-wire-evidence
+          retention-days: 3
+          path: ${{ runner.temp }}/frontend-async-wire
       - name: Frontend runtime smoke with Go development config
         if: success() && inputs.frontend_runtime_smoke == true
         working-directory: rust

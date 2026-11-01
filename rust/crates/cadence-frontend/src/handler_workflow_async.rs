@@ -78,6 +78,14 @@ mod tests {
     use cadence_thrift::value::{read_struct, FromThrift};
     use cadence_thrift::Reader;
 
+    fn export_go_decoder_fixture(name: &str, payload: &[u8]) {
+        if let Some(path) = std::env::var_os("FRONTEND_ASYNC_WIRE_EVIDENCE") {
+            let path = std::path::PathBuf::from(path);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join(name), payload).unwrap();
+        }
+    }
+
     #[test]
     fn async_payload_has_go_versioned_thriftrw_framing() {
         // Go's version-0 encoder emits 0x59 followed by Thrift STOP for an
@@ -88,7 +96,8 @@ mod tests {
         );
         assert_eq!(
             thrift_payload(
-                &cadence_api::service_types::SignalWithStartWorkflowExecutionAsyncRequest::default()
+                &cadence_api::service_types::SignalWithStartWorkflowExecutionAsyncRequest::default(
+                )
             ),
             [0x59, 0x00]
         );
@@ -122,6 +131,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded.request.unwrap().workflow_id, "order-17");
+        export_go_decoder_fixture("start.bin", &message.payload);
     }
 
     #[test]
@@ -150,5 +160,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(decoded.request.unwrap().workflow_id, "order-18");
+        export_go_decoder_fixture("signal-with-start.bin", &message.payload);
     }
 }
