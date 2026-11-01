@@ -1,0 +1,74 @@
+name: Frontend mixed gate (MySQL, Rust Frontend + Rust Matching, Go History/Worker)
+on:
+  workflow_dispatch:
+    inputs:
+      rust_ref:
+        description: branch/ref of the Rust sources to build cadence-server from
+        default: fe-integ
+
+concurrency:
+  group: frontend-mixed-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: /tmp/cadence-cargo-target-fe-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout Rust sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.rust_ref }}
+          path: rustsrc
+          submodules: true
+      - name: IDL submodule
+        run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-gate/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Rust cadence-server (fresh target dir)
+        run: |
+          mkdir -p out
+          echo "rust_ref=${{ inputs.rust_ref }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
+          set +e
+          cargo build --manifest-path rustsrc/rust/Cargo.toml -p cadence-server -j2 > out/cargo-build.log 2>&1; echo $? > out/cargo-build.exit
+          set -e
+          test "$(cat out/cargo-build.exit)" = 0 || { tail -60 out/cargo-build.log; exit 1; }
+          sha256sum "$CARGO_TARGET_DIR/debug/cadence-server" | tee out/binary.sha256
+      - name: Build Go server, CLI and SDK driver
+        run: |
+          (cd go/cmd/server && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" .)
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
+      - name: Gate
+        run: |
+          set +e
+          tests/gates/run-frontend-mysql-lane.sh out/gate \
+            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+            --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+            --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+            --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
+            --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          echo $? > out/gate.exit
+          grep -E '^(GATE|STEP|SDK|---|RESULT|panic)' out/gate.log | cut -c1-400
+          mkdir -p out/logs; cp -r out/gate/run/*.log out/gate/run/*.json out/gate/run/*.cmd out/gate/run/*.yaml out/gate/run/*.sha256 out/logs/ 2>/dev/null || true
+          exit "$(cat out/gate.exit)"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-mixed-gate
+          path: |
+            out/
+            !out/cadence-go-server
+            !out/cadence-cli
+            !out/frontend-gate-driver
+            !out/gate/run/**
+          retention-days: 3
