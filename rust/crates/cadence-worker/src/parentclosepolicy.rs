@@ -392,6 +392,47 @@ where
     Ok(operations)
 }
 
+/// Go `activityOptions` of the processor workflow.
+pub fn activity_options() -> crate::sdk::core::ActivityOptions {
+    use std::time::Duration;
+    crate::sdk::core::ActivityOptions {
+        schedule_to_start: Duration::from_secs(ACTIVITY_SCHEDULE_TO_START_TIMEOUT_SECONDS),
+        start_to_close: Duration::from_secs(ACTIVITY_START_TO_CLOSE_TIMEOUT_SECONDS),
+        retry_policy: Some(crate::sdk::core::RetryPolicy {
+            initial_interval: Duration::from_secs(ACTIVITY_RETRY_INITIAL_INTERVAL_SECONDS),
+            backoff_coefficient: ACTIVITY_RETRY_BACKOFF_COEFFICIENT_MILLI as f64 / 1000.0,
+            maximum_interval: Duration::from_secs(ACTIVITY_RETRY_MAXIMUM_INTERVAL_SECONDS),
+            maximum_attempts: 0,
+            expiration_interval: Duration::from_secs(ACTIVITY_RETRY_EXPIRATION_SECONDS),
+            non_retriable_error_reasons: Vec::new(),
+        }),
+        ..Default::default()
+    }
+}
+
+/// Port of Go `ProcessorWorkflow`: drain buffered signals, running the
+/// processor activity for each request and ignoring the activity error.
+/// The activity itself (`ACTIVITY_TYPE`) needs the history/domain-cache
+/// clients and is not part of this runtime port.
+pub async fn processor_workflow(
+    ctx: crate::sdk::core::WorkflowContext,
+    _input: Vec<u8>,
+) -> crate::sdk::core::WorkflowResult {
+    let channel = ctx.signal_channel(SIGNAL_NAME);
+    let options = activity_options();
+    while let Some(request) = channel.receive_async::<Request>() {
+        let _ = ctx
+            .execute_activity(ACTIVITY_TYPE, &options, &request)
+            .await;
+    }
+    Ok(None)
+}
+
+/// Registers the workflow with the SDK runtime under the Go type name.
+pub fn register_sdk(registry: &mut crate::sdk::registry::Registry) {
+    registry.register_workflow(WORKFLOW_TYPE, processor_workflow);
+}
+
 pub fn registration() -> crate::runtime::WorkflowRegistration {
     crate::runtime::WorkflowRegistration {
         workflow_type: WORKFLOW_TYPE,
