@@ -104,6 +104,10 @@ def record(name, ok, detail=''):
     steps.append({'step': name, 'ok': ok, 'detail': detail[-3000:]})
     print(f'GATE {"ok  " if ok else "FAIL"} {name} {detail[-300:] if not ok else ""}', flush=True)
     (work / 'steps.json').write_text(json.dumps(steps, indent=2))
+def record_services_alive(phase):
+    for name in ['go-history-worker', 'rust-matching', 'rust-frontend']:
+        exit_code = procs[name].poll()
+        record(f'{name}-alive-{phase}', exit_code is None, f'exit={exit_code}')
 def run(name, cmd, timeout=120, env=None):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     out = (r.stdout + r.stderr)
@@ -139,6 +143,7 @@ try:
     time.sleep(12)  # domain cache refresh in Go History/Worker
     run('cli-describe-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'describe'])
     run('cli-describe-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'describe'])
+    record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
     env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks)}
     drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env)
@@ -161,6 +166,7 @@ try:
             record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
     print('SDK LOG TAIL\n' + '\n'.join((work / 'sdk.log').read_text().splitlines()[-40:]), flush=True)
     record('sdk-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
+    record_services_alive('after-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
 except SystemExit:
