@@ -19,10 +19,15 @@ Base: `ace9aefd49431bdb709d66be77c036797e5200d9` (integration of `fe-workflow-se
 
 ## CI evidence
 
-Pending dispatch on the pushed head. Required command:
+Dispatched with the required command:
 `gh workflow run rust-ci.yml --ref t3/frontend-grpc-start-signal -f package=cadence-matching -f format_all=true`
 
-No Cargo or Go validation has been run locally, per project instructions. Update this section with the Actions URL, head SHA and conclusion after CI completes; apply any formatting artifact through CI-driven formatting only.
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41327541884
+- Head: `e059623c4dae11b2f25926c01c51ce3142e8aea1`
+- State at handoff: in progress; no conclusion yet. The CI run is on the dedicated feature branch and has not been canceled.
+- Next action: inspect run 41327541884; if `workspace-formatting-patch` is non-empty, apply it, commit/push, and rerun the exact workflow. Once completed, append its conclusion and final head here.
+
+No Cargo or Go validation has been run locally, per project instructions. Formatting artifacts must be inspected and applied through CI only.
 
 ## Scope/gaps
 
