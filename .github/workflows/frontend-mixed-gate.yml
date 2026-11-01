@@ -57,7 +57,8 @@ jobs:
             --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
             --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
           echo $? > out/gate.exit
-          grep '^GATE' out/gate.log | cut -c1-400
+          grep -E '^(GATE|STEP|SDK|---|RESULT|panic)' out/gate.log | cut -c1-400
+          mkdir -p out/logs; cp -r out/gate/run/*.log out/gate/run/*.json out/gate/run/*.cmd out/gate/run/*.yaml out/gate/run/*.sha256 out/logs/ 2>/dev/null || true
           exit "$(cat out/gate.exit)"
       - name: Upload
         if: always()
@@ -69,5 +70,5 @@ jobs:
             !out/cadence-go-server
             !out/cadence-cli
             !out/frontend-gate-driver
-            !out/gate/run/**/*.db
+            !out/gate/run/**
           retention-days: 3

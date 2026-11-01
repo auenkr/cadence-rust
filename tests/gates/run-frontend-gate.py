@@ -159,9 +159,10 @@ try:
         m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
         if m:
             record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
+    print('SDK LOG TAIL\n' + '\n'.join((work / 'sdk.log').read_text().splitlines()[-40:]), flush=True)
     record('sdk-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
-    run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--all'])
+    run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
 except SystemExit:
     pass
 except Exception as e:
@@ -169,6 +170,10 @@ except Exception as e:
 finally:
     for n in list(procs):
         kill(n)
+    for n in ['rust-frontend', 'rust-matching', 'go-history-worker']:
+        lp = work / f'{n}.log'
+        print(f'--- {n}.log tail', flush=True)
+        print('\n'.join(lp.read_text(errors='replace').splitlines()[-25:]) if lp.exists() else '(none)', flush=True)
     failed = [s['step'] for s in steps if not s['ok']]
     (work / 'summary.json').write_text(json.dumps({'failedSteps': failed, 'stepCount': len(steps)}, indent=2))
     print('GATE SUMMARY failed:', failed, flush=True)
