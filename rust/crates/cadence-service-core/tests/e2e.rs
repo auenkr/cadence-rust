@@ -1137,22 +1137,13 @@ async fn schedule_crud_and_firing_flow() {
     let (status, resp) = call(
         app.clone(),
         Method::POST,
-        "/api/v1/schedules/describe",
-        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(resp["spec"]["cronExpression"], "* * * * *");
-
-    let (status, resp) = call(
-        app.clone(),
-        Method::POST,
         "/api/v1/schedules/list",
         json!({"domain": "e2e-domain"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(resp["schedules"].as_array().unwrap().len(), 1);
+    assert_eq!(resp["schedules"][0]["scheduleId"], "sched-1");
 
     // Pause stops firing; unpause resumes.
     let (status, _) = call(
@@ -1185,15 +1176,19 @@ async fn schedule_crud_and_firing_flow() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Signalling a schedule that does not exist reports Go's normalized error.
     let (status, resp) = call(
         app.clone(),
         Method::POST,
-        "/api/v1/schedules/describe",
-        json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+        "/api/v1/schedules/pause",
+        json!({"domain": "e2e-domain", "scheduleId": "missing"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(resp["spec"]["cronExpression"], "0 * * * *");
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        resp["message"],
+        "schedule \"missing\" not found in domain \"e2e-domain\""
+    );
 
     // Delete is idempotent.
     let (status, _) = call(
@@ -1209,6 +1204,15 @@ async fn schedule_crud_and_firing_flow() {
         Method::POST,
         "/api/v1/schedules/delete",
         json!({"domain": "e2e-domain", "scheduleId": "sched-1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Deleting a schedule that never existed is also success.
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/schedules/delete",
+        json!({"domain": "e2e-domain", "scheduleId": "never-existed"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
