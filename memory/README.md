@@ -25,3 +25,4 @@ running listeners do not establish complete Go behavior. Keep unfinished changes
 and validation of the running binary distinct from validation of source changes.
 
 - `matching-storage-next.md` — durable Matching storage port, validation and queue/History RPC continuation.
+- [Skip Rust Worker, use Go Worker](worker-skip-use-go-worker-20261101.md) — user decision 2026-11-01
