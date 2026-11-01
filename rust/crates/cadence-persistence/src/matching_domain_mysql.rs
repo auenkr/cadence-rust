@@ -867,6 +867,22 @@ impl crate::matching_domain_metadata::GoSqlDomainPersistence for MySqlDomainMeta
 }
 
 impl crate::matching_domain_metadata::DomainMetadataPersistence for MySqlDomainMetadataStore {
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        MySqlDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+        MySqlDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+    }
+
     fn supports_domain_audit_log(&self) -> bool {
         true
     }

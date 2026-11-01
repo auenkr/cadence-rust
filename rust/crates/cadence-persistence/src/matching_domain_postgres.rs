@@ -891,6 +891,22 @@ impl PostgresDomainMetadataStore {
 }
 
 impl crate::matching_domain_metadata::DomainMetadataPersistence for PostgresDomainMetadataStore {
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        PostgresDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+        PostgresDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+    }
+
     fn supports_domain_audit_log(&self) -> bool {
         true
     }

@@ -1636,6 +1636,22 @@ impl MatchingDomainMetadataStore {
 }
 
 impl crate::matching_domain_metadata::DomainMetadataPersistence for MatchingDomainMetadataStore {
+    fn get_domain(
+        &self,
+        name: Option<&str>,
+        id: Option<&str>,
+    ) -> Result<MatchingDomainMetadata, String> {
+        MatchingDomainMetadataStore::get_domain(self, name, id).map_err(|error| error.to_string())
+    }
+
+    fn list_domains(
+        &self,
+        page_size: usize,
+        page_token: Option<&[u8]>,
+    ) -> Result<crate::matching_domain_metadata::MatchingDomainPage, String> {
+        MatchingDomainMetadataStore::list_domains(self, page_size, page_token).map_err(|error| error.to_string())
+    }
+
     fn metadata_version(&self) -> Result<i64, String> {
         self.get_metadata_version()
             .map_err(|error| error.to_string())
