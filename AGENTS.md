@@ -21,8 +21,7 @@ The existing sdk should work for this.
 ## SERVICE-BY-SERVICE MIGRATION
 
 Complete one service before starting migration work on the next service.
-Current order: Matching -> History -> Frontend -> Worker. Matching is the
-current service and remains incomplete.
+Current order: Matching -> Frontend -> History
 
 For each service, port all of its Go behavior and required dependencies,
 including persistence, transports, configuration, discovery, lifecycle and
@@ -42,7 +41,9 @@ for the next service until the entire cluster runs in Rust without Go.
 
 Use tmux session: cadence-rust for running long process
 
-After each compaction(let compaction be at 230k token, do not execed this), save the progress in memory and commit and push changes to origin
+After each compaction,
+update the [progress-dashboard.html](memory/progress-dashboard.html)
+save the progress in memory and commit and push changes to origin
 
 ## AGENT ORCHESTRACTION
 The orchestrator model will be divinding the work into subagents so things can speed up and task were done indepedently.

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cadence Go → Rust migration progress</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1c2430; --muted:#6b7686; --line:#e1e5ea;
+    --go:#d9e6f2; --go-ink:#27425e;
+    --done:#2e9d5b; --done-bg:#dff3e6; --done-ink:#145a32;
+    --part:#e0a100; --part-bg:#fff2cc; --part-ink:#6b4e00;
+    --none:#9aa3af; --none-bg:#eceff3; --none-ink:#4b5563;
+    --skip:#6b7686; --skip-bg:#e8eaf6; --skip-ink:#3949ab;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#10151c;--card:#182029;--ink:#e6ebf1;--muted:#93a0b0;--line:#2a3541;
+      --go:#22364a;--go-ink:#b9d3ee;
+      --done-bg:#16382a;--done-ink:#8fe0b2;--part-bg:#40330a;--part-ink:#f0cf6b;
+      --none-bg:#232c37;--none-ink:#aab4c0;--skip-bg:#25284a;--skip-ink:#aab3f5;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+  header{padding:24px 32px 8px}
+  h1{margin:0 0 4px;font-size:22px}
+  .sub{color:var(--muted)}
+  main{padding:8px 32px 48px;max-width:1400px;margin:auto}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0 0;font-size:12px;color:var(--muted)}
+  .legend span::before{content:"";display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+  .l-done::before{background:var(--done)} .l-part::before{background:var(--part)}
+  .l-none::before{background:var(--none)} .l-skip::before{background:repeating-linear-gradient(45deg,var(--skip),var(--skip) 3px,transparent 3px,transparent 6px)}
+  .l-go::before{background:var(--go-ink)}
+  .overall{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat .n{font-size:26px;font-weight:700}
+  .bar{height:10px;border-radius:5px;background:var(--none-bg);overflow:hidden;margin-top:8px;display:flex}
+  .bar i{display:block;height:100%}
+  .bar .d{background:var(--done)} .bar .p{background:var(--part)}
+  section.svc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .svc-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+  .svc-head h2{margin:0;font-size:18px}
+  .badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px}
+  .b-done{background:var(--done-bg);color:var(--done-ink)} .b-part{background:var(--part-bg);color:var(--part-ink)}
+  .b-none{background:var(--none-bg);color:var(--none-ink)} .b-skip{background:var(--skip-bg);color:var(--skip-ink)}
+  .note{color:var(--muted);font-size:12.5px;margin:6px 0 12px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:850px){.cols{grid-template-columns:1fr}}
+  .fig{border:1px solid var(--line);border-radius:10px;padding:12px}
+  .fig h3{margin:0 0 10px;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .tile{border-radius:8px;padding:8px 10px;min-height:56px;border:1px solid transparent;position:relative}
+  .tile b{display:block;font-size:12.5px;word-break:break-word}
+  .tile small{font-size:11px;opacity:.8}
+  .tile.go{background:var(--go);color:var(--go-ink)}
+  .tile.done{background:var(--done-bg);color:var(--done-ink);border-color:var(--done)}
+  .tile.part{background:var(--part-bg);color:var(--part-ink);border-color:var(--part)}
+  .tile.none{background:var(--none-bg);color:var(--none-ink);border-color:var(--line)}
+  .tile.skip{background:repeating-linear-gradient(45deg,var(--skip-bg),var(--skip-bg) 6px,transparent 6px,transparent 12px);color:var(--skip-ink);border:1px dashed var(--skip)}
+  .tile.done::after{content:"✓";position:absolute;right:8px;top:6px;font-weight:700}
+  .est{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .est table{border-collapse:collapse;width:100%;margin-top:10px}
+  .est th,.est td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
+  .est label{margin-right:18px;font-size:13px}
+  .est input{width:70px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+  footer{color:var(--muted);font-size:12px;margin-top:24px}
+  code{background:var(--none-bg);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Cadence migration: Go → Rust</h1>
+  <div class="sub">Snapshot <span id="asof"></span> · source of truth: <code>memory/</code> in the repo · edit the <code>DATA</code> block in this file to update</div>
+  <div class="legend">
+    <span class="l-go">Go original (reference)</span>
+    <span class="l-done">Ported to Rust</span>
+    <span class="l-part">Partially ported</span>
+    <span class="l-none">Not started</span>
+    <span class="l-skip">Decision: stays Go</span>
+  </div>
+</header>
+<main>
+  <div class="overall" id="overall"></div>
+  <div id="services"></div>
+  <div class="est" id="est"></div>
+  <footer>
+    "Ported" means the code exists in <code>rust/crates/*</code> with unit tests. It does <b>not</b> mean the service passed the mixed Go/Rust cluster gates required by AGENTS.md;
+    that is shown separately per service as "Acceptance". Progress % is weighted by Go non-test lines of code (a rough size proxy, not effort).
+  </footer>
+</main>
+
+<script>
+// ============================ DATA (edit me) ============================
+// status: done | part | none | skip     loc = Go non-test lines (go/service/<svc>/<dir>)
+const DATA = {
+  asof: "2026-11-01",
+  start: "2026-10-14",           // first Rust commit
+  services: [
+    { name: "Matching", order: 1,
+      status: "part",
+      acceptance: "Not accepted: fresh workspace CI passes, but 0/10 mixed Go/Rust lanes accepted (PostgreSQL readiness stall under investigation).",
+      note: "Implementation is substantial. Remaining work is mixed-cluster validation, fixing demonstrated defects, parity audit.",
+      components: [
+        {n:"tasklist (engine, matcher, partitions)", loc:6846, s:"done", r:"matching_engine_*, matching_partition*, matching_forward*"},
+        {n:"handler (RPC)", loc:3307, s:"done", r:"matching_handler*, grpc_matching, thrift_matching_native_dispatch"},
+        {n:"semaphore", loc:929, s:"done", r:"matching_semaphore*"},
+        {n:"config", loc:257, s:"done", r:"matching_config"},
+        {n:"wrappers", loc:245, s:"done", r:"matching_rate / metered"},
+        {n:"poller", loc:238, s:"done", r:"common/poller"},
+        {n:"liveness", loc:114, s:"done", r:"common/liveness"},
+        {n:"event", loc:66, s:"done", r:"matching_task_info_log"},
+        {n:"Persistence (Cassandra/MySQL/PG)", loc:1500, s:"done", r:"cadence-persistence matching_*"},
+        {n:"Transports (TChannel/Thrift/gRPC)", loc:1500, s:"done", r:"tchannel.rs, grpc*.rs"},
+        {n:"Ringpop membership / discovery", loc:1000, s:"done", r:"ringpop_*, matching_membership*"},
+        {n:"Metrics (StatsD/M3/Prom)", loc:800, s:"done", r:"matching_metrics_*"},
+        {n:"Mixed-cluster gates (10 lanes)", loc:2000, s:"part", r:"0/10 accepted"}
+      ]},
+    { name: "History", order: 2,
+      status: "none",
+      acceptance: "Not started. Crate <code>cadence-history</code> is a 5-line stub.",
+      note: "Largest service by far (~75k Go lines, about 6x Matching). Only a few persistence pieces (executions, history_branch) exist as shared infra.",
+      components: [
+        {n:"execution (mutable state, workflow ctx)", loc:18696, s:"none"},
+        {n:"task (transfer/timer processors)", loc:9882, s:"none"},
+        {n:"queuev2", loc:7159, s:"none"},
+        {n:"queue (v1)", loc:6337, s:"none"},
+        {n:"engine", loc:6227, s:"none"},
+        {n:"ndc (n-DC replication/conflict)", loc:4767, s:"none"},
+        {n:"shard", loc:4155, s:"none"},
+        {n:"replication", loc:3424, s:"none"},
+        {n:"decision", loc:3147, s:"none"},
+        {n:"handler (RPC)", loc:3116, s:"none"},
+        {n:"resource", loc:1075, s:"none"},
+        {n:"wrappers", loc:922, s:"none"},
+        {n:"taskdlq", loc:844, s:"none"},
+        {n:"events", loc:809, s:"none"},
+        {n:"reset", loc:790, s:"none"},
+        {n:"failover", loc:744, s:"none"},
+        {n:"config", loc:730, s:"none"},
+        {n:"query", loc:612, s:"none"},
+        {n:"testing", loc:563, s:"none"},
+        {n:"workflow", loc:441, s:"none"},
+        {n:"workflowcache", loc:388, s:"none"},
+        {n:"constants / common / lookup / simulation", loc:425, s:"none"}
+      ]},
+    { name: "Frontend", order: 3,
+      status: "part",
+      acceptance: "Not accepted: mixed gate (Rust Frontend + Rust Matching + Go History/Worker) fails: QueryWorkflow nil result, open-workflow describe/list wrong, Ringpop join to Rust Frontend fails.",
+      note: "Most handlers exist on integration branch <code>frontend-domain-admin</code>/<code>fe-integ</code>; master still has a thin frontend crate. Passing: domain CRUD, start/complete/signal, list-closed, SIGKILL restart.",
+      components: [
+        {n:"api (workflow/domain handlers)", loc:7207, s:"part", r:"handler_workflow*, handler_domain"},
+        {n:"wrappers (access, ratelimit, redirect, metered, version)", loc:8374, s:"part", r:"wrappers/*"},
+        {n:"admin", loc:2703, s:"part", r:"handler_admin (DLQ, membership missing)"},
+        {n:"config", loc:232, s:"done", r:"config.rs"},
+        {n:"validate", loc:104, s:"done", r:"request_validator.rs"},
+        {n:"schedule API", loc:400, s:"part", r:"handler_schedule"},
+        {n:"History / Matching clients", loc:600, s:"done", r:"history_client, matching_client"},
+        {n:"Ringpop join on TChannel", loc:300, s:"none"},
+        {n:"Mixed-cluster gate", loc:1500, s:"part", r:"workflow exists, failing steps"}
+      ]},
+    { name: "Worker", order: 4,
+      status: "skip",
+      acceptance: "Out of scope: decision 2026-11-01 to keep running the Go Worker next to the Rust services.",
+      note: "The Go Worker must work unmodified against the Rust Frontend. Branch <code>worker-core</code> holds partial scanner/indexer/scheduler ports as reference only.",
+      components: [
+        {n:"scanner", loc:5502, s:"skip"},
+        {n:"scheduler", loc:2351, s:"skip"},
+        {n:"diagnostics", loc:2308, s:"skip"},
+        {n:"failovermanager", loc:1776, s:"skip"},
+        {n:"archiver", loc:1586, s:"skip"},
+        {n:"batcher", loc:1007, s:"skip"},
+        {n:"indexer", loc:930, s:"skip"},
+        {n:"esanalyzer", loc:885, s:"skip"},
+        {n:"domaindeprecation", loc:576, s:"skip"},
+        {n:"parentclosepolicy", loc:537, s:"skip"},
+        {n:"replicator", loc:365, s:"skip"},
+        {n:"asyncworkflow", loc:292, s:"skip"},
+        {n:"worker / workercommon", loc:265, s:"skip"}
+      ]}
+  ]
+};
+// ========================================================================
+
+const LBL = {done:"Ported",part:"Partial",none:"Not started",skip:"Stays Go"};
+const W = c => c.loc || 300;
+const sum = (a,f)=>a.reduce((t,x)=>t+f(x),0);
+const pct = (v,t)=> t? Math.round(1000*v/t)/10 : 0;
+
+function calc(svc){
+  const cs = svc.components, t = sum(cs,W);
+  const d = sum(cs.filter(c=>c.s==="done"),W);
+  const p = sum(cs.filter(c=>c.s==="part"),W);
+  return {t,d,p,done:pct(d,t),partial:pct(p,t), eff: pct(d+p*0.5,t)};
+}
+
+document.getElementById("asof").textContent = DATA.asof;
+
+// overall (Worker excluded from scope)
+const inScope = DATA.services.filter(s=>s.status!=="skip");
+const allT = sum(inScope,s=>calc(s).t), allD = sum(inScope,s=>calc(s).d), allP = sum(inScope,s=>calc(s).p);
+const ov = document.getElementById("overall");
+function stat(title,done,part,sub){
+  return `<div class="stat"><div class="sub">${title}</div><div class="n">${(done+part/2).toFixed(1)}%</div>
+  <div class="bar"><i class="d" style="width:${done}%"></i><i class="p" style="width:${part}%"></i></div>
+  <div class="sub" style="font-size:12px;margin-top:6px">${sub}</div></div>`;
+}
+ov.innerHTML = stat("Whole cluster (Worker excluded)", pct(allD,allT), pct(allP,allT), `${(allD/1000).toFixed(1)}k ported of ${(allT/1000).toFixed(1)}k Go lines (partial counted as half)`)
+  + DATA.services.map(s=>{const c=calc(s); return s.status==="skip"
+     ? `<div class="stat"><div class="sub">${s.name}</div><div class="n" style="font-size:18px">Stays Go</div><div class="sub" style="font-size:12px;margin-top:6px">Rust port skipped by decision</div></div>`
+     : stat(s.name,c.done,c.partial,`${(c.t/1000).toFixed(1)}k Go lines`)}).join("");
+
+// service sections
+const root = document.getElementById("services");
+DATA.services.forEach(s=>{
+  const c = calc(s);
+  const tiles = (cls)=>s.components.map(x=>{
+    const k = cls==="go"?"go":x.s;
+    const sub = cls==="go" ? (x.loc?`${x.loc.toLocaleString()} lines`:"") : (x.r||LBL[x.s]);
+    return `<div class="tile ${k}" title="${x.n}${x.r?' → '+x.r:''}"><b>${x.n}</b><small>${sub}</small></div>`;
+  }).join("");
+  const badge = {done:["b-done","Complete"],part:["b-part","In progress"],none:["b-none","Not started"],skip:["b-skip","Stays Go"]}[s.status];
+  root.insertAdjacentHTML("beforeend",`
+  <section class="svc">
+    <div class="svc-head"><h2>${s.order}. ${s.name} service</h2>
+      <span><span class="badge ${badge[0]}">${badge[1]}</span>
+      ${s.status==="skip"?"":` <span class="sub">${c.eff}% ported (by size)</span>`}</span></div>
+    <div class="note"><b>Acceptance:</b> ${s.acceptance}<br>${s.note}</div>
+    <div class="cols">
+      <div class="fig"><h3>Go version <span class="sub">reference</span></h3><div class="grid">${tiles("go")}</div></div>
+      <div class="fig"><h3>Rust version <span class="sub">${s.components.filter(x=>x.s==="done").length}/${s.components.length} components ported</span></h3><div class="grid">${tiles("rust")}</div></div>
+    </div>
+  </section>`);
+});
+
+// estimate
+const est = document.getElementById("est");
+const daysSoFar = Math.round((new Date(DATA.asof)-new Date(DATA.start))/86400000);
+const matching = DATA.services[0];
+const matchingLoc = calc(matching).t;
+est.innerHTML = `
+  <h2 style="margin:0 0 6px;font-size:18px">Rough time estimate</h2>
+  <div class="note">Velocity baseline: Matching (~${(matchingLoc/1000).toFixed(1)}k Go lines incl. persistence/transport/ringpop/metrics) took ${daysSoFar} days of calendar time since ${DATA.start} and is still not gate-accepted. Adjust the knobs.</div>
+  <label>Go lines ported/day (one stream) <input id="v" type="number" value="500"></label>
+  <label>Parallel workers <input id="p" type="number" value="3" min="1"></label>
+  <label>Parallel efficiency % <input id="e" type="number" value="60" min="10" max="100"></label>
+  <label>Validation overhead % <input id="o" type="number" value="40" min="0"></label>
+  <table><thead><tr><th>Service</th><th>Remaining Go lines</th><th>Est. calendar days</th></tr></thead><tbody id="rows"></tbody></table>
+  <div class="sub" id="total" style="margin-top:8px;font-weight:600"></div>`;
+function recompute(){
+  const v=+document.getElementById("v").value, p=+document.getElementById("p").value,
+        e=+document.getElementById("e").value/100, o=+document.getElementById("o").value/100;
+  const rate = v*(1+(p-1)*e);
+  let tot=0, html="";
+  DATA.services.forEach(s=>{
+    if(s.status==="skip"){html+=`<tr><td>${s.name}</td><td>–</td><td>0 (stays Go)</td></tr>`;return;}
+    const c=calc(s); const rem = c.t - c.d - c.p*0.5;
+    // Matching/Frontend: remaining is mostly validation, add overhead on remaining
+    const days = Math.ceil(rem/rate*(1+o));
+    tot+=days; html+=`<tr><td>${s.name}</td><td>${Math.round(rem).toLocaleString()}</td><td>~${days}</td></tr>`;
+  });
+  document.getElementById("rows").innerHTML=html;
+  document.getElementById("total").textContent=`Total ≈ ${tot} calendar days (≈ ${(tot/7).toFixed(1)} weeks), assuming services are done one after another as AGENTS.md requires. Treat as order of magnitude only.`;
+}
+["v","p","e","o"].forEach(i=>document.getElementById(i).addEventListener("input",recompute));
+recompute();
+</script>
+</body>
+</html>
