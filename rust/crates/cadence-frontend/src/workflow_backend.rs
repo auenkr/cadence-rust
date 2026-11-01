@@ -33,12 +33,21 @@ const CALLER: &str = "cadence-frontend";
 /// Go's frontend client default timeout for History calls.
 const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProductionBackend {
     history_addr: String,
     matching_addr: String,
     pub(crate) history_access: Option<crate::workflow_matching::HistoryAccess>,
     pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
+}
+
+impl std::fmt::Debug for ProductionBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProductionBackend")
+            .field("history_addr", &self.history_addr)
+            .field("matching_addr", &self.matching_addr)
+            .finish_non_exhaustive()
+    }
 }
 
 type BackendFuture<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, CadenceError>> + Send + 'a>>;
