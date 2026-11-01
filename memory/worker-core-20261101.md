@@ -25,4 +25,4 @@ Design:
 
 Known gaps: child workflows, external signal/cancel, search attribute upsert (Version marker), local activities, sessions, sticky execution, activity WaitForCancellation.
 
-Status: see latest CI run for branch worker-core (package=cadence-worker).
+Status: steps 1-4 and parentclosepolicy workflow done. CI green: https://github.com/auenkr/cadence-rust/actions/runs/41288651422 (head 1dedcdd7e, package=cadence-worker).
