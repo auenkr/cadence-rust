@@ -23,7 +23,7 @@ Branch: `t3/6e5c5418` (prepared worktree `t3-6e5c5418`). This is a bounded hook-
 
 - No local Cargo, rustfmt, Go test, or Go build commands were run, as required.
 - `git diff --check` passed before commit.
-- Current implementation head and CI result: pending dispatch. The required workflow is `gh workflow run rust-ci.yml --ref t3/6e5c5418 -f package=cadence-matching -f format_all=true`. Record the final pushed SHA and run URL/conclusion here after CI completes. Apply any formatter output only as a CI artifact patch.
+- CI run `https://github.com/auenkr/cadence-rust/actions/runs/41328219489` tested head `04421156b6d0c7a2aa64a207a2422f9a1d2057ba` and failed in Clippy. It found that new direct unit-test calls to generated tonic trait methods need the `cadence_proto::api::workflow_api_server::WorkflowApi` trait imported into the test module. No formatter patch was produced; format checks passed. Added that trait import locally; this correction is committed separately and requires a rerun before validation is complete.
 
 ## Scope limits
 
