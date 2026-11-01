@@ -10,5 +10,10 @@ async fn main() -> anyhow::Result<()> {
         .with_ansi(false)
         .compact()
         .init();
-    cadence_matching::launcher::run("cadence-server", None).await
+    cadence_matching::launcher::run_frontend_with_hook(
+        "cadence-server",
+        None,
+        Box::new(cadence_frontend::workflow_backend::build_workflow_api),
+    )
+    .await
 }

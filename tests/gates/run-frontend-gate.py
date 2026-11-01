@@ -17,7 +17,11 @@ ap.add_argument('--go-cli', type=Path, required=True)
 ap.add_argument('--driver', type=Path, required=True)
 ap.add_argument('--rust-root', type=Path, required=True, help='checkout of rust_ref (for rust/config/development.yaml)')
 ap.add_argument('--rust-outbound', choices=['grpc', 'tchannel'], default='grpc')
+ap.add_argument('--sdk-timeout-seconds', type=int, default=900,
+                help='SDK driver wall-clock limit, including restart and shutdown (default: 900)')
 args = ap.parse_args()
+if args.sdk_timeout_seconds <= 0:
+    ap.error('--sdk-timeout-seconds must be positive')
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
 (work / 'config').mkdir(exist_ok=True)
@@ -120,6 +124,11 @@ rust_matching = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yam
     '--matching-tchannel-port', ports['RUST_MATCHING_PORT'], '--data-dir', work / 'rust-matching-data']
 rust_frontend = lambda: [args.rust_binary, 'start', '--config', work / 'rust.yaml', '--root', work, '--services', 'frontend',
     '--history-grpc-port', ports['HISTORY_PORT_GRPC'], '--data-dir', work / 'rust-frontend-data']
+frontend_env = {
+    **os.environ,
+    'CADENCE_HISTORY_TCHANNEL_ADDR': f'127.0.0.1:{ports["HISTORY_PORT"]}',
+    'CADENCE_MATCHING_TCHANNEL_ADDR': f'127.0.0.1:{ports["RUST_MATCHING_PORT"]}',
+}
 cli_t = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT"]}', '--transport', 'tchannel']
 cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc']
 status = 0
@@ -129,7 +138,7 @@ try:
     record('go-history-listening', wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker'))
     start('rust-matching', rust_matching())
     record('rust-matching-listening', wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching'))
-    start('rust-frontend', rust_frontend())
+    start('rust-frontend', rust_frontend(), env=frontend_env)
     fe_t = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend')
     fe_g = wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
     record('rust-frontend-tchannel-listening', fe_t)
@@ -146,15 +155,21 @@ try:
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
     env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks)}
-    drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env)
+    drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env, start_new_session=True)
+    procs['sdk-driver'] = drv
+    sdk_deadline = time.monotonic() + args.sdk_timeout_seconds
     restarted = False
     while drv.poll() is None:
+        if time.monotonic() >= sdk_deadline:
+            record('sdk-driver-timeout', False, f'exceeded {args.sdk_timeout_seconds}s wall-clock limit')
+            kill('sdk-driver')
+            break
         if (marks / 'restart-request').exists() and not restarted:
             restarted = True
             kill('rust-frontend')
             record('rust-frontend-killed', True)
             time.sleep(3)
-            start('rust-frontend', rust_frontend())
+            start('rust-frontend', rust_frontend(), env=frontend_env)
             ok = wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
             record('rust-frontend-restarted-listening', ok)
             time.sleep(15)
