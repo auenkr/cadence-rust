@@ -1811,6 +1811,11 @@ shard-distributor-matching:
             .contains("defaultStore"));
         assert_eq!(
             persistence.store_name_for(PersistenceStoreRole::Visibility),
+            Ok(Some("visibility"))
+        );
+        persistence.visibility_store.clear();
+        assert_eq!(
+            persistence.store_name_for(PersistenceStoreRole::Visibility),
             Ok(None)
         );
     }
