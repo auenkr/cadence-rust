@@ -6567,6 +6567,21 @@ mod tests {
         out
     }
 
+    fn assert_pinned_binary_fixture<T>(fixture: Struct, expected: &T)
+    where
+        T: ToThrift + FromThrift + PartialEq + std::fmt::Debug,
+    {
+        let mut writer = crate::protocol::Writer::new();
+        crate::value::write_struct(&mut writer, &fixture);
+        let bytes = writer.into_bytes();
+        let mut reader = crate::protocol::Reader::new(&bytes);
+        let decoded = crate::value::read_struct(&mut reader).unwrap();
+        assert_eq!(reader.remaining(), 0);
+        assert_eq!(decoded, fixture);
+        assert_eq!(T::from_thrift(&decoded).unwrap(), *expected);
+        assert_eq!(expected.to_thrift(), fixture);
+    }
+
     #[test]
     fn primitives_round_trip() {
         round_trip(&WorkflowExecution::new("wf-1", "run-1"));
@@ -7549,6 +7564,10 @@ mod timeout_wire_tests {
             SyncShardStatusTaskAttributes::from_thrift(&shard_wire).unwrap(),
             shard
         );
+        assert_pinned_binary_fixture(
+            Struct { fields: vec![(10, Value::Bytes(b"source".to_vec())), (20, Value::I64(0)), (30, Value::I64(-1))] },
+            &shard,
+        );
 
         let activity = SyncActivityTaskAttributes {
             domain_id: Some("domain".into()),
@@ -7594,6 +7613,20 @@ mod timeout_wire_tests {
             SyncActivityTaskAttributes::from_thrift(&activity_wire).unwrap(),
             activity
         );
+        let activity_fixture = Struct { fields: vec![
+            (10, Value::Bytes(b"domain".to_vec())), (20, Value::Bytes(b"workflow".to_vec())),
+            (30, Value::Bytes(b"run".to_vec())), (40, Value::I64(-4)), (50, Value::I64(0)),
+            (60, Value::I64(-1)), (70, Value::I64(23)), (80, Value::I64(1)),
+            (90, Value::I64(1_700_000_000_000_000_123)), (100, Value::Bytes(vec![0,255])),
+            (110, Value::I32(0)), (120, Value::Bytes(b"failed".to_vec())),
+            (130, Value::Bytes(b"worker".to_vec())), (140, Value::Bytes(vec![])),
+            (145, Value::Struct(Struct { fields: vec![(10, Value::I32(2)), (20, Value::I32(0))] })),
+            (150, Value::Struct(Struct { fields: vec![
+                (10, Value::Bytes(vec![0,255])),
+                (20, Value::List(vec![Value::Struct(Struct { fields: vec![(10, Value::I64(4)), (20, Value::I64(-5))] })])),
+            ] })),
+        ] };
+        assert_pinned_binary_fixture(activity_fixture.clone(), &activity);
 
         let history = HistoryTaskV2Attributes {
             task_id: Some(0),
@@ -7627,6 +7660,14 @@ mod timeout_wire_tests {
             HistoryTaskV2Attributes::from_thrift(&history_wire).unwrap(),
             history
         );
+        let history_fixture = Struct { fields: vec![
+            (5, Value::I64(0)), (10, Value::Bytes(b"d".to_vec())),
+            (20, Value::Bytes(b"wf".to_vec())), (30, Value::Bytes(b"run".to_vec())),
+            (40, Value::List(vec![Value::Struct(Struct { fields: vec![(10, Value::I64(0)), (20, Value::I64(-2))] })])),
+            (50, Value::Struct(Struct { fields: vec![(10, Value::I32(0)), (20, Value::Bytes(vec![0,255])] })),
+            (70, Value::Struct(Struct { fields: vec![(10, Value::I32(1))] })),
+        ] };
+        assert_pinned_binary_fixture(history_fixture.clone(), &history);
 
         let marker = FailoverMarkerAttributes {
             domain_id: Some("d".into()),
@@ -7646,6 +7687,10 @@ mod timeout_wire_tests {
         assert_eq!(
             FailoverMarkerAttributes::from_thrift(&marker_wire).unwrap(),
             marker
+        );
+        assert_pinned_binary_fixture(
+            Struct { fields: vec![(10, Value::Bytes(b"d".to_vec())), (20, Value::I64(0)), (30, Value::I64(-7))] },
+            &marker,
         );
 
         // Thrift permits more than one optional attributes struct. Preserve all
@@ -7669,6 +7714,18 @@ mod timeout_wire_tests {
             vec![10, 40, 50, 70, 80, 90]
         );
         assert_eq!(ReplicationTask::from_thrift(&task_wire).unwrap(), task);
+        assert_pinned_binary_fixture(
+            Struct { fields: vec![
+                (10, Value::I32(3)), (40, Value::Struct(shard_wire)),
+                (50, Value::Struct(activity_fixture)), (70, Value::Struct(history_fixture)),
+                (80, Value::Struct(marker_wire)), (90, Value::I64(0)),
+            ] },
+            &task,
+        );
+        for task_type in ReplicationTaskType::values() {
+            let expected = ReplicationTask { task_type: Some(*task_type), ..Default::default() };
+            assert_pinned_binary_fixture(Struct { fields: vec![(10, Value::I32(task_type.value()))] }, &expected);
+        }
     }
 
     #[test]
