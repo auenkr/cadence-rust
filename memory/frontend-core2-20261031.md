@@ -1542,13 +1542,16 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
 
 ## Successor handoff — 2026-10-31
 
-- Branch `frontend-core2` is pushed at `ce13c6b8998b60be2c72150feca8372070d1e69e`.
-  This checkout is detached at that exact commit and clean before this handoff
-  update; the validator source change is `e124daed576ece6854d9a66153206a10778a5a8f`.
+- Before this handoff update, branch `origin/frontend-core2` and the detached
+  checkout were clean at `9dc7d51a414af8c92874fb9826ba5c4276db67b1`. The
+  validator source change is
+  `e124daed576ece6854d9a66153206a10778a5a8f`.
 - Latest dispatched CI at handoff:
   https://github.com/auenkr/cadence-rust/actions/runs/41219618498
-  tests head `ce13c6b8998b60be2c72150feca8372070d1e69e`; status
-  `in_progress` at last check. The preceding exact source-head run
+  tested head `ce13c6b8998b60be2c72150feca8372070d1e69e` and concluded
+  `success` (formatting, Clippy, tests, Frontend smoke, and configured Go
+  oracle gates). This is not an exact-head check for the later memory-only
+  commits. The preceding exact source-head run
   https://github.com/auenkr/cadence-rust/actions/runs/41219259467 tested
   `e124daed576ece6854d9a66153206a10778a5a8f` and concluded `success` for
   formatting, Clippy, tests, Frontend smoke, and configured Go oracle gates.
@@ -1579,3 +1582,27 @@ validated by run `41209257515` at `74bff6691f94705d26c3ddbf1567a8a5472be3ad`.
   worker-owned `handler_workflow*`, `wrappers`, and `handler_domain/admin/schedule`
   files. Re-run package CI after each pushed checkpoint and update this file
   with URL, tested head SHA, conclusion, and remaining gaps.
+
+## Final handoff update — 2026-10-31
+
+- Verified with `gh run view 41219618498`: URL
+  https://github.com/auenkr/cadence-rust/actions/runs/41219618498, tested head
+  `ce13c6b8998b60be2c72150feca8372070d1e69e`, conclusion `success`.
+- This handoff only corrects the recorded CI state and branch checkpoint; no
+  Rust source or tests were changed. The latest CI run is successful but does
+  not test the then-current documentation-only head. No Cargo command ran
+  locally.
+- Open work for the successor: implement and wire production Go-compatible
+  Cassandra/SQL domain, metadata, visibility, history, and execution managers
+  with configured datastore selection; finish concrete Go `service.go`
+  lifecycle drain/shutdown owner wiring (global quota collections and Admin
+  DLQ/failover watchers); then run package CI and close the complete Go
+  request-validator test matrix. The currently recorded validator matrix has
+  named coverage for the 88 Go table rows and all 16 Rust validator entry
+  points, with directly named exact-result cases added for the 13 task-list
+  rows; confirm whether this constitutes the complete requested Go matrix
+  while continuing the parity audit.
+- Commit and push this memory update on `frontend-core2`. Successor should
+  verify the pushed head, preserve the worker-owned file exclusions, and
+  continue from the open work above; do not regard the existing successful CI
+  run as validation of this documentation update or as completion of Frontend.
