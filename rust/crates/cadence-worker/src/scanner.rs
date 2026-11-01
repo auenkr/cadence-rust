@@ -1,4 +1,5 @@
 //! Scanner and fixer system workflow names from Go `scanner`.
+pub mod daemon_workflows;
 pub mod tasklist;
 pub mod shard_batches;
 pub mod executions;

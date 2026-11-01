@@ -39,3 +39,9 @@ Status: steps 1-4 and parentclosepolicy workflow done. CI green: https://github.
 - SDK additions: ActivityOptions.wait_for_cancellation, ActivityFailure::CanceledWith(details), ActivityFuture::get_detailed (cancel details).
 - Tests: workflow replay (v1 options/result, invalid params, v2 tune-signal cancel + restart with progress), activity logic with fake backend.
 - CI: https://github.com/auenkr/cadence-rust/actions/runs/41291322183 success.
+
+## Step 4b: scanner (partial)
+- scanner/daemon_workflows.rs: TaskListScannerWorkflow and HistoryScannerWorkflow on the SDK runtime (activity options identical to Go), replay test added.
+- Remaining and NOT started (module stays NotPorted in startup_plan):
+  - shardscanner scanner/fixer workflows (executions concrete/current, timers): need workflow.Go-style concurrent coroutines + self-signal channels in the SDK, plus the aggregators and 8 query handlers.
+  - All scanner ACTIVITIES (tasklist scavenger, history scavenger, scan/fix shard, config/emit-metrics, corrupted keys) need persistence access (task manager, history manager, execution manager, blobstore); the worker crate currently talks to the cluster only over gRPC, so a persistence factory wired from service config is a prerequisite.

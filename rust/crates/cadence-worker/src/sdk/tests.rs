@@ -1223,3 +1223,45 @@ mod batcher_workflows {
         assert_eq!(restarted.progress, Some(progress));
     }
 }
+
+#[test]
+fn scanner_daemon_workflows_run_one_scavenger_activity() {
+    use crate::scanner as sc;
+    let mut r = Registry::default();
+    sc::daemon_workflows::register_sdk(&mut r);
+    for (wf, act) in [
+        (sc::TASK_LIST_WORKFLOW_TYPE, sc::SCAVENGER_ACTIVITY_TYPE),
+        (sc::HISTORY_WORKFLOW_TYPE, sc::HISTORY_SCAVENGER_ACTIVITY_TYPE),
+    ] {
+        let e = vec![ev(1, started(sc::TASK_LIST)), ev(2, dt_sched()), ev(3, dt_started())];
+        let out = process_decision_task(&r, input(wf, e.clone())).unwrap();
+        let Some(DA::ScheduleActivityTaskDecisionAttributes(a)) = &out.decisions[0].attributes
+        else {
+            panic!("expected schedule activity");
+        };
+        assert_eq!(a.activity_type.as_ref().unwrap().name, act);
+        assert_eq!(a.heartbeat_timeout.as_ref().unwrap().seconds, 300);
+        assert_eq!(a.schedule_to_start_timeout.as_ref().unwrap().seconds, 300);
+        assert_eq!(a.retry_policy.as_ref().unwrap().backoff_coefficient, 1.7);
+
+        let mut done = e;
+        done.extend([
+            ev(4, dt_completed()),
+            ev(5, activity_scheduled("0")),
+            ev(
+                6,
+                A::ActivityTaskCompletedEventAttributes(pb::ActivityTaskCompletedEventAttributes {
+                    scheduled_event_id: 5,
+                    ..Default::default()
+                }),
+            ),
+            ev(7, dt_sched()),
+            ev(8, dt_started()),
+        ]);
+        let out = process_decision_task(&r, input(wf, done)).unwrap();
+        assert!(matches!(
+            out.decisions[0].attributes,
+            Some(DA::CompleteWorkflowExecutionDecisionAttributes(_))
+        ));
+    }
+}
