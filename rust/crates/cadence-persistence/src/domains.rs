@@ -2707,7 +2707,6 @@ mod go_sql_frontend_manager_tests {
                 persistence.clone(),
                 std::sync::Arc::new(|| "thriftrw_snappy".to_string()),
             );
-        persistence.get_domain(Some("durable"), None).unwrap();
         let described = restarted
             .describe(&DescribeDomainRequest {
                 name: Some("durable".into()),
