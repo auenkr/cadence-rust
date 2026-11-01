@@ -542,7 +542,7 @@ async fn handle_call(
         .ok_or_else(|| anyhow!("Unknown Cadence procedure"))?;
     let method = definition.method;
     let mut headers = Cursor::new(&call.args[1]);
-    headers.headers16()?;
+    let app_headers = headers.headers16()?;
     if headers.remaining() != 0 {
         bail!("Trailing TChannel application headers");
     }
@@ -563,11 +563,18 @@ async fn handle_call(
                 .await
             }
             None => {
-                crate::yarpc::dispatch(
+                let caller_headers = call
+                    .headers
+                    .iter()
+                    .chain(app_headers.iter())
+                    .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+                    .collect();
+                crate::yarpc::dispatch_with_headers(
                     &state,
                     method,
                     &request,
                     deadline.min(Instant::now() + Duration::from_secs(60)),
+                    caller_headers,
                 )
                 .await
             }

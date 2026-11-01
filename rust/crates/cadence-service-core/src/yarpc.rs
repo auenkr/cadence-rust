@@ -2196,10 +2196,22 @@ pub async fn dispatch(
     body: &Struct,
     deadline: Instant,
 ) -> Result<(Struct, Option<(&'static str, String)>), String> {
+    dispatch_with_headers(state, method, body, deadline, Default::default()).await
+}
+
+/// Like [`dispatch`], forwarding the caller's request headers (lower-cased
+/// names) to the WorkflowService hook.
+pub async fn dispatch_with_headers(
+    state: &AppState,
+    method: &str,
+    body: &Struct,
+    deadline: Instant,
+    caller_headers: std::collections::HashMap<String, String>,
+) -> Result<(Struct, Option<(&'static str, String)>), String> {
     if let Some(api) = &state.workflow_api {
         let ctx = crate::workflow_api::CallerContext {
             deadline: Some(deadline),
-            headers: Default::default(),
+            headers: caller_headers,
         };
         if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
             return Ok(reply);
@@ -2373,7 +2385,16 @@ pub async fn yarpc_handler(
         }
     };
     let deadline = ttl_deadline(&headers, Duration::from_secs(60));
-    match dispatch(&state, &method, &args, deadline).await {
+    // YARPC/HTTP carries application headers as `Rpc-Header-<name>`.
+    let caller_headers = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.as_str().to_ascii_lowercase();
+            let name = name.strip_prefix("rpc-header-").unwrap_or(&name).to_owned();
+            Some((name, value.to_str().ok()?.to_owned()))
+        })
+        .collect();
+    match dispatch_with_headers(&state, &method, &args, deadline, caller_headers).await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
