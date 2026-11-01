@@ -1289,7 +1289,12 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
         &self,
         request: tonic::Request<p::GetWorkflowExecutionHistoryRequest>,
     ) -> Result<Response<p::GetWorkflowExecutionHistoryResponse>, Status> {
-        if self.state.workflow_api.as_ref().is_some_and(|api| api.serves("GetWorkflowExecutionHistory")) {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("GetWorkflowExecutionHistory"))
+        {
             let r = request.get_ref();
             let input = st::GetWorkflowExecutionHistoryRequest {
                 domain: r.domain.clone(),
@@ -1297,24 +1302,33 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
                 maximum_page_size: r.page_size,
                 next_page_token: r.next_page_token.clone(),
                 wait_for_new_event: r.wait_for_new_event,
-                history_event_filter_type: cv::enum_in(r.history_event_filter_type, enums::HistoryEventFilterType::from_i32)?,
+                history_event_filter_type: cv::enum_in(
+                    r.history_event_filter_type,
+                    enums::HistoryEventFilterType::from_i32,
+                )?,
                 skip_archival: r.skip_archival,
-                query_consistency_level: cv::enum_in(r.query_consistency_level, enums::QueryConsistencyLevel::from_i32)?,
+                query_consistency_level: cv::enum_in(
+                    r.query_consistency_level,
+                    enums::QueryConsistencyLevel::from_i32,
+                )?,
             };
-            let v: st::GetWorkflowExecutionHistoryResponse = self.call_with_headers(
-                Method::POST, "/api/v1/workflows/history", &input,
-                &[],
-            ).await?;
+            let v: st::GetWorkflowExecutionHistoryResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/history", &input, &[])
+                .await?;
             return Ok(Response::new(p::GetWorkflowExecutionHistoryResponse {
                 history: v.history.map(cv::history).transpose()?,
-                raw_history: v.raw_history.into_iter().map(|b| p::DataBlob {
-                    encoding_type: match b.encoding_type {
-                        Some(enums::EncodingType::ThriftRW) => 1,
-                        Some(enums::EncodingType::JSON) => 2,
-                        _ => 0,
-                    },
-                    data: b.data,
-                }).collect(),
+                raw_history: v
+                    .raw_history
+                    .into_iter()
+                    .map(|b| p::DataBlob {
+                        encoding_type: match b.encoding_type {
+                            Some(enums::EncodingType::ThriftRW) => 1,
+                            Some(enums::EncodingType::JSON) => 2,
+                            _ => 0,
+                        },
+                        data: b.data,
+                    })
+                    .collect(),
                 next_page_token: v.next_page_token,
                 archived: v.archived,
             }));
@@ -1359,14 +1373,18 @@ impl p::workflow_api_server::WorkflowApi for Frontend {
             {
                 return Ok(Response::new(p::GetWorkflowExecutionHistoryResponse {
                     history: v.history.map(cv::history).transpose()?,
-                    raw_history: v.raw_history.into_iter().map(|b| p::DataBlob {
-                        encoding_type: match b.encoding_type {
-                            Some(enums::EncodingType::ThriftRW) => 1,
-                            Some(enums::EncodingType::JSON) => 2,
-                            _ => 0,
-                        },
-                        data: b.data,
-                    }).collect(),
+                    raw_history: v
+                        .raw_history
+                        .into_iter()
+                        .map(|b| p::DataBlob {
+                            encoding_type: match b.encoding_type {
+                                Some(enums::EncodingType::ThriftRW) => 1,
+                                Some(enums::EncodingType::JSON) => 2,
+                                _ => 0,
+                            },
+                            data: b.data,
+                        })
+                        .collect(),
                     next_page_token: v.next_page_token,
                     archived: v.archived,
                 }));
@@ -2277,7 +2295,9 @@ mod workflow_hook_tests {
         fn serves(&self, operation: &str) -> bool {
             matches!(
                 operation,
-                "StartWorkflowExecution" | "SignalWithStartWorkflowExecution" | "GetWorkflowExecutionHistory"
+                "StartWorkflowExecution"
+                    | "SignalWithStartWorkflowExecution"
+                    | "GetWorkflowExecutionHistory"
             )
         }
 
@@ -2315,10 +2335,21 @@ mod workflow_hook_tests {
         p::StartWorkflowExecutionRequest {
             domain: "sample-domain".into(),
             workflow_id: "sample-workflow".into(),
-            workflow_type: Some(p::WorkflowType { name: "sample-type".into() }),
-            task_list: Some(p::TaskList { name: "sample-task-list".into(), ..Default::default() }),
-            execution_start_to_close_timeout: Some(prost_types::Duration { seconds: 60, nanos: 0 }),
-            task_start_to_close_timeout: Some(prost_types::Duration { seconds: 10, nanos: 0 }),
+            workflow_type: Some(p::WorkflowType {
+                name: "sample-type".into(),
+            }),
+            task_list: Some(p::TaskList {
+                name: "sample-task-list".into(),
+                ..Default::default()
+            }),
+            execution_start_to_close_timeout: Some(prost_types::Duration {
+                seconds: 60,
+                nanos: 0,
+            }),
+            task_start_to_close_timeout: Some(prost_types::Duration {
+                seconds: 10,
+                nanos: 0,
+            }),
             request_id: "request-id".into(),
             ..Default::default()
         }
@@ -2378,9 +2409,7 @@ mod workflow_hook_tests {
         });
         let frontend = frontend(api.clone());
         let result = frontend
-            .start_workflow_execution(tonic::Request::new(
-                valid_start_request(),
-            ))
+            .start_workflow_execution(tonic::Request::new(valid_start_request()))
             .await;
         let error = result.unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
@@ -2403,12 +2432,14 @@ mod workflow_hook_tests {
         let frontend = frontend(api.clone());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let headers = std::collections::HashMap::from([(
-            "x-cadence-caller".to_owned(), "sdk-worker".to_owned(),
+            "x-cadence-caller".to_owned(),
+            "sdk-worker".to_owned(),
         )]);
         let request = p::GetWorkflowExecutionHistoryRequest {
             domain: "sample-domain".into(),
             workflow_execution: Some(p::WorkflowExecution {
-                workflow_id: "sample-workflow".into(), run_id: "sample-run".into(),
+                workflow_id: "sample-workflow".into(),
+                run_id: "sample-run".into(),
             }),
             page_size: 23,
             next_page_token: vec![4, 5],
@@ -2416,7 +2447,11 @@ mod workflow_hook_tests {
             ..Default::default()
         };
         let future = frontend.get_workflow_execution_history(tonic::Request::new(request));
-        let response = GRPC_CALLER.scope((headers, Some(deadline)), future).await.unwrap().into_inner();
+        let response = GRPC_CALLER
+            .scope((headers, Some(deadline)), future)
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(response.raw_history.len(), 1);
         assert_eq!(response.raw_history[0].encoding_type, 2);
         assert_eq!(response.raw_history[0].data, vec![0, 1]);
@@ -2441,15 +2476,19 @@ mod workflow_hook_tests {
             error: true,
         });
         let frontend = frontend(api.clone());
-        let error = frontend.get_workflow_execution_history(tonic::Request::new(
-            p::GetWorkflowExecutionHistoryRequest {
-                domain: "sample-domain".into(),
-                workflow_execution: Some(p::WorkflowExecution {
-                    workflow_id: "sample-workflow".into(), run_id: "sample-run".into(),
-                }),
-                ..Default::default()
-            },
-        )).await.unwrap_err();
+        let error = frontend
+            .get_workflow_execution_history(tonic::Request::new(
+                p::GetWorkflowExecutionHistoryRequest {
+                    domain: "sample-domain".into(),
+                    workflow_execution: Some(p::WorkflowExecution {
+                        workflow_id: "sample-workflow".into(),
+                        run_id: "sample-run".into(),
+                    }),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("hook failure"));
         assert_eq!(api.calls.lock().unwrap().len(), 1);
