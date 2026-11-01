@@ -303,8 +303,8 @@ pub fn matching_response_from_started(
         workflow_execution_task_list: started.workflow_execution_task_list.clone(),
         event_store_version: started.event_store_version,
         branch_token: started.branch_token.clone(),
-        scheduled_time: started.scheduled_time.clone(),
-        started_time: started.started_time.clone(),
+        scheduled_time: started.scheduled_time,
+        started_time: started.started_time,
         queries: started.queries.clone(),
         total_history_bytes: started.history_size,
         ..Default::default()
