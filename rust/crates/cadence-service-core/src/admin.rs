@@ -1459,7 +1459,11 @@ pub async fn remove_task(
     if req.task_type.is_none() {
         return bad_request(BadRequestError::new("TaskType is not set on request."));
     }
-    let Some(channel) = state.history_admin_channel.clone() else {
+    let channel = match history_channel_for(&state, req.shard_id, None) {
+        Ok(channel) => channel,
+        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let Some(channel) = channel else {
         return error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1505,7 +1509,11 @@ pub async fn reset_queue(
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
     }
-    let Some(channel) = state.history_admin_channel.clone() else {
+    let channel = match history_channel_for(&state, req.shard_id, None) {
+        Ok(channel) => channel,
+        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let Some(channel) = channel else {
         return error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1546,7 +1554,11 @@ pub async fn describe_queue(
     if req.cluster_name.is_empty() {
         return bad_request(BadRequestError::new("Cluster name is not set."));
     }
-    let Some(channel) = state.history_admin_channel.clone() else {
+    let channel = match history_channel_for(&state, req.shard_id, None) {
+        Ok(channel) => channel,
+        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let Some(channel) = channel else {
         return error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
