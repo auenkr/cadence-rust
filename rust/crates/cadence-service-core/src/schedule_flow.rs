@@ -591,9 +591,14 @@ mod caller_context_tests {
             Box::pin(async move {
                 if operation == "SignalWorkflowExecution"
                     && matches!(request.get("signalName").and_then(serde_json::Value::as_str),
-                        Some(wire::SIGNAL_DELETE | wire::SIGNAL_PAUSE))
+                        Some(wire::SIGNAL_PAUSE))
                 {
                     return Err(CadenceError::EntityNotExists(EntityNotExistsError::new("missing")));
+                }
+                if operation == "SignalWorkflowExecution"
+                    && request.get("signalName").and_then(serde_json::Value::as_str) == Some(wire::SIGNAL_DELETE)
+                {
+                    return Err(CadenceError::BadRequest(BadRequestError::new("signal rejected")));
                 }
                 let response = match operation.as_str() {
                     "QueryWorkflow" => serde_json::json!({ "queryResult": "eyJwYXVzZWQiOmZhbHNlfQ==" }),
