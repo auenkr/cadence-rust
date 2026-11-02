@@ -43,3 +43,7 @@ Reviewed on `frontend-schedule-context-reviewed`. Fixed the short-TTL assertion 
 - The first CI run, https://github.com/auenkr/cadence-rust/actions/runs/41431070009, targeted the pre-follow-up head and is superseded.
 - Current CI: https://github.com/auenkr/cadence-rust/actions/runs/41431354388, package `cadence-service-core`, `format_all=true`, fresh target requested. It targets pushed code head `5e993e09b`; conclusion and any formatting artifact remain pending. No Cargo/rustfmt/Go commands were run locally.
 - No mixed Go/Rust gate was dispatched. This closes only the YARPC/Thrift schedule routing gap and does not establish Frontend service parity.
+
+## YARPC parent review
+
+Routing CI41431354388 failed to compile: dispatcher moved caller_headers into the general hook before borrowing it for schedule dispatch. Corrected by retaining a clone and applied the run's three-file formatting artifact (no local rustfmt). Reviewed code `071cf55d1` on `frontend-schedule-routing-reviewed`; replacement package CI https://github.com/auenkr/cadence-rust/actions/runs/41432145458 is pending. No runtime/CI pass claimed for this routing head.
