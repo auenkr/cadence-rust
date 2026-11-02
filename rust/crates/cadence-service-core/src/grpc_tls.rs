@@ -158,6 +158,14 @@ pub struct ClientTls {
     server_name: Option<String>,
 }
 
+impl std::fmt::Debug for ClientTls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientTls")
+            .field("server_name", &self.server_name)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Go `ToTLSConfig` for a client dialing a gRPC peer. Disabled TLS returns `None`.
 pub fn client_tls(tls: &TlsConfig) -> anyhow::Result<Option<ClientTls>> {
     if !tls.enabled {

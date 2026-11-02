@@ -2299,7 +2299,10 @@ pub async fn dispatch_with_headers(
                 method,
                 body,
                 |req: cadence_api::admin::DescribeShardDistributionRequest| {
-                    crate::admin::describe_shard_distribution(State(shared()), axum::extract::Query(req))
+                    crate::admin::describe_shard_distribution(
+                        State(shared()),
+                        axum::extract::Query(req),
+                    )
                 },
             )
             .await
