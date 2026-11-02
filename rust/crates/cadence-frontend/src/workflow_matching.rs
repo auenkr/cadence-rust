@@ -125,6 +125,7 @@ impl HistoryAccess {
     ) -> Result<(st::History, Vec<u8>), CadenceError> {
         let is_first_page = next_page_token.is_empty();
         let shard_id = workflow_id_to_history_shard(&execution.workflow_id, self.num_shards);
+        eprintln!("GH-TRACE shard={} num_shards={} first={} next={} branch={}", shard_id, self.num_shards, first_event_id, next_event_id, String::from_utf8_lossy(branch_token).escape_default());
         let (mut events, next_token) = self
             .read_full_page(ReadHistoryBranchRequest {
                 branch_token: branch_token.to_vec(),

@@ -19,7 +19,7 @@ cleanup() {
   trap - EXIT INT TERM
   if (( STARTED )); then
     docker exec "$CONTAINER" mysql -uroot -p"$PASSWORD" -h127.0.0.1 --force -e \
-      "SELECT shard_id, HEX(id) id_hex, name, is_global, data_encoding, LENGTH(data) data_len, HEX(LEFT(data,24)) data_head FROM cadence.domains; SELECT * FROM cadence.domain_metadata; SELECT HEX(domain_id) d, name, task_type, range_id FROM cadence.task_lists; SELECT HEX(domain_id) d, task_list_name, task_type, task_id FROM cadence.tasks LIMIT 50; SELECT shard_id, HEX(domain_id) d, workflow_id, HEX(run_id) r FROM cadence.executions LIMIT 20; SELECT shard_id, task_id, LENGTH(data) FROM cadence.transfer_tasks LIMIT 30; SELECT workflow_id, close_status FROM cadence_visibility.executions_visibility LIMIT 20;" \
+      "SELECT shard_id, HEX(id) id_hex, name, is_global, data_encoding, LENGTH(data) data_len, HEX(LEFT(data,24)) data_head FROM cadence.domains; SELECT * FROM cadence.domain_metadata; SELECT HEX(domain_id) d, name, task_type, range_id FROM cadence.task_lists; SELECT HEX(domain_id) d, task_list_name, task_type, task_id FROM cadence.tasks LIMIT 50; SELECT shard_id, HEX(domain_id) d, workflow_id, HEX(run_id) r FROM cadence.executions LIMIT 20; SELECT shard_id, task_id, LENGTH(data) FROM cadence.transfer_tasks LIMIT 30; SELECT shard_id, HEX(tree_id) t, HEX(branch_id) b, node_id, txn_id FROM cadence.history_node LIMIT 40; SELECT workflow_id, close_status FROM cadence_visibility.executions_visibility LIMIT 20;" \
       > "$ARTIFACTS/mysql-domains-dump.txt" 2>&1 || true
     docker logs "$CONTAINER" > "$ARTIFACTS/mysql-container.log" 2>&1 || true
     docker rm --force "$CONTAINER" > "$ARTIFACTS/mysql-container-cleanup.txt" 2>&1 || true
