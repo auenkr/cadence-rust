@@ -394,12 +394,17 @@ impl ProductionBackend {
         let reply = self
             .matching("PollForDecisionTask", envelope, POLL_TIMEOUT)
             .await?;
+        eprintln!("PD-TRACE reply fields={:?}", reply.fields.iter().map(|(i, _)| *i).collect::<Vec<_>>());
         let Some(task) = DecisionTask::from_matching(&reply)? else {
+            eprintln!("PD-TRACE no task");
             return Ok(serde_json::json!({}));
         };
+        eprintln!("PD-TRACE task wf={:?} next_event_id={} started={}", task.execution.workflow_id, task.next_event_id, task.started_event_id);
         let response = self
             .decision_response(&str_field(request, "domainUUID"), task)
-            .await?;
+            .await;
+        eprintln!("PD-TRACE decision_response ok={} events={:?}", response.is_ok(), response.as_ref().ok().and_then(|r| r.history.as_ref().map(|h| h.events.len())));
+        let response = response?;
         to_json(&response)
     }
 
