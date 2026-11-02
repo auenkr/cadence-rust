@@ -169,8 +169,8 @@ func main() {
 		fmt.Printf("SDK schedule %s\n", out)
 		return nil
 	}
-	if step("sched-create-grpc", cli("create", "--sid", schedule, "--ce", "* * * * *", "--wt", "ScheduledWorkflow", "--tl", tl, "--workflow_id_prefix", schedule, "--end_time", "2026-01-01T00:02:00Z")) {
-		step("sched-backfill-grpc", cli("backfill", "--sid", schedule, "--st", "2026-01-01T00:00:00Z", "--endt", "2026-01-01T00:02:00Z"))
+	if step("sched-create-grpc", cli("create", "--sid", schedule, "--ce", "0 0 1 1 *", "--wt", "ScheduledWorkflow", "--tl", tl, "--workflow_id_prefix", schedule)) {
+		step("sched-backfill-grpc", cli("backfill", "--sid", schedule, "--st", "2024-01-01T00:00:00Z", "--endt", "2025-01-01T00:00:00Z"))
 		backfillCtx, stopBackfill := context.WithTimeout(ctx, 3*time.Minute)
 		e := retry(func() error {
 			resp, e := c.ListClosedWorkflow(backfillCtx, &shared.ListClosedWorkflowExecutionsRequest{Domain: &domain, MaximumPageSize: ptr(int32(100)), StartTimeFilter: &shared.StartTimeFilter{EarliestTime: ptr(int64(1)), LatestTime: ptr(time.Now().Add(time.Hour).UnixNano())}})
