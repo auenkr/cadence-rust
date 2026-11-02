@@ -11,6 +11,10 @@ on:
         description: Also run the async workflow (Kafka) acceptance steps (mysql lane only)
         type: boolean
         default: true
+      two_history:
+        description: Run two Go History hosts and kill/restart one during SDK traffic
+        type: boolean
+        default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: fe-integ
@@ -59,6 +63,7 @@ jobs:
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         env:
           CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
+          CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e
           if [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then

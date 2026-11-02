@@ -245,6 +245,9 @@ func main() {
 			listErr = errors.New("open execution not listed within 30s")
 		}
 		step("list-open", listErr)
+		if marks != "" && os.Getenv("FE_CHURN") == "1" {
+			churnPhase(ctx, c, opts, marks)
+		}
 		// 3. restart handshake: harness kills/restarts Rust Frontend while this workflow is open
 		if marks != "" {
 			_ = os.WriteFile(filepath.Join(marks, "restart-request"), []byte("x"), 0o644)
@@ -304,4 +307,64 @@ func retryFor(ctx context.Context, f func() error) error {
 		case <-time.After(2*time.Second):
 		}
 	}
+}
+
+// churnPhase keeps starting and completing workflows (spread over all shards) while the harness
+// kills and restarts the second Go History host.
+func churnPhase(ctx context.Context, c client.Client, opts func(string) client.StartWorkflowOptions, marks string) {
+	_ = os.WriteFile(filepath.Join(marks, "history-churn-request"), []byte("x"), 0o644)
+	stop := make(chan struct{})
+	errs := make(chan error, 8)
+	counts := make(chan int, 8)
+	for w := 0; w < 4; w++ {
+		go func(w int) {
+			n := 0
+			for {
+				select {
+				case <-stop:
+					counts <- n
+					errs <- nil
+					return
+				default:
+				}
+				id := fmt.Sprintf("churn-%d-%s", w, uuid.NewString())
+				var e error
+				for try := 0; try < 30; try++ {
+					var run client.WorkflowRun
+					run, e = c.ExecuteWorkflow(ctx, opts(id), EchoWorkflow, id)
+					if e == nil {
+						var out string
+						if e = run.Get(ctx, &out); e == nil && out != id {
+							e = fmt.Errorf("result %q", out)
+						}
+					}
+					if e == nil {
+						break
+					}
+					time.Sleep(time.Second)
+				}
+				if e != nil {
+					counts <- n
+					errs <- e
+					return
+				}
+				n++
+			}
+		}(w)
+	}
+	step("history-churn-handshake", waitFile(filepath.Join(marks, "history-churn-done"), 8*time.Minute))
+	close(stop)
+	var first error
+	total := 0
+	for w := 0; w < 4; w++ {
+		total += <-counts
+		if e := <-errs; e != nil && first == nil {
+			first = e
+		}
+	}
+	if first == nil && total < 8 {
+		first = fmt.Errorf("only %d workflows completed during churn", total)
+	}
+	step("history-churn-workflows", first)
+	fmt.Printf("SDK churn completed %d workflows\n", total)
 }
