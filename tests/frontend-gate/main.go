@@ -245,6 +245,9 @@ func main() {
 			listErr = errors.New("open execution not listed within 30s")
 		}
 		step("list-open", listErr)
+		if marks != "" && os.Getenv("FE_CHURN") == "1" {
+			churnPhase(ctx, c, opts, marks)
+		}
 		// 3. restart handshake: harness kills/restarts Rust Frontend while this workflow is open
 		if marks != "" {
 			_ = os.WriteFile(filepath.Join(marks, "restart-request"), []byte("x"), 0o644)
