@@ -34,3 +34,12 @@ Domain async configuration already persists in Go SQL/Cassandra and has admin ge
 ## Acceptance limitations / failure semantics
 
 Do not treat handler unit tests or a fake publisher as service completion. A successful async RPC means broker publish acknowledged, not workflow started. Publish errors must return to SDK; never return empty success before ack. Retries can duplicate messages depending on broker delivery and client retry; preserve Go key/type and let existing Go consumer semantics define dedupe (inspect `go/common/asyncworkflow/queue/consumer/default_consumer.go` in implementation). Recovery evidence needs broker restart/reconnect or Frontend restart and proof that acknowledged messages are consumed exactly as Go handles them. Validate first in the current mixed cluster with Rust Frontend and Rust Matching; no Worker/History changes.
+
+## Slice 2 implementation progress (2026-11-03)
+
+- Branch `async-publisher-adapter`. New `cadence_frontend::async_publisher`: `AsyncMessageProducer`/`AsyncProducerFactory` traits (no new dependencies; Kafka client is Slice 3), `QueueAsyncPublisher` (implements `AsyncWorkflowPublisher`: persisted domain async config -> `resolve_domain_queue` -> producer cache -> synchronous-ack publish; errors passed through, `{}` only after ack), `ProducerCache` (queue-ID key, 5 min TTL, max 100, oldest evicted and closed), `ConfiguredQueueProvider` over `asyncWorkflowQueues`, `PersistenceAsyncDomainConfig`.
+- Envelope: partition key = workflow ID, type 0/1, original headers, `thriftrw` versioned payload; domain is not a message field.
+- `workflow_backend::build_workflow_api` now installs the publisher via `install_async_publisher` (`Handler::has_async_publisher` added for the test). Production transport is `UnsupportedTransport`: until Slice 3 any enabled domain gets an Internal error naming the missing transport (never a false success).
+- Tests: envelope for both types and producer reuse, disabled-domain BadRequest with no producer, publish-failure passthrough, cache max eviction/close, TTL expiry, missing transport error, production install test.
+- CI (`rust-ci.yml`, head `32c348da084a66bb964df5fd5c79517f5fecba97`): package run https://github.com/auenkr/cadence-rust/actions/runs/41502590213 **success**; full run https://github.com/auenkr/cadence-rust/actions/runs/41503473735 **success**. First run 41501948164 failed only on rustfmt layout (fixed).
+- Not claimed: real broker publishing, mixed-cluster acceptance, metrics.
