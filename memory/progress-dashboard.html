@@ -56,12 +56,26 @@
   .tile.part{background:var(--part-bg);color:var(--part-ink);border-color:var(--part)}
   .tile.none{background:var(--none-bg);color:var(--none-ink);border-color:var(--line)}
   .tile.skip{background:repeating-linear-gradient(45deg,var(--skip-bg),var(--skip-bg) 6px,transparent 6px,transparent 12px);color:var(--skip-ink);border:1px dashed var(--skip)}
-  .tile.done::after{content:"✓";position:absolute;right:8px;top:6px;font-weight:700}
+  .tile.done::after{content:"✓";position:absolute;right:8px;top:6px;font-weight:700;pointer-events:none}
   .est{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:18px 0}
   .est table{border-collapse:collapse;width:100%;margin-top:10px}
   .est th,.est td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
   .est label{margin-right:18px;font-size:13px}
   .est input{width:70px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+  .tile{padding:0}
+  .tile summary{list-style:none;cursor:pointer;padding:8px 10px;min-height:56px}
+  .tile summary::-webkit-details-marker{display:none}
+  .tile[open]{grid-column:1/-1}
+  .fill{height:5px;border-radius:3px;background:rgba(0,0,0,.12);margin-top:6px;overflow:hidden}
+  .fill i{display:block;height:100%;background:var(--done)}
+  .tile.part .fill i{background:var(--part)}
+  .subs{margin:0;padding:4px 10px 10px;list-style:none;font-size:11.5px;columns:2;column-gap:18px}
+  @media(max-width:1100px){.subs{columns:1}}
+  .subs li{display:flex;justify-content:space-between;gap:8px;padding:2px 6px;border-radius:4px;margin-bottom:2px;break-inside:avoid}
+  .subs li em{opacity:.6;font-style:normal}
+  .subs li.done{background:var(--done-bg);color:var(--done-ink)} .subs li.part{background:var(--part-bg);color:var(--part-ink)}
+  .subs li.none{background:var(--none-bg);color:var(--none-ink)} .subs li.go{background:rgba(255,255,255,.35)}
+  .tile.done::after{top:8px}
   footer{color:var(--muted);font-size:12px;margin-top:24px}
   code{background:var(--none-bg);padding:1px 5px;border-radius:4px}
 </style>
@@ -90,95 +104,97 @@
 
 <script>
 // ============================ DATA (edit me) ============================
-// status: done | part | none | skip     loc = Go non-test lines (go/service/<svc>/<dir>)
+// GOFILES: auto-generated list of Go non-test source files per package: [path, lines]
+const GOFILES = {"matching/config":[["config.go",257]],"matching/event":[["logger.go",66]],"matching/handler":[["engine.go",1818],["handler.go",565],["membership.go",196],["context.go",139],["interfaces.go",73]],"matching/liveness":[["liveness.go",114]],"matching/poller":[["manager.go",238]],"matching/semaphore":[["semaphore_manager.go",570],["identifier.go",74],["semaphore_registry.go",67],["interfaces.go",40]],"matching/tasklist":[["task_list_manager.go",1244],["matcher.go",834],["task_reader.go",578],["adaptive_scaler.go",441],["isolation_balancer.go",425],["testing.go",408],["task_writer.go",344],["forwarder.go",315],["task_completer.go",242],["db.go",241],["task.go",190],["identifier.go",177],["task_list_registry.go",146],["task_list_limiter.go",128],["interfaces.go",127],["shard_processor.go",115],["task_gc.go",101],["shard_processor_factory.go",25]],"matching/wrappers":[["grpc/grpc_handler_generated.go",86],["thrift/thrift_handler_generated.go",63],["thrift/thrift_handler.go",53],["grpc/grpc_handler.go",43]],"history/common":[["type.go",47],["errors.go",46]],"history/config":[["config.go",730]],"history/constants":[["test_constants.go",200],["constants.go",47]],"history/decision":[["task_handler.go",1241],["checker.go",958],["handler.go",948]],"history/engine":[["engineimpl/start_workflow_execution.go",1050],["engineimpl/history_engine.go",481],["engineimpl/query_workflow.go",359],["engineimpl/poll_mutable_state.go",320],["engineimpl/reset_workflow_execution.go",296],["engineimpl/describe_workflow_execution.go",295],["engineimpl/register_domain_failover_callback.go",282],["engineimpl/reapply_events.go",184],["engineimpl/record_activity_task_started.go",170],["engineimpl/get_replication_messages.go",153],["engineimpl/respond_activity_task_failed.go",143],["engineimpl/notify_tasks.go",131],["engineimpl/signal_workflow_execution.go",130],["engineimpl/respond_activity_task_completed.go",126],["engineimpl/respond_activity_task_heartbeat.go",123],["engineimpl/respond_activity_task_canceled.go",123],["engineimpl/record_child_execution_completed.go",120],["engineimpl/request_cancel_workflow_execution.go",111],["engineimpl/terminate_workflow_execution.go",103],["engineimpl/dlq_operations.go",102],["engineimpl/describe_mutable_state.go",87],["interface.go",83],["engineimpl/describe_queues.go",74],["engineimpl/refresh_workflow_tasks.go",72],["engineimpl/reset_sticky_tasklist.go",64],["engineimpl/remove_signal_mutable_state.go",59],["engineimpl/reset_queues.go",54],["engineimpl/respond_decision_task_failed.go",33],["engineimpl/respond_decision_task_completed.go",33],["engineimpl/record_decision_task_started.go",33]],"history/events":[["cache.go",307],["notifier.go",271],["blob.go",53]],"history/execution":[["mutable_state_builder.go",2479],["context.go",1503],["history_builder.go",950],["mutable_state_decision_task_manager.go",884],["mutable_state_builder_methods_activity.go",746],["mutable_state_task_generator.go",714],["state_builder.go",581],["mutable_state_builder_methods_child_workflow.go",535],["timer_sequence.go",511],["mutable_state_task_refresher.go",505],["workflow_repairer.go",450],["cache.go",397],["mutable_state_builder_methods_decision.go",354],["workflow.go",344],["mutable_state_util_test_helpers.go",309],["mutable_state_builder_methods_started.go",301],["mutable_state_builder_methods_timer.go",284],["state_rebuilder.go",281],["mutable_state_builder_methods_signal.go",255],["mutable_state.go",255],["mutable_state_builder_methods_cancellation.go",240],["context_util.go",226],["mutable_state_util.go",199],["mutable_state_builder_methods_semaphore.go",193],["integrity.go",175],["mutable_state_builder_methods_completed.go",158],["checksum.go",115],["retry.go",109],["mutable_state_builder_methods_timedout.go",63],["workflow_execution_util.go",51]],"history/failover":[["coordinator.go",453],["marker_notifier.go",122]],"history/handler":[["handler.go",2289],["interface.go",90]],"history/lookup":[["lookup.go",33]],"history/ndc":[["history_replicator.go",903],["existing_workflow_transaction_manager.go",566],["transaction_manager.go",543],["replication_task.go",403],["new_workflow_transaction_manager.go",393],["activity_replicator.go",322],["branch_manager.go",278],["workflow_resetter.go",237],["conflict_resolver.go",196],["events_reapplier.go",111]],"history/query":[["registry.go",220],["query.go",152]],"history/queue":[["transfer_queue_processor.go",750],["timer_queue_processor_base.go",734],["transfer_queue_processor_base.go",631],["timer_queue_processor.go",566],["processor_base.go",471],["split_policy.go",433],["processing_queue.go",362],["processing_queue_collection.go",238],["task_allocator.go",233],["transfer_queue_validator.go",190],["domain_filter.go",136],["queue_processor_util.go",125],["timer_queue_failover_processor.go",125],["action.go",122],["timer_queue_standby_processor.go",115],["factory.go",113],["processing_queue_state.go",104],["interface.go",97],["timer_queue_active_processor.go",95],["processor_options.go",60],["constants.go",31]],"history/queuev2":[["queue_reader_cached_base.go",749],["virtual_slice.go",612],["queue_reader_cached_scheduled.go",574],["virtual_queue.go",480],["queue_base.go",365],["virtual_queue_manager.go",253],["mitigator.go",240],["queue_scheduled.go",239],["queue_mem.go",235],["queue_immediate.go",212],["transfer_queue_factory.go",194],["timer_queue_factory.go",185],["predicate_operation.go",183],["queue_reader_cached_immediate.go",178],["pause_controller.go",156],["queue_reader.go",150],["monitor.go",125],["pending_task_tracker.go",122],["convert.go",121],["predicate.go",116],["queue_cached.go",75],["queue_state.go",70],["range.go",52],["interface.go",45],["alert.go",21]],"history/replication":[["task_processor.go",782],["dlq_handler.go",398],["task_executor.go",369],["task_fetcher.go",349],["task_hydrator.go",330],["task_ack_manager.go",298],["task_store.go",265],["metrics_emitter.go",182],["dynamic_task_batch_sizer.go",156],["task_reader.go",67]],"history/reset":[["resetter.go",732]],"history/resource":[["resource.go",191],["resource_test_utils.go",71]],"history/shard":[["context.go",2032],["controller.go",605],["task_notifier.go",241],["notifying_execution_manager.go",161],["context_test_utils.go",118]],"history/simulation":[["event.go",52]],"history/task":[["transfer_active_task_executor.go",2045],["timer_active_task_executor.go",937],["transfer_standby_task_executor.go",767],["transfer_task_executor_base.go",657],["timer_standby_task_executor.go",599],["task.go",552],["timer_task_executor_base.go",407],["task_util.go",402],["standby_task_util.go",327],["redispatcher.go",318],["rescheduler.go",292],["processor.go",260],["priority_assigner.go",161],["interface.go",140],["task_rate_limiter.go",113],["event_logger.go",111],["executor_wrapper.go",111],["rate_limited_processor.go",83],["constants.go",36]],"history/taskdlq":[["processor.go",610],["host_limiter.go",42],["interface.go",35],["constants.go",8]],"history/templates":[],"history/testing":[["events_util.go",424],["workflow_util.go",139]],"history/workflow":[["util.go",291],["context.go",88],["errors.go",62]],"history/workflowcache":[["cache.go",242],["metrics.go",78]],"history/wrappers":[["ratelimited/handler_generated.go",329],["grpc/grpc_handler_generated.go",241],["thrift/thrift_handler_generated.go",229],["thrift/thrift_handler.go",53],["grpc/grpc_handler.go",43],["ratelimited/ratelimit.go",27]],"frontend/admin":[["handler.go",1985],["interface.go",78]],"frontend/api":[["handler.go",3425],["handler_schedule.go",996],["request_validator.go",393],["list_workflow_handlers.go",367],["domain_handlers.go",331],["producer_manager.go",122],["task_list_handlers.go",117],["interface.go",101],["handler_semaphore.go",93],["refresh_workflow_tasks.go",55]],"frontend/config":[["config.go",232]],"frontend/templates":[],"frontend/validate":[["errors.go",104]],"frontend/wrappers":[["clusterredirection/api_generated.go",1912],["metered/api_generated.go",1133],["ratelimited/api_generated.go",918],["accesscontrolled/api_generated.go",820],["accesscontrolled/admin_generated.go",670],["clusterredirection/policy.go",560],["versioncheck/api_generated.go",470],["metered/metered.go",422],["grpc/api_generated.go",302],["thrift/api_generated.go",292],["grpc/admin_generated.go",217],["thrift/admin_generated.go",199],["ratelimited/ratelimit.go",112],["accesscontrolled/access_controlled.go",78],["clusterredirection/callwrappers.go",69],["thrift/constructor.go",68],["grpc/share.go",52],["clusterredirection/utils.go",22]]};
+
+// Component = a Go package dir ("dir") whose files become SUBMODULES. Each file's Rust status comes from the first
+// matching rule [regex, status]; files matching no rule get the default "d". Components without "dir" list "subs" by hand:
+// subs: [[name, lines, status]].  status: done | part | none | skip
 const DATA = {
-  asof: "2026-11-01",
-  start: "2026-10-14",           // first Rust commit
+  asof: "2026-11-02",
+  start: "2026-10-14",
   services: [
-    { name: "Matching", order: 1,
-      status: "part",
+    { name: "Matching", order: 1, status: "part",
       acceptance: "Not accepted: fresh workspace CI passes, but 0/10 mixed Go/Rust lanes accepted (PostgreSQL readiness stall under investigation).",
-      note: "Implementation is substantial. Remaining work is mixed-cluster validation, fixing demonstrated defects, parity audit.",
+      note: "Code for every Go file is ported. Remaining work is mixed-cluster validation, fixing demonstrated defects, parity audit.",
       components: [
-        {n:"tasklist (engine, matcher, partitions)", loc:6846, s:"done", r:"matching_engine_*, matching_partition*, matching_forward*"},
-        {n:"handler (RPC)", loc:3307, s:"done", r:"matching_handler*, grpc_matching, thrift_matching_native_dispatch"},
-        {n:"semaphore", loc:929, s:"done", r:"matching_semaphore*"},
-        {n:"config", loc:257, s:"done", r:"matching_config"},
-        {n:"wrappers", loc:245, s:"done", r:"matching_rate / metered"},
-        {n:"poller", loc:238, s:"done", r:"common/poller"},
-        {n:"liveness", loc:114, s:"done", r:"common/liveness"},
-        {n:"event", loc:66, s:"done", r:"matching_task_info_log"},
-        {n:"Persistence (Cassandra/MySQL/PG)", loc:1500, s:"done", r:"cadence-persistence matching_*"},
-        {n:"Transports (TChannel/Thrift/gRPC)", loc:1500, s:"done", r:"tchannel.rs, grpc*.rs"},
-        {n:"Ringpop membership / discovery", loc:1000, s:"done", r:"ringpop_*, matching_membership*"},
-        {n:"Metrics (StatsD/M3/Prom)", loc:800, s:"done", r:"matching_metrics_*"},
-        {n:"Mixed-cluster gates (10 lanes)", loc:2000, s:"part", r:"0/10 accepted"}
+        {n:"tasklist (engine, matcher, partitions)", dir:"matching/tasklist", d:"done", r:"matching_engine_*, matching_partition*, matching_forward*, matching_scaler*"},
+        {n:"handler (RPC)", dir:"matching/handler", d:"done", r:"matching_handler*, grpc_matching"},
+        {n:"semaphore", dir:"matching/semaphore", d:"done", r:"matching_semaphore*"},
+        {n:"config", dir:"matching/config", d:"done"}, {n:"wrappers", dir:"matching/wrappers", d:"done"},
+        {n:"poller", dir:"matching/poller", d:"done"}, {n:"liveness", dir:"matching/liveness", d:"done"}, {n:"event", dir:"matching/event", d:"done"},
+        {n:"Persistence", subs:[["Cassandra task store",500,"done"],["MySQL task store",350,"done"],["PostgreSQL task store",350,"done"],["SQLite task store",150,"done"],["Domain metadata (3 DBs)",150,"done"]]},
+        {n:"Transports", subs:[["TChannel server/client",600,"done"],["Thrift dispatch",400,"done"],["gRPC server/convert",500,"done"],["History outbound client",300,"done"]]},
+        {n:"Ringpop membership / discovery", subs:[["Wire protocol",200,"done"],["Memberlist + disseminator",300,"done"],["Bootstrap / join",200,"done"],["Peer provider",150,"done"],["Shard distributor",150,"done"]]},
+        {n:"Metrics", subs:[["StatsD",250,"done"],["M3",200,"done"],["Prometheus",200,"done"],["Rollup / migration",150,"done"]]},
+        {n:"Mixed-cluster gate lanes", subs:[["PostgreSQL",200,"part"],["MySQL probes",200,"none"],["Thrift/TChannel",200,"none"],["configstore",200,"none"],["shard-distributor/etcd",200,"none"],["two-node MySQL",200,"none"],["Cassandra",200,"none"],["full adaptive",200,"none"],["active offer",200,"none"],["production TLS",200,"none"]]}
       ]},
-    { name: "History", order: 2,
-      status: "none",
+    { name: "Frontend", order: 2, status: "part",
+      acceptance: "Not yet accepted: mixed gate on branch fe-hang is GREEN (run 41377753898: start/signal/query/describe/list open+closed, restart, complete-after-restart). Remaining: remove temp traces, rust-ci clippy/test, Postgres visibility store, IPv6 gRPC bind, parity audit.",
+      note: "fe-workflow-service and fe-admin-domain merged into master, CI green. Submodule statuses below are file-level estimates; 'part' = Rust equivalent exists but some behaviour is missing or unverified.",
+      components: [
+        {n:"api (workflow/domain handlers)", dir:"frontend/api", d:"none", r:"handler_workflow*, handler_domain, handler_schedule", rules:[
+          ["^handler\\.go","part"],["handler_schedule","part"],["list_workflow_handlers","part"],["producer_manager","part"],
+          ["request_validator|domain_handlers|task_list_handlers|interface","done"]]},
+        {n:"admin", dir:"frontend/admin", d:"part", r:"handler_admin* (DLQ, membership missing)", rules:[["interface","done"]]},
+        {n:"wrappers", dir:"frontend/wrappers", d:"done", r:"wrappers/*", rules:[["clusterredirection","part"]]},
+        {n:"config", dir:"frontend/config", d:"done"}, {n:"validate", dir:"frontend/validate", d:"done"},
+        {n:"History / Matching clients", subs:[["history_client",300,"done"],["matching_client",300,"done"]]},
+        {n:"Ringpop join on TChannel", subs:[["Answer ring join on TChannel port",300,"none"]]},
+        {n:"Visibility", subs:[["Cassandra / MySQL visibility",400,"done"],["Postgres visibility store",300,"none"]]},
+        {n:"Mixed-cluster gate", subs:[["Domain CRUD",100,"done"],["Start/complete/signal",100,"done"],["Query / describe / list open+closed",100,"done"],["SIGKILL restart recovery",100,"done"],["Ringpop join",100,"none"],["Clean rust-ci + parity audit",300,"none"]]}
+      ]},
+    { name: "History", order: 3, status: "none",
       acceptance: "Not started. Crate <code>cadence-history</code> is a 5-line stub.",
-      note: "Largest service by far (~75k Go lines, about 6x Matching). Only a few persistence pieces (executions, history_branch) exist as shared infra.",
+      note: "Largest service (~75k Go lines, about 6x Matching). Only shared persistence pieces (executions, history_branch) exist.",
       components: [
-        {n:"execution (mutable state, workflow ctx)", loc:18696, s:"none"},
-        {n:"task (transfer/timer processors)", loc:9882, s:"none"},
-        {n:"queuev2", loc:7159, s:"none"},
-        {n:"queue (v1)", loc:6337, s:"none"},
-        {n:"engine", loc:6227, s:"none"},
-        {n:"ndc (n-DC replication/conflict)", loc:4767, s:"none"},
-        {n:"shard", loc:4155, s:"none"},
-        {n:"replication", loc:3424, s:"none"},
-        {n:"decision", loc:3147, s:"none"},
-        {n:"handler (RPC)", loc:3116, s:"none"},
-        {n:"resource", loc:1075, s:"none"},
-        {n:"wrappers", loc:922, s:"none"},
-        {n:"taskdlq", loc:844, s:"none"},
-        {n:"events", loc:809, s:"none"},
-        {n:"reset", loc:790, s:"none"},
-        {n:"failover", loc:744, s:"none"},
-        {n:"config", loc:730, s:"none"},
-        {n:"query", loc:612, s:"none"},
-        {n:"testing", loc:563, s:"none"},
-        {n:"workflow", loc:441, s:"none"},
-        {n:"workflowcache", loc:388, s:"none"},
-        {n:"constants / common / lookup / simulation", loc:425, s:"none"}
+        {n:"execution (mutable state, workflow ctx)", dir:"history/execution", d:"none"},
+        {n:"task (transfer/timer processors)", dir:"history/task", d:"none"},
+        {n:"queuev2", dir:"history/queuev2", d:"none"}, {n:"queue (v1)", dir:"history/queue", d:"none"},
+        {n:"engine", dir:"history/engine", d:"none"}, {n:"ndc (n-DC)", dir:"history/ndc", d:"none"},
+        {n:"shard", dir:"history/shard", d:"none"}, {n:"replication", dir:"history/replication", d:"none"},
+        {n:"decision", dir:"history/decision", d:"none"}, {n:"handler (RPC)", dir:"history/handler", d:"none"},
+        {n:"resource", dir:"history/resource", d:"none"}, {n:"wrappers", dir:"history/wrappers", d:"none"},
+        {n:"taskdlq", dir:"history/taskdlq", d:"none"}, {n:"events", dir:"history/events", d:"none"},
+        {n:"reset", dir:"history/reset", d:"none"}, {n:"failover", dir:"history/failover", d:"none"},
+        {n:"config", dir:"history/config", d:"none"}, {n:"query", dir:"history/query", d:"none"},
+        {n:"testing", dir:"history/testing", d:"none"}, {n:"workflow", dir:"history/workflow", d:"none"},
+        {n:"workflowcache", dir:"history/workflowcache", d:"none"},
+        {n:"constants / common / lookup / simulation", dirs:["history/constants","history/common","history/lookup","history/simulation"], d:"none"}
       ]},
-    { name: "Frontend", order: 3,
-      status: "part",
-      acceptance: "Not yet accepted: mixed gate on branch fe-hang is GREEN (run 41377753898: start/signal/query/describe/list open+closed, restart, complete-after-restart all pass). Remaining: remove temp traces, rust-ci clippy/test, Postgres visibility store, IPv6 gRPC bind, parity audit.",
-      note: "2026-11-01: fe-workflow-service (gRPC/Thrift routing, polls, history reader, ByID types) and fe-admin-domain (domain audit, Thrift AdminService, schedule via scheduler workflow) are merged into master, CI green. Latest mixed gate not yet accepted (see memory/frontend-*.md).  Passing: domain CRUD, start/complete/signal, list-closed, SIGKILL restart.",
-      components: [
-        {n:"api (workflow/domain handlers)", loc:7207, s:"part", r:"handler_workflow*, handler_domain"},
-        {n:"wrappers (access, ratelimit, redirect, metered, version)", loc:8374, s:"part", r:"wrappers/*"},
-        {n:"admin", loc:2703, s:"part", r:"handler_admin (DLQ, membership missing)"},
-        {n:"config", loc:232, s:"done", r:"config.rs"},
-        {n:"validate", loc:104, s:"done", r:"request_validator.rs"},
-        {n:"schedule API", loc:400, s:"part", r:"handler_schedule"},
-        {n:"History / Matching clients", loc:600, s:"done", r:"history_client, matching_client"},
-        {n:"Ringpop join on TChannel", loc:300, s:"none"},
-        {n:"Mixed-cluster gate", loc:1500, s:"part", r:"workflow exists, failing steps"}
-      ]},
-    { name: "Worker", order: 4,
-      status: "skip",
+    { name: "Worker", order: 4, status: "skip",
       acceptance: "Out of scope: decision 2026-11-01 to keep running the Go Worker next to the Rust services.",
-      note: "The Go Worker must work unmodified against the Rust Frontend. Branch <code>worker-core</code> holds partial scanner/indexer/scheduler ports as reference only.",
+      note: "The Go Worker must work unmodified against the Rust Frontend. Branch <code>worker-core</code> holds partial ports as reference only.",
       components: [
-        {n:"scanner", loc:5502, s:"skip"},
-        {n:"scheduler", loc:2351, s:"skip"},
-        {n:"diagnostics", loc:2308, s:"skip"},
-        {n:"failovermanager", loc:1776, s:"skip"},
-        {n:"archiver", loc:1586, s:"skip"},
-        {n:"batcher", loc:1007, s:"skip"},
-        {n:"indexer", loc:930, s:"skip"},
-        {n:"esanalyzer", loc:885, s:"skip"},
-        {n:"domaindeprecation", loc:576, s:"skip"},
-        {n:"parentclosepolicy", loc:537, s:"skip"},
-        {n:"replicator", loc:365, s:"skip"},
-        {n:"asyncworkflow", loc:292, s:"skip"},
-        {n:"worker / workercommon", loc:265, s:"skip"}
+        {n:"scanner",loc:5502,s:"skip"},{n:"scheduler",loc:2351,s:"skip"},{n:"diagnostics",loc:2308,s:"skip"},{n:"failovermanager",loc:1776,s:"skip"},
+        {n:"archiver",loc:1586,s:"skip"},{n:"batcher",loc:1007,s:"skip"},{n:"indexer",loc:930,s:"skip"},{n:"esanalyzer",loc:885,s:"skip"},
+        {n:"domaindeprecation",loc:576,s:"skip"},{n:"parentclosepolicy",loc:537,s:"skip"},{n:"replicator",loc:365,s:"skip"},
+        {n:"asyncworkflow",loc:292,s:"skip"},{n:"worker / workercommon",loc:265,s:"skip"}
       ]}
   ]
 };
 // ========================================================================
+
+// Expand each component into submodules, then derive status/loc from them.
+DATA.services.forEach(svc=>svc.components.forEach(c=>{
+  if(!c.subs){
+    if(c.s==="skip"){c.subs=[];}
+    else{
+      const dirs=c.dirs||[c.dir]; c.subs=[];
+      dirs.forEach(d=>(GOFILES[d]||[]).forEach(([f,n])=>{
+        const hit=(c.rules||[]).find(r=>new RegExp(r[0]).test(f));
+        c.subs.push([f,n,hit?hit[1]:c.d]);
+      }));
+    }
+  } 
+  if(c.subs.length){
+    c.loc=c.subs.reduce((t,x)=>t+x[1],0);
+    const done=c.subs.filter(x=>x[2]==="done").reduce((t,x)=>t+x[1],0);
+    const part=c.subs.filter(x=>x[2]==="part").reduce((t,x)=>t+x[1],0);
+    c.frac=(done+part*0.5)/c.loc; c.sdone=c.subs.filter(x=>x[2]==="done").length;
+    c.s=c.frac>=0.999?"done":c.frac>0?"part":"none";
+  } else c.frac=0;
+}));
 
 const LBL = {done:"Ported",part:"Partial",none:"Not started",skip:"Stays Go"};
 const W = c => c.loc || 300;
@@ -187,9 +203,10 @@ const pct = (v,t)=> t? Math.round(1000*v/t)/10 : 0;
 
 function calc(svc){
   const cs = svc.components, t = sum(cs,W);
-  const d = sum(cs.filter(c=>c.s==="done"),W);
-  const p = sum(cs.filter(c=>c.s==="part"),W);
-  return {t,d,p,done:pct(d,t),partial:pct(p,t), eff: pct(d+p*0.5,t)};
+  const full = sum(cs,c=>W(c)*(c.frac||0));          // submodule-weighted progress
+  const dn = sum(cs,c=>c.subs.filter(x=>x[2]==="done").reduce((q,x)=>q+x[1],0));
+  const pt = full-dn;                                   // partial contribution (already half-weighted)
+  return {t, d:dn, p:pt*2, done:pct(dn,t), partial:pct(pt*2,t), eff:pct(full,t)};
 }
 
 document.getElementById("asof").textContent = DATA.asof;
@@ -212,10 +229,17 @@ ov.innerHTML = stat("Whole cluster (Worker excluded)", pct(allD,allT), pct(allP,
 const root = document.getElementById("services");
 DATA.services.forEach(s=>{
   const c = calc(s);
+  const ICON={done:"✓",part:"◐",none:"○",skip:"–"};
   const tiles = (cls)=>s.components.map(x=>{
     const k = cls==="go"?"go":x.s;
-    const sub = cls==="go" ? (x.loc?`${x.loc.toLocaleString()} lines`:"") : (x.r||LBL[x.s]);
-    return `<div class="tile ${k}" title="${x.n}${x.r?' → '+x.r:''}"><b>${x.n}</b><small>${sub}</small></div>`;
+    const nd = x.subs.filter(q=>q[2]==="done").length, ns=x.subs.length;
+    const sub = cls==="go" ? (x.loc?`${x.loc.toLocaleString()} lines · ${ns} files`:"")
+                           : (ns?`${nd}/${ns} submodules · ${Math.round(x.frac*100)}%`:LBL[x.s]);
+    const fill = cls==="go"||!ns ? "" : `<div class="fill"><i style="width:${x.frac*100}%"></i></div>`;
+    const list = !ns ? "" : `<ul class="subs">${x.subs.map(q=>cls==="go"
+        ? `<li class="go"><span>${q[0]}</span><em>${q[1]}</em></li>`
+        : `<li class="${q[2]}"><span>${ICON[q[2]]} ${q[0]}</span><em>${q[1]}</em></li>`).join("")}</ul>`;
+    return `<details class="tile ${k}"><summary><b>${x.n}</b><small>${sub}</small>${fill}</summary>${list}</details>`;
   }).join("");
   const badge = {done:["b-done","Complete"],part:["b-part","In progress"],none:["b-none","Not started"],skip:["b-skip","Stays Go"]}[s.status];
   root.insertAdjacentHTML("beforeend",`
@@ -225,8 +249,8 @@ DATA.services.forEach(s=>{
       ${s.status==="skip"?"":` <span class="sub">${c.eff}% ported (by size)</span>`}</span></div>
     <div class="note"><b>Acceptance:</b> ${s.acceptance}<br>${s.note}</div>
     <div class="cols">
-      <div class="fig"><h3>Go version <span class="sub">reference</span></h3><div class="grid">${tiles("go")}</div></div>
-      <div class="fig"><h3>Rust version <span class="sub">${s.components.filter(x=>x.s==="done").length}/${s.components.length} components ported</span></h3><div class="grid">${tiles("rust")}</div></div>
+      <div class="fig"><h3>Go version <span class="sub">${s.components.reduce((t,x)=>t+x.subs.length,0)} source files</span></h3><div class="grid">${tiles("go")}</div></div>
+      <div class="fig"><h3>Rust version <span class="sub">${s.components.reduce((t,x)=>t+x.subs.filter(q=>q[2]==="done").length,0)}/${s.components.reduce((t,x)=>t+x.subs.length,0)} submodules ported · click a block to expand</span></h3><div class="grid">${tiles("rust")}</div></div>
     </div>
   </section>`);
 });
