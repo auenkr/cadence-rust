@@ -309,6 +309,15 @@ impl PostgresTaskStore {
     }
 
     pub fn connect(config: PostgresTaskStoreConfig) -> Result<Self> {
+        Self::connect_inner(config, true)
+    }
+
+    /// Connect to a visibility database without requiring task tables.
+    pub fn connect_visibility_only(config: PostgresTaskStoreConfig) -> Result<Self> {
+        Self::connect_inner(config, false)
+    }
+
+    fn connect_inner(config: PostgresTaskStoreConfig, validate_tasks: bool) -> Result<Self> {
         validate_shard_config(&config)?;
         if config.n_shards > u32::MAX as usize {
             return Err(configuration_error(
@@ -332,7 +341,9 @@ impl PostgresTaskStore {
             let (options, tls) = postgres_options(&shard)?;
             let pool = PostgresConnectionPool::new(options, tls, max_open, max_idle, max_lifetime);
             let mut client = pool.checkout()?;
-            validate_postgres_schema(&mut client)?;
+            if validate_tasks {
+                validate_postgres_schema(&mut client)?;
+            }
             drop(client);
             pools.push(pool);
         }
