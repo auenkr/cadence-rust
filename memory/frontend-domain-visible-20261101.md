@@ -30,3 +30,11 @@ NOTE: `frontend-mixed-gate.yml` defaults `rust_ref=fe-integ`; pass `-f rust_ref=
   or blocking MySQL call on the async runtime for visibility reads) is unproven. Next step: add request-level tracing to Frontend
   gRPC handlers (poll/start/list) and dump matching task_list/tasks tables in the lane before container removal.
 - sdk-list-closed therefore not yet passing; likely downstream of the same hang (no workflow ever closes normally).
+
+## fe-hang findings (2026-11-02)
+- Root cause of decisions never completing: Go SQL `history_node.txn_id` is stored multiplied by -1; Rust readers (MySQL/Postgres) did not revert it, so `read_history_branch` skipped all rows (`txn_id < last_txn_id`) -> EntityNotExists. Fix: negate on read in matching_mysql.rs / matching_postgres.rs. Gate 41371984343: complete-echo, describe-closed, signal, start-signal-query pass.
+- Query hang: Frontend rate-limit wrapper (wrappers/ratelimited.rs) decoded the RespondQueryTaskCompleted token as a workflow TaskToken ("missing field workflowType", surfaced as undeclared InternalServiceError). Fix: use deserialize_query_token. workflow_api.rs fallback error now includes the message.
+- list/describe-open timeouts: visibility reader used the default `cadence` DB (`Table cadence.executions_visibility doesn't exist`); fix opens a separate MySqlTaskStore for `visibilityStore` datastore (cadence_visibility) in matching_task_store.rs (MySQL only; Postgres still TODO).
+- Gate 41374006882 (head after message change) exposed both; fix gate run: 41376086311.
+- Still open: IPv6 `[::1]` gRPC dial from Go worker (Rust Frontend gRPC bind).
+- Gate runs on fe-hang: ...41371984343 (txn fix verified), 41374006882, 41376086311.
