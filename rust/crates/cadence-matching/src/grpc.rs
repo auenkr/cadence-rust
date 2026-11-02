@@ -1803,7 +1803,7 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
                 .call_with_headers(Method::POST, "/api/v1/workflows/list-open", &input, &[])
                 .await?;
             return Ok(Response::new(p::ListOpenWorkflowExecutionsResponse {
-                executions: v.executions.into_iter().map(cv::info).collect(),
+                executions: v.executions.into_iter().map(cv::info_nanos).collect(),
                 next_page_token: v.next_page_token,
             }));
         }
@@ -1872,7 +1872,7 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
                 .call_with_headers(Method::POST, "/api/v1/workflows/list-closed", &input, &[])
                 .await?;
             return Ok(Response::new(p::ListClosedWorkflowExecutionsResponse {
-                executions: v.executions.into_iter().map(cv::info).collect(),
+                executions: v.executions.into_iter().map(cv::info_nanos).collect(),
                 next_page_token: v.next_page_token,
             }));
         }

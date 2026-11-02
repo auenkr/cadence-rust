@@ -361,3 +361,201 @@ pub fn list_schedulers(
     };
     (entries, token)
 }
+
+// ---- Production backend: the scheduler workflow lives in the real History
+// service, so Frontend drives it through the `WorkflowApi` hook (the same
+// handler the workflow operations use) instead of the in-memory store.
+
+use crate::workflow_api::{CallerContext, SharedWorkflowApi};
+
+async fn api_call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
+    api: &SharedWorkflowApi,
+    operation: &str,
+    request: &Req,
+) -> Result<Resp, CadenceError> {
+    let value = serde_json::to_value(request)
+        .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))?;
+    let out = api.call(operation, value, CallerContext::default()).await?;
+    serde_json::from_value(out)
+        .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))
+}
+
+/// Go `CreateSchedule` tail against the real backend.
+pub async fn start_scheduler_api(
+    api: &SharedWorkflowApi,
+    request: &CreateScheduleRequest,
+) -> Result<String, CadenceError> {
+    let start = StartWorkflowExecutionRequest {
+        domain: request.domain.clone(),
+        workflow_id: workflow_id(&request.schedule_id),
+        workflow_type: Some(WorkflowType {
+            name: wire::WORKFLOW_TYPE_NAME.to_string(),
+        }),
+        task_list: Some(TaskList {
+            name: wire::TASK_LIST_NAME.to_string(),
+            ..Default::default()
+        }),
+        input: wire::scheduler_input(request),
+        execution_start_to_close_timeout_seconds: Some(wire::EXECUTION_TIMEOUT_SECONDS),
+        task_start_to_close_timeout_seconds: Some(wire::DECISION_TIMEOUT_SECONDS),
+        request_id: uuid::Uuid::new_v4().to_string(),
+        workflow_id_reuse_policy: Some(WorkflowIDReusePolicy::AllowDuplicate),
+        memo: request.memo.clone(),
+        search_attributes: request.search_attributes.clone(),
+        ..Default::default()
+    };
+    match api_call::<_, serde_json::Value>(api, "StartWorkflowExecution", &start).await {
+        Ok(_) => Ok(request.schedule_id.clone()),
+        Err(CadenceError::WorkflowAlreadyStarted(_)) => {
+            Err(CadenceError::BadRequest(BadRequestError::new(format!(
+                "schedule {:?} already exists in domain {:?}",
+                request.schedule_id, request.domain
+            ))))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Go `signalScheduleWorkflow` against the real backend.
+pub async fn signal_scheduler_api(
+    api: &SharedWorkflowApi,
+    domain: &str,
+    schedule_id: &str,
+    signal_name: &str,
+    input: Vec<u8>,
+) -> Result<(), CadenceError> {
+    let request = SignalWorkflowExecutionRequest {
+        domain: domain.to_string(),
+        workflow_execution: Some(WorkflowExecution::new(
+            workflow_id(schedule_id),
+            String::new(),
+        )),
+        signal_name: signal_name.to_string(),
+        input,
+        request_id: uuid::Uuid::new_v4().to_string(),
+        ..Default::default()
+    };
+    api_call::<_, serde_json::Value>(api, "SignalWorkflowExecution", &request)
+        .await
+        .map(|_| ())
+        .map_err(|e| wire::normalize_schedule_error(e, schedule_id, domain))
+}
+
+/// Go `DeleteSchedule` against the real backend: signal, else terminate.
+pub async fn delete_scheduler_api(
+    api: &SharedWorkflowApi,
+    domain: &str,
+    schedule_id: &str,
+) -> Result<(), CadenceError> {
+    let signal_error =
+        match signal_scheduler_api(api, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new()).await
+        {
+            Ok(()) => return Ok(()),
+            Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
+            Err(e) => e,
+        };
+    if matches!(
+        signal_error,
+        CadenceError::ServiceBusy(_) | CadenceError::Internal(_)
+    ) {
+        return Err(signal_error);
+    }
+    let terminate = TerminateWorkflowExecutionRequest {
+        domain: domain.to_string(),
+        workflow_execution: Some(WorkflowExecution::new(
+            workflow_id(schedule_id),
+            String::new(),
+        )),
+        reason: "terminated by DeleteSchedule".to_string(),
+        ..Default::default()
+    };
+    match api_call::<_, serde_json::Value>(api, "TerminateWorkflowExecution", &terminate).await {
+        Ok(_) => Ok(()),
+        Err(e) if wire::is_schedule_already_gone(&e) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Go `DescribeSchedule` against the real backend: query with bounded retries.
+pub async fn describe_scheduler_api(
+    api: &SharedWorkflowApi,
+    domain: &str,
+    schedule_id: &str,
+) -> Result<DescribeScheduleResponse, CadenceError> {
+    let mut last = None;
+    for attempt in 0..wire::DESCRIBE_RETRY_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_secs(wire::DESCRIBE_RETRY_INTERVAL_SECS)).await;
+        }
+        let request = cadence_api::tasks::QueryWorkflowRequest {
+            domain: domain.to_string(),
+            execution: Some(WorkflowExecution::new(
+                workflow_id(schedule_id),
+                String::new(),
+            )),
+            query: Some(cadence_api::tasks::WorkflowQuery {
+                query_type: wire::QUERY_DESCRIBE.to_string(),
+                query_args: Vec::new(),
+            }),
+            query_reject_condition: Some(QueryRejectCondition::NotCompletedCleanly),
+            ..Default::default()
+        };
+        let result = tokio::time::timeout(
+            QUERY_TIMEOUT,
+            api_call::<_, cadence_api::tasks::QueryWorkflowResponse>(
+                api,
+                "QueryWorkflow",
+                &request,
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(CadenceError::QueryFailed(QueryFailedError::new(
+                "Query timed out.",
+            )))
+        });
+        match result {
+            Ok(resp) => return wire::describe_response(&resp.query_result),
+            Err(CadenceError::QueryFailed(e)) if e.message.contains("decision task") => {
+                last = Some(CadenceError::QueryFailed(e));
+            }
+            Err(e) => {
+                return Err(wire::normalize_schedule_error(e, schedule_id, domain));
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        CadenceError::EntityNotExists(EntityNotExistsError::new(format!(
+            "schedule {schedule_id:?} not found in domain {domain:?}"
+        )))
+    }))
+}
+
+/// Go `ListSchedules` against the real backend: open scheduler workflows.
+pub async fn list_schedulers_api(
+    api: &SharedWorkflowApi,
+    domain: &str,
+    page_size: usize,
+    page_token: &[u8],
+) -> Result<(Vec<ScheduleListEntry>, Vec<u8>), CadenceError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as i64);
+    let request = cadence_api::service_types::ListOpenWorkflowExecutionsRequest {
+        domain: domain.to_string(),
+        maximum_page_size: page_size as i32,
+        next_page_token: page_token.to_vec(),
+        start_time_filter: Some(cadence_api::service_types::StartTimeFilter {
+            earliest_time: Some(0),
+            latest_time: Some(now),
+        }),
+        type_filter: Some(cadence_api::service_types::WorkflowTypeFilter {
+            name: wire::WORKFLOW_TYPE_NAME.to_string(),
+        }),
+        ..Default::default()
+    };
+    let resp: cadence_api::service_types::ListOpenWorkflowExecutionsResponse =
+        api_call(api, "ListOpenWorkflowExecutions", &request).await?;
+    let entries = resp.executions.iter().filter_map(list_entry).collect();
+    Ok((entries, resp.next_page_token))
+}

@@ -50,7 +50,7 @@ text = (root / 'go/config/development.yaml').read_text()
 for k, v in ports.items():
     text = re.sub(r'\$\{' + k + r':\d+\}', v, text)
 text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"', seeds)
-text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
+text = text.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(work / 'dynamic-config.yaml')))
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
@@ -74,7 +74,7 @@ for k, v in ports.items():
 rt, n = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence, rt, count=1); assert n == 1
 rt, n = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rt, count=1); assert n == 1
 rt = rt.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(work / 'rust-dynamic-config.yaml')))
-rt = rt.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
+rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
@@ -205,7 +205,7 @@ try:
             raise
     if ipv6_available:
         kill('rust-frontend')
-        ipv6_config = rt.replace('  frontend:\n', '  frontend:\n', 1)
+        ipv6_config = rt
         ipv6_config, n = re.subn(r'(?s)(  frontend:\n    rpc:\n.*?)(      bindOnLocalHost: true)',
                                 r'\1      bindOnLocalHost: false\n      bindOnIP: "::1"', ipv6_config, count=1)
         assert n == 1, 'Frontend bind config not found'

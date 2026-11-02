@@ -169,10 +169,10 @@ func main() {
 		fmt.Printf("SDK schedule %s\n", out)
 		return nil
 	}
-	if step("sched-create-grpc", cli("create", "--sid", schedule, "--ce", "0 0 1 1 *", "--wt", "ScheduledWorkflow", "--tl", tl, "--workflow_id_prefix", schedule)) {
+	if step("sched-create-grpc", cli("create", "--sid", schedule, "--ce", "0 0 1 1 *", "--wt", "main.ScheduledWorkflow", "--tl", tl, "--workflow_id_prefix", schedule)) {
 		step("sched-backfill-grpc", cli("backfill", "--sid", schedule, "--st", "2024-01-01T00:00:00Z", "--endt", "2025-01-01T00:00:00Z"))
 		backfillCtx, stopBackfill := context.WithTimeout(ctx, 3*time.Minute)
-		e := retry(func() error {
+		e := retryFor(backfillCtx, func() error {
 			resp, e := c.ListClosedWorkflow(backfillCtx, &shared.ListClosedWorkflowExecutionsRequest{Domain: &domain, MaximumPageSize: ptr(int32(100)), StartTimeFilter: &shared.StartTimeFilter{EarliestTime: ptr(int64(1)), LatestTime: ptr(time.Now().Add(time.Hour).UnixNano())}})
 			if e != nil { return e }
 			count := 0
@@ -289,4 +289,15 @@ func retry(f func() error) error {
 		time.Sleep(time.Second)
 	}
 	return err
+}
+
+func retryFor(ctx context.Context, f func() error) error {
+	for {
+		err := f()
+		if err == nil { return nil }
+		select {
+		case <-ctx.Done(): return fmt.Errorf("%v: %w", err, ctx.Err())
+		case <-time.After(2*time.Second):
+		}
+	}
 }
