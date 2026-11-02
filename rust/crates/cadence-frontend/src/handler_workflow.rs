@@ -590,6 +590,15 @@ impl<B: WorkflowBackend> Handler<B> {
     /// Install the Go access-control decorator. This check intentionally runs
     /// outside metering, matching `accesscontrolled.NewAPIHandler` being the
     /// outermost Go handler decorator.
+    /// Emit Go-metered Frontend metrics into a shared exporter sink.
+    pub fn with_metrics_sink(
+        mut self,
+        sink: Arc<dyn cadence_service_core::matching_metrics::MetricSink>,
+    ) -> Self {
+        self.metrics = Arc::new(crate::wrappers::metrics_sink::SinkMetrics::new(sink));
+        self
+    }
+
     pub fn with_access_control(mut self, authorizer: Arc<dyn RequestAuthorization>) -> Self {
         self.access_control = Some(authorizer);
         self
@@ -810,7 +819,8 @@ impl<B: WorkflowBackend> Handler<B> {
                 Ok(response) => Ok(response),
                 Err(error) => {
                     let (error, counter) = crate::wrappers::metered::normalize_error(error);
-                    self.metrics.increment(counter);
+                    self.metrics
+                        .increment_error(operation.name(), &tags, counter);
                     Err(error)
                 }
             }

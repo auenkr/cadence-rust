@@ -28,10 +28,21 @@ impl MatchingMetricsRuntime {
         pprof: Option<&crate::config::PProfConfig>,
         policy: MigrationPolicy,
     ) -> anyhow::Result<Self> {
+        Self::new_for_service(config, pprof, policy, "cadence-matching")
+    }
+
+    /// Same exporter selection for another service (Go tags every root scope
+    /// with `cadence_service=<service role>`).
+    pub fn new_for_service(
+        config: &MetricsConfig,
+        pprof: Option<&crate::config::PProfConfig>,
+        policy: MigrationPolicy,
+        service_role: &str,
+    ) -> anyhow::Result<Self> {
         config.validate()?;
         policy.validate()?;
         let mut root_tags = config.tags.clone();
-        root_tags.insert("cadence_service".into(), "cadence-matching".into());
+        root_tags.insert("cadence_service".into(), service_role.into());
         let interval = Duration::from_nanos(if config.reporting_interval_nanos > 0 {
             config.reporting_interval_nanos as u64
         } else {

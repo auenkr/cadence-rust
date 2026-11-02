@@ -50,6 +50,11 @@ impl Counter {
 
 pub trait Metrics {
     fn increment(&self, counter: Counter);
+    /// Error counter scoped to the API operation and request tags (Go emits
+    /// failures on the per-operation tagged scope). Defaults to `increment`.
+    fn increment_error(&self, _operation: &str, _tags: &[MetricTag], counter: Counter) {
+        self.increment(counter);
+    }
     fn increment_requests(&self, _operation: &str) {}
     fn record_operation(
         &self,
