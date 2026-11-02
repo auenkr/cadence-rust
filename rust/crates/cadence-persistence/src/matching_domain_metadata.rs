@@ -849,18 +849,17 @@ impl CassandraDomainMetadataStore {
                 let session = self.driver.session();
                 let result = self
                     .driver
-                    .run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
+                    .run(session.query_unpaged("SELECT domain.name FROM domains WHERE id=?", (id,)))
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
                 let rows = result
                     .into_rows_result()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
                 let row = rows
-                    .maybe_first_row::<(Option<crate::cassandra::CassandraNullableDomainUdt>,)>()
+                    .maybe_first_row::<(Option<String>,)>()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
                     .and_then(|row| row.0)
-                    .and_then(crate::cassandra::CassandraNullableDomainUdt::into_domain)
                     .ok_or_else(|| MatchingDomainMetadataError::NotFound(id.to_string()))?;
-                self.get_by_name(&row.name)
+                self.get_by_name(&row)
             }
         }
     }

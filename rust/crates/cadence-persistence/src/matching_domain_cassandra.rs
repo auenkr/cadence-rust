@@ -645,21 +645,20 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
         let session = self.driver.session();
         let result = self
             .driver
-            .run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
+            .run(session.query_unpaged("SELECT domain.name FROM domains WHERE id=?", (id,)))
             .map_err(|e| e.to_string())?;
         let rows = result.into_rows_result().map_err(|e| e.to_string())?;
-        let Some(domain) = rows
-            .maybe_first_row::<(Option<crate::cassandra::CassandraNullableDomainUdt>,)>()
+        let Some(name) = rows
+            .maybe_first_row::<(Option<String>,)>()
             .map_err(|e| e.to_string())?
             .and_then(|row| row.0)
-            .and_then(crate::cassandra::CassandraNullableDomainUdt::into_domain)
         else {
             return Ok(());
         };
         self.driver
             .run(session.query_unpaged(
                 "DELETE FROM domains_by_name_v2 WHERE domains_partition=? AND name=?",
-                (DOMAIN_PARTITION, domain.name.clone()),
+                (DOMAIN_PARTITION, name),
             ))
             .map_err(|e| e.to_string())?;
         self.driver
