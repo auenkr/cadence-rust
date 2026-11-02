@@ -14,6 +14,19 @@ pub struct Config {
     /// Dynamic values use Go's canonical key (for example
     /// `frontend.visibilityMaxPageSize`) and may be replaced at runtime.
     pub dynamic: BTreeMap<String, serde_yaml::Value>,
+    /// Provider definitions from Go's top-level `asyncWorkflowQueues` map.
+    #[serde(default)]
+    pub async_workflow_queues: BTreeMap<String, AsyncWorkflowQueueProviderConfig>,
+}
+
+/// Go `AsyncWorkflowQueueProvider`: `type` selects a registered provider and
+/// `config` is provider-specific YAML (for example Kafka's connection/topic).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AsyncWorkflowQueueProviderConfig {
+    #[serde(default, rename = "type")]
+    pub queue_type: String,
+    #[serde(default)]
+    pub config: Option<serde_yaml::Value>,
 }
 
 impl Config {
@@ -31,6 +44,13 @@ impl Config {
             advanced_visibility_store,
             host_name: std::env::var("HOSTNAME").unwrap_or_default(),
             dynamic: BTreeMap::new(),
+            async_workflow_queues: shared
+                .async_workflow_queues
+                .into_iter()
+                .map(|(name, cfg)| {
+                    (name, AsyncWorkflowQueueProviderConfig { queue_type: cfg.queue_type, config: cfg.config })
+                })
+                .collect(),
         })
     }
 

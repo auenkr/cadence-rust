@@ -22,6 +22,14 @@ Domain async configuration already persists in Go SQL/Cassandra and has admin ge
 
 3. **Go-compatible Kafka implementation + mixed acceptance** — Add Kafka producer implementation matching Go queue config (`topic`, brokers, TLS/SASL and remaining `queue/kafka/config.go` fields), synchronous acknowledgement and topic metrics; add shutdown close. Done: broker/mock integration tests for acknowledged publish, broker error propagation and headers/key/type; CI mixed gate with Rust Frontend + Rust Matching (Go History/Worker) and no Go Frontend/Matching. SDK tests call both APIs, observe Go consumer execution for start and signal-with-start; cover disabled config, invalid workflow validation, broker unavailable, Frontend restart, publish recovery and duplicate/retry semantics. Record binary SHA256 and run/head/conclusion in memory.
 
+## Slice 1 implementation progress (2026-11-02)
+
+- Added Go-compatible `asyncWorkflowQueues` provider model to shared server config. Provider-specific `config` remains a YAML value, preserving Go's `*yaml.Node` shape instead of guessing Kafka fields; Frontend `Config::load` now carries the map through.
+- Added `cadence_frontend::async_queue` with Go-equivalent domain selection: disabled check happens before provider lookup, a predefined name wins over inline type/config, and inline queue config is passed through as the original API `DataBlob`. Provider interfaces expose queue ID (for Go's queue-ID producer cache key), provider construction seam, and close lifecycle. Cache constants capture Go's 5-minute TTL and max 100; the bounded cache implementation remains for slice 2.
+- Added unit coverage for YAML provider decoding/defaults, disabled-domain error ordering, predefined precedence, inline selection, and provider lookup error propagation.
+- Shared-file coordination note: `rust/crates/cadence-service-core/src/config.rs` changed only to carry the Go top-level config through the existing loader; no admin_history_proxy or scheduler files touched.
+- CI and commit evidence will be appended after the frontend package workflow completes. This slice is infrastructure only and does not claim a production async publisher or Frontend parity.
+
 ## Acceptance limitations / failure semantics
 
 Do not treat handler unit tests or a fake publisher as service completion. A successful async RPC means broker publish acknowledged, not workflow started. Publish errors must return to SDK; never return empty success before ack. Retries can duplicate messages depending on broker delivery and client retry; preserve Go key/type and let existing Go consumer semantics define dedupe (inspect `go/common/asyncworkflow/queue/consumer/default_consumer.go` in implementation). Recovery evidence needs broker restart/reconnect or Frontend restart and proof that acknowledged messages are consumed exactly as Go handles them. Validate first in the current mixed cluster with Rust Frontend and Rust Matching; no Worker/History changes.
