@@ -403,7 +403,7 @@ impl ProductionBackend {
         let response = self
             .decision_response(&str_field(request, "domainUUID"), task)
             .await;
-        eprintln!("PD-TRACE decision_response ok={} events={:?}", response.is_ok(), response.as_ref().ok().and_then(|r| r.history.as_ref().map(|h| h.events.len())));
+        eprintln!("PD-TRACE decision_response err={:?} events={:?}", response.as_ref().err().map(|e| e.to_string()), response.as_ref().ok().and_then(|r| r.history.as_ref().map(|h| h.events.len())));
         let response = response?;
         to_json(&response)
     }
