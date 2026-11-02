@@ -358,7 +358,7 @@ pub fn open_configured_default_store(
             let store = Arc::new(store.with_encoding_source(encoding_source));
             let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
                 match visibility_config {
-                    Some(c) => Arc::new(MySqlTaskStore::connect(c)?),
+                    Some(c) => Arc::new(MySqlTaskStore::connect_visibility_only(c)?),
                     None => store.clone(),
                 };
             let metadata = Arc::new(metadata);

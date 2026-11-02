@@ -506,6 +506,20 @@ impl MySqlTaskStore {
         Self::connect_with_pools(config, pools)
     }
 
+    /// Connect to a separate Cadence visibility database: only
+    /// `executions_visibility` exists there, so task-schema validation is skipped.
+    pub fn connect_visibility_only(config: MySqlTaskStoreConfig) -> Result<Self> {
+        validate_mysql_shards(&config)?;
+        let pools = Self::create_mysql_pools(&config)?;
+        Ok(Self {
+            pools,
+            n_shards: config.n_shards.max(1),
+            encoding: config.encoding,
+            encoding_source: None,
+            isolation: configured_isolation(&config.connect_attributes)?,
+        })
+    }
+
     /// Construct the task adapter and metadata reader over one shared pool,
     /// keeping their combined connections within Go's configured maxConns.
     pub fn connect_with_domain_metadata(
