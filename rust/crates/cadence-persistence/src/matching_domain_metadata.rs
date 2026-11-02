@@ -399,7 +399,10 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
     put(28, Value::I64(notification_version));
     put(30, Value::I64(failover_notification_version));
     put(32, Value::I64(failover_version));
-    put(50, Value::I64(failover_end_time));
+    // Go: only a positive stored value sets FailoverEndTime.
+    if failover_end_time > 0 {
+        put(50, Value::I64(failover_end_time));
+    }
     put(52, Value::I64(previous_failover_version));
     put(54, Value::I64(last_updated_time));
     let uuid = info.id.to_string();
@@ -849,16 +852,17 @@ impl CassandraDomainMetadataStore {
                 let session = self.driver.session();
                 let result = self
                     .driver
-                    .run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
+                    .run(session.query_unpaged("SELECT domain.name FROM domains WHERE id=?", (id,)))
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
                 let rows = result
                     .into_rows_result()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
                 let row = rows
-                    .maybe_first_row::<(crate::cassandra::CassandraDomainUdt,)>()
+                    .maybe_first_row::<(Option<String>,)>()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
+                    .and_then(|row| row.0)
                     .ok_or_else(|| MatchingDomainMetadataError::NotFound(id.to_string()))?;
-                self.get_by_name(&row.0.name)
+                self.get_by_name(&row)
             }
         }
     }

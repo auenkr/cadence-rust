@@ -10,7 +10,7 @@ import argparse, json, os, re, secrets, signal, socket, subprocess, sys, time
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--database', choices=['mysql', 'postgres'], default='mysql')
+ap.add_argument('--database', choices=['mysql', 'postgres', 'cassandra'], default='mysql')
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--go-server', type=Path, required=True)
@@ -63,9 +63,31 @@ def sql_store(name, db, conns):
     return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(db)}\n'
             f'        connectAddr: {json.dumps(my_addr)}\n        connectProtocol: tcp\n        user: {json.dumps(my_user)}\n'
             f'        password: {json.dumps(my_pass)}\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
-persistence = (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
-               + sql_store(plugin + '-default', 'cadence', 20) + sql_store(plugin + '-visibility', 'cadence_visibility', 2))
-(work / f'config/development_{plugin}.yaml').write_text(persistence)
+if plugin == 'cassandra':
+    cassandra_hosts = os.environ.get('CADENCE_CASSANDRA_CONTACT_POINTS', '127.0.0.1')
+    cassandra_port = int(os.environ.get('CADENCE_CASSANDRA_PORT', '9042'))
+    cassandra_keyspace = os.environ.get('CADENCE_CASSANDRA_KEYSPACE', 'cadence')
+    cassandra_visibility_keyspace = os.environ.get('CADENCE_CASSANDRA_VISIBILITY_KEYSPACE', 'cadence_visibility')
+    go_cassandra = text.replace('hosts: "127.0.0.1"', f'hosts: {json.dumps(cassandra_hosts)}')
+    go_cassandra = go_cassandra.replace('keyspace: "cadence_visibility"', f'keyspace: {json.dumps(cassandra_visibility_keyspace)}')
+    go_cassandra = go_cassandra.replace('keyspace: "cadence"', f'keyspace: {json.dumps(cassandra_keyspace)}')
+    # The Go development config's Cassandra port is the default 9042; keep
+    # generated configs reproducible when the disposable container uses another port.
+    go_cassandra = re.sub(r'(?m)^(\s+port:) 9042$', rf'\1 {cassandra_port}', go_cassandra)
+    (work / 'config/development_cassandra.yaml').write_text(go_cassandra)
+    def cassandra_store(name, keyspace):
+        return (f'    {name}:\n      nosql:\n        pluginName: cassandra\n'
+                f'        hosts: {json.dumps(cassandra_hosts)}\n        port: {cassandra_port}\n'
+                f'        keyspace: {json.dumps(keyspace)}\n        connectTimeout: 2s\n        timeout: 5s\n'
+                '        consistency: LOCAL_QUORUM\n        serialConsistency: LOCAL_SERIAL\n')
+    persistence = ('persistence:\n  defaultStore: cass-default\n  visibilityStore: cass-visibility\n'
+                   '  numHistoryShards: 4\n  datastores:\n'
+                   + cassandra_store('cass-default', cassandra_keyspace)
+                   + cassandra_store('cass-visibility', cassandra_visibility_keyspace))
+else:
+    persistence = (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
+                   + sql_store(plugin + '-default', 'cadence', 20) + sql_store(plugin + '-visibility', 'cadence_visibility', 2))
+    (work / f'config/development_{plugin}.yaml').write_text(persistence)
 rt = (args.rust_root / 'rust/config/development.yaml').read_text()
 for k, v in ports.items():
     rt = re.sub(r'\$\{' + k + r':\d+\}', v, rt)

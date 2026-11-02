@@ -1,11 +1,11 @@
-name: Frontend mixed gate (SQL, Rust Frontend + Rust Matching, Go History/Worker)
+name: Frontend mixed gate (SQL/Cassandra, Rust Frontend + Rust Matching, Go History/Worker)
 on:
   workflow_dispatch:
     inputs:
       database:
-        description: SQL persistence lane
+        description: Persistence lane
         type: choice
-        options: [mysql, postgres]
+        options: [mysql, postgres, cassandra]
         default: mysql
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
@@ -55,12 +55,21 @@ jobs:
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         run: |
           set +e
-          tests/gates/run-frontend-${{ inputs.database || 'mysql' }}-lane.sh out/gate \
-            --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
-            --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
-            --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
-            --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
-            --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          if [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
+            RUST_BACKTRACE=1 tests/gates/run-frontend-cassandra-lane.sh out/gate \
+              --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+              --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+              --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+              --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
+              --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          else
+            tests/gates/run-frontend-${{ inputs.database || 'mysql' }}-lane.sh out/gate \
+              --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+              --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+              --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+              --driver "$GITHUB_WORKSPACE/out/frontend-gate-driver" \
+              --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          fi
           echo $? > out/gate.exit
           grep -E '^(GATE|STEP|SDK|---|RESULT|panic)' out/gate.log | cut -c1-400
           mkdir -p out/logs; cp -r out/gate/run/*.log out/gate/run/*.json out/gate/run/*.cmd out/gate/run/*.yaml out/gate/run/*.sha256 out/logs/ 2>/dev/null || true
