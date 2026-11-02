@@ -174,10 +174,16 @@ func main() {
 			step("restart-handshake", waitFile(filepath.Join(marks, "restart-done"), 5*time.Minute))
 		}
 		step("signal-after-restart", retry(func() error { return c.SignalWorkflow(ctx, sq.GetID(), sq.GetRunID(), "wake", "two") }))
+		// 3b. harness SIGKILLs and restarts Rust Matching while the workflow is open
+		if marks != "" {
+			_ = os.WriteFile(filepath.Join(marks, "matching-restart-request"), []byte("x"), 0o644)
+			step("matching-restart-handshake", waitFile(filepath.Join(marks, "matching-restart-done"), 5*time.Minute))
+		}
+		step("signal-after-matching-restart", retry(func() error { return c.SignalWorkflow(ctx, sq.GetID(), sq.GetRunID(), "wake", "three") }))
 		step("signal-done", retry(func() error { return c.SignalWorkflow(ctx, sq.GetID(), sq.GetRunID(), "done", "") }))
 		var out string
 		err = sq.Get(ctx, &out)
-		if err == nil && out != "final:two" {
+		if err == nil && out != "final:three" {
 			err = fmt.Errorf("result %q", out)
 		}
 		step("complete-after-restart", err)

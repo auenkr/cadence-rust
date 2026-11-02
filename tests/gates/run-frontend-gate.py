@@ -165,6 +165,7 @@ try:
     procs['sdk-driver'] = drv
     sdk_deadline = time.monotonic() + args.sdk_timeout_seconds
     restarted = False
+    m_restarted = False
     while drv.poll() is None:
         if time.monotonic() >= sdk_deadline:
             record('sdk-driver-timeout', False, f'exceeded {args.sdk_timeout_seconds}s wall-clock limit')
@@ -180,6 +181,15 @@ try:
             record('rust-frontend-restarted-listening', ok)
             time.sleep(15)
             (marks / 'restart-done').write_text('x')
+        if (marks / 'matching-restart-request').exists() and not m_restarted:
+            m_restarted = True
+            kill('rust-matching', signal.SIGKILL)
+            record('rust-matching-killed', True)
+            time.sleep(3)
+            start('rust-matching', rust_matching())
+            record('rust-matching-restarted-listening', wait_port(ports['RUST_MATCHING_PORT_GRPC'], 120, 'rust-matching'))
+            time.sleep(20)
+            (marks / 'matching-restart-done').write_text('x')
         time.sleep(1)
     for line in (work / 'sdk.log').read_text().splitlines():
         m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
@@ -190,6 +200,20 @@ try:
     record_services_alive('after-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
+    # ---- Schedules through the Rust Frontend against the real Go Worker scheduler
+    for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+        sid = 'fe-sched-' + tag + '-' + secrets.token_hex(3)
+        sc = [*cli, '--domain', dom_t, 'schedule']
+        run(f'sched-create-{tag}', [*sc, 'create', '--schedule_id', sid, '--cron_expression', '* * * * *',
+            '--workflow_type', 'EchoWorkflow', '--tasklist', 'fe-gate-tl', '--execution_timeout', '60', '--decision_timeout', '10'])
+        time.sleep(15)
+        run(f'sched-describe-{tag}', [*sc, 'describe', '--schedule_id', sid])
+        run(f'sched-pause-{tag}', [*sc, 'pause', '--schedule_id', sid, '--reason', 'gate'])
+        run(f'sched-unpause-{tag}', [*sc, 'unpause', '--schedule_id', sid, '--reason', 'gate'])
+        run(f'sched-backfill-{tag}', [*sc, 'backfill', '--schedule_id', sid, '--start_time', '2026-01-01T00:00:00Z',
+            '--end_time', '2026-01-01T00:03:00Z', '--backfill_id', 'bf-' + tag])
+        run(f'sched-list-{tag}', [*sc, 'list'])
+        run(f'sched-delete-{tag}', [*sc, 'delete', '--schedule_id', sid])
 except SystemExit:
     pass
 except Exception as e:
