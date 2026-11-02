@@ -2968,8 +2968,10 @@ mod frontend_drain_tests {
         headers.insert("Rpc-Header-X-Trace", "rpc".parse().unwrap());
         let before = std::time::Instant::now();
         let ctx = schedule_caller_context(&headers);
+        let after = std::time::Instant::now();
         let deadline = ctx.deadline.unwrap();
-        assert!(deadline.saturating_duration_since(before) <= std::time::Duration::from_millis(1));
+        assert!(deadline >= before + std::time::Duration::from_millis(1));
+        assert!(deadline <= after + std::time::Duration::from_millis(1));
         assert_eq!(ctx.headers.get("x-trace").map(String::as_str), Some("rpc"));
 
         headers.insert("Context-TTL-MS", "400000".parse().unwrap());
