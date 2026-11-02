@@ -92,3 +92,17 @@ are recorded below when available.
 - Frontend package CI dispatched:
   https://github.com/auenkr/cadence-rust/actions/runs/41421435035,
   head `9aae9101da4133951844e749c57fd0367046e5dc`; pending at this checkpoint.
+
+### Final validation complete
+
+- Frontend package CI **success**, fresh target, clippy then tests (149 passed):
+  https://github.com/auenkr/cadence-rust/actions/runs/41421435035,
+  head `9aae9101da4133951844e749c57fd0367046e5dc`.
+- Final fresh uncached **workspace clippy followed by workspace tests: success**:
+  https://github.com/auenkr/cadence-rust/actions/runs/41422156747,
+  head `4df07d90ad30a7ffb6311e820a1aa0760d6e2d9b` (`clean_target=true`).
+  Only evidence/dashboard documentation differs from the package-tested source.
+
+The nested-runtime blocker is resolved and the PostgreSQL lane is green.
+No local Cargo/rustfmt/Go commands were run. Branch remains
+`t3/frontend-postgres-visibility-gate`; no merge or branch deletion performed.
