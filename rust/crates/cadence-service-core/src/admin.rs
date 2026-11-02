@@ -2970,7 +2970,7 @@ mod dynamic_config_admin_tests {
                 .len(),
             2
         );
-        assert_eq!(o.admin_list(false, "")[0].name, BOOL); // sorted by name
+        assert_eq!(o.admin_list(false, "")[0].name, INT); // sorted by name
         o.admin_update(false, INT, vec![]).unwrap();
         assert_eq!(o.admin_list(false, "").len(), 1);
     }
