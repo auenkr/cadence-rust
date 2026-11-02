@@ -1775,7 +1775,7 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
                 domain: r.domain.clone(),
                 maximum_page_size: r.page_size,
                 next_page_token: r.next_page_token.clone(),
-                start_time_filter: proto_time_filter(r.start_time_filter.clone())?,
+                start_time_filter: proto_time_filter(r.start_time_filter)?,
                 execution_filter: match &r.filters {
                     Some(p::list_open_workflow_executions_request::Filters::ExecutionFilter(f)) => {
                         Some(st::WorkflowExecutionFilter {
@@ -1838,7 +1838,7 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
                 domain: r.domain.clone(),
                 maximum_page_size: r.page_size,
                 next_page_token: r.next_page_token.clone(),
-                start_time_filter: proto_time_filter(r.start_time_filter.clone())?,
+                start_time_filter: proto_time_filter(r.start_time_filter)?,
                 execution_filter: match &r.filters {
                     Some(p::list_closed_workflow_executions_request::Filters::ExecutionFilter(
                         f,
