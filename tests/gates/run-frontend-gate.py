@@ -210,6 +210,84 @@ try:
     record_services_alive('after-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
+    # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)
+    def dbq(stmt):
+        c = os.environ.get(prefix + '_DOCKER_CONTAINER')
+        if plugin == 'mysql':
+            cmd = ['docker', 'exec', c, 'mysql', '-uroot', f'-p{my_pass}', '-h127.0.0.1', '-N', '-B', '-e', stmt]
+        elif plugin == 'postgres':
+            cmd = ['docker', 'exec', c, 'psql', '-U', my_user, '-d', 'cadence', '-At', '-c', stmt]
+        else:
+            cmd = ['docker', 'exec', c, 'cqlsh', '-k', cassandra_keyspace, '-e', stmt]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return r.stdout + r.stderr
+    def versions():
+        q = 'SELECT row_type, version FROM ' + ('cadence.' if plugin == 'mysql' else '') + 'cluster_config'
+        out = dbq(q)
+        if plugin == 'cassandra':
+            return [tuple(int(x) for x in re.findall(r'-?\d+', l)[:2]) for l in out.splitlines() if re.match(r'^\s*-?\d+\s*\|\s*-?\d+\s*$', l)]
+        return [tuple(int(x) for x in re.split(r'[\t|]', l)) for l in out.splitlines() if re.match(r'^-?\d+[\t|]-?\d+$', l)]
+    def cli_out(name, cmd, expect=None, absent=None, timeout=60):
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        out = r.stdout + r.stderr
+        (work / f'{name}.log').write_text(out)
+        ok = r.returncode == 0 and (expect is None or expect in out) and (absent is None or absent not in out)
+        record(name, ok, out.strip())
+        return ok
+    def restart_frontend(cfg_path):
+        kill('rust-frontend')
+        start('rust-frontend', [str(c) if c != work / 'rust.yaml' else str(cfg_path) for c in rust_frontend()], env=frontend_env)
+        return wait_port(ports['FRONTEND_PORT'], 120, 'rust-frontend') and wait_port(ports['FRONTEND_PORT_GRPC'], 10, 'rust-frontend')
+    cs_cfg = rt.replace('client: filebased', 'client: configstore', 1)
+    (work / 'rust-configstore.yaml').write_text(cs_cfg)
+    record('dynconfig-restart-with-configstore', restart_frontend(work / 'rust-configstore.yaml'))
+    time.sleep(10)
+    key = 'frontend.visibilityMaxPageSize'
+    admin_t = [*cli_t, 'admin', 'config']
+    val = '{"Value":777,"Filters":[]}'
+    cli_out('dyncfg-update', [*admin_t, 'update', '--name', key, '--value', val])
+    cli_out('dyncfg-get', [*admin_t, 'get', '--name', key], expect='777')
+    cli_out('dyncfg-list', [*admin_t, 'list', '--name', key], expect='777')
+    vs1 = versions()
+    record('dyncfg-db-row-written', len(vs1) >= 1, str(vs1))
+    cli_out('dyncfg-restore', [*admin_t, 'restore', '--name', key])
+    cli_out('dyncfg-get-after-restore', [*admin_t, 'get', '--name', key], absent='777')
+    cli_out('dyncfg-list-after-restore', [*admin_t, 'list', '--name', key], absent='777')
+    vs2 = versions()
+    record('dyncfg-db-version-advanced', len(vs2) > len(vs1), f'{vs1} -> {vs2}')
+    cli_out('dyncfg-update-again', [*admin_t, 'update', '--name', key, '--value', '{"Value":888,"Filters":[]}'])
+    # Seed a second "Go-written" row at the next version (same Go thriftrw blob format) and require it to be readable.
+    latest = max(versions(), key=lambda t: abs(t[1]))
+    if plugin == 'mysql':
+        dbq(f"INSERT INTO cadence.cluster_config (row_type, version, timestamp, data, data_encoding) SELECT row_type, version-1, NOW(6), data, data_encoding FROM cadence.cluster_config WHERE row_type={latest[0]} ORDER BY version LIMIT 1")
+    elif plugin == 'postgres':
+        dbq(f"INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) SELECT row_type, version-1, now(), data, data_encoding FROM cluster_config WHERE row_type={latest[0]} ORDER BY version LIMIT 1")
+    else:
+        o = dbq(f'SELECT values, encoding FROM cluster_config WHERE row_type={latest[0]} AND version={latest[1]}')
+        m = re.search(r'(0x[0-9a-fA-F]+)\s*\|\s*(\S+)', o)
+        if m:
+            dbq(f"INSERT INTO cluster_config (row_type, version, timestamp, values, encoding) VALUES ({latest[0]}, {latest[1] + 1}, toTimestamp(now()), {m.group(1)}, '{m.group(2)}')")
+    vs3 = versions()
+    record('dyncfg-seeded-go-row', len(vs3) == len(versions()) and len(vs3) > len(vs2), f'{vs2} -> {vs3}')
+    record('dynconfig-restart-persistence', restart_frontend(work / 'rust-configstore.yaml'))
+    time.sleep(10)
+    cli_out('dyncfg-get-after-restart', [*admin_t, 'get', '--name', key], expect='888')
+    cli_out('dyncfg-update-after-seed', [*admin_t, 'update', '--name', key, '--value', '{"Value":999,"Filters":[]}'])
+    cli_out('dyncfg-get-after-seed-update', [*admin_t, 'get', '--name', key], expect='999')
+    vs4 = versions()
+    record('dyncfg-db-version-after-seed', len(vs4) > len(vs3), f'{vs3} -> {vs4}')
+    sa = 'GateAttr' + secrets.token_hex(2)
+    r = subprocess.run([*cli_t, 'admin', 'cluster', 'add-search-attr', '--search_attr_key', sa, '--search_attr_type', '2'],
+                       input='y\n', capture_output=True, text=True, timeout=60)
+    (work / 'add-search-attr.log').write_text(r.stdout + r.stderr)
+    record('dyncfg-add-search-attr', r.returncode == 0, r.stdout + r.stderr)
+    vs5 = versions()
+    record('dyncfg-add-search-attr-persisted', len(vs5) > len(vs4), f'{vs4} -> {vs5}')
+    record('dynconfig-restart-search-attr', restart_frontend(work / 'rust-configstore.yaml'))
+    time.sleep(10)
+    cli_out('dyncfg-list-search-attr-after-restart', [*admin_t, 'list'], expect=sa)
+    (work / 'rust.yaml').write_text(rt)
+    record('dynconfig-restart-filebased', restart_frontend(work / 'rust.yaml'))
     # Exercise the configured IPv6 listener with an actual gRPC request, not a TCP-only probe.
     ipv6_available = True
     try:

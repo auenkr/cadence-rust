@@ -36,6 +36,7 @@ done
 for ks in "$KEYSPACE" "$VISIBILITY_KEYSPACE"; do
   echo "CREATE KEYSPACE IF NOT EXISTS $ks WITH replication = {'class':'SimpleStrategy','replication_factor':1};" | docker exec -i "$CONTAINER" cqlsh || exit 5
 done
+export CADENCE_CASSANDRA_DOCKER_CONTAINER="$CONTAINER"
 export CADENCE_CASSANDRA_CONTACT_POINTS=127.0.0.1 CADENCE_CASSANDRA_PORT="$PORT"
 export CADENCE_CASSANDRA_KEYSPACE="$KEYSPACE" CADENCE_CASSANDRA_VISIBILITY_KEYSPACE="$VISIBILITY_KEYSPACE"
 python3 "$ROOT/tests/gates/run-frontend-gate.py" --database cassandra --out "$ARTIFACTS/run" "$@"

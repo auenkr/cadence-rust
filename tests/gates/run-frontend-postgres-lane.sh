@@ -32,6 +32,7 @@ done
 for database in cadence cadence_visibility; do
   docker exec "$CONTAINER" createdb -U postgres "$database" || exit 5
 done
+export CADENCE_POSTGRES_DOCKER_CONTAINER="$CONTAINER"
 export CADENCE_POSTGRES_ADDR="127.0.0.1:${PORT}" CADENCE_POSTGRES_USER=postgres
 export CADENCE_POSTGRES_PASSWORD=cadence CADENCE_POSTGRES_DATABASE=cadence
 export CADENCE_POSTGRES_VISIBILITY_DATABASE=cadence_visibility CADENCE_POSTGRES_SSLMODE=disable
