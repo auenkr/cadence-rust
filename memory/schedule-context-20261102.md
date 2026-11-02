@@ -27,3 +27,7 @@ Commit `2353717e8062367cb39ce58350fb93d32f403b2b` changes schedule API functions
 - Scope gap: YARPC schedule procedure handlers remain on their existing local execution-store path and are not covered by this HTTP WorkflowApi context slice. No mixed Go/Rust cluster gate is claimed.
 - Source/tests commit: `3e93b82b1921a9be0ec7f9423d33a248d8b4e06f`.
 - CI handoff: https://github.com/auenkr/cadence-rust/actions/runs/41430225291, dispatched for package `cadence-service-core` with `format_all=true` (format patch may be uploaded as an artifact). At dispatch the run was active; conclusion and formatting artifact application remain pending. Do not treat as validated until the artifact is inspected/applied if present and a final CI run passes on the resulting exact head.
+
+## Parent review correction
+
+Reviewed on `frontend-schedule-context-reviewed`. Fixed the short-TTL assertion to bracket the actual context capture between before/after instants. Changed the delete-signal mock from EntityNotExists (which intentionally returns idempotent success without termination) to BadRequest, so the expected TerminateWorkflowExecution fallback is actually exercised. Code head `66fd2b282`; replacement CI with formatting requested: https://github.com/auenkr/cadence-rust/actions/runs/41430427854. Conclusion pending. No local Cargo/Go/formatting commands executed.
