@@ -230,6 +230,9 @@ impl MatchingRingpopProvider {
 pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>);
 
 impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership {
+    fn history_host(&self, address: &str) -> Result<Option<cadence_common::membership::Host>, String> {
+        Ok(self.0.snapshot().members.iter().find(|member| member.address == address).and_then(|member| member.matching_host("cadence-history")))
+    }
     fn history_owner(&self, shard: i32) -> Result<Option<cadence_common::membership::Host>, String> {
         use cadence_common::membership::Ring;
         let snapshot = self.0.snapshot();

@@ -283,6 +283,10 @@ pub trait ClusterMembership: Send + Sync {
     fn who_am_i(&self) -> Result<String, String>;
     fn members(&self, role: &str) -> Result<Vec<String>, String>;
 
+    fn history_host(&self, address: &str) -> Result<Option<cadence_common::membership::Host>, String> {
+        Ok(self.members("cadence-history")?.into_iter().find(|member| member == address).map(|identity| cadence_common::membership::Host { address: identity.clone(), identity, grpc_address: String::new() }))
+    }
+
     /// Resolve the Go rune shard key on the live History ring.
     fn history_owner(&self, shard: i32) -> Result<Option<cadence_common::membership::Host>, String> {
         use cadence_common::membership::{Host, Ring};
@@ -1379,7 +1383,14 @@ fn history_channel_for(
     explicit: Option<&str>,
 ) -> Result<Option<tonic::transport::Channel>, String> {
     let peer = match explicit {
-        Some(address) => Some(address.to_owned()),
+        Some(address) => match state.admin.membership.get() {
+            Some(resolver) => match resolver.history_host(address)? {
+                Some(host) => Some(host.grpc_address),
+                None if resolver.members("cadence-history")?.is_empty() => None,
+                None => return Err("History host is not a member".into()),
+            },
+            None => None,
+        },
         None => state.admin.membership.get().map(|resolver| resolver.history_owner(shard)).transpose()?.flatten().map(|host| host.grpc_address),
     };
     match peer {
