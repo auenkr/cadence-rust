@@ -2189,17 +2189,32 @@ fn schedule_bad_request(e: BadRequestError) -> Response {
 /// Carry the HTTP caller metadata and relative deadline into WorkflowService,
 /// matching the Go handlers which pass their request context to every backend RPC.
 fn schedule_caller_context(headers: &HeaderMap) -> crate::workflow_api::CallerContext {
+    // HTTP's caller TTL is a remaining budget. Do not apply YARPC's historical
+    // transport clamp here: raising a short TTL or capping a longer one would
+    // change the caller's deadline. Missing or malformed values use the same
+    // 60 second HTTP default as the WorkflowService dispatcher.
     let ttl_ms = headers
         .get("Context-TTL-MS")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(60_000)
-        .clamp(100, 300_000);
-    let forwarded = headers.iter().filter_map(|(name, value)| {
-        let name = name.as_str().to_ascii_lowercase();
-        let name = name.strip_prefix("rpc-header-").unwrap_or(&name).to_owned();
-        Some((name, value.to_str().ok()?.to_owned()))
-    }).collect();
+        .unwrap_or(60_000);
+    let mut forwarded = std::collections::HashMap::new();
+    // Insert plain headers first and the explicit YARPC-style application
+    // headers second. This makes `x-foo` + `rpc-header-x-foo` deterministic:
+    // the prefixed application value wins, independent of HeaderMap order.
+    for prefixed in [false, true] {
+        for (name, value) in headers {
+            let lower = name.as_str().to_ascii_lowercase();
+            let is_prefixed = lower.starts_with("rpc-header-");
+            if is_prefixed != prefixed {
+                continue;
+            }
+            let key = if prefixed { &lower[11..] } else { &lower };
+            if let Ok(value) = value.to_str() {
+                forwarded.insert(key.to_owned(), value.to_owned());
+            }
+        }
+    }
     crate::workflow_api::CallerContext {
         deadline: Some(std::time::Instant::now() + std::time::Duration::from_millis(ttl_ms)),
         headers: forwarded,
@@ -2944,6 +2959,24 @@ mod frontend_drain_tests {
     use axum::http::{Request, StatusCode};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
+
+    #[test]
+    fn schedule_context_preserves_remaining_ttl_and_resolves_header_collisions() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Context-TTL-MS", "1".parse().unwrap());
+        headers.insert("x-trace", "plain".parse().unwrap());
+        headers.insert("Rpc-Header-X-Trace", "rpc".parse().unwrap());
+        let before = std::time::Instant::now();
+        let ctx = schedule_caller_context(&headers);
+        let deadline = ctx.deadline.unwrap();
+        assert!(deadline.saturating_duration_since(before) <= std::time::Duration::from_millis(1));
+        assert_eq!(ctx.headers.get("x-trace").map(String::as_str), Some("rpc"));
+
+        headers.insert("Context-TTL-MS", "400000".parse().unwrap());
+        let before = std::time::Instant::now();
+        let ctx = schedule_caller_context(&headers);
+        assert!(ctx.deadline.unwrap().saturating_duration_since(before) >= std::time::Duration::from_millis(400_000));
+    }
 
     #[derive(Debug)]
     struct TestLimiter(Arc<AtomicUsize>);
