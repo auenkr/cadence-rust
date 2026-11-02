@@ -119,6 +119,18 @@ impl Drop for OpenFeatureLifecycle {
     }
 }
 
+/// Listener defaults stay IPv4; an explicit bindOnIP may select either family.
+fn rpc_bind_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::net::IpAddr> {
+    match rpc {
+        Some(r) if r.bind_on_local_host && !r.bind_on_ip.is_empty() => {
+            anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive")
+        }
+        Some(r) if r.bind_on_local_host => Ok(std::net::Ipv4Addr::LOCALHOST.into()),
+        Some(r) if !r.bind_on_ip.is_empty() => matching_listen_ip(Some(r)),
+        _ => Ok(std::net::Ipv4Addr::UNSPECIFIED.into()),
+    }
+}
+
 fn matching_listen_ip(rpc: Option<&config::RpcConfig>) -> anyhow::Result<std::net::IpAddr> {
     if let Some(rpc) = rpc {
         if rpc.bind_on_local_host && !rpc.bind_on_ip.is_empty() {
@@ -1185,11 +1197,7 @@ async fn run_with_lifecycle(
             let grpc_port = grpc_port
                 .or_else(|| frontend_rpc.map(|r| r.grpc_port).filter(|p| *p > 0))
                 .unwrap_or(7833);
-            let grpc_bind = if frontend_rpc.is_some_and(|r| r.bind_on_local_host) {
-                [127, 0, 0, 1]
-            } else {
-                [0, 0, 0, 0]
-            };
+            let grpc_bind = rpc_bind_ip(frontend_rpc)?;
             let grpc_addr = std::net::SocketAddr::from((grpc_bind, grpc_port));
             let tchannel_port = tchannel_port
                 .or_else(|| frontend_rpc.map(|r| r.port).filter(|p| *p > 0))
@@ -1231,14 +1239,7 @@ async fn run_with_lifecycle(
             let matching_rpc = cfg.services.get("matching").map(|s| s.rpc.clone());
             // Go binds gRPC and TChannel to `rpc.bindOnIP` when set; the wildcard
             // fallback keeps unconfigured deployments reachable on every interface.
-            let matching_bind_ip: std::net::IpAddr = match matching_rpc.as_ref() {
-                Some(r) if r.bind_on_local_host && !r.bind_on_ip.is_empty() => {
-                    anyhow::bail!("bindOnLocalHost and bindOnIP are mutually exclusive")
-                }
-                Some(r) if r.bind_on_local_host => std::net::Ipv4Addr::LOCALHOST.into(),
-                Some(r) if !r.bind_on_ip.is_empty() => matching_listen_ip(Some(r))?,
-                _ => std::net::Ipv4Addr::UNSPECIFIED.into(),
-            };
+            let matching_bind_ip = rpc_bind_ip(matching_rpc.as_ref())?;
             let matching_addr = std::net::SocketAddr::from((
                 matching_bind_ip,
                 matching_grpc_port
@@ -2827,6 +2828,58 @@ mod matching_http_listener_tests {
             .await
             .unwrap();
         assert_eq!(accepting.await.unwrap(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn rpc_listener_parses_both_address_families_and_preserves_defaults() {
+        for (yaml, expected) in [
+            ("{}", "0.0.0.0:7833"),
+            ("bindOnLocalHost: true", "127.0.0.1:7833"),
+            ("bindOnIP: 127.0.0.2", "127.0.0.2:7833"),
+            ("bindOnIP: '::1'", "[::1]:7833"),
+            ("bindOnIP: '::'", "[::]:7833"),
+        ] {
+            let rpc: config::RpcConfig = serde_yaml::from_str(yaml).unwrap();
+            let addr = std::net::SocketAddr::new(rpc_bind_ip(Some(&rpc)).unwrap(), 7833);
+            assert_eq!(addr.to_string(), expected);
+        }
+        assert_eq!(rpc_bind_ip(None).unwrap(), std::net::Ipv4Addr::UNSPECIFIED);
+        for yaml in [
+            "bindOnIP: invalid",
+            "bindOnIP: '::1'\nbindOnLocalHost: true",
+        ] {
+            let rpc: config::RpcConfig = serde_yaml::from_str(yaml).unwrap();
+            assert!(rpc_bind_ip(Some(&rpc)).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn rpc_listener_binds_ipv4_and_ipv6_loopback() {
+        for ip in ["127.0.0.1", "::1"] {
+            let rpc: config::RpcConfig =
+                serde_yaml::from_str(&format!("bindOnIP: '{ip}'")).unwrap();
+            let addr = std::net::SocketAddr::new(rpc_bind_ip(Some(&rpc)).unwrap(), 0);
+            let listener = match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => listener,
+                Err(err)
+                    if addr.is_ipv6()
+                        && matches!(
+                            err.kind(),
+                            std::io::ErrorKind::AddrNotAvailable
+                                | std::io::ErrorKind::Unsupported
+                        ) =>
+                {
+                    eprintln!("IPv6 unavailable: {err}");
+                    continue;
+                }
+                Err(err) => panic!("bind {addr}: {err}"),
+            };
+            let bound = listener.local_addr().unwrap();
+            assert_eq!(bound.ip(), addr.ip());
+            let client = tokio::net::TcpStream::connect(bound).await.unwrap();
+            let (_, peer) = listener.accept().await.unwrap();
+            assert_eq!(peer, client.local_addr().unwrap());
+        }
     }
 
     #[test]
