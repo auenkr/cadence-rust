@@ -2276,7 +2276,10 @@ async fn create_schedule(
         return bad_request(e);
     }
     let started = match &state.workflow_api {
-        Some(api) => crate::schedule_flow::start_scheduler_api(api, &req, &schedule_caller_context(&headers)).await,
+        Some(api) => {
+            crate::schedule_flow::start_scheduler_api(api, &req, &schedule_caller_context(&headers))
+                .await
+        }
         None => crate::schedule_flow::start_scheduler(&executions, &req),
     };
     match started {
@@ -2322,7 +2325,13 @@ async fn describe_schedule(
     }
     let described = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id, &schedule_caller_context(&headers)).await
+            crate::schedule_flow::describe_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                &schedule_caller_context(&headers),
+            )
+            .await
         }
         None => {
             crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id)
@@ -2411,7 +2420,13 @@ async fn delete_schedule(
     }
     let deleted = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id, &schedule_caller_context(&headers)).await
+            crate::schedule_flow::delete_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                &schedule_caller_context(&headers),
+            )
+            .await
         }
         None => crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id),
     };
@@ -2977,7 +2992,10 @@ mod frontend_drain_tests {
         headers.insert("Context-TTL-MS", "400000".parse().unwrap());
         let before = std::time::Instant::now();
         let ctx = schedule_caller_context(&headers);
-        assert!(ctx.deadline.unwrap().saturating_duration_since(before) >= std::time::Duration::from_millis(400_000));
+        assert!(
+            ctx.deadline.unwrap().saturating_duration_since(before)
+                >= std::time::Duration::from_millis(400_000)
+        );
     }
 
     #[derive(Debug)]
