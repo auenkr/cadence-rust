@@ -283,8 +283,19 @@ pub trait ClusterMembership: Send + Sync {
     fn who_am_i(&self) -> Result<String, String>;
     fn members(&self, role: &str) -> Result<Vec<String>, String>;
 
-    fn history_host(&self, address: &str) -> Result<Option<cadence_common::membership::Host>, String> {
-        Ok(self.members("cadence-history")?.into_iter().find(|member| member == address).map(|identity| cadence_common::membership::Host { address: identity.clone(), identity, grpc_address: String::new() }))
+    fn history_host(
+        &self,
+        address: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
+        Ok(self
+            .members("cadence-history")?
+            .into_iter()
+            .find(|member| member == address)
+            .map(|identity| cadence_common::membership::Host {
+                address: identity.clone(),
+                identity,
+                grpc_address: String::new(),
+            }))
     }
 
     /// Resolve the Go rune shard key on the live History ring.
@@ -1439,7 +1450,14 @@ fn history_channel_for(
             },
             None => None,
         },
-        None => state.admin.membership.get().map(|resolver| resolver.history_owner(shard)).transpose()?.flatten().map(|host| host.grpc_address),
+        None => state
+            .admin
+            .membership
+            .get()
+            .map(|resolver| resolver.history_owner(shard))
+            .transpose()?
+            .flatten()
+            .map(|host| host.grpc_address),
     };
     match peer {
         None => Ok(state.history_admin_channel.clone()),
@@ -1517,7 +1535,13 @@ pub async fn remove_task(
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
-        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
     };
     let Some(channel) = channel else {
         return error_response(
@@ -1567,7 +1591,13 @@ pub async fn reset_queue(
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
-        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
     };
     let Some(channel) = channel else {
         return error_response(
@@ -1612,7 +1642,13 @@ pub async fn describe_queue(
     }
     let channel = match history_channel_for(&state, req.shard_id, None) {
         Ok(channel) => channel,
-        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
     };
     let Some(channel) = channel else {
         return error_response(
