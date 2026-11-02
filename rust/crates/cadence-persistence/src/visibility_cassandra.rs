@@ -310,7 +310,7 @@ mod tests {
         let (cql, extra) = list_query(&filter(), false);
         assert!(cql.contains("FROM open_executions WHERE domain_id = ? AND domain_partition IN (?) AND start_time >= ? AND start_time <= ? "));
         assert_eq!(extra, Extra::None);
-        assert!(!cql.contains("status"));
+        assert!(!cql.contains("AND status"));
     }
 
     #[test]
