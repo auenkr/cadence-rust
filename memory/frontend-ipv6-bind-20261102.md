@@ -29,4 +29,30 @@ Formatting/validation rerun:
 - Run: https://github.com/auenkr/cadence-rust/actions/runs/41411296796
 - Head: `087dd8c587d5314b4ed4b9b8d3b366dd57fc9815`
 - Dispatch: same command with `-f format_all=true`; formatting runs on CI only.
-- Conclusion: pending.
+- Conclusion: cancelled as superseded by the formatted branch head.
+
+Crate validation:
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41411339193
+- Head: `e5ad5041116e5e9cf359694015d538408b351b73`
+- Dispatch: `gh workflow run rust-ci.yml --ref t3/frontend-ipv6-bind -f package=cadence-matching -f clean_target=true`
+- Conclusion: **success**. Formatting, clippy (`--all-targets -- -D warnings`),
+  and `cargo test -p cadence-matching` passed in a fresh uncached target directory.
+
+Both new tests explicitly passed in the crate CI log:
+- `launcher::matching_http_listener_tests::rpc_listener_binds_ipv4_and_ipv6_loopback`
+- `launcher::matching_http_listener_tests::rpc_listener_parses_both_address_families_and_preserves_defaults`
+
+Final broader workspace validation:
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41412637746
+- Head: `e5ad5041116e5e9cf359694015d538408b351b73`
+- Dispatch: `gh workflow run rust-ci.yml --ref t3/frontend-ipv6-bind -f clean_target=true`
+- Conclusion: **failure**. Fresh-target workspace clippy passed, then workspace
+  tests failed in `cadence-service-core/tests/e2e.rs`:
+  `admin_cluster_config_and_workflow_maintenance` at line 1306 (None unwrap), and
+  `admin_reapply_replication_dlq_and_cross_cluster` at line 1686 (500 History client
+  is not configured, expected 200). These exercise service-core admin/history
+  handlers rather than the changed Matching launcher; no unrelated fixes included.
+
+No mixed gate was run and no IPv6 gRPC end-to-end claim is made. The required
+crate-specific CI is green; the broader workspace failure remains for the parent.
+The final evidence-only commit does not change the validated Rust sources.
