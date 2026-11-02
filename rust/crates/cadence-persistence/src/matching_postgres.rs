@@ -496,21 +496,24 @@ impl MatchingTaskStore for PostgresTaskStore {
         row_type: i32,
     ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
         // Go sqlplugin/postgres SelectLatestConfig on the default shard.
-        let mut lease = self.pools[0].checkout().map_err(|e| e.to_string())?;
-        let row = lease
-            .query_opt(
-                "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = $1 ORDER BY version LIMIT 1;",
-                &[&row_type],
-            )
-            .map_err(|e| e.to_string())?;
-        match row {
-            None => Ok(None),
-            Some(row) => Ok(Some(crate::config_store::ConfigStoreRow {
-                version: -row.try_get::<_, i64>(0).map_err(|e| e.to_string())?,
-                data: row.try_get(1).map_err(|e| e.to_string())?,
-                encoding: row.try_get(2).map_err(|e| e.to_string())?,
-            })),
-        }
+        // The sync postgres driver owns a runtime: run off any caller runtime.
+        outside_runtime(|| {
+            let mut lease = self.pools[0].checkout().map_err(|e| e.to_string())?;
+            let row = lease
+                .query_opt(
+                    "SELECT version, data, data_encoding FROM cluster_config WHERE row_type = $1 ORDER BY version LIMIT 1;",
+                    &[&row_type],
+                )
+                .map_err(|e| e.to_string())?;
+            match row {
+                None => Ok(None),
+                Some(row) => Ok(Some(crate::config_store::ConfigStoreRow {
+                    version: -row.try_get::<_, i64>(0).map_err(|e| e.to_string())?,
+                    data: row.try_get(1).map_err(|e| e.to_string())?,
+                    encoding: row.try_get(2).map_err(|e| e.to_string())?,
+                })),
+            }
+        })
     }
 
     fn insert_config(
@@ -520,23 +523,25 @@ impl MatchingTaskStore for PostgresTaskStore {
     ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
         use crate::config_store::ConfigWriteError;
         // Go sqlplugin/postgres InsertConfig on the default shard (negated version).
-        let mut lease = self.pools[0]
-            .checkout()
-            .map_err(|e| ConfigWriteError::Other(e.to_string()))?;
-        let version = -row.version;
-        match lease.execute(
-            "INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) VALUES ($1, $2, now(), $3, $4)",
-            &[&row_type, &version, &row.data, &row.encoding],
-        ) {
-            Ok(_) => Ok(()),
-            Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => {
-                Err(ConfigWriteError::ConditionFailed(format!(
-                    "Version {} already exists. Condition Failed",
-                    row.version
-                )))
+        outside_runtime(|| {
+            let mut lease = self.pools[0]
+                .checkout()
+                .map_err(|e| ConfigWriteError::Other(e.to_string()))?;
+            let version = -row.version;
+            match lease.execute(
+                "INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) VALUES ($1, $2, now(), $3, $4)",
+                &[&row_type, &version, &row.data, &row.encoding],
+            ) {
+                Ok(_) => Ok(()),
+                Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => {
+                    Err(ConfigWriteError::ConditionFailed(format!(
+                        "Version {} already exists. Condition Failed",
+                        row.version
+                    )))
+                }
+                Err(e) => Err(ConfigWriteError::Other(e.to_string())),
             }
-            Err(e) => Err(ConfigWriteError::Other(e.to_string())),
-        }
+        })
     }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
