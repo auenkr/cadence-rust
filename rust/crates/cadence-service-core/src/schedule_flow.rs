@@ -451,13 +451,20 @@ pub async fn delete_scheduler_api(
     schedule_id: &str,
     ctx: &CallerContext,
 ) -> Result<(), CadenceError> {
-    let signal_error =
-        match signal_scheduler_api(api, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new(), ctx).await
-        {
-            Ok(()) => return Ok(()),
-            Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
-            Err(e) => e,
-        };
+    let signal_error = match signal_scheduler_api(
+        api,
+        domain,
+        schedule_id,
+        wire::SIGNAL_DELETE,
+        Vec::new(),
+        ctx,
+    )
+    .await
+    {
+        Ok(()) => return Ok(()),
+        Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
+        Err(e) => e,
+    };
     if matches!(
         signal_error,
         CadenceError::ServiceBusy(_) | CadenceError::Internal(_)
@@ -473,7 +480,8 @@ pub async fn delete_scheduler_api(
         reason: "terminated by DeleteSchedule".to_string(),
         ..Default::default()
     };
-    match api_call::<_, serde_json::Value>(api, "TerminateWorkflowExecution", &terminate, ctx).await {
+    match api_call::<_, serde_json::Value>(api, "TerminateWorkflowExecution", &terminate, ctx).await
+    {
         Ok(_) => Ok(()),
         Err(e) if wire::is_schedule_already_gone(&e) => Ok(()),
         Err(e) => Err(e),
@@ -572,13 +580,19 @@ mod caller_context_tests {
     use super::*;
     use crate::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
     use cadence_api::errors::EntityNotExistsError;
-    use std::{collections::HashMap, sync::{Arc, Mutex}, time::Instant};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+        time::Instant,
+    };
 
     #[derive(Debug, Default)]
     struct CapturingApi(Mutex<Vec<(String, CallerContext)>>);
 
     impl WorkflowApi for CapturingApi {
-        fn serves(&self, _: &str) -> bool { true }
+        fn serves(&self, _: &str) -> bool {
+            true
+        }
 
         fn call<'a>(
             &'a self,
@@ -590,18 +604,31 @@ mod caller_context_tests {
             self.0.lock().unwrap().push((operation.clone(), ctx));
             Box::pin(async move {
                 if operation == "SignalWorkflowExecution"
-                    && matches!(request.get("signalName").and_then(serde_json::Value::as_str),
-                        Some(wire::SIGNAL_PAUSE))
+                    && matches!(
+                        request
+                            .get("signalName")
+                            .and_then(serde_json::Value::as_str),
+                        Some(wire::SIGNAL_PAUSE)
+                    )
                 {
-                    return Err(CadenceError::EntityNotExists(EntityNotExistsError::new("missing")));
+                    return Err(CadenceError::EntityNotExists(EntityNotExistsError::new(
+                        "missing",
+                    )));
                 }
                 if operation == "SignalWorkflowExecution"
-                    && request.get("signalName").and_then(serde_json::Value::as_str) == Some(wire::SIGNAL_DELETE)
+                    && request
+                        .get("signalName")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(wire::SIGNAL_DELETE)
                 {
-                    return Err(CadenceError::BadRequest(BadRequestError::new("signal rejected")));
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "signal rejected",
+                    )));
                 }
                 let response = match operation.as_str() {
-                    "QueryWorkflow" => serde_json::json!({ "queryResult": "eyJwYXVzZWQiOmZhbHNlfQ==" }),
+                    "QueryWorkflow" => {
+                        serde_json::json!({ "queryResult": "eyJwYXVzZWQiOmZhbHNlfQ==" })
+                    }
                     "ListOpenWorkflowExecutions" => serde_json::json!({ "executions": [] }),
                     _ => serde_json::json!({}),
                 };
@@ -619,24 +646,41 @@ mod caller_context_tests {
             deadline: Some(deadline),
             headers: HashMap::from([("x-caller".into(), "preserved".into())]),
         };
-        let create = CreateScheduleRequest { domain: "d".into(), schedule_id: "s".into(), ..Default::default() };
+        let create = CreateScheduleRequest {
+            domain: "d".into(),
+            schedule_id: "s".into(),
+            ..Default::default()
+        };
         start_scheduler_api(&api, &create, &ctx).await.unwrap();
         describe_scheduler_api(&api, "d", "s", &ctx).await.unwrap();
         list_schedulers_api(&api, "d", 10, &[], &ctx).await.unwrap();
-        let signal_error = signal_scheduler_api(&api, "d", "s", wire::SIGNAL_PAUSE, Vec::new(), &ctx).await.unwrap_err();
+        let signal_error =
+            signal_scheduler_api(&api, "d", "s", wire::SIGNAL_PAUSE, Vec::new(), &ctx)
+                .await
+                .unwrap_err();
         assert!(matches!(signal_error, CadenceError::EntityNotExists(ref e)
             if e.message.contains("schedule") && e.message.contains("s")));
         delete_scheduler_api(&api, "d", "s", &ctx).await.unwrap();
 
         let calls = mock.0.lock().unwrap();
         let operations: Vec<_> = calls.iter().map(|(op, _)| op.as_str()).collect();
-        assert_eq!(operations, [
-            "StartWorkflowExecution", "QueryWorkflow", "ListOpenWorkflowExecutions",
-            "SignalWorkflowExecution", "SignalWorkflowExecution", "TerminateWorkflowExecution",
-        ]);
+        assert_eq!(
+            operations,
+            [
+                "StartWorkflowExecution",
+                "QueryWorkflow",
+                "ListOpenWorkflowExecutions",
+                "SignalWorkflowExecution",
+                "SignalWorkflowExecution",
+                "TerminateWorkflowExecution",
+            ]
+        );
         for (_, captured) in calls.iter() {
             assert_eq!(captured.deadline, Some(deadline));
-            assert_eq!(captured.headers.get("x-caller").map(String::as_str), Some("preserved"));
+            assert_eq!(
+                captured.headers.get("x-caller").map(String::as_str),
+                Some("preserved")
+            );
         }
     }
 }
