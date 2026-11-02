@@ -165,6 +165,15 @@ Cassandra: check `uptime; free -h` first. To use an existing Cassandra instead, 
 the harness directly with `--cassandra --cassandra-hosts H --cassandra-port P
 --cassandra-keyspace K --cassandra-visibility-keyspace V`; the schemas must already exist.
 
+## Frontend Cassandra lane
+
+`frontend-mixed-gate.yml` can also run the Frontend SDK/restart lane against Cassandra:
+choose `database=cassandra`. It starts a disposable, resource-limited Cassandra 4.1.7
+container, creates the two Go keyspaces, and invokes `run-frontend-gate.py` with Rust
+Frontend + Rust Matching and Go History/Worker. Go `--auto-setup` installs the original
+Cadence schemas. The lane stores the Rust binary hash and logs in the three-day Actions
+artifact. This is bounded runtime evidence and does not establish full Frontend parity.
+
 ## MySQL lane wrapper
 
 `tests/gates/run-mysql-lane.sh ARTIFACTS_DIR BINARY [harness args]` starts a limited, uniquely named `mysql:8.0.36` container, creates both databases, runs `--rust-services matching --mysql` and removes only that container. Add `--matching-transport thrift` for the Thrift lane.
