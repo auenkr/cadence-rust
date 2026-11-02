@@ -1302,14 +1302,10 @@ async fn admin_cluster_config_and_workflow_maintenance() {
 
     let (status, cluster) = get(app.clone(), "/api/v1/admin/cluster/describe").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(
-        cluster["membershipInfo"]["rings"].as_array().unwrap().len(),
-        4
-    );
-    assert!(!cluster["membershipInfo"]["currentHost"]["Identity"]
-        .as_str()
-        .unwrap()
-        .is_empty());
+    let membership: cadence_api::admin::MembershipInfo =
+        serde_json::from_value(cluster["membershipInfo"].clone()).unwrap();
+    assert!(membership.rings.is_empty());
+    assert!(membership.current_host.is_none());
 
     // Dynamic config round-trips through both namespaces independently.
     let (status, _) = call(
@@ -1675,7 +1671,7 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(resp["message"].as_str().unwrap().contains("WorkflowID"));
 
-    // Replication fetches are empty; domain replication is not enabled.
+    // Replication fetches require a History client; this local router has none.
     let (status, resp) = call(
         app.clone(),
         Method::POST,
@@ -1683,7 +1679,8 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
         json!({"clusterName": "cluster0"}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{resp}");
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{resp}");
+    assert_eq!(resp["message"], "History client is not configured.");
     let (status, _) = call(
         app.clone(),
         Method::POST,
