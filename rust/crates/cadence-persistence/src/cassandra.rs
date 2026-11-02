@@ -616,10 +616,16 @@ impl CassandraBlockingSession {
     /// Drive one Scylla operation from a Tokio blocking-pool worker. Calling
     /// this on an async worker is forbidden because it blocks that worker.
     pub fn run<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.runtime
-            .as_ref()
-            .expect("live Cassandra runtime")
-            .block_on(future)
+        let runtime = self.runtime.as_ref().expect("live Cassandra runtime");
+        // Sync store traits are also called from async handlers (e.g. Matching
+        // domain-cache refresh). block_in_place leaves the caller's runtime
+        // context so the private runtime's block_on is legal there.
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(|| runtime.block_on(future))
+            }
+            _ => runtime.block_on(future),
+        }
     }
 
     pub fn default_consistency(&self) -> Consistency {
