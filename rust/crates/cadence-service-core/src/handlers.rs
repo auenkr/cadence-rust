@@ -2186,8 +2186,44 @@ fn schedule_bad_request(e: BadRequestError) -> Response {
     error_response("BadRequestError", StatusCode::BAD_REQUEST, e.message)
 }
 
+/// Carry the HTTP caller metadata and relative deadline into WorkflowService,
+/// matching the Go handlers which pass their request context to every backend RPC.
+fn schedule_caller_context(headers: &HeaderMap) -> crate::workflow_api::CallerContext {
+    // HTTP's caller TTL is a remaining budget. Do not apply YARPC's historical
+    // transport clamp here: raising a short TTL or capping a longer one would
+    // change the caller's deadline. Missing or malformed values use the same
+    // 60 second HTTP default as the WorkflowService dispatcher.
+    let ttl_ms = headers
+        .get("Context-TTL-MS")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(60_000);
+    let mut forwarded = std::collections::HashMap::new();
+    // Insert plain headers first and the explicit YARPC-style application
+    // headers second. This makes `x-foo` + `rpc-header-x-foo` deterministic:
+    // the prefixed application value wins, independent of HeaderMap order.
+    for prefixed in [false, true] {
+        for (name, value) in headers {
+            let lower = name.as_str().to_ascii_lowercase();
+            let is_prefixed = lower.starts_with("rpc-header-");
+            if is_prefixed != prefixed {
+                continue;
+            }
+            let key = if prefixed { &lower[11..] } else { &lower };
+            if let Ok(value) = value.to_str() {
+                forwarded.insert(key.to_owned(), value.to_owned());
+            }
+        }
+    }
+    crate::workflow_api::CallerContext {
+        deadline: Some(std::time::Instant::now() + std::time::Duration::from_millis(ttl_ms)),
+        headers: forwarded,
+    }
+}
+
 async fn create_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::CreateScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2240,7 +2276,10 @@ async fn create_schedule(
         return bad_request(e);
     }
     let started = match &state.workflow_api {
-        Some(api) => crate::schedule_flow::start_scheduler_api(api, &req).await,
+        Some(api) => {
+            crate::schedule_flow::start_scheduler_api(api, &req, &schedule_caller_context(&headers))
+                .await
+        }
         None => crate::schedule_flow::start_scheduler(&executions, &req),
     };
     match started {
@@ -2265,6 +2304,7 @@ fn validate_schedule_cron(expr: &str) -> Result<(), String> {
 
 async fn describe_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::DescribeScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2285,7 +2325,13 @@ async fn describe_schedule(
     }
     let described = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id).await
+            crate::schedule_flow::describe_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                &schedule_caller_context(&headers),
+            )
+            .await
         }
         None => {
             crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id)
@@ -2300,6 +2346,7 @@ async fn describe_schedule(
 
 async fn list_schedules(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::ListSchedulesRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2326,6 +2373,7 @@ async fn list_schedules(
             &req.domain,
             page_size,
             &req.next_page_token,
+            &schedule_caller_context(&headers),
         )
         .await
         {
@@ -2351,6 +2399,7 @@ async fn list_schedules(
 
 async fn delete_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::DeleteScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2371,7 +2420,13 @@ async fn delete_schedule(
     }
     let deleted = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id).await
+            crate::schedule_flow::delete_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                &schedule_caller_context(&headers),
+            )
+            .await
         }
         None => crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id),
     };
@@ -2387,6 +2442,7 @@ async fn delete_schedule(
 
 async fn pause_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::PauseScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2415,6 +2471,7 @@ async fn pause_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2438,6 +2495,7 @@ async fn pause_schedule(
 
 async fn unpause_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::UnpauseScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2466,6 +2524,7 @@ async fn unpause_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2489,6 +2548,7 @@ async fn unpause_schedule(
 
 async fn backfill_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::BackfillScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2540,6 +2600,7 @@ async fn backfill_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2563,6 +2624,7 @@ async fn backfill_schedule(
 
 async fn update_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::UpdateScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2625,6 +2687,7 @@ async fn update_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2911,6 +2974,29 @@ mod frontend_drain_tests {
     use axum::http::{Request, StatusCode};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
+
+    #[test]
+    fn schedule_context_preserves_remaining_ttl_and_resolves_header_collisions() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Context-TTL-MS", "1".parse().unwrap());
+        headers.insert("x-trace", "plain".parse().unwrap());
+        headers.insert("Rpc-Header-X-Trace", "rpc".parse().unwrap());
+        let before = std::time::Instant::now();
+        let ctx = schedule_caller_context(&headers);
+        let after = std::time::Instant::now();
+        let deadline = ctx.deadline.unwrap();
+        assert!(deadline >= before + std::time::Duration::from_millis(1));
+        assert!(deadline <= after + std::time::Duration::from_millis(1));
+        assert_eq!(ctx.headers.get("x-trace").map(String::as_str), Some("rpc"));
+
+        headers.insert("Context-TTL-MS", "400000".parse().unwrap());
+        let before = std::time::Instant::now();
+        let ctx = schedule_caller_context(&headers);
+        assert!(
+            ctx.deadline.unwrap().saturating_duration_since(before)
+                >= std::time::Duration::from_millis(400_000)
+        );
+    }
 
     #[derive(Debug)]
     struct TestLimiter(Arc<AtomicUsize>);

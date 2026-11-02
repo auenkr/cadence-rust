@@ -1822,7 +1822,9 @@ pub async fn get_workflow_execution_raw_history(
     }
 }
 
-/// Admin workflow describe: shard placement plus the mutable state as JSON.
+/// Admin workflow describe: shard placement plus History's mutable-state
+/// diagnostic. This is Admin's DescribeMutableState delegation, not the
+/// WorkflowService DescribeWorkflowExecution operation.
 pub async fn describe_workflow_execution_admin(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::AdminDescribeWorkflowExecutionRequest>,
@@ -1831,23 +1833,100 @@ pub async fn describe_workflow_execution_admin(
     if execution.workflow_id.is_empty() {
         return bad_request(BadRequestError::new("Execution is not set on request."));
     }
-    if let Some(e) = require_domain(&state, &req.domain).await {
-        return e;
+    // An unconfigured History transport is retained for embedded/local
+    // service-core use. Production Frontend always installs this channel.
+    if state.history_admin_channel.is_none() && state.admin.membership.get().is_none() {
+        if let Some(e) = require_domain(&state, &req.domain).await {
+            return e;
+        }
+        let executions = match state.execution_store(&req.domain) {
+            Ok(store) => store,
+            Err(error) => return entity_not_exists(error),
+        };
+        return match executions.describe_admin(&req.domain, &execution) {
+            Ok((shard_id, history_addr, state_json)) => {
+                ok_json(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
+                    shard_id,
+                    history_addr,
+                    mutable_state_in_cache: state_json.clone(),
+                    mutable_state_in_database: state_json,
+                })
+            }
+            Err(e) => entity_not_exists(e),
+        };
     }
-    let executions = match state.execution_store(&req.domain) {
-        Ok(store) => store,
+
+    let shard_id = (cadence_common::membership::fingerprint32(execution.workflow_id.as_bytes())
+        % shard_count(&state).max(1) as u32) as i32;
+    let domain_id = match state.domain_manager.domain_id(&req.domain) {
+        Ok(id) => id,
         Err(error) => return entity_not_exists(error),
     };
-    match executions.describe_admin(&req.domain, &execution) {
-        Ok((shard_id, history_addr, state_json)) => {
+    let owner = match state
+        .admin
+        .membership
+        .get()
+        .map(|resolver| resolver.history_owner(shard_id))
+        .transpose()
+    {
+        Ok(owner) => owner.flatten(),
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let (history_addr, channel) = match history_channel_for(&state, shard_id, None) {
+        Ok(Some(channel)) => (
+            owner
+                .as_ref()
+                .map(|host| host.address.clone())
+                .unwrap_or_default(),
+            channel,
+        ),
+        Ok(None) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "History client is not configured.".to_string(),
+            )
+        }
+        Err(error) => {
+            return error_response(
+                "InternalServiceError",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                error,
+            )
+        }
+    };
+    let request = cadence_proto::history::DescribeMutableStateRequest {
+        domain_id,
+        workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+            workflow_id: execution.workflow_id,
+            run_id: execution.run_id,
+        }),
+    };
+    let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
+    match client
+        .describe_mutable_state(history_admin_request(request))
+        .await
+    {
+        Ok(response) => {
+            let response = response.into_inner();
             ok_json(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
                 shard_id,
                 history_addr,
-                mutable_state_in_cache: state_json.clone(),
-                mutable_state_in_database: state_json,
+                mutable_state_in_cache: response.mutable_state_in_cache,
+                mutable_state_in_database: response.mutable_state_in_database,
             })
         }
-        Err(e) => entity_not_exists(e),
+        Err(error) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            error.message().to_string(),
+        ),
     }
 }
 

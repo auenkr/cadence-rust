@@ -57,6 +57,18 @@ pub struct Config {
     /// Matching's shard-manager namespace/executor settings.
     #[serde(default, rename = "shard-distributor-matching")]
     pub shard_distributor_matching: ShardDistributorMatchingConfig,
+    /// Go common/config.Config.AsyncWorkflowQueues. Provider-specific `config`
+    /// remains an untyped YAML value, matching Go's yaml.Node contract.
+    #[serde(default, rename = "asyncWorkflowQueues")]
+    pub async_workflow_queues: HashMap<String, AsyncWorkflowQueueProviderConfig>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AsyncWorkflowQueueProviderConfig {
+    #[serde(default, rename = "type")]
+    pub queue_type: String,
+    #[serde(default)]
+    pub config: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -1514,6 +1526,29 @@ clusterMetadata:
             "active"
         );
         cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_go_async_workflow_queue_provider_map_without_erasing_provider_config() {
+        let config: Config = serde_yaml::from_str(
+            "asyncWorkflowQueues:\n  primary:\n    type: kafka\n    config:\n      connection:\n        brokers: [kafka-a:9092, kafka-b:9092]\n      topic: workflows\n",
+        )
+        .unwrap();
+        let provider = &config.async_workflow_queues["primary"];
+        assert_eq!(provider.queue_type, "kafka");
+        assert_eq!(provider.config.as_ref().unwrap()["topic"], "workflows");
+        assert_eq!(
+            provider.config.as_ref().unwrap()["connection"]["brokers"][0],
+            "kafka-a:9092"
+        );
+    }
+
+    #[test]
+    fn async_workflow_queue_provider_config_defaults_like_go_zero_values() {
+        let config: Config = serde_yaml::from_str("asyncWorkflowQueues:\n  empty: {}\n").unwrap();
+        let provider = &config.async_workflow_queues["empty"];
+        assert_eq!(provider.queue_type, "");
+        assert_eq!(provider.config, None);
     }
 
     #[test]

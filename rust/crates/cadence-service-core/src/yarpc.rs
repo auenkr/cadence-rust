@@ -1539,7 +1539,30 @@ fn schedule_error(e: cadence_persistence::ScheduleError) -> AppError {
     }
 }
 
-async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+fn schedule_api_context(
+    deadline: Instant,
+    headers: &std::collections::HashMap<String, String>,
+) -> crate::workflow_api::CallerContext {
+    crate::workflow_api::CallerContext {
+        deadline: Some(deadline),
+        headers: headers.clone(),
+    }
+}
+
+fn schedule_api_error(error: cadence_api::errors::CadenceError) -> AppError {
+    let (exc_name, value, message) = crate::workflow_api::error_to_thrift(&error);
+    AppError {
+        exc_name,
+        value,
+        message,
+    }
+}
+
+async fn handle_create_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{CreateScheduleRequest, CreateScheduleResponse};
     use cadence_api::validation;
     let req: CreateScheduleRequest =
@@ -1572,6 +1595,12 @@ async fn handle_create_schedule(state: &AppState, body: &Struct) -> HandlerResul
         .map_err(|e| AppError::bad_request(e.message))?;
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(api) = &state.workflow_api {
+        return crate::schedule_flow::start_scheduler_api(api, &req, ctx)
+            .await
+            .map(|id| wrap_success(&CreateScheduleResponse { schedule_id: id }))
+            .map_err(schedule_api_error);
+    }
     let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .create_schedule(&req.domain, &req)
@@ -1591,32 +1620,88 @@ fn validate_schedule_cron_thrift(expr: &str) -> Result<(), AppError> {
         .map_err(AppError::bad_request)
 }
 
-async fn handle_describe_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_describe_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::DescribeScheduleRequest;
     let req: DescribeScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
         ));
     }
+    if let Some(api) = &state.workflow_api {
+        return crate::schedule_flow::describe_scheduler_api(
+            api,
+            &req.domain,
+            &req.schedule_id,
+            ctx,
+        )
+        .await
+        .map(|resp| wrap_success(&resp))
+        .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .describe_schedule(&req.domain, &req.schedule_id)
         .map(|resp| wrap_success(&resp))
         .map_err(schedule_error)
 }
 
-async fn handle_list_schedules(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_list_schedules(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{ListSchedulesRequest, ListSchedulesResponse};
     let req: ListSchedulesRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     let page_size = if req.page_size <= 0 {
         10
     } else {
         req.page_size as usize
     };
+    if let Some(api) = &state.workflow_api {
+        return crate::schedule_flow::list_schedulers_api(
+            api,
+            &req.domain,
+            page_size,
+            &req.next_page_token,
+            ctx,
+        )
+        .await
+        .map(|(schedules, next_page_token)| {
+            wrap_success(&ListSchedulesResponse {
+                schedules,
+                next_page_token,
+            })
+        })
+        .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     let (schedules, next_page_token) =
         executions.list_schedules(&req.domain, page_size, &req.next_page_token);
     Ok(wrap_success(&ListSchedulesResponse {
@@ -1625,27 +1710,60 @@ async fn handle_list_schedules(state: &AppState, body: &Struct) -> HandlerResult
     }))
 }
 
-async fn handle_delete_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_delete_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{DeleteScheduleRequest, DeleteScheduleResponse};
     let req: DeleteScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
         ));
     }
+    if let Some(api) = &state.workflow_api {
+        return crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id, ctx)
+            .await
+            .map(|()| wrap_success(&DeleteScheduleResponse {}))
+            .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .delete_schedule(&req.domain, &req.schedule_id)
         .map(|()| wrap_success(&DeleteScheduleResponse {}))
         .map_err(schedule_error)
 }
 
-async fn handle_pause_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_pause_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{PauseScheduleRequest, PauseScheduleResponse};
     let req: PauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1656,33 +1774,89 @@ async fn handle_pause_schedule(state: &AppState, body: &Struct) -> HandlerResult
     } else {
         req.identity.clone()
     };
+    if let Some(api) = &state.workflow_api {
+        let input = crate::scheduler_wire::pause_signal(&req);
+        return crate::schedule_flow::signal_scheduler_api(
+            api,
+            &req.domain,
+            &req.schedule_id,
+            crate::scheduler_wire::SIGNAL_PAUSE,
+            input,
+            ctx,
+        )
+        .await
+        .map(|()| wrap_success(&PauseScheduleResponse {}))
+        .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .pause_schedule(&req.domain, &req.schedule_id, &req.reason, &actor)
         .map(|()| wrap_success(&PauseScheduleResponse {}))
         .map_err(schedule_error)
 }
 
-async fn handle_unpause_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_unpause_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{UnpauseScheduleRequest, UnpauseScheduleResponse};
     let req: UnpauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
         ));
     }
+    if let Some(api) = &state.workflow_api {
+        let input = crate::scheduler_wire::unpause_signal(&req);
+        return crate::schedule_flow::signal_scheduler_api(
+            api,
+            &req.domain,
+            &req.schedule_id,
+            crate::scheduler_wire::SIGNAL_UNPAUSE,
+            input,
+            ctx,
+        )
+        .await
+        .map(|()| wrap_success(&UnpauseScheduleResponse {}))
+        .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .unpause_schedule(&req.domain, &req.schedule_id, req.catch_up_policy)
         .map(|()| wrap_success(&UnpauseScheduleResponse {}))
         .map_err(schedule_error)
 }
 
-async fn handle_backfill_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_backfill_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{BackfillScheduleRequest, BackfillScheduleResponse};
     let req: BackfillScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request(
+            "Domain not set on request.".to_string(),
+        ));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1711,6 +1885,21 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct) -> HandlerRes
     } else {
         req.backfill_id.trim().to_string()
     };
+    if let Some(api) = &state.workflow_api {
+        let input = crate::scheduler_wire::backfill_signal(&req, &backfill_id);
+        return crate::schedule_flow::signal_scheduler_api(
+            api,
+            &req.domain,
+            &req.schedule_id,
+            crate::scheduler_wire::SIGNAL_BACKFILL,
+            input,
+            ctx,
+        )
+        .await
+        .map(|()| wrap_success(&BackfillScheduleResponse {}))
+        .map_err(schedule_api_error);
+    }
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .backfill_schedule(
             &req.domain,
@@ -1724,7 +1913,11 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct) -> HandlerRes
         .map_err(schedule_error)
 }
 
-async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResult {
+async fn handle_update_schedule(
+    state: &AppState,
+    body: &Struct,
+    ctx: &crate::workflow_api::CallerContext,
+) -> HandlerResult {
     use cadence_api::schedule::{UpdateScheduleRequest, UpdateScheduleResponse};
     use cadence_api::validation;
     let req: UpdateScheduleRequest =
@@ -1759,6 +1952,20 @@ async fn handle_update_schedule(state: &AppState, body: &Struct) -> HandlerResul
     }
     validation::validate_schedule_search_attributes(req.search_attributes.as_ref())
         .map_err(|e| AppError::bad_request(e.message))?;
+    if let Some(api) = &state.workflow_api {
+        let input = crate::scheduler_wire::update_signal(&req);
+        return crate::schedule_flow::signal_scheduler_api(
+            api,
+            &req.domain,
+            &req.schedule_id,
+            crate::scheduler_wire::SIGNAL_UPDATE,
+            input,
+            ctx,
+        )
+        .await
+        .map(|()| wrap_success(&UpdateScheduleResponse {}))
+        .map_err(schedule_api_error);
+    }
     let executions = require_domain_thrift(state, &req.domain)?;
     executions
         .update_schedule(&req)
@@ -2245,7 +2452,7 @@ pub async fn dispatch_with_headers(
     if let Some(api) = &state.workflow_api {
         let ctx = crate::workflow_api::CallerContext {
             deadline: Some(deadline),
-            headers: caller_headers,
+            headers: caller_headers.clone(),
         };
         if let Some(reply) = crate::workflow_api::dispatch_thrift(api, method, body, ctx).await? {
             return Ok(reply);
@@ -2255,6 +2462,7 @@ pub async fn dispatch_with_headers(
     let shared = || Arc::new(state.clone());
     let admin = method.starts_with("AdminService::");
     let name = method.rsplit("::").next().unwrap_or(method);
+    let schedule_ctx = schedule_api_context(deadline, &caller_headers);
     let outcome: HandlerResult = match name {
         "health" => Ok(Struct {
             fields: vec![(
@@ -2458,14 +2666,14 @@ pub async fn dispatch_with_headers(
         "ResetWorkflowExecution" => handle_reset(state, body).await,
         "DiagnoseWorkflowExecution" => handle_diagnose(state, body).await,
         "CreateSemaphore" => handle_create_semaphore(state, body).await,
-        "CreateSchedule" => handle_create_schedule(state, body).await,
-        "DescribeSchedule" => handle_describe_schedule(state, body).await,
-        "ListSchedules" => handle_list_schedules(state, body).await,
-        "DeleteSchedule" => handle_delete_schedule(state, body).await,
-        "PauseSchedule" => handle_pause_schedule(state, body).await,
-        "UnpauseSchedule" => handle_unpause_schedule(state, body).await,
-        "BackfillSchedule" => handle_backfill_schedule(state, body).await,
-        "UpdateSchedule" => handle_update_schedule(state, body).await,
+        "CreateSchedule" => handle_create_schedule(state, body, &schedule_ctx).await,
+        "DescribeSchedule" => handle_describe_schedule(state, body, &schedule_ctx).await,
+        "ListSchedules" => handle_list_schedules(state, body, &schedule_ctx).await,
+        "DeleteSchedule" => handle_delete_schedule(state, body, &schedule_ctx).await,
+        "PauseSchedule" => handle_pause_schedule(state, body, &schedule_ctx).await,
+        "UnpauseSchedule" => handle_unpause_schedule(state, body, &schedule_ctx).await,
+        "BackfillSchedule" => handle_backfill_schedule(state, body, &schedule_ctx).await,
+        "UpdateSchedule" => handle_update_schedule(state, body, &schedule_ctx).await,
         "FailoverDomain" => handle_failover_domain(state, body).await,
         "ListFailoverHistory" => handle_list_failover_history(state, body).await,
         "StartWorkflowExecutionAsync" => handle_start_async(state, body).await,
@@ -2582,5 +2790,122 @@ pub async fn yarpc_handler(
     match dispatch_with_headers(&state, &method, &args, deadline, caller_headers).await {
         Ok((result, app_error)) => ok_reply(service_echo, result, app_error),
         Err(e) => transport_error(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[cfg(test)]
+mod schedule_dispatch_tests {
+    use super::*;
+    use crate::workflow_api::{ApiFuture, WorkflowApi};
+    use cadence_api::errors::{CadenceError, EntityNotExistsError};
+    use cadence_api::schedule::PauseScheduleRequest;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    #[derive(Debug, Default)]
+    struct Capture(
+        Mutex<
+            Vec<(
+                String,
+                serde_json::Value,
+                crate::workflow_api::CallerContext,
+            )>,
+        >,
+    );
+
+    impl WorkflowApi for Capture {
+        fn serves(&self, _: &str) -> bool {
+            true
+        }
+        fn call<'a>(
+            &'a self,
+            operation: &'a str,
+            request: serde_json::Value,
+            ctx: crate::workflow_api::CallerContext,
+        ) -> ApiFuture<'a> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((operation.to_owned(), request, ctx));
+            Box::pin(async {
+                Err(CadenceError::EntityNotExists(EntityNotExistsError::new(
+                    "missing",
+                )))
+            })
+        }
+    }
+
+    fn pause_args() -> Struct {
+        Struct {
+            fields: vec![(
+                1,
+                Value::Struct(
+                    PauseScheduleRequest {
+                        domain: "d".into(),
+                        schedule_id: "s".into(),
+                        reason: "hold".into(),
+                        identity: "caller".into(),
+                    }
+                    .to_thrift(),
+                ),
+            )],
+        }
+    }
+
+    #[tokio::test]
+    async fn schedule_dispatch_uses_installed_workflow_api_and_preserves_caller_context() {
+        let capture = Arc::new(Capture::default());
+        let state = AppState {
+            workflow_api: Some(capture.clone()),
+            ..AppState::default()
+        };
+        let deadline = Instant::now() + Duration::from_secs(17);
+        let headers = HashMap::from([("x-tenant".to_string(), "blue".to_string())]);
+        let (_, error) = dispatch_with_headers(
+            &state,
+            "WorkflowService::PauseSchedule",
+            &pause_args(),
+            deadline,
+            headers,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            error.as_ref().map(|(name, _)| *name),
+            Some("EntityNotExistsError")
+        );
+        let calls = capture.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "SignalWorkflowExecution");
+        assert_eq!(
+            calls[0].1["signalName"],
+            crate::scheduler_wire::SIGNAL_PAUSE
+        );
+        assert_eq!(calls[0].2.deadline, Some(deadline));
+        assert_eq!(
+            calls[0].2.headers.get("x-tenant").map(String::as_str),
+            Some("blue")
+        );
+    }
+
+    #[tokio::test]
+    async fn schedule_dispatch_without_workflow_api_keeps_local_engine_fallback() {
+        let state = AppState::default();
+        let (_, error) = dispatch_with_headers(
+            &state,
+            "WorkflowService::PauseSchedule",
+            &pause_args(),
+            Instant::now() + Duration::from_secs(1),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            error.as_ref().map(|(name, _)| *name),
+            Some("EntityNotExistsError")
+        );
+        assert!(error.unwrap().1.contains("Domain d does not exist"));
     }
 }
