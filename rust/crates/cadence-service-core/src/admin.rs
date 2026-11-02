@@ -2353,11 +2353,16 @@ pub async fn get_domain_async_workflow_configuration(
     if req.domain.is_empty() {
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
-    match state.domains.domain_async_workflow_config(&req.domain) {
+    match state.domain_manager.async_workflow_config(&req.domain) {
         Ok(configuration) => ok_json(
             cadence_api::admin::GetDomainAsyncWorkflowConfiguratonResponse { configuration },
         ),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(e) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ),
     }
 }
 
@@ -2370,11 +2375,16 @@ pub async fn update_domain_async_workflow_configuration(
         return bad_request(BadRequestError::new("Domain is not set on request."));
     }
     match state
-        .domains
-        .update_domain_async_workflow_config(&req.domain, req.configuration)
+        .domain_manager
+        .update_async_workflow_config(&req.domain, req.configuration)
     {
         Ok(()) => ok_json(cadence_api::admin::UpdateDomainAsyncWorkflowConfiguratonResponse {}),
-        Err(e) => entity_not_exists(e),
+        Err(cadence_persistence::FrontendDomainError::NotFound(e)) => entity_not_exists(e),
+        Err(e) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        ),
     }
 }
 

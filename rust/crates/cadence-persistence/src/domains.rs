@@ -94,9 +94,13 @@ impl DomainRecord {
         ) -> Result<GoDomainBlob, String> {
             let mut writer = Writer::new();
             write_struct(&mut writer, &value.to_thrift());
+            // Go's thriftrw codec prefixes the payload with version byte 0x59
+            // before any snappy wrapping; Go readers reject blobs without it.
+            let mut versioned = vec![0x59];
+            versioned.extend_from_slice(&writer.into_bytes());
             Ok(GoDomainBlob {
                 data: encoding
-                    .encode(&writer.into_bytes())
+                    .encode(&versioned)
                     .map_err(|error| error.to_string())?,
                 encoding: encoding.as_str().to_string(),
             })
@@ -315,6 +319,20 @@ pub trait FrontendDomainManager: std::fmt::Debug + Send + Sync {
     ) -> Result<ListDomainsResponse, cadence_api::errors::BadRequestError>;
 
     fn subscribe_failover(&self, uuid: &str) -> tokio::sync::watch::Receiver<u64>;
+
+    /// Read a domain's async-workflow queue configuration (admin API).
+    fn async_workflow_config(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, FrontendDomainError>;
+
+    /// Replace and persist a domain's async-workflow queue configuration
+    /// (Go `UpdateAsyncWorkflowConfiguraton`: config version +1, domain row updated).
+    fn update_async_workflow_config(
+        &self,
+        name: &str,
+        config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+    ) -> Result<(), FrontendDomainError>;
 }
 
 /// Errors for domain failover: unknown domains are `EntityNotExists`,
@@ -1409,6 +1427,21 @@ impl InMemoryDomainStore {
 }
 
 impl FrontendDomainManager for InMemoryDomainStore {
+    fn async_workflow_config(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, FrontendDomainError> {
+        Ok(self.domain_async_workflow_config(name)?)
+    }
+
+    fn update_async_workflow_config(
+        &self,
+        name: &str,
+        config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+    ) -> Result<(), FrontendDomainError> {
+        Ok(self.update_domain_async_workflow_config(name, config)?)
+    }
+
     fn create_with_version(
         &self,
         info: DomainInfo,
@@ -1653,6 +1686,42 @@ impl PersistedFrontendDomainManager {
 }
 
 impl FrontendDomainManager for PersistedFrontendDomainManager {
+    fn async_workflow_config(
+        &self,
+        name: &str,
+    ) -> Result<Option<cadence_api::types::AsyncWorkflowConfiguration>, FrontendDomainError> {
+        // describe() loads the persisted Go row on a cache miss.
+        self.describe(&DescribeDomainRequest {
+            name: Some(name.to_owned()),
+            uuid: None,
+        })?;
+        Ok(self.cache.domain_async_workflow_config(name)?)
+    }
+
+    fn update_async_workflow_config(
+        &self,
+        name: &str,
+        config: Option<cadence_api::types::AsyncWorkflowConfiguration>,
+    ) -> Result<(), FrontendDomainError> {
+        let _guard = self.mutation_lock.lock().expect("domain manager lock");
+        self.describe(&DescribeDomainRequest {
+            name: Some(name.to_owned()),
+            uuid: None,
+        })?;
+        let old = self.cache.record_by_name(name)?;
+        let version = self.current_metadata_version()?;
+        self.cache.update_domain_async_workflow_config(name, config)?;
+        let mut updated = self.cache.record_by_name(name)?;
+        updated.config_version += 1;
+        updated.last_updated_time_nanos = now_nanos();
+        self.cache.restore_record(updated.clone());
+        if let Err(error) = self.persist_record(&updated, version, false) {
+            self.cache.restore_record(old);
+            return Err(error);
+        }
+        Ok(())
+    }
+
     fn create_with_version(
         &self,
         info: DomainInfo,

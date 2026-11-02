@@ -20,7 +20,17 @@ ap.add_argument('--rust-root', type=Path, required=True, help='checkout of rust_
 ap.add_argument('--rust-outbound', choices=['grpc', 'tchannel'], default='grpc')
 ap.add_argument('--sdk-timeout-seconds', type=int, default=900,
                 help='SDK driver wall-clock limit, including restart and shutdown (default: 900)')
+ap.add_argument('--kafka-broker', help='host:port of a plaintext Kafka broker; enables the async workflow acceptance steps')
+ap.add_argument('--kafka-container', help='docker container name of that broker (stopped/started for the broker-down step)')
+ap.add_argument('--kafka-topic', default='cadence-async-gate')
 args = ap.parse_args()
+if args.kafka_broker and not args.kafka_container:
+    ap.error('--kafka-broker requires --kafka-container')
+ASYNC_QUEUE = 'gate-async-queue'
+async_yaml = ''
+if args.kafka_broker:
+    async_yaml = (f'\nasyncWorkflowQueues:\n  {ASYNC_QUEUE}:\n    type: "kafka"\n    config:\n'
+                  f'      connection:\n        brokers:\n          - "{args.kafka_broker}"\n      topic: "{args.kafka_topic}"\n')
 if args.sdk_timeout_seconds <= 0:
     ap.error('--sdk-timeout-seconds must be positive')
 root = Path(__file__).resolve().parents[2]
@@ -58,6 +68,7 @@ text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(wo
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
+text = text.rstrip('\n') + '\n' + async_yaml
 (work / 'config/development.yaml').write_text(text)
 def sql_store(name, db, conns):
     return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(db)}\n'
@@ -98,6 +109,7 @@ rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
+rt = rt.rstrip('\n') + '\n' + async_yaml
 (work / 'rust.yaml').write_text(rt)
 
 # ---- process helpers
@@ -175,6 +187,16 @@ try:
     dom_t, dom_g = 'fe-gate-t-' + secrets.token_hex(3), 'fe-gate-g-' + secrets.token_hex(3)
     run('cli-register-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'register', '--retention', '1'])
     run('cli-register-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'register', '--retention', '1'])
+    dom_a = dom_n = None
+    if args.kafka_broker:
+        dom_a, dom_n = 'fe-gate-async-' + secrets.token_hex(3), 'fe-gate-noasync-' + secrets.token_hex(3)
+        run('cli-register-domain-async', [*cli_t, '--domain', dom_a, 'domain', 'register', '--retention', '1'])
+        run('cli-register-domain-noasync', [*cli_t, '--domain', dom_n, 'domain', 'register', '--retention', '1'])
+        cfg = json.dumps({'Enabled': True, 'PredefinedQueueName': ASYNC_QUEUE})
+        ok = run('cli-admin-async-config-update-grpc', [*cli_g, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])
+        if not ok:
+            run('cli-admin-async-config-update-tchannel', [*cli_t, '--domain', dom_a, 'admin', 'async-wf-queue', 'update', '--json', cfg])
+        run('cli-admin-async-config-get', [*cli_g, '--domain', dom_a, 'admin', 'async-wf-queue', 'get'])
     time.sleep(12)  # domain cache refresh in Go History/Worker
     run('cli-describe-domain-tchannel', [*cli_t, '--domain', dom_t, 'domain', 'describe'])
     run('cli-describe-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'describe'])
@@ -208,6 +230,39 @@ try:
     print('SDK LOG TAIL\n' + '\n'.join((work / 'sdk.log').read_text().splitlines()[-40:]), flush=True)
     record('sdk-driver-exit', drv.returncode == 0, f'exit={drv.returncode}')
     record_services_alive('after-sdk')
+    if args.kafka_broker:
+        amarks = work / 'async-marks'; amarks.mkdir(exist_ok=True)
+        aenv = {**env, 'FE_MODE': 'async', 'FE_DOMAIN': dom_a, 'FE_DOMAIN_NOASYNC': dom_n, 'FE_MARK_DIR': str(amarks)}
+        adrv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk-async.log').open('w'), stderr=subprocess.STDOUT, env=aenv, start_new_session=True)
+        procs['sdk-async-driver'] = adrv
+        adeadline = time.monotonic() + 900
+        done_down = done_up = False
+        while adrv.poll() is None:
+            if time.monotonic() >= adeadline:
+                record('sdk-async-driver-timeout', False, 'exceeded 900s')
+                kill('sdk-async-driver')
+                break
+            if (amarks / 'broker-down-request').exists() and not done_down:
+                done_down = True
+                r = subprocess.run(['docker', 'stop', '-t', '5', args.kafka_container], capture_output=True, text=True)
+                record('kafka-broker-stopped', r.returncode == 0, r.stdout + r.stderr)
+                (amarks / 'broker-down-done').write_text('x')
+            if (amarks / 'broker-up-request').exists() and not done_up:
+                done_up = True
+                r = subprocess.run(['docker', 'start', args.kafka_container], capture_output=True, text=True)
+                broker_port = args.kafka_broker.rsplit(':', 1)[1]
+                ok = r.returncode == 0 and wait_port(broker_port, 120)
+                record('kafka-broker-restarted', ok, r.stdout + r.stderr)
+                time.sleep(20)  # KRaft leader election / group coordinator
+                (amarks / 'broker-up-done').write_text('x')
+            time.sleep(1)
+        for line in (work / 'sdk-async.log').read_text().splitlines():
+            m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
+            if m:
+                record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
+        print('ASYNC SDK LOG TAIL\n' + '\n'.join((work / 'sdk-async.log').read_text().splitlines()[-40:]), flush=True)
+        record('sdk-async-driver-exit', adrv.returncode == 0, f'exit={adrv.returncode}')
+        record_services_alive('after-async-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
     # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)

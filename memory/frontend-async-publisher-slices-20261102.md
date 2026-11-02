@@ -52,3 +52,16 @@ Do not treat handler unit tests or a fake publisher as service completion. A suc
 - Tests: config/ID, SASL, partitioner, record encoding round-trip, transport, TLS config, unreachable broker = error. No in-process broker test.
 - CI (head `58ba7b07cbc6f84ebe521c752b0d313f1d3dcf17`): package run https://github.com/auenkr/cadence-rust/actions/runs/41522975621 **success**; full run https://github.com/auenkr/cadence-rust/actions/runs/41523983534 **success**. Earlier run 41507945353 hung 90 min (unbounded rskafka connect retry) and was fixed with a timeout.
 - Remaining mixed acceptance: Kafka service container + Rust Frontend/Matching with Go History/Worker; SDK Start/SignalWithStart async consumed by Go consumer; broker unavailable, Frontend restart, recovery, and verifying partition choice/Go decoder accepts the value.
+
+## Mixed async acceptance (2026-11-03, branch `frontend-async-gate`)
+
+Gate: `frontend-mixed-gate.yml` mysql lane with `kafka=true` (Rust Frontend + Rust Matching, Go History/Worker; no Go Frontend/Matching). Lane starts `apache/kafka:3.8.0` (KRaft, plaintext, `--memory 1g --cpus 1`, topic `cadence-async-gate` with 3 partitions created by the gate, extra INTERNAL listener for admin tooling). Domain async config set via `cadence admin async-wf-queue update` (predefined queue `gate-async-queue`, defined in both Go and Rust `asyncWorkflowQueues`); the Go Worker's async consumer manager consumes it. Driver `FE_MODE=async` (`tests/frontend-gate/async.go`) uses SDK `StartWorkflowAsync` / `SignalWithStartWorkflowAsync`.
+
+Bugs found and fixed (Rust):
+1. Admin `GetDomainAsyncWorkflowConfiguraton`/`Update...` handlers used the in-memory store, not the persisted domain manager, so the Frontend publisher saw the domain as disabled. Now `FrontendDomainManager::{async_workflow_config,update_async_workflow_config}` (persisted, config version +1).
+2. Domain config blobs (async config, bad binaries, isolation groups) were written without Go's `0x59` thriftrw version byte; Go's domain cache refresh failed (`Invalid binary encoding version`) and broke all Go services. `thrift_blob` now prefixes 0x59.
+
+Steps proven (all `ok`): async start executes (workflow completes), async signal-with-start executes (signal delivered, completes `final:one`), invalid workflow -> BadRequest, domain without async config -> BadRequest `not enabled`, broker stopped -> async start returns an error (never success), broker restarted -> async start accepted and executes (rskafka reconnects), errored start never executed; all three services alive afterwards.
+
+Evidence: gate run https://github.com/auenkr/cadence-rust/actions/runs/41541833004 **success**, head `229a69d4d901d6ff62aac6b79eb52263f0989d2a`, Rust binary SHA256 `6921c1a34fe2240830c797c03180b0e516cea2e4dc4f28fe73d4302910268985`; `rust-ci.yml` package runs `cadence-service-core` 41537345970 (at 4a499a0f) and `cadence-persistence` 41541837274 (at 229a69d4) success. Earlier failing runs: 41526003729 (Kafka internal listener), 41533882351 (in-memory admin config), 41537340211 (missing 0x59).
+Not covered: Frontend restart while async traffic flows, TLS/SASL brokers, duplicate/retry semantics, Cassandra/Postgres lanes with Kafka, Frontend metrics.
