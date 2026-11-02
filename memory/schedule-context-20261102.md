@@ -17,3 +17,13 @@ Commit `2353717e8062367cb39ce58350fb93d32f403b2b` changes schedule API functions
 - Required CI was dispatched: https://github.com/auenkr/cadence-rust/actions/runs/41429636203
 - Run head: `2353717e8062367cb39ce58350fb93d32f403b2b`; status was `queued` at handoff, conclusion pending.
 - A hook-level test that executes real schedule operations while asserting preserved metadata/deadline and error behavior is still required. CI completion alone does not cover that request; add this test, rerun this workflow, and update this note with final conclusion before treating the task complete.
+
+## Follow-up implementation and CI handoff (2026-11-02)
+
+- Integrated `origin/t3/schedule-context` (implementation `2353717e8062367cb39ce58350fb93d32f403b2b` and evidence commit `9db05037b`) into branch `t3/schedule-context-tests`.
+- Corrected HTTP schedule TTL parsing: preserve the parsed remaining caller budget exactly (including sub-100ms and >300s values); malformed or missing values retain the 60s default. YARPC's existing transport parser still clamps its own TTL to 100–300000ms; the schedule HTTP path deliberately does not silently extend/cap the caller budget.
+- Header collisions are deterministic: plain application headers are loaded first, then `Rpc-Header-*` values override the matching normalized key, matching the explicit application-header encoding.
+- Added a schedule context parser test for short/long TTLs and prefixed collision precedence. Added a production `WorkflowApi` test driving scheduler Create, Describe, List, Signal, and Delete's signal-to-Terminate fallback; it checks operation sequence, unchanged absolute deadline and metadata on every backend call, plus normalized signal error propagation.
+- Scope gap: YARPC schedule procedure handlers remain on their existing local execution-store path and are not covered by this HTTP WorkflowApi context slice. No mixed Go/Rust cluster gate is claimed.
+- Source/tests commit: `3e93b82b1921a9be0ec7f9423d33a248d8b4e06f`.
+- CI handoff: https://github.com/auenkr/cadence-rust/actions/runs/41430225291, dispatched for package `cadence-service-core` with `format_all=true` (format patch may be uploaded as an artifact). At dispatch the run was active; conclusion and formatting artifact application remain pending. Do not treat as validated until the artifact is inspected/applied if present and a final CI run passes on the resulting exact head.
