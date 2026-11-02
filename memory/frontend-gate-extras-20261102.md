@@ -21,11 +21,9 @@ Adds named steps to the existing Python-owned MySQL lane and SDK driver:
 CI attempts:
 - https://github.com/auenkr/cadence-rust/actions/runs/41420891439 — cancelled as
   superseded, head `fccc99865` (the scheduler spec was corrected before testing).
-- https://github.com/auenkr/cadence-rust/actions/runs/41420976855 — in progress,
-  head `4792b98880170c63361a478667d86891a8355b9f`. Fresh dedicated runner target;
-  binary SHA256 and final conclusion to be recorded after artifact inspection.
+- https://github.com/auenkr/cadence-rust/actions/runs/41420976855 — failure on head `4792b98880170c63361a478667d86891a8355b9f`; exposed RefreshWorkflowTasks domain-field, timestamp-unit and missing production schedule wiring defects, all fixed in later commits.
 
-No parity row is upgraded before green runtime evidence is available.
+
 
 First attempt concluded failure (binary
 `58e6e895a730199079bfb0f04c9cb5efc371c6177e2a8888370a23963ec1d104`).
@@ -49,10 +47,16 @@ Final validation on source head `63412d6281edbeff0755f947ce9ac39807d523c7`:
 - Clean uncached workspace CI: https://github.com/auenkr/cadence-rust/actions/runs/41422827735 — success. Fresh dedicated target, clippy then workspace tests, formatting check passed.
 - Mixed MySQL gate: https://github.com/auenkr/cadence-rust/actions/runs/41422833412 — success. Rust Frontend and Matching with Go History/Worker, no Go Frontend; 46/46 named JSON assertions passed. Retained exact evidence in `memory/frontend-gate-extras-41422833412-steps.json`.
 - Mixed gate Rust binary SHA256: `7264f455fdc361ae3fdf9b5de73fc2f99990a288c8f4df52489b19d4c148f2cc` (fresh CI target). Real IPv6 gRPC ran successfully; child SDK workflow and activity completed; schedule backfill executions were visible as completed; requested task-list, refresh, cancel, terminate and sticky reset APIs passed.
-- CI formatting artifact from run 41422827735 is applied as a formatting-only patch in `workflow_backend.rs` and `cadence-proto/src/convert/mod.rs`; this patch remains to be committed and final-head CI rerun.
+- That run’s formatting patch was committed and passed the final-head workspace format/clippy/test gate below.
 
-Final-commit validation follow-up (head `d08287ffecebbd7b4f09ddeeadfaa54a2f464702`):
-- Fresh uncached full workspace CI https://github.com/auenkr/cadence-rust/actions/runs/41424261789 — success (clippy, formatting, workspace tests).
-- Mixed run https://github.com/auenkr/cadence-rust/actions/runs/41424268026 — failure. Binary SHA256 `d068f36e208320f9a677fe3b7c4770dcbe9ae2d6f8f3aeecab2ebc34c05b2781`. 25/34 gate assertions passed. SDK workflow starts failed because Go History returned EntityNotExists for the registered domain UUID; schedule create/backfill RPCs passed but completion polling hit the same domain error. The IPv6 gRPC probe was refused. Captured `rust.yaml` had `bindOnIP: "::1"`; runtime log said the restarted Frontend listened on `0.0.0.0`.
-- Retry https://github.com/auenkr/cadence-rust/actions/runs/41425876411 — same failure pattern. Binary SHA256 `1619092278254401211139b4ad7e79b64b5f9b0e2329772880985d48076bf494`; 25/34 assertions passed. Exact step arrays retained in `memory/frontend-gate-extras-41424268026-steps.json` and `memory/frontend-gate-extras-41425876411-steps.json`.
-- The earlier source-head mixed run 41422833412 was green (46/46), with binary SHA256 `7264f455fdc361ae3fdf9b5de73fc2f99990a288c8f4df52489b19d4c148f2cc`. Final-head runtime regressions are not explained by the formatting-only Rust changes; do not claim final-head mixed validation as green. Specific unresolved evidence is domain metadata visibility to Go History during SDK starts and Frontend IPv6 bind selection on restart. No local Cargo, Rust, Go, or gate commands were run.
+Final-head evidence:
+- Fresh uncached workspace CI (same final head `5644052674ad0294bb10662a8fe8c67446193e3b`): https://github.com/auenkr/cadence-rust/actions/runs/41424261789 — success (formatting, workspace clippy then tests).
+- Final-head MySQL mixed gate: https://github.com/auenkr/cadence-rust/actions/runs/41427827989 — **success**, head `5644052674ad0294bb10662a8fe8c67446193e3b`, `rust_ref=t3/frontend-gate-extras`, 51/51 named steps true. Rust binary SHA256 `e6cd5037ffb45cf4897c81a5d40d005207e12b6e9f149de7b4dc67efe803db85` from fresh `/tmp/cadence-cargo-target-fe-41427827989`. Exact steps retained in `frontend-gate-extras-41427827989-steps.json`. IPv6 gRPC, child workflow completion, backfill run closure and requested API checks all passed.
+
+The two intervening mixed attempts used the default Rust ref `fe-integ` by mistake;
+their captured commit files identify source head `115f5b4b56969603648a828f01758ad1e73bdf70`,
+not this gate branch. They are retained as dispatch evidence and are superseded by
+the correctly dispatched final-head run 41427827989.
+- Run 41424268026 — failure, binary SHA256 `d068f36e208320f9a677fe3b7c4770dcbe9ae2d6f8f3aeecab2ebc34c05b2781`, 25/34 checks.
+- Run 41425876411 — failure, binary SHA256 `1619092278254401211139b4ad7e79b64b5f9b0e2329772880985d48076bf494`, 25/34 checks.
+- Their exact step arrays remain in `frontend-gate-extras-41424268026-steps.json` and `frontend-gate-extras-41425876411-steps.json`.

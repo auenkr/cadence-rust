@@ -1,0 +1,257 @@
+[
+  {
+    "step": "go-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-0cdcab successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-af8407 successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-0cdcab\nUUID: 01a19bc9-6f8a-779f-8f2b-5bf84a90b006\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-af8407\nUUID: 01a19bc9-6fb2-7615-9eae-ef028f428db5\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "go-history-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-child",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-child",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-task-list",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-task-list-partitions",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-get-task-lists-by-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-cancel",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-refresh-workflow-tasks",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-reset-sticky-task-list",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-cancel-workflow-execution",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-terminate",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-terminate-workflow-execution",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-create-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-completed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-describe-after-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-delete-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-signal-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-done",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-history-worker-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "cli-list-workflows-grpc",
+    "ok": true,
+    "detail": "\u001b[94m     WORKFLOW TYPE      \u001b[0m | \u001b[94m                    WORKFLOW ID                    \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  main.SignalQueryWorkflow | fe-gate-2b9dcdd1-2b82-43a9-adc8-6497011df1ea-cancel | f3bf73c2-34f9-4691-a958-b144f2eb1145 |           | false   | 10:24:04   | 10:24:04       | COMPLETED    |              0 | 00:00:00    | PENDING           \n\nFetching 0 workflows..."
+  },
+  {
+    "step": "cli-list-workflows-tchannel",
+    "ok": true,
+    "detail": "\u001b[94m     WORKFLOW TYPE      \u001b[0m | \u001b[94m                    WORKFLOW ID                    \u001b[0m | \u001b[94m               RUN ID               \u001b[0m | \u001b[94mTASK LIST\u001b[0m | \u001b[94mIS CRON\u001b[0m | \u001b[94mSTART TIME\u001b[0m | \u001b[94mEXECUTION TIME\u001b[0m | \u001b[94mCLOSE STATUS\u001b[0m | \u001b[94mHISTORY LENGTH\u001b[0m | \u001b[94mUPDATE TIME\u001b[0m | \u001b[94mEXECUTION STATUS\u001b[0m  \n  main.SignalQueryWorkflow | fe-gate-2b9dcdd1-2b82-43a9-adc8-6497011df1ea-cancel | f3bf73c2-34f9-4691-a958-b144f2eb1145 |           | false   | 23:47:16   | 23:47:16       | COMPLETED    |              0 | 00:00:00    | PENDING"
+  },
+  {
+    "step": "cli-describe-domain-grpc-ipv6",
+    "ok": true,
+    "detail": "Name: fe-gate-t-0cdcab\nUUID: 01a19bc9-6f8a-779f-8f2b-5bf84a90b006\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED\n\n\n"
+  }
+]
