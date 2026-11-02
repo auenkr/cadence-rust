@@ -251,7 +251,10 @@ try:
     vs1 = versions()
     record('dyncfg-db-row-written', len(vs1) >= 1, str(vs1))
     cli_out('dyncfg-restore', [*admin_t, 'restore', '--name', key])
-    cli_out('dyncfg-get-after-restore', [*admin_t, 'get', '--name', key], absent='777')
+    # Go GetDynamicConfig returns EntityNotExists ("unable to find key") once restored: the CLI must fail without the value.
+    r = subprocess.run([*admin_t, 'get', '--name', key], capture_output=True, text=True, timeout=60)
+    (work / 'dyncfg-get-after-restore.log').write_text(r.stdout + r.stderr)
+    record('dyncfg-get-after-restore', r.returncode != 0 and '777' not in r.stdout + r.stderr, r.stdout + r.stderr)
     cli_out('dyncfg-list-after-restore', [*admin_t, 'list', '--name', key], absent='777')
     vs2 = versions()
     record('dyncfg-db-version-advanced', len(vs2) > len(vs1), f'{vs1} -> {vs2}')
