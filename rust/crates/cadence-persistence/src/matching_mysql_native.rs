@@ -122,6 +122,14 @@ impl MatchingTaskStoreBytes for MySqlTaskStore {
         MatchingTaskStore::fetch_latest_config(self, row_type)
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        MatchingTaskStore::insert_config(self, row_type, row)
+    }
+
     fn get_task_list(&self, key: &TaskListKeyBytes) -> BytesResult<TaskListRecordBytes> {
         let mut connection = self.pool_bytes(key).checkout().map_err(leg)?;
         let row = self

@@ -379,6 +379,14 @@ impl MatchingTaskStoreBytes for Store {
         crate::matching_task_store::MatchingTaskStore::fetch_latest_config(self, row_type)
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        crate::matching_task_store::MatchingTaskStore::insert_config(self, row_type, row)
+    }
+
     fn get_task_list(&self, key: &TaskListKeyBytes) -> Result<TaskListRecordBytes> {
         self.native_get_task_list_for(key, "GetTaskList")
     }

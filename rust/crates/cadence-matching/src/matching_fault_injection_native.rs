@@ -100,6 +100,14 @@ impl MatchingTaskStoreBytes for InjectingTaskStoreBytes {
         self.store.fetch_latest_config(row_type)
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &cadence_persistence::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), cadence_persistence::config_store::ConfigWriteError> {
+        self.store.insert_config(row_type, row)
+    }
+
     fn get_task_list(&self, key: &TaskListKeyBytes) -> TaskBytesResult<TaskListRecordBytes> {
         self.run("get-task-list", || self.store.get_task_list(key))
     }

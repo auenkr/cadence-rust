@@ -130,7 +130,7 @@ impl fmt::Display for ExecFailure {
 
 pub type ExecResult<T> = std::result::Result<T, ExecFailure>;
 
-pub type ConfigRow = (i64, Option<Vec<u8>>, Option<String>);
+pub type ConfigRow = (i32, Option<Vec<u8>>, Option<String>);
 
 pub trait CqlExecutor: Send + Sync {
     /// Plain statement whose result is ignored.

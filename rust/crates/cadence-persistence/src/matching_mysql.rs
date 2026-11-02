@@ -776,6 +776,31 @@ impl MatchingTaskStore for MySqlTaskStore {
         ))
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        use crate::config_store::ConfigWriteError;
+        // Go sqlplugin/mysql InsertConfig on the default shard (negated version).
+        let mut lease = self.pools[0]
+            .checkout()
+            .map_err(|e| ConfigWriteError::Other(e.to_string()))?;
+        match lease.exec_drop(
+            "INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) VALUES (?, ?, NOW(6), ?, ?);",
+            (row_type, -row.version, row.data.as_slice(), row.encoding.as_str()),
+        ) {
+            Ok(()) => Ok(()),
+            Err(mysql::Error::MySqlError(e)) if e.code == 1062 => {
+                Err(ConfigWriteError::ConditionFailed(format!(
+                    "Version {} already exists. Condition Failed",
+                    row.version
+                )))
+            }
+            Err(e) => Err(ConfigWriteError::Other(e.to_string())),
+        }
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         let mut connection = self.pool(key).checkout()?;
         self.read_task_list(&mut connection, key)?

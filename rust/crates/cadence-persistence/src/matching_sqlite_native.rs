@@ -109,6 +109,18 @@ impl MatchingTaskStoreBytes for SqliteTaskStore {
         )
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        crate::config_store::sqlite_insert_config(
+            &self.connection.lock().expect("matching SQL lock"),
+            row_type,
+            row,
+        )
+    }
+
     fn get_task_list(&self, key: &TaskListKeyBytes) -> Result<TaskListRecordBytes> {
         Self::n_read_list(&self.connection.lock().expect("matching SQL lock"), key)?
             .ok_or(Error::Legacy(StorageError::NotFound))

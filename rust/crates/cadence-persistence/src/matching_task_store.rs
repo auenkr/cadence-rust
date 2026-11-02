@@ -125,6 +125,17 @@ pub trait MatchingTaskStore: Send + Sync {
     ) -> std::result::Result<Option<crate::config_store::ConfigStoreRow>, String> {
         Err("this task store has no config store".into())
     }
+    /// Go `ConfigStore.UpdateConfig`: conditional insert of a new config row
+    /// (`row.version` is the positive logical version).
+    fn insert_config(
+        &self,
+        _row_type: i32,
+        _row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        Err(crate::config_store::ConfigWriteError::Other(
+            "this task store has no config store".into(),
+        ))
+    }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord>;
 

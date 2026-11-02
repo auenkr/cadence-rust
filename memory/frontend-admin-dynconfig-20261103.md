@@ -13,3 +13,9 @@ Branch `frontend-admin-dynconfig` (from master). Evidence: CI run https://github
 - Separate operational config store and its audit log (in-memory namespace only).
 - Elasticsearch mapping update in AddSearchAttribute; GetCrossClusterTasks/Respond* (need cross-cluster History work, a different audit item).
 - Go returns defaults when no snapshot is loaded; Rust has no default table, returns NotFound.
+
+## Durable store follow-up (branch frontend-admin-dynconfig-durable)
+- `MatchingTaskStore`/`MatchingTaskStoreBytes::insert_config` added (default Err); implemented for SQLite (existing helper), MySQL (`INSERT ... NOW(6)`, errno 1062 -> ConditionFailed), PostgreSQL (`now()`, SQLSTATE 23505 -> ConditionFailed) and Cassandra (`INSERT ... IF NOT EXISTS` LWT, not applied -> ConditionFailed). SQL stores negate the version like Go.
+- Cassandra `version` column is `int`: `ConfigRow` now decodes i32 (was i64, would have failed type check in scylla).
+- Production launcher binds a `StoreBinding` (fetch+insert on the default store from the same persistence config) when the dynamic-config provider is `configstore`, so Admin Update/Restore and AddSearchAttribute are durable; with no row yet the binding starts at version 0 (first insert = version 1).
+- Not done: Elasticsearch mapping in AddSearchAttribute (no ES client in Rust); mixed-gate API step. Rows stay `partial` until CI + a gate prove them.

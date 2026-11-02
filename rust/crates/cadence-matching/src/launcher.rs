@@ -719,6 +719,9 @@ async fn run_with_lifecycle(
             let mut config_store_client: Option<
                 std::sync::Arc<cadence_persistence::config_store::ConfigStoreClient>,
             > = None;
+            // Durable Admin write path (Go configStoreClient.UpdateValue).
+            let mut config_store_binding: Option<crate::admin::StoreBinding> = None;
+            let update_retry_attempts_cfg;
             let dynamic_config_path = match dynamic_config_provider {
                 config::DynamicConfigProvider::FileBased(provider) => {
                     if provider.filepath.is_empty() {
@@ -759,6 +762,7 @@ async fn run_with_lifecycle(
                             store.update_timeout_nanos as u64,
                         ),
                     };
+                    update_retry_attempts_cfg = store.update_retry_attempts;
                     let persistence = cfg.persistence.clone();
                     let cluster_name = String::new();
                     let created = tokio::task::spawn_blocking(move || {
@@ -770,6 +774,7 @@ async fn run_with_lifecycle(
                         )
                         .map_err(|e| e.to_string())?;
                         let task_store = stores.task_store;
+                        let write_store = task_store.clone();
                         let fetch: cadence_persistence::config_store::ConfigRowFetcher =
                             std::sync::Arc::new(move |row_type| {
                                 cadence_persistence::matching_task_store::MatchingTaskStore::fetch_latest_config(
@@ -777,15 +782,33 @@ async fn run_with_lifecycle(
                                     row_type,
                                 )
                             });
-                        cadence_persistence::config_store::ConfigStoreClient::new(
+                        let write: cadence_persistence::config_store::ConfigRowWriter =
+                            std::sync::Arc::new(move |row_type, row| {
+                                cadence_persistence::matching_task_store::MatchingTaskStore::insert_config(
+                                    &*write_store,
+                                    row_type,
+                                    row,
+                                )
+                            });
+                        let client = cadence_persistence::config_store::ConfigStoreClient::new(
                             &client_config,
-                            fetch,
-                        )
+                            fetch.clone(),
+                        )?;
+                        Ok::<_, String>((client, fetch, write))
                     })
                     .await
                     .map_err(|error| anyhow::anyhow!("joining config store startup: {error}"))?;
                     match created {
-                        Ok(client) => config_store_client = Some(std::sync::Arc::new(client)),
+                        Ok((client, fetch, write)) => {
+                            config_store_client = Some(std::sync::Arc::new(client));
+                            config_store_binding = Some(crate::admin::StoreBinding {
+                                fetch,
+                                write,
+                                update_retry_attempts: update_retry_attempts_cfg,
+                                version: 0,
+                                schema_version: 0,
+                            });
+                        }
                         Err(error) => eprintln!(
                             "warning: creating ConfigStore dynamic config client: {error}; using no-op configuration"
                         ),
@@ -889,12 +912,28 @@ async fn run_with_lifecycle(
             let mut dynamic_config_loaded_at = None;
             if let Some(client) = config_store_client.as_ref() {
                 if let Some(snapshot) = client.snapshot() {
-                    *state
+                    let mut overlay = state
                         .admin
                         .dynamic_config
                         .lock()
-                        .expect("dynamic config lock") =
-                        crate::admin::DynamicConfigOverlay::from_config_store(&snapshot);
+                        .expect("dynamic config lock");
+                    match config_store_binding.take() {
+                        Some(binding) => overlay.attach_store(binding, &snapshot),
+                        None => {
+                            *overlay =
+                                crate::admin::DynamicConfigOverlay::from_config_store(&snapshot)
+                        }
+                    }
+                } else if let Some(binding) = config_store_binding.take() {
+                    state
+                        .admin
+                        .dynamic_config
+                        .lock()
+                        .expect("dynamic config lock")
+                        .attach_store(
+                            binding,
+                            &cadence_persistence::config_store::Snapshot::default(),
+                        );
                 }
             }
             let dynamic_config_loaded = if let Some(path) = dynamic_config_path.as_ref() {

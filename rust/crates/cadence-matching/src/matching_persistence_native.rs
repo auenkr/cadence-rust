@@ -59,6 +59,14 @@ impl MatchingTaskStoreBytes for RateLimitedTaskStoreBytes {
         self.store.fetch_latest_config(row_type)
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &cadence_persistence::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), cadence_persistence::config_store::ConfigWriteError> {
+        self.store.insert_config(row_type, row)
+    }
+
     fn get_task_list(&self, key: &TaskListKeyBytes) -> NativeResult<TaskListRecordBytes> {
         self.permit("GetTaskList", None)?;
         let started = std::time::Instant::now();

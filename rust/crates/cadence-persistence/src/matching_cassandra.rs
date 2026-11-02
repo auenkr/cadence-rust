@@ -30,6 +30,7 @@ const FALLBACK_CONSISTENCY: scylla::frame::types::Consistency =
     scylla::frame::types::Consistency::LocalQuorum;
 const MAX_CASSANDRA_TTL_SECONDS: i64 = 157_680_000;
 const SELECT_LIST: &str = "SELECT range_id, task_list FROM tasks WHERE domain_id=? AND task_list_name=? AND task_list_type=? AND type=? AND task_id=?";
+const INSERT_CONFIG: &str = "INSERT INTO cluster_config (row_type, version, timestamp, values, encoding) VALUES (?, ?, ?, ?, ?) IF NOT EXISTS;";
 const SELECT_CONFIG: &str =
     "SELECT version, values, encoding FROM cluster_config WHERE row_type = ? LIMIT 1";
 const INSERT_TASK_LIST_TTL: &str = "INSERT INTO tasks (domain_id, task_list_name, task_list_type, type, task_id, created_time) VALUES (?, ?, ?, ?, ?, ?) USING TTL 86400";
@@ -427,11 +428,46 @@ impl MatchingTaskStore for CassandraMatchingTaskStore {
             .map_err(|e| e.to_string())?;
         Ok(row.map(
             |(version, data, encoding)| crate::config_store::ConfigStoreRow {
-                version,
+                version: i64::from(version),
                 data: data.unwrap_or_default(),
                 encoding: encoding.unwrap_or_default(),
             },
         ))
+    }
+
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        use crate::config_store::ConfigWriteError;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or_default();
+        let version = i32::try_from(row.version)
+            .map_err(|_| ConfigWriteError::Other("config version out of range".into()))?;
+        let outcome = self
+            .executor
+            .exec_lwt(
+                &CqlStatement::new(INSERT_CONFIG),
+                vec![
+                    bound(row_type),
+                    bound(version),
+                    bound(scylla::value::CqlTimestamp(now_ms)),
+                    bound(row.data.clone()),
+                    bound(row.encoding.clone()),
+                ],
+            )
+            .map_err(|e| ConfigWriteError::Other(e.to_string()))?;
+        if outcome.applied {
+            Ok(())
+        } else {
+            Err(ConfigWriteError::ConditionFailed(format!(
+                "Version {} already exists. Condition Failed",
+                row.version
+            )))
+        }
     }
 
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {

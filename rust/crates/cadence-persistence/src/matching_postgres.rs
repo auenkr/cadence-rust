@@ -513,6 +513,32 @@ impl MatchingTaskStore for PostgresTaskStore {
         }
     }
 
+    fn insert_config(
+        &self,
+        row_type: i32,
+        row: &crate::config_store::ConfigStoreRow,
+    ) -> std::result::Result<(), crate::config_store::ConfigWriteError> {
+        use crate::config_store::ConfigWriteError;
+        // Go sqlplugin/postgres InsertConfig on the default shard (negated version).
+        let mut lease = self.pools[0]
+            .checkout()
+            .map_err(|e| ConfigWriteError::Other(e.to_string()))?;
+        let version = -row.version;
+        match lease.execute(
+            "INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) VALUES ($1, $2, now(), $3, $4)",
+            &[&row_type, &version, &row.data, &row.encoding],
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) if e.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION) => {
+                Err(ConfigWriteError::ConditionFailed(format!(
+                    "Version {} already exists. Condition Failed",
+                    row.version
+                )))
+            }
+            Err(e) => Err(ConfigWriteError::Other(e.to_string())),
+        }
+    }
+
     fn get_task_list(&self, key: &TaskListKey) -> Result<TaskListRecord> {
         let mut client = self.pool(key).checkout()?;
         self.read_task_list_row(&mut client, key)?
