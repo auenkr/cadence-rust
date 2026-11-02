@@ -130,7 +130,7 @@ const DATA = {
         {n:"Mixed-cluster gate lanes", subs:[["PostgreSQL",200,"part"],["MySQL probes",200,"none"],["Thrift/TChannel",200,"none"],["configstore",200,"none"],["shard-distributor/etcd",200,"none"],["two-node MySQL",200,"none"],["Cassandra",200,"none"],["full adaptive",200,"none"],["active offer",200,"none"],["production TLS",200,"none"]]}
       ]},
     { name: "Frontend", order: 2, status: "part",
-      acceptance: "Frontend remains partial (see Nov 2 parity audit). History owner routing validated on e0ac162ba: clean workspace CI 41415396963 GREEN; Go History mixed regression 41415440353 GREEN (34/34: SDK, Frontend restart, TChannel/gRPC CLI). Multi-History churn/retry and broader persistence/policy gaps remain open. Evidence: memory/frontend-history-routing-20261102.md.",
+      acceptance: "Frontend remains partial (see Nov 2 parity audit). History owner routing validated on e0ac162ba: clean workspace CI 41415396963 GREEN; Go History mixed regression 41415440353 GREEN (34/34: SDK, Frontend restart, TChannel/gRPC CLI). Multi-History churn/retry and broader persistence/policy gaps remain open. Evidence: memory/frontend-history-routing-20261102.md. PostgreSQL mixed gate 41418956694 GREEN (34/34, SDK start/complete/list-open/list-closed and Frontend restart); synchronous domain-runtime panic fixed. Evidence: memory/frontend-postgres-visibility-20261102.md.",
       note: "fe-workflow-service and fe-admin-domain merged into master, CI green. Submodule statuses below are file-level estimates; 'part' = Rust equivalent exists but some behaviour is missing or unverified.",
       components: [
         {n:"api (workflow/domain handlers)", dir:"frontend/api", d:"none", r:"handler_workflow*, handler_domain, handler_schedule", rules:[

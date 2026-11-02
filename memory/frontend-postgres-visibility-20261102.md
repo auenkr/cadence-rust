@@ -39,3 +39,56 @@ Retained evidence: runner artifact contains `commit.txt`, `binary.sha256`, `gate
 ## Final workspace validation
 
 Fresh uncached workspace clippy followed by workspace tests dispatched on the same implementation (only this evidence note changed): https://github.com/auenkr/cadence-rust/actions/runs/41418563149, head `91ba98e434b2f03b0db3bfd25b339bc006a02750`. In progress at handoff; do not interpret package CI as a workspace pass.
+
+## Nested-runtime fix — implementation follow-up
+
+Implementation commit `b5b9e0cae` (CI formatting follow-up `9aae9101d`) isolates
+all synchronous PostgreSQL domain transactions, including metadata reads,
+domain CRUD, replication queue operations and audit-log operations, on a scoped
+thread when invoked from a Tokio runtime. This retains synchronous APIs,
+borrowed inputs, SQL, transaction ordering and timeout behavior. Unlike
+`block_in_place`, this boundary also works with current-thread runtimes. It
+follows the MySQL runtime-owner principle that driver runtime work must happen
+outside the caller runtime. Existing Frontend history/visibility readers already
+use `spawn_blocking`.
+
+Pooled PostgreSQL client destruction now uses the same boundary both when the
+pool is dropped and when a lease is discarded. Unit tests call domain/name,
+list and metadata reads from `#[tokio::test]`, expecting ordinary database
+connection errors against an unavailable local endpoint rather than a nested
+runtime panic; a second test asserts the boundary has no active Tokio runtime.
+
+All Rust formatting/build/test commands run only in Actions. Initial Matching
+CI https://github.com/auenkr/cadence-rust/actions/runs/41418924849 generated the
+format patch but was superseded/cancelled by the persistence-test dispatch;
+it is not a passing CI result. Persistence CI:
+https://github.com/auenkr/cadence-rust/actions/runs/41419395684 (head
+`9aae9101d`; pending at this checkpoint). Mixed PostgreSQL gate:
+https://github.com/auenkr/cadence-rust/actions/runs/41418956694 (implementation
+head `b5b9e0cae`; pending at this checkpoint). Final outcomes and binary identity
+are recorded below when available.
+
+### Confirmed follow-up outcomes
+
+- PostgreSQL mixed gate **success**, 34/34 steps, `RESULT failures=0`, gate
+  exit 0: https://github.com/auenkr/cadence-rust/actions/runs/41418956694.
+  Head `b5b9e0cae8bf30cba3934c408ec88ecf742b72e5`.
+  Fresh dedicated target `/tmp/cadence-cargo-target-fe-41418956694`.
+  Rust binary SHA256:
+  `7a77873938cd1f8fa850ab02a97b1e2e270ce3695da262a77b8457a134ac95f9`.
+  Domain registration/description over TChannel and gRPC, SDK workflow start,
+  completion, signal/query, list-open/list-closed, and Frontend kill/restart
+  recovery all passed with Rust Frontend + Matching and Go History/Worker.
+  This lane explicitly exercises Frontend restart; do not infer a Matching
+  restart from `sdk-restart-handshake` or claim full service parity.
+- Persistence CI **success**: https://github.com/auenkr/cadence-rust/actions/runs/41419395684.
+  Head `9aae9101da4133951844e749c57fd0367046e5dc`. Fresh target, clippy then
+  tests: 377 passed, 13 ignored. Both `runtime_boundary_tests` passed.
+- Formatting-only commit `9aae9101d` applies the Actions-generated patch;
+  mixed-gate implementation is identical apart from whitespace.
+- Matching package CI **success** (fresh target, clippy then tests):
+  https://github.com/auenkr/cadence-rust/actions/runs/41420119179,
+  head `9aae9101da4133951844e749c57fd0367046e5dc`.
+- Frontend package CI dispatched:
+  https://github.com/auenkr/cadence-rust/actions/runs/41421435035,
+  head `9aae9101da4133951844e749c57fd0367046e5dc`; pending at this checkpoint.
