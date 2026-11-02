@@ -236,3 +236,6 @@ The failed intervening attempts used `rust_ref=fe-integ` (source head
 `115f5b4b56969603648a828f01758ad1e73bdf70`) and do not test this branch. This
 expands API-specific mixed evidence only; the `partial` service-wide verdict and
 remaining parity limits above still apply.
+
+## 2026-11-03 archival update
+Filestore archival readers, domain archival state machine and production wiring landed on `frontend-archival` (see memory/evidence/frontend-archival-20261103.md, CI run 41548252149). Rows GetWorkflowExecutionHistory / ListArchivedWorkflowExecutions / Archival remain `partial`: unit-proven only, no endpoint or mixed-gate evidence yet.
