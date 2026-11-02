@@ -87,10 +87,7 @@ fn percent_decode(path: &str) -> Result<String, String> {
                 }
                 None => {
                     let end = (i + 3).min(bytes.len());
-                    return Err(format!(
-                        "invalid URL escape {}",
-                        go_quote(&path[i..end])
-                    ));
+                    return Err(format!("invalid URL escape {}", go_quote(&path[i..end])));
                 }
             }
         } else {
@@ -440,9 +437,9 @@ pub fn filestore_get_history(
         serde_json::from_slice(&data).map_err(|e| ArchiverError::Internal(e.to_string()))?;
     let start = usize::try_from(token.next_batch_idx).unwrap_or(0);
     // Go slices `historyBatches[token.NextBatchIdx:]`, which panics out of range.
-    let remaining = batches.get(start..).ok_or_else(|| {
-        ArchiverError::Internal("slice bounds out of range".to_owned())
-    })?;
+    let remaining = batches
+        .get(start..)
+        .ok_or_else(|| ArchiverError::Internal("slice bounds out of range".to_owned()))?;
     let mut response = GetHistoryResponse::default();
     let mut num_events = 0_i64;
     let mut num_batches = 0_usize;
@@ -654,9 +651,7 @@ impl Parser {
             Some(Tok::Ident(col)) => {
                 self.pos += 1;
                 let Some(Tok::Op(op)) = self.toks.get(self.pos).cloned() else {
-                    return Err(
-                        "only comparison and \"and\" expression is supported".to_string()
-                    );
+                    return Err("only comparison and \"and\" expression is supported".to_string());
                 };
                 self.pos += 1;
                 let (val, quoted) = match self.toks.get(self.pos).cloned() {
@@ -844,10 +839,7 @@ fn sort_and_filter_files(
 ) -> Result<Vec<String>, String> {
     let mut parsed = Vec::new();
     for name in names {
-        let pieces: Vec<&str> = name
-            .split(['_', '.'])
-            .filter(|p| !p.is_empty())
-            .collect();
+        let pieces: Vec<&str> = name.split(['_', '.']).filter(|p| !p.is_empty()).collect();
         let fail = || format!("failed to parse visibility filename {name}");
         if pieces.len() != 3 {
             return Err(fail());
@@ -939,7 +931,8 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("cadence-archiver-{name}-{}", std::process::id()));
+        let d =
+            std::env::temp_dir().join(format!("cadence-archiver-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -955,10 +948,19 @@ mod tests {
         assert_eq!(u.scheme, "file");
         assert_eq!(u.path, "/tmp/cadence_archival/development");
         let u = parse_uri("S3://bucket:80/a%20b?x=1").unwrap();
-        assert_eq!((u.scheme.as_str(), u.host.as_str(), u.path.as_str()), ("s3", "bucket", "/a b"));
+        assert_eq!(
+            (u.scheme.as_str(), u.host.as_str(), u.path.as_str()),
+            ("s3", "bucket", "/a b")
+        );
         assert_eq!(parse_uri("").unwrap_err(), "parse \"\": empty url");
-        assert_eq!(parse_uri("nope").unwrap_err(), "parse \"nope\": invalid URI for request");
-        assert_eq!(parse_uri(":x").unwrap_err(), "parse \":x\": missing protocol scheme");
+        assert_eq!(
+            parse_uri("nope").unwrap_err(),
+            "parse \"nope\": invalid URI for request"
+        );
+        assert_eq!(
+            parse_uri(":x").unwrap_err(),
+            "parse \":x\": missing protocol scheme"
+        );
         assert_eq!(parse_uri("mailto:a@b").unwrap().opaque, "a@b");
         assert!(parse_uri("/rooted").unwrap().scheme.is_empty());
     }
@@ -979,7 +981,9 @@ mod tests {
             .unwrap_err()
             .message()
             .starts_with(ERR_NOT_SUPPORTED));
-        assert!(p.validate_history_uri("file:///tmp/does-not-exist-xyz").is_ok());
+        assert!(p
+            .validate_history_uri("file:///tmp/does-not-exist-xyz")
+            .is_ok());
         let d = tmp("valid");
         let f = d.join("f");
         std::fs::write(&f, b"x").unwrap();
@@ -1052,21 +1056,33 @@ mod tests {
             ArchiverError::BadRequest(ERR_INVALID_GET_HISTORY_REQUEST.into())
         );
         assert_eq!(
-            p.get_history("file:///nonexistent-archive-dir", &GetHistoryRequest {
-                domain_id: "d".into(), workflow_id: "w".into(), run_id: "r".into(),
-                page_size: 1, ..Default::default()
-            }).unwrap_err(),
+            p.get_history(
+                "file:///nonexistent-archive-dir",
+                &GetHistoryRequest {
+                    domain_id: "d".into(),
+                    workflow_id: "w".into(),
+                    run_id: "r".into(),
+                    page_size: 1,
+                    ..Default::default()
+                }
+            )
+            .unwrap_err(),
             ArchiverError::BadRequest(ERR_HISTORY_NOT_EXIST.into())
         );
     }
 
     #[test]
     fn query_parser_follows_go_rules() {
-        let q = parse_query("WorkflowType = 'a' and (CloseStatus = 'completed' and CloseTime > 5)").unwrap();
+        let q = parse_query("WorkflowType = 'a' and (CloseStatus = 'completed' and CloseTime > 5)")
+            .unwrap();
         assert_eq!(q.workflow_type_name.as_deref(), Some("a"));
         assert_eq!(q.close_status, Some(0));
         assert_eq!(q.earliest_close_time, 6);
-        assert!(parse_query("WorkflowID = 'a' and WorkflowID = 'b'").unwrap().empty_result);
+        assert!(
+            parse_query("WorkflowID = 'a' and WorkflowID = 'b'")
+                .unwrap()
+                .empty_result
+        );
         assert_eq!(
             parse_query("WorkflowID = 'a' or RunID = 'b'").unwrap_err(),
             "only comparison and \"and\" expression is supported"
@@ -1075,7 +1091,10 @@ mod tests {
             parse_query("WorkflowID > 'a'").unwrap_err(),
             "only operator = is supported for WorkflowID with file system"
         );
-        assert_eq!(parse_query("Bogus = 'a'").unwrap_err(), "unknown filter name: Bogus");
+        assert_eq!(
+            parse_query("Bogus = 'a'").unwrap_err(),
+            "unknown filter name: Bogus"
+        );
         assert_eq!(
             parse_query("WorkflowID = 5").unwrap_err(),
             "value 5 is not a string value"
@@ -1098,7 +1117,11 @@ mod tests {
             "CloseStatus": status, "HistoryLength": 3, "Memo": null,
             "SearchAttributes": {"k": "v"}
         });
-        std::fs::write(dir.join(visibility_filename(close, run)), serde_json::to_vec(&rec).unwrap()).unwrap();
+        std::fs::write(
+            dir.join(visibility_filename(close, run)),
+            serde_json::to_vec(&rec).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1132,7 +1155,10 @@ mod tests {
         req.page_size = 10;
         assert_eq!(p.query_visibility(&uri, &req).unwrap().records.len(), 2);
         req.query = "CloseStatus = 'failed'".into();
-        assert_eq!(p.query_visibility(&uri, &req).unwrap().records[0].run_id, "r2");
+        assert_eq!(
+            p.query_visibility(&uri, &req).unwrap().records[0].run_id,
+            "r2"
+        );
         req.domain_id = "missing".into();
         assert!(p.query_visibility(&uri, &req).unwrap().records.is_empty());
         req.query = String::new();

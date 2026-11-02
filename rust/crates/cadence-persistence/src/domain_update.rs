@@ -169,7 +169,13 @@ fn prepare_inner(
             if let Some(policy) = cadence_common::archival_state::domain_archival_policy() {
                 use cadence_common::archival_state::{ArchivalKind, ArchivalState};
                 let enabled = |s: Option<ArchivalStatus>| s.map(|s| s == ArchivalStatus::Enabled);
-                let flag = |on: bool| Some(if on { ArchivalStatus::Enabled } else { ArchivalStatus::Disabled });
+                let flag = |on: bool| {
+                    Some(if on {
+                        ArchivalStatus::Enabled
+                    } else {
+                        ArchivalStatus::Disabled
+                    })
+                };
                 let cfg = &mut record.configuration;
                 let cur = ArchivalState {
                     enabled: cfg.history_archival_status == Some(ArchivalStatus::Enabled),
@@ -197,7 +203,10 @@ fn prepare_inner(
                         ArchivalKind::Visibility,
                         &cur,
                         enabled(config.visibility_archival_status),
-                        config.visibility_archival_uri.as_deref().unwrap_or_default(),
+                        config
+                            .visibility_archival_uri
+                            .as_deref()
+                            .unwrap_or_default(),
                     )
                     .map_err(|e| invalid(e.message().to_owned()))?
                 {
@@ -206,26 +215,26 @@ fn prepare_inner(
                     changed = true;
                 }
             } else {
-            if let Some(status) = config.history_archival_status {
-                record.configuration.history_archival_status = Some(status);
-                changed = true;
-            }
-            if let Some(uri) = &config.history_archival_uri {
-                if !uri.is_empty() {
-                    record.configuration.history_archival_uri.clone_from(uri);
+                if let Some(status) = config.history_archival_status {
+                    record.configuration.history_archival_status = Some(status);
                     changed = true;
                 }
-            }
-            if let Some(status) = config.visibility_archival_status {
-                record.configuration.visibility_archival_status = Some(status);
-                changed = true;
-            }
-            if let Some(uri) = &config.visibility_archival_uri {
-                if !uri.is_empty() {
-                    record.configuration.visibility_archival_uri.clone_from(uri);
+                if let Some(uri) = &config.history_archival_uri {
+                    if !uri.is_empty() {
+                        record.configuration.history_archival_uri.clone_from(uri);
+                        changed = true;
+                    }
+                }
+                if let Some(status) = config.visibility_archival_status {
+                    record.configuration.visibility_archival_status = Some(status);
                     changed = true;
                 }
-            }
+                if let Some(uri) = &config.visibility_archival_uri {
+                    if !uri.is_empty() {
+                        record.configuration.visibility_archival_uri.clone_from(uri);
+                        changed = true;
+                    }
+                }
             }
         }
         if let Some(checksum) = &request.delete_bad_binary {

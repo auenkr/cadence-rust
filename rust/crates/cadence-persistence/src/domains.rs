@@ -1710,7 +1710,8 @@ impl FrontendDomainManager for PersistedFrontendDomainManager {
         })?;
         let old = self.cache.record_by_name(name)?;
         let version = self.current_metadata_version()?;
-        self.cache.update_domain_async_workflow_config(name, config)?;
+        self.cache
+            .update_domain_async_workflow_config(name, config)?;
         let mut updated = self.cache.record_by_name(name)?;
         updated.config_version += 1;
         updated.last_updated_time_nanos = now_nanos();

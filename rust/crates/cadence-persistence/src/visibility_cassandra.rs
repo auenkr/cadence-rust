@@ -34,8 +34,10 @@ fn internal(error: impl std::fmt::Display) -> VisibilityError {
 /// Go `SelectVisibility` template choice. Precedence mirrors the SQL reader:
 /// workflow ID, workflow type, close status.
 pub fn list_query(filter: &VisibilityFilter, sort_by_close_time: bool) -> (String, Extra) {
-    let closed =
-        filter.closed || (filter.workflow_id.is_none() && filter.workflow_type_name.is_none() && filter.close_status.is_some());
+    let closed = filter.closed
+        || (filter.workflow_id.is_none()
+            && filter.workflow_type_name.is_none()
+            && filter.close_status.is_some());
     let (table, time_col) = if !closed {
         ("open_executions", "start_time")
     } else if sort_by_close_time {
@@ -47,7 +49,11 @@ pub fn list_query(filter: &VisibilityFilter, sort_by_close_time: bool) -> (Strin
     let (partition, tail, extra) = if let Some(id) = &filter.workflow_id {
         ("= ?", "AND workflow_id = ? ", Extra::Text(id.clone()))
     } else if let Some(name) = &filter.workflow_type_name {
-        ("= ?", "AND workflow_type_name = ? ", Extra::Text(name.clone()))
+        (
+            "= ?",
+            "AND workflow_type_name = ? ",
+            Extra::Text(name.clone()),
+        )
     } else if let (true, Some(status)) = (closed, filter.close_status) {
         ("= ?", "AND status = ? ", Extra::Status(status))
     } else {
@@ -329,7 +335,9 @@ mod tests {
         let mut f = filter();
         f.workflow_type_name = Some("t".into());
         let (cql, extra) = list_query(&f, false);
-        assert!(cql.contains("domain_partition = ?") && cql.ends_with("AND workflow_type_name = ? "));
+        assert!(
+            cql.contains("domain_partition = ?") && cql.ends_with("AND workflow_type_name = ? ")
+        );
         assert_eq!(extra, Extra::Text("t".into()));
         f.workflow_id = Some("w".into());
         let (cql, extra) = list_query(&f, true);
@@ -345,7 +353,10 @@ mod tests {
         assert!(cql.contains("FROM closed_executions WHERE") && cql.contains("start_time >= ?"));
         assert!(cql.contains("close_time, workflow_type_name, status, history_length"));
         let (cql, _) = list_query(&f, true);
-        assert!(cql.contains("FROM closed_executions_v2 WHERE") && cql.contains("close_time >= ? AND close_time <= ?"));
+        assert!(
+            cql.contains("FROM closed_executions_v2 WHERE")
+                && cql.contains("close_time >= ? AND close_time <= ?")
+        );
     }
 
     #[test]
@@ -377,7 +388,10 @@ mod tests {
 
     #[test]
     fn timestamps_convert_ms_to_us() {
-        assert_eq!(us(Some(CqlTimestamp(1_700_000_000_123))), 1_700_000_000_123_000);
+        assert_eq!(
+            us(Some(CqlTimestamp(1_700_000_000_123))),
+            1_700_000_000_123_000
+        );
         assert_eq!(us(None), 0);
     }
 }

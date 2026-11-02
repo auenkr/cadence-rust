@@ -55,7 +55,14 @@ pub fn next_state(
     } else {
         match status {
             Some(true) => (
-                with(true, if event_uri_set { event_uri } else { default_uri }),
+                with(
+                    true,
+                    if event_uri_set {
+                        event_uri
+                    } else {
+                        default_uri
+                    },
+                ),
                 true,
             ),
             _ if event_uri_set => (with(false, event_uri), true),
@@ -183,15 +190,63 @@ mod tests {
         let d = "file:///d";
         let cases = [
             // (state, status, uri, expected state, changed)
-            (st(true, "file:///a"), Some(true), "", st(true, "file:///a"), false),
-            (st(true, "file:///a"), Some(false), "", st(false, "file:///a"), true),
-            (st(true, "file:///a"), None, "file:///a", st(true, "file:///a"), false),
-            (st(false, "file:///a"), Some(true), "", st(true, "file:///a"), true),
-            (st(false, "file:///a"), Some(false), "", st(false, "file:///a"), false),
+            (
+                st(true, "file:///a"),
+                Some(true),
+                "",
+                st(true, "file:///a"),
+                false,
+            ),
+            (
+                st(true, "file:///a"),
+                Some(false),
+                "",
+                st(false, "file:///a"),
+                true,
+            ),
+            (
+                st(true, "file:///a"),
+                None,
+                "file:///a",
+                st(true, "file:///a"),
+                false,
+            ),
+            (
+                st(false, "file:///a"),
+                Some(true),
+                "",
+                st(true, "file:///a"),
+                true,
+            ),
+            (
+                st(false, "file:///a"),
+                Some(false),
+                "",
+                st(false, "file:///a"),
+                false,
+            ),
             (st(false, ""), Some(true), "", st(true, d), true),
-            (st(false, ""), Some(true), "file:///e", st(true, "file:///e"), true),
-            (st(false, ""), Some(false), "file:///e", st(false, "file:///e"), true),
-            (st(false, ""), None, "file:///e", st(false, "file:///e"), true),
+            (
+                st(false, ""),
+                Some(true),
+                "file:///e",
+                st(true, "file:///e"),
+                true,
+            ),
+            (
+                st(false, ""),
+                Some(false),
+                "file:///e",
+                st(false, "file:///e"),
+                true,
+            ),
+            (
+                st(false, ""),
+                None,
+                "file:///e",
+                st(false, "file:///e"),
+                true,
+            ),
             (st(false, ""), None, "", st(false, ""), false),
             (st(false, ""), Some(false), "", st(false, ""), false),
         ];
@@ -204,11 +259,20 @@ mod tests {
     #[test]
     fn go_state_errors() {
         let e = next_state(&st(true, "file:///a"), None, "file:///b", "file:///d", &ok);
-        assert_eq!(e.unwrap_err().message(), "Cannot update existing archival URI");
+        assert_eq!(
+            e.unwrap_err().message(),
+            "Cannot update existing archival URI"
+        );
         let e = next_state(&st(false, ""), None, "", "", &ok);
-        assert!(e.unwrap_err().message().starts_with("Encountered illegal event"));
+        assert!(e
+            .unwrap_err()
+            .message()
+            .starts_with("Encountered illegal event"));
         let e = next_state(&st(true, ""), None, "", "x", &ok);
-        assert!(e.unwrap_err().message().starts_with("Encountered illegal state"));
+        assert!(e
+            .unwrap_err()
+            .message()
+            .starts_with("Encountered illegal state"));
         let reject = |_: &str| Err(ArchiverError::Other("nope".into()));
         let e = next_state(&st(false, ""), Some(true), "", "file:///d", &reject);
         assert_eq!(e.unwrap_err().message(), "nope");
@@ -228,14 +292,21 @@ mod tests {
         };
         let r = policy.register(ArchivalKind::History, None, "").unwrap();
         assert!(r.enabled && r.uri.ends_with("default"));
-        let r = policy.register(ArchivalKind::Visibility, Some(true), "file:///x").unwrap();
+        let r = policy
+            .register(ArchivalKind::Visibility, Some(true), "file:///x")
+            .unwrap();
         assert_eq!(r, st(false, ""));
         let e = policy
             .register(ArchivalKind::History, Some(true), "s3://bucket/x")
             .unwrap_err();
         assert!(!e.message().is_empty());
         let u = policy
-            .update(ArchivalKind::History, &st(true, "file:///a"), Some(false), "")
+            .update(
+                ArchivalKind::History,
+                &st(true, "file:///a"),
+                Some(false),
+                "",
+            )
             .unwrap();
         assert_eq!(u, Some(st(false, "file:///a")));
         let u = policy

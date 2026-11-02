@@ -196,9 +196,7 @@ fn map_archiver_error(e: ArchiverError) -> CadenceError {
         ArchiverError::EntityNotExists(m) => {
             cadence_api::errors::EntityNotExistsError::new(m).into()
         }
-        ArchiverError::Internal(m) | ArchiverError::Other(m) => {
-            InternalServiceError::new(m).into()
-        }
+        ArchiverError::Internal(m) | ArchiverError::Other(m) => InternalServiceError::new(m).into(),
     }
 }
 
@@ -242,11 +240,7 @@ impl ArchivedHistory {
         }
     }
 
-    async fn get(
-        &self,
-        domain_id: String,
-        request: Value,
-    ) -> Result<Option<Value>, CadenceError> {
+    async fn get(&self, domain_id: String, request: Value) -> Result<Option<Value>, CadenceError> {
         if !self.config.read_enabled() {
             return Ok(None);
         }
@@ -269,11 +263,7 @@ impl ArchivedHistory {
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or_default();
         // Only an EntityNotExists from History means "archived".
-        match self
-            .probe
-            .exists(&domain_id, &workflow_id, &run_id)
-            .await
-        {
+        match self.probe.exists(&domain_id, &workflow_id, &run_id).await {
             Ok(false) => {}
             _ => return Ok(None),
         }
@@ -399,7 +389,12 @@ impl ArchivedVisibility {
                     .search_attributes
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|(k, v)| (k, Value::String(cadence_api::b64::encode_bytes(v.as_bytes()))))
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            Value::String(cadence_api::b64::encode_bytes(v.as_bytes())),
+                        )
+                    })
                     .collect();
                 let mut info = json!({
                     "execution": {"workflowId": r.workflow_id, "runId": r.run_id},
@@ -477,11 +472,19 @@ mod tests {
 
     #[test]
     fn cluster_status_parsing_and_gating() {
-        assert!(parse_cluster_status("bogus").unwrap_err().starts_with("invalid archival status of bogus for cluster"));
+        assert!(parse_cluster_status("bogus")
+            .unwrap_err()
+            .starts_with("invalid archival status of bogus for cluster"));
         assert!(cfg("enabled", true).read_enabled());
         assert!(!cfg("enabled", false).read_enabled());
         assert!(!cfg("paused", true).cluster_configured_for_archival());
-        let dyn_off = ArchivalConfig::new("enabled", Arc::new(|| "disabled".into()), true, Arc::new(|| true)).unwrap();
+        let dyn_off = ArchivalConfig::new(
+            "enabled",
+            Arc::new(|| "disabled".into()),
+            true,
+            Arc::new(|| true),
+        )
+        .unwrap();
         assert!(!dyn_off.cluster_configured_for_archival());
     }
 
@@ -516,7 +519,10 @@ mod tests {
             ArchivedHistory::new(
                 cfg("enabled", true),
                 provider(),
-                Arc::new(Domains(DomainArchival { history_uri: uri.to_owned(), ..archival.clone() })),
+                Arc::new(Domains(DomainArchival {
+                    history_uri: uri.to_owned(),
+                    ..archival.clone()
+                })),
                 Arc::new(Probe(exists)),
             )
         };
@@ -527,15 +533,27 @@ mod tests {
         assert_eq!(resp["history"]["events"].as_array().unwrap().len(), 3);
         assert!(resp["nextPageToken"].is_null());
         // live workflow: no archive read
-        assert!(reader(true, &archival.history_uri).get("dom".into(), req.clone()).await.unwrap().is_none());
+        assert!(reader(true, &archival.history_uri)
+            .get("dom".into(), req.clone())
+            .await
+            .unwrap()
+            .is_none());
         // no run id: no archive read
         let no_run = json!({"domain":"d","execution":{"workflowId":"wf"},"maximumPageSize":10});
         assert!(r.get("dom".into(), no_run).await.unwrap().is_none());
         // never archived domain
-        let err = reader(false, "").get("dom".into(), req.clone()).await.unwrap_err();
+        let err = reader(false, "")
+            .get("dom".into(), req.clone())
+            .await
+            .unwrap_err();
         assert_eq!(err.to_string(), HISTORY_NOT_FOUND);
         // read disabled
-        let off = ArchivedHistory::new(cfg("enabled", false), provider(), Arc::new(Domains(archival.clone())), Arc::new(Probe(false)));
+        let off = ArchivedHistory::new(
+            cfg("enabled", false),
+            provider(),
+            Arc::new(Domains(archival.clone())),
+            Arc::new(Probe(false)),
+        );
         assert!(off.get("dom".into(), req).await.unwrap().is_none());
     }
 
@@ -546,23 +564,50 @@ mod tests {
         std::fs::create_dir_all(&dom).unwrap();
         let rec = json!({"WorkflowID":"wf","RunID":"r1","WorkflowTypeName":"t","StartTimestamp":5,
             "ExecutionTimestamp":0,"CloseTimestamp":10,"CloseStatus":"COMPLETED","HistoryLength":4});
-        std::fs::write(dom.join(cadence_common::archiver::visibility_filename(10, "r1")), serde_json::to_vec(&rec).unwrap()).unwrap();
+        std::fs::write(
+            dom.join(cadence_common::archiver::visibility_filename(10, "r1")),
+            serde_json::to_vec(&rec).unwrap(),
+        )
+        .unwrap();
         let archival = DomainArchival {
             visibility_status: Some(ArchivalStatus::Enabled),
             visibility_uri: format!("file://{}", d.display()),
             ..Default::default()
         };
-        let mk = |c: ArchivalConfig, a: DomainArchival| ArchivedVisibility::new(c, provider(), Arc::new(Domains(a)));
+        let mk = |c: ArchivalConfig, a: DomainArchival| {
+            ArchivedVisibility::new(c, provider(), Arc::new(Domains(a)))
+        };
         let req = json!({"domainUUID":"dom","pageSize":5,"nextPageToken":null,"query":"WorkflowType = 't'"});
-        let resp = mk(cfg("enabled", true), archival.clone()).list(req.clone()).await.unwrap();
+        let resp = mk(cfg("enabled", true), archival.clone())
+            .list(req.clone())
+            .await
+            .unwrap();
         assert_eq!(resp["executions"][0]["execution"]["runId"], "r1");
         assert_eq!(resp["executions"][0]["closeStatus"], "COMPLETED");
         assert!(resp["nextPageToken"].is_null());
-        let e = mk(cfg("disabled", true), archival.clone()).list(req.clone()).await.unwrap_err();
-        assert_eq!(e.to_string(), "Cluster is not configured for visibility archival");
-        let e = mk(cfg("enabled", false), archival.clone()).list(req.clone()).await.unwrap_err();
-        assert_eq!(e.to_string(), "Cluster is not configured for reading archived visibility records");
-        let e = mk(cfg("enabled", true), DomainArchival::default()).list(req).await.unwrap_err();
-        assert_eq!(e.to_string(), "Domain is not configured for visibility archival");
+        let e = mk(cfg("disabled", true), archival.clone())
+            .list(req.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "Cluster is not configured for visibility archival"
+        );
+        let e = mk(cfg("enabled", false), archival.clone())
+            .list(req.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "Cluster is not configured for reading archived visibility records"
+        );
+        let e = mk(cfg("enabled", true), DomainArchival::default())
+            .list(req)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "Domain is not configured for visibility archival"
+        );
     }
 }

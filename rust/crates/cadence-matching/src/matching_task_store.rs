@@ -220,7 +220,8 @@ fn separate_visibility_nosql<'a>(
         .get(&persistence.visibility_store)?
         .nosql
         .as_ref()?;
-    (v.plugin_name == "cassandra" && (v.keyspace != default_nosql.keyspace || v.hosts != default_nosql.hosts))
+    (v.plugin_name == "cassandra"
+        && (v.keyspace != default_nosql.keyspace || v.hosts != default_nosql.hosts))
         .then_some(v)
 }
 
@@ -242,17 +243,20 @@ pub fn open_configured_default_store(
         let driver =
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
         let visibility_driver = match separate_visibility_nosql(persistence, nosql) {
-            Some(v) => Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(
-                &cassandra_config(v)?,
-            )?),
+            Some(v) => Arc::new(
+                cadence_persistence::cassandra::CassandraBlockingSession::connect(
+                    &cassandra_config(v)?,
+                )?,
+            ),
             None => driver.clone(),
         };
-        let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
-            Arc::new(cadence_persistence::visibility_cassandra::CassandraVisibilityStore::new(
+        let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> = Arc::new(
+            cadence_persistence::visibility_cassandra::CassandraVisibilityStore::new(
                 visibility_driver,
                 // Go reads system.enableReadFromClosedExecutionV2 (default false).
                 false,
-            ));
+            ),
+        );
         let domain_all_consistency_delete = all_consistency_delete.clone();
         let task_store = Arc::new(
             cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(

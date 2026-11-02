@@ -907,7 +907,11 @@ fn build_archive_readers(
             domains.clone(),
             probe,
         )),
-        std::sync::Arc::new(ar::ArchivedVisibility::new(visibility_cfg, provider, domains)),
+        std::sync::Arc::new(ar::ArchivedVisibility::new(
+            visibility_cfg,
+            provider,
+            domains,
+        )),
     ))
 }
 

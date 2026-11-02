@@ -294,18 +294,26 @@ async fn handle_register(state: &AppState, body: &Struct) -> HandlerResult {
     let mut req = req;
     if let Some(policy) = cadence_common::archival_state::domain_archival_policy() {
         use cadence_common::archival_state::ArchivalKind;
-        let flag = |on: bool| Some(if on { ArchivalStatus::Enabled } else { ArchivalStatus::Disabled });
+        let flag = |on: bool| {
+            Some(if on {
+                ArchivalStatus::Enabled
+            } else {
+                ArchivalStatus::Disabled
+            })
+        };
         let h = policy
             .register(
                 ArchivalKind::History,
-                req.history_archival_status.map(|s| s == ArchivalStatus::Enabled),
+                req.history_archival_status
+                    .map(|s| s == ArchivalStatus::Enabled),
                 &req.history_archival_uri,
             )
             .map_err(|e| AppError::bad_request(e.message().to_owned()))?;
         let v = policy
             .register(
                 ArchivalKind::Visibility,
-                req.visibility_archival_status.map(|s| s == ArchivalStatus::Enabled),
+                req.visibility_archival_status
+                    .map(|s| s == ArchivalStatus::Enabled),
                 &req.visibility_archival_uri,
             )
             .map_err(|e| AppError::bad_request(e.message().to_owned()))?;
