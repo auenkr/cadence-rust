@@ -32,6 +32,7 @@ const HISTORY_SERVICE: &str = "cadence-history";
 const CALLER: &str = "cadence-frontend";
 /// Go's frontend client default timeout for History calls.
 const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
+const HISTORY_RETRY_BUDGET: Duration = Duration::from_secs(25);
 
 #[derive(Clone)]
 pub struct ProductionBackend {
@@ -263,15 +264,33 @@ impl ProductionBackend {
         envelope: Struct,
     ) -> Result<Struct, CadenceError> {
         let workflow_id = history_workflow_id(method, &envelope)?;
-        let address = self.history_addr_for_workflow(&workflow_id)?;
-        self.call(
-            &address,
-            HISTORY_SERVICE,
-            "HistoryService",
-            method,
-            envelope,
-        )
-        .await
+        // Go client/history: the owner is re-resolved from Ringpop on every attempt;
+        // ShardOwnershipLost (request not applied) and ServiceBusy (host down /
+        // overloaded) are retried with backoff while shard ownership moves.
+        let started = std::time::Instant::now();
+        let mut attempt = 0u32;
+        loop {
+            let address = self.history_addr_for_workflow(&workflow_id)?;
+            let result = self
+                .call(
+                    &address,
+                    HISTORY_SERVICE,
+                    "HistoryService",
+                    method,
+                    envelope.clone(),
+                )
+                .await;
+            match &result {
+                Err(CadenceError::ShardOwnershipLost(_)) | Err(CadenceError::ServiceBusy(_))
+                    if attempt < 20 && started.elapsed() < HISTORY_RETRY_BUDGET =>
+                {
+                    attempt += 1;
+                    tokio::time::sleep(Duration::from_millis(250 * u64::from(attempt.min(8))))
+                        .await;
+                }
+                _ => return result,
+            }
+        }
     }
 
     async fn call(

@@ -77,6 +77,7 @@ if [[ "${CADENCE_GATE_KAFKA:-}" == "true" || "${CADENCE_GATE_KAFKA:-}" == "1" ]]
   KAFKA_ARGS=(--kafka-broker "127.0.0.1:${KAFKA_PORT}" --kafka-container "$KAFKA_CONTAINER" --kafka-topic "$KAFKA_TOPIC")
 fi
 export CADENCE_MYSQL_ADDR="127.0.0.1:${PORT}" CADENCE_MYSQL_PASSWORD="$PASSWORD" CADENCE_MYSQL_DOCKER_CONTAINER="$CONTAINER"
+if [[ "${CADENCE_GATE_TWO_HISTORY:-}" == "true" ]]; then KAFKA_ARGS+=(--two-history); fi
 python3 "$ROOT/tests/gates/run-frontend-gate.py" --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
