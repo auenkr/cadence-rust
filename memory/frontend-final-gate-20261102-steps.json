@@ -1,0 +1,232 @@
+[
+  {
+    "step": "go-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-19c375 successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-7c84d8 successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-19c375\nUUID: 01a19abc-a2ac-7454-b8f9-d27789e27c78\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-7c84d8\nUUID: 01a19abc-a2d4-763c-8c7e-2b0dd1882130\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "go-history-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-signal-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-matching-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-after-matching-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-done",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-history-worker-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "cli-list-workflows-grpc",
+    "ok": true,
+    "detail": "Fetching 0 workflows..."
+  },
+  {
+    "step": "cli-list-workflows-tchannel",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sched-create-grpc",
+    "ok": true,
+    "detail": "Schedule created successfully. ScheduleID: fe-sched-grpc-12d07b"
+  },
+  {
+    "step": "sched-describe-grpc",
+    "ok": true,
+    "detail": "Schedule Configuration:\n  Cron Expression:    * * * * *\n  Workflow Type:      EchoWorkflow\n  Task List:          fe-gate-tl\n  Execution Timeout:  60s\n  Decision Timeout:   10s\n  Overlap Policy:     INVALID\n  Catch-up Policy:    INVALID\n  Status:             ACTIVE\n\nSchedule Runtime:\n  Total Runs:         0\n  Next Run:           2026-11-02T05:32:00Z\n  Created:            2026-11-02T05:31:13Z\n  Last Updated:       2026-11-02T05:31:13Z"
+  },
+  {
+    "step": "sched-pause-grpc",
+    "ok": true,
+    "detail": "Schedule \"fe-sched-grpc-12d07b\" paused successfully."
+  },
+  {
+    "step": "sched-unpause-grpc",
+    "ok": true,
+    "detail": "Schedule \"fe-sched-grpc-12d07b\" unpaused successfully."
+  },
+  {
+    "step": "sched-backfill-grpc",
+    "ok": true,
+    "detail": "Backfill requested for schedule \"fe-sched-grpc-12d07b\" (2026-01-01T00:00:00Z to 2026-01-01T00:03:00Z)."
+  },
+  {
+    "step": "sched-list-grpc",
+    "ok": true,
+    "detail": "fe-sched-grpc-12d07b                                                        active\n\n  ... more schedules exist. Use --pagesize to increase the page size."
+  },
+  {
+    "step": "sched-describe-after-backfill-grpc",
+    "ok": true,
+    "detail": "Schedule Configuration:\n  Cron Expression:    * * * * *\n  Workflow Type:      EchoWorkflow\n  Task List:          fe-gate-tl\n  Execution Timeout:  60s\n  Decision Timeout:   10s\n  Overlap Policy:     INVALID\n  Catch-up Policy:    INVALID\n  Status:             ACTIVE\n\nSchedule Runtime:\n  Total Runs:         1\n  Missed Runs:        1\n  Last Run:           2026-01-01T00:02:00Z\n  Next Run:           2026-11-02T05:32:00Z\n  Created:            2026-11-02T05:31:13Z\n  Last Updated:       2026-11-02T05:31:13Z\n  Ongoing Backfills:\n    - id: bf-grpc [2026-01-01T00:00:00Z, 2026-01-01T00:03:00Z] progress: 2/4"
+  },
+  {
+    "step": "sched-delete-grpc",
+    "ok": true,
+    "detail": "Schedule \"fe-sched-grpc-12d07b\" deleted successfully."
+  }
+]
