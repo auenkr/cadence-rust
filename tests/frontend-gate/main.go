@@ -95,6 +95,10 @@ func main() {
 	}
 	defer d.Stop()
 	rpc := workflowserviceclient.New(d.ClientConfig("cadence-frontend"))
+	if os.Getenv("FE_MODE") == "async" {
+		asyncMain(rpc, domain, os.Getenv("FE_DOMAIN_NOASYNC"), marks)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	tl := "fe-gate-" + uuid.NewString()
