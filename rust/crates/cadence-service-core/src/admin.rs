@@ -83,7 +83,8 @@ const NOT_FOUND_MESSAGE: &str = "unable to find key";
 const INVALID_FILTERS_MESSAGE: &str = "Request Filters are invalid, unable to parse.";
 
 fn blob_to_json(blob: Option<&cadence_api::types::DataBlob>) -> Result<serde_json::Value, String> {
-    let blob = blob.ok_or_else(|| "invalid memory address or nil pointer dereference".to_string())?;
+    let blob =
+        blob.ok_or_else(|| "invalid memory address or nil pointer dereference".to_string())?;
     match blob.encoding_type {
         Some(cadence_api::enums::EncodingType::JSON) => {
             serde_json::from_slice(&blob.data).map_err(|e| e.to_string())
@@ -404,7 +405,8 @@ impl DynamicConfigOverlay {
                 continue;
             }
             if go_match_filters(value, &request) {
-                let parsed = blob_to_json(value.value.as_ref()).map_err(DynamicConfigError::Internal)?;
+                let parsed =
+                    blob_to_json(value.value.as_ref()).map_err(DynamicConfigError::Internal)?;
                 return Ok(json_blob(&parsed));
             }
         }
@@ -438,9 +440,10 @@ impl DynamicConfigOverlay {
         let request = if filters.is_empty() {
             None
         } else {
-            Some(convert_filters(filters).map_err(|_| {
-                DynamicConfigError::BadRequest(INVALID_FILTERS_MESSAGE.into())
-            })?)
+            Some(
+                convert_filters(filters)
+                    .map_err(|_| DynamicConfigError::BadRequest(INVALID_FILTERS_MESSAGE.into()))?,
+            )
         };
         let current = self
             .map(operational)
@@ -515,7 +518,10 @@ impl DynamicConfigOverlay {
                 ),
                 encoding: "thriftrw".into(),
             };
-            match (binding.write)(cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG, &row) {
+            match (binding.write)(
+                cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
+                &row,
+            ) {
                 Ok(()) => {
                     binding.version = row.version;
                     self.normal = next;
@@ -994,7 +1000,11 @@ fn dynamic_config_error_response(error: DynamicConfigError) -> Response {
     }
 }
 
-fn get_config(state: &AppState, req: cadence_api::admin::GetDynamicConfigRequest, op: bool) -> Response {
+fn get_config(
+    state: &AppState,
+    req: cadence_api::admin::GetDynamicConfigRequest,
+    op: bool,
+) -> Response {
     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.admin_get(op, &req.config_name, &req.filters) {
         Ok(value) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: Some(value) }),
@@ -1002,7 +1012,11 @@ fn get_config(state: &AppState, req: cadence_api::admin::GetDynamicConfigRequest
     }
 }
 
-fn update_config(state: &AppState, req: cadence_api::admin::UpdateDynamicConfigRequest, op: bool) -> Response {
+fn update_config(
+    state: &AppState,
+    req: cadence_api::admin::UpdateDynamicConfigRequest,
+    op: bool,
+) -> Response {
     let mut overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.admin_update(op, &req.config_name, req.config_values) {
         Ok(()) => ok_json(cadence_api::admin::UpdateDynamicConfigResponse {}),
@@ -1010,7 +1024,11 @@ fn update_config(state: &AppState, req: cadence_api::admin::UpdateDynamicConfigR
     }
 }
 
-fn restore_config(state: &AppState, req: cadence_api::admin::RestoreDynamicConfigRequest, op: bool) -> Response {
+fn restore_config(
+    state: &AppState,
+    req: cadence_api::admin::RestoreDynamicConfigRequest,
+    op: bool,
+) -> Response {
     let mut overlay = state.admin.dynamic_config.lock().expect("admin lock");
     match overlay.admin_restore(op, &req.config_name, &req.filters) {
         Ok(()) => ok_json(cadence_api::admin::RestoreDynamicConfigResponse {}),
@@ -1018,7 +1036,11 @@ fn restore_config(state: &AppState, req: cadence_api::admin::RestoreDynamicConfi
     }
 }
 
-fn list_config(state: &AppState, req: cadence_api::admin::ListDynamicConfigRequest, op: bool) -> Response {
+fn list_config(
+    state: &AppState,
+    req: cadence_api::admin::ListDynamicConfigRequest,
+    op: bool,
+) -> Response {
     let overlay = state.admin.dynamic_config.lock().expect("admin lock");
     ok_json(cadence_api::admin::ListDynamicConfigResponse {
         entries: overlay.admin_list(op, &req.config_name),
@@ -2817,11 +2839,19 @@ mod dynamic_config_admin_tests {
             "key value pair mismatch, key type: dynamicproperties.MapKey, value type: []interface {}"
         );
         assert_eq!(
-            err(o.admin_update(false, "matching.longPollExpirationInterval", vec![value("\"zz\"", &[])])),
+            err(o.admin_update(
+                false,
+                "matching.longPollExpirationInterval",
+                vec![value("\"zz\"", &[])]
+            )),
             "value string encoding cannot be parsed into duration"
         );
-        o.admin_update(false, "matching.longPollExpirationInterval", vec![value("\"1m\"", &[])])
-            .unwrap();
+        o.admin_update(
+            false,
+            "matching.longPollExpirationInterval",
+            vec![value("\"1m\"", &[])],
+        )
+        .unwrap();
         o.admin_update(false, INT, vec![value("5", &[])]).unwrap();
         let bad_encoding = DynamicConfigValue {
             value: Some(cadence_api::types::DataBlob {
@@ -2929,12 +2959,17 @@ mod dynamic_config_admin_tests {
     fn update_with_empty_values_deletes_and_list_falls_back_to_all() {
         let mut o = DynamicConfigOverlay::default();
         o.admin_update(false, INT, vec![value("1", &[])]).unwrap();
-        o.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
+        o.admin_update(false, BOOL, vec![value("true", &[])])
+            .unwrap();
         assert_eq!(o.admin_list(false, INT).len(), 1);
         assert_eq!(o.admin_list(false, "").len(), 2);
         // Unknown name (or a key without an entry) lists everything, like Go.
         assert_eq!(o.admin_list(false, "no.such.key").len(), 2);
-        assert_eq!(o.admin_list(false, "matching.longPollExpirationInterval").len(), 2);
+        assert_eq!(
+            o.admin_list(false, "matching.longPollExpirationInterval")
+                .len(),
+            2
+        );
         assert_eq!(o.admin_list(false, "")[0].name, BOOL); // sorted by name
         o.admin_update(false, INT, vec![]).unwrap();
         assert_eq!(o.admin_list(false, "").len(), 1);
@@ -2976,10 +3011,17 @@ mod dynamic_config_admin_tests {
     fn updates_are_durable_across_restart_and_versions_increase() {
         let db = new_db();
         let mut o = load(&db, 1);
-        o.admin_update(false, INT, vec![value("5", &[("domainName", "\"d\"")]), value("1", &[])])
+        o.admin_update(
+            false,
+            INT,
+            vec![value("5", &[("domainName", "\"d\"")]), value("1", &[])],
+        )
+        .unwrap();
+        o.admin_update(false, BOOL, vec![value("true", &[])])
             .unwrap();
-        o.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
-        let latest = cs::sqlite_fetch_latest(&db.0.lock().unwrap(), 0).unwrap().unwrap();
+        let latest = cs::sqlite_fetch_latest(&db.0.lock().unwrap(), 0)
+            .unwrap()
+            .unwrap();
         assert_eq!((latest.version, latest.encoding.as_str()), (2, "thriftrw"));
         // "Restart": a fresh overlay loads the same state, filters and order intact.
         let restarted = load(&db, 1);
@@ -3012,7 +3054,8 @@ mod dynamic_config_admin_tests {
         a.admin_update(false, INT, vec![value("1", &[])]).unwrap();
         // `b` still thinks version 0: the insert of version 1 conflicts, it
         // refetches `a`'s snapshot and retries, keeping both writes.
-        b.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
+        b.admin_update(false, BOOL, vec![value("true", &[])])
+            .unwrap();
         let merged = load(&db, 1);
         assert_eq!(merged.admin_list(false, "").len(), 2);
         // With no retry budget the conflict is "ran out of retry attempts".

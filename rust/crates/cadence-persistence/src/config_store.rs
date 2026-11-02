@@ -284,10 +284,7 @@ pub fn encode_snapshot(schema_version: i64, entries: &[DynamicConfigEntry]) -> V
         w.write_field_begin(TType::Struct, id);
         if let Some(t) = &b.encoding_type {
             w.write_field_begin(TType::I32, 10);
-            w.write_i32(match t {
-                EncodingType::ThriftRW => 0,
-                EncodingType::JSON => 1,
-            });
+            w.write_i32(*t as i32);
         }
         w.write_field_begin(TType::String, 20);
         w.write_bytes(&b.data);
@@ -389,12 +386,8 @@ mod tests {
                 }],
             }],
         }];
-        let decoded = decode_snapshot(&row(
-            2,
-            encode_snapshot(4, &with_filter),
-            "thriftrw",
-        ))
-        .unwrap();
+        let decoded =
+            decode_snapshot(&row(2, encode_snapshot(4, &with_filter), "thriftrw")).unwrap();
         assert_eq!(decoded.schema_version, 4);
         assert_eq!(decoded.entries.unwrap(), with_filter);
     }
