@@ -1609,6 +1609,14 @@ async fn handle_describe_schedule(state: &AppState, body: &Struct, ctx: &crate::
     use cadence_api::schedule::DescribeScheduleRequest;
     let req: DescribeScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1618,7 +1626,7 @@ async fn handle_describe_schedule(state: &AppState, body: &Struct, ctx: &crate::
         return crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id, ctx).await
             .map(|resp| wrap_success(&resp)).map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .describe_schedule(&req.domain, &req.schedule_id)
         .map(|resp| wrap_success(&resp))
@@ -1629,6 +1637,14 @@ async fn handle_list_schedules(state: &AppState, body: &Struct, ctx: &crate::wor
     use cadence_api::schedule::{ListSchedulesRequest, ListSchedulesResponse};
     let req: ListSchedulesRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     let page_size = if req.page_size <= 0 {
         10
     } else {
@@ -1639,7 +1655,7 @@ async fn handle_list_schedules(state: &AppState, body: &Struct, ctx: &crate::wor
             .map(|(schedules, next_page_token)| wrap_success(&ListSchedulesResponse { schedules, next_page_token }))
             .map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     let (schedules, next_page_token) =
         executions.list_schedules(&req.domain, page_size, &req.next_page_token);
     Ok(wrap_success(&ListSchedulesResponse {
@@ -1652,6 +1668,14 @@ async fn handle_delete_schedule(state: &AppState, body: &Struct, ctx: &crate::wo
     use cadence_api::schedule::{DeleteScheduleRequest, DeleteScheduleResponse};
     let req: DeleteScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1661,7 +1685,7 @@ async fn handle_delete_schedule(state: &AppState, body: &Struct, ctx: &crate::wo
         return crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id, ctx).await
             .map(|()| wrap_success(&DeleteScheduleResponse {})).map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .delete_schedule(&req.domain, &req.schedule_id)
         .map(|()| wrap_success(&DeleteScheduleResponse {}))
@@ -1672,6 +1696,14 @@ async fn handle_pause_schedule(state: &AppState, body: &Struct, ctx: &crate::wor
     use cadence_api::schedule::{PauseScheduleRequest, PauseScheduleResponse};
     let req: PauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1687,7 +1719,7 @@ async fn handle_pause_schedule(state: &AppState, body: &Struct, ctx: &crate::wor
         return crate::schedule_flow::signal_scheduler_api(api, &req.domain, &req.schedule_id, crate::scheduler_wire::SIGNAL_PAUSE, input, ctx).await
             .map(|()| wrap_success(&PauseScheduleResponse {})).map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .pause_schedule(&req.domain, &req.schedule_id, &req.reason, &actor)
         .map(|()| wrap_success(&PauseScheduleResponse {}))
@@ -1698,6 +1730,14 @@ async fn handle_unpause_schedule(state: &AppState, body: &Struct, ctx: &crate::w
     use cadence_api::schedule::{UnpauseScheduleRequest, UnpauseScheduleResponse};
     let req: UnpauseScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1708,7 +1748,7 @@ async fn handle_unpause_schedule(state: &AppState, body: &Struct, ctx: &crate::w
         return crate::schedule_flow::signal_scheduler_api(api, &req.domain, &req.schedule_id, crate::scheduler_wire::SIGNAL_UNPAUSE, input, ctx).await
             .map(|()| wrap_success(&UnpauseScheduleResponse {})).map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .unpause_schedule(&req.domain, &req.schedule_id, req.catch_up_policy)
         .map(|()| wrap_success(&UnpauseScheduleResponse {}))
@@ -1719,6 +1759,14 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct, ctx: &crate::
     use cadence_api::schedule::{BackfillScheduleRequest, BackfillScheduleResponse};
     let req: BackfillScheduleRequest =
         decode_args(body).map_err(|e| AppError::bad_request(format!("invalid args: {e}")))?;
+    let local_executions = if state.workflow_api.is_none() {
+        Some(require_domain_thrift(state, &req.domain)?)
+    } else {
+        None
+    };
+    if req.domain.is_empty() {
+        return Err(AppError::bad_request("Domain not set on request.".to_string()));
+    }
     if req.schedule_id.is_empty() {
         return Err(AppError::bad_request(
             "ScheduleID is not set on request.".to_string(),
@@ -1752,7 +1800,7 @@ async fn handle_backfill_schedule(state: &AppState, body: &Struct, ctx: &crate::
         return crate::schedule_flow::signal_scheduler_api(api, &req.domain, &req.schedule_id, crate::scheduler_wire::SIGNAL_BACKFILL, input, ctx).await
             .map(|()| wrap_success(&BackfillScheduleResponse {})).map_err(schedule_api_error);
     }
-    let executions = require_domain_thrift(state, &req.domain)?;
+    let executions = local_executions.expect("local execution store selected without WorkflowApi");
     executions
         .backfill_schedule(
             &req.domain,
