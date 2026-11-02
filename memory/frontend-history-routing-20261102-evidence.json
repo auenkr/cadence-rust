@@ -1,0 +1,29 @@
+{
+  "source_head": "e0ac162ba9cec2a77fea8aa1c769ceec28973c19",
+  "branch": "frontend-history-routing-20261102",
+  "ci": {
+    "url": "https://github.com/auenkr/cadence-rust/actions/runs/41415396963",
+    "conclusion": "success",
+    "target_dir": "/home/runner/work/_temp/cargo-target-final",
+    "clean_target": true,
+    "scope": "workspace",
+    "exits": {
+      "workspace-format.exit": 0,
+      "tls-format.exit": 0,
+      "test.exit": 0,
+      "query-format.exit": 0,
+      "matching-runtime-format.exit": 0,
+      "fmt.exit": 0,
+      "clippy.exit": 0
+    }
+  },
+  "mixed": {
+    "url": "https://github.com/auenkr/cadence-rust/actions/runs/41415440353",
+    "conclusion": "success",
+    "head": "e0ac162ba9cec2a77fea8aa1c769ceec28973c19",
+    "binary_sha256": "f0274bf5c58c62f126b5fb9d3ac9215b046c220afa895fea13f297749abfadbe",
+    "checks_passed": 34,
+    "checks_total": 34,
+    "go_frontend": false
+  }
+}

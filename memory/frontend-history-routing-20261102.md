@@ -1,6 +1,6 @@
 # Frontend History owner routing — 2026-11-02
 
-Branch: `frontend-history-routing-20261102`. Implementation validation in progress; no service-completion claim.
+Branch: `frontend-history-routing-20261102`. Scoped implementation and validation complete; no Frontend service-completion claim.
 
 ## Behavior and source references
 
@@ -18,12 +18,19 @@ Branch: `frontend-history-routing-20261102`. Implementation validation in progre
 - Service-core `shard_distribution_paginates_and_reports_unknown_membership`: page bounds, final partial page, empty/default page and absent membership.
 - No local Cargo/rustfmt/Go build or validation commands were run.
 
-## CI evidence (pending)
+## CI evidence
 
 - Initial https://github.com/auenkr/cadence-rust/actions/runs/41412292178 — head `4038f2de1`; failed compile because AppState's Debug derive required ClientTls Debug. Corrected with a redacted Debug implementation; CI formatting patch applied.
-- Follow-up https://github.com/auenkr/cadence-rust/actions/runs/41412822094 — head `1debbeaff`; pending.
-- Final clean workspace CI and mixed gate: pending. Binary SHA256: pending.
+- Follow-up https://github.com/auenkr/cadence-rust/actions/runs/41412822094 — head `1debbeaff`; Clippy passed, then superseded/cancelled for final workspace validation.
+- https://github.com/auenkr/cadence-rust/actions/runs/41413364086 — head `9f3681186`; superseded/cancelled after recovering the CI formatting patch.
+- https://github.com/auenkr/cadence-rust/actions/runs/41413822026 — head `a224ff5b9bfcaefde8ed00ec4a25c4407e64309b`; fresh workspace Clippy passed and all five new routing tests passed; workspace tests exposed two stale, unchanged local Admin assertions. Tests expected fabricated membership without a resolver and successful replication without a History client. Updated only those expectations to the existing production behavior; no runtime logic changed for these failures.
+- Final fresh workspace run https://github.com/auenkr/cadence-rust/actions/runs/41415396963 — head `e0ac162ba9cec2a77fea8aa1c769ceec28973c19`; **success**. Fresh uncached `/home/runner/work/_temp/cargo-target-final`; workspace Clippy followed by workspace tests. Artifacts confirm workspace formatting, runtime formatting, Clippy, Frontend formatting and tests all exit **0**.
+- Final mixed run https://github.com/auenkr/cadence-rust/actions/runs/41415440353 — **success**, Rust and gate head both `e0ac162ba9cec2a77fea8aa1c769ceec28973c19`; **34/34 checks pass**, including SDK workflows/query/signal, Frontend SIGKILL/restart, both CLI transports. No Go Frontend runs.
+- Mixed binary SHA256: `f0274bf5c58c62f126b5fb9d3ac9215b046c220afa895fea13f297749abfadbe`, fresh `/tmp/cadence-cargo-target-fe-41415440353/debug/cadence-server`.
+- Retained [gate steps](frontend-history-routing-20261102-steps.json). Reproduce with `gh workflow run frontend-mixed-gate.yml --ref frontend-history-routing-20261102 -f rust_ref=frontend-history-routing-20261102`; retrieve `gh run download 41415440353 -n frontend-mixed-gate -D <directory>` while retention permits.
+- Reproduce final CI: `gh workflow run rust-ci.yml --ref frontend-history-routing-20261102 -f clean_target=true` (package omitted for final workspace validation). The earlier targeted Frontend runs were superseded by this stronger full-workspace gate.
+- Retained [validation identity and exits](frontend-history-routing-20261102-evidence.json). The final documentation-only commit follows the validated source head above; Rust source is unchanged.
 
 ## Scope limits
 
-The existing mixed gate uses one Go History instance and proves SDK/restart regression compatibility, not multi-History churn/owner migration. ShardOwnershipLost retry loops and replication fanout are not added by this change. Frontend parity audit remains open for those broader distributed/failure cases.
+This checkout’s existing mixed gate records 34 checks (not the earlier audit’s 46): SDK/Frontend-restart regression compatibility with one Go History instance. It does not exercise Matching restart, Schedule APIs, multi-History churn or owner migration. ShardOwnershipLost retry loops and replication fanout are not added by this change. Frontend parity audit remains open for those broader distributed/failure cases.

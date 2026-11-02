@@ -1,0 +1,172 @@
+[
+  {
+    "step": "go-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-e68126 successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-72eabb successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-e68126\nUUID: 01a19b75-6abb-72eb-9da8-6cb006b7f27c\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-72eabb\nUUID: 01a19b75-6ada-77ed-bbdf-387dea08d805\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "go-history-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-killed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-restarted-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-echo",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-signal-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-query",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-describe-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-open",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-restart-handshake",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-signal-done",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-complete-after-restart",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-closed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-driver-exit",
+    "ok": true,
+    "detail": "exit=0"
+  },
+  {
+    "step": "go-history-worker-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "cli-list-workflows-grpc",
+    "ok": true,
+    "detail": "Fetching 0 workflows..."
+  },
+  {
+    "step": "cli-list-workflows-tchannel",
+    "ok": true,
+    "detail": ""
+  }
+]
