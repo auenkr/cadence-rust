@@ -97,6 +97,17 @@ struct ClosedRec {
     is_cron: Option<bool>,
     update_time: Option<CqlTimestamp>,
     shard_id: Option<i32>,
+    // Selected columns must all be present in a by-name derive.
+    #[allow(dead_code)]
+    task_list: Option<String>,
+    #[allow(dead_code)]
+    num_clusters: Option<i32>,
+    #[allow(dead_code)]
+    execution_status: Option<i32>,
+    #[allow(dead_code)]
+    cron_schedule: Option<String>,
+    #[allow(dead_code)]
+    scheduled_execution_time: Option<CqlTimestamp>,
 }
 
 /// Cassandra timestamps are milliseconds; rows carry microseconds.
