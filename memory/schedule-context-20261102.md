@@ -31,3 +31,15 @@ Commit `2353717e8062367cb39ce58350fb93d32f403b2b` changes schedule API functions
 ## Parent review correction
 
 Reviewed on `frontend-schedule-context-reviewed`. Fixed the short-TTL assertion to bracket the actual context capture between before/after instants. Changed the delete-signal mock from EntityNotExists (which intentionally returns idempotent success without termination) to BadRequest, so the expected TerminateWorkflowExecution fallback is actually exercised. Code head `66fd2b282`; replacement CI with formatting requested: https://github.com/auenkr/cadence-rust/actions/runs/41430427854. Conclusion pending. No local Cargo/Go/formatting commands executed.
+
+## YARPC/Thrift schedule routing implementation (2026-11-02)
+
+- Integrated `origin/frontend-schedule-context-reviewed` at `fe309ad62` into `t3/frontend-schedule-routing` before implementation.
+- Updated YARPC/Thrift schedule handlers for Create, Describe, List, Update, Delete, Pause, Unpause, and Backfill to use shared production `schedule_flow` helpers whenever `AppState.workflow_api` is installed. The local execution store remains the fallback only when the hook is absent.
+- Schedule API calls receive the incoming YARPC deadline and normalized caller headers. Backend errors retain the Thrift exception conversion path. Validation stays before backend calls; production Describe/List do not demand a local execution store first.
+- Added dispatch-level tests for installed-hook routing, context/error propagation, and no-hook fallback. Existing `schedule_flow` hook tests exercise Create/Describe/List/signals/Delete fallback context behavior.
+- gRPC audit: the proto gRPC WorkflowApi implementation exposes no schedule RPC methods, so this YARPC dispatch gap is not shared by gRPC.
+- Source and tests commits: `2d10db0fac654a9307da15d59380cb5b2f2735d8` plus validation-order follow-up `5e993e09b`.
+- The first CI run, https://github.com/auenkr/cadence-rust/actions/runs/41431070009, targeted the pre-follow-up head and is superseded.
+- Current CI: https://github.com/auenkr/cadence-rust/actions/runs/41431354388, package `cadence-service-core`, `format_all=true`, fresh target requested. It targets pushed code head `5e993e09b`; conclusion and any formatting artifact remain pending. No Cargo/rustfmt/Go commands were run locally.
+- No mixed Go/Rust gate was dispatched. This closes only the YARPC/Thrift schedule routing gap and does not establish Frontend service parity.
