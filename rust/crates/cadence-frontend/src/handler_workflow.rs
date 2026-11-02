@@ -678,6 +678,10 @@ impl<B: WorkflowBackend> Handler<B> {
         self
     }
 
+    pub fn has_async_publisher(&self) -> bool {
+        self.async_publisher.is_some()
+    }
+
     pub fn with_async_publisher(mut self, publisher: Arc<dyn AsyncWorkflowPublisher>) -> Self {
         self.async_publisher = Some(publisher);
         self

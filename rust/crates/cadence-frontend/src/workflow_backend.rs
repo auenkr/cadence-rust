@@ -779,8 +779,16 @@ pub fn build_workflow_api(
         std::sync::Arc::new(crate::wrappers::quota_policy::NoBypass),
         std::time::Duration::from_nanos(max_poll_delay_nanos.max(0) as u64),
     );
-    let handler = crate::handler_workflow::Handler::new(backend)
-        .with_domain_lookup(lookup)
+    let async_domains: std::sync::Arc<dyn crate::async_publisher::AsyncDomainConfigLookup> =
+        std::sync::Arc::new(crate::async_publisher::PersistenceAsyncDomainConfig::new(
+            ctx.state.domain_manager.clone(),
+        ));
+    let handler = install_async_publisher(
+        crate::handler_workflow::Handler::new(backend),
+        async_domains,
+        ctx.config.async_workflow_queues.clone(),
+    )
+    .with_domain_lookup(lookup)
         .with_rate_limit_policies(rate_limit)
         .with_access_control(std::sync::Arc::new(
             crate::wrappers::accesscontrolled::HandlerAuthorization::new(
@@ -793,6 +801,18 @@ pub fn build_workflow_api(
             std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
         );
     Ok(std::sync::Arc::new(HandlerApi { handler }))
+}
+
+/// Installs the production async publisher on the handler.
+fn install_async_publisher<B: WorkflowBackend>(
+    handler: crate::handler_workflow::Handler<B>,
+    domains: std::sync::Arc<dyn crate::async_publisher::AsyncDomainConfigLookup>,
+    queues: std::collections::HashMap<
+        String,
+        cadence_service_core::config::AsyncWorkflowQueueProviderConfig,
+    >,
+) -> crate::handler_workflow::Handler<B> {
+    handler.with_async_publisher(crate::async_publisher::production_publisher(domains, queues))
 }
 
 /// Go's `authorization.NewNopAuthorizer`: used when authorization is not
@@ -947,5 +967,33 @@ mod history_routing_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod async_publisher_install_tests {
+    use super::*;
+    use cadence_api::types::AsyncWorkflowConfiguration;
+    use std::sync::Arc;
+
+    struct NoDomains;
+    impl crate::async_publisher::AsyncDomainConfigLookup for NoDomains {
+        fn async_config(
+            &self,
+            _: &str,
+        ) -> Result<AsyncWorkflowConfiguration, cadence_api::errors::CadenceError> {
+            Ok(AsyncWorkflowConfiguration::default())
+        }
+    }
+
+    #[test]
+    fn production_install_sets_async_publisher() {
+        let plain = crate::handler_workflow::Handler::new(ProductionBackend::new(
+            "127.0.0.1:1".into(),
+            "127.0.0.1:2".into(),
+        ));
+        assert!(!plain.has_async_publisher());
+        let installed = install_async_publisher(plain, Arc::new(NoDomains), Default::default());
+        assert!(installed.has_async_publisher());
     }
 }
