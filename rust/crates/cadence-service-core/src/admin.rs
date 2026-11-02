@@ -134,10 +134,10 @@ fn validate_key_blob(
                 return Err("value type is not int".into());
             }
         }
-        KeyKind::Duration => {
-            if crate::config::parse_go_duration(value.as_str().unwrap_or_default()).is_err() {
-                return Err("value string encoding cannot be parsed into duration".into());
-            }
+        KeyKind::Duration
+            if crate::config::parse_go_duration(value.as_str().unwrap_or_default()).is_err() =>
+        {
+            return Err("value string encoding cannot be parsed into duration".into());
         }
         _ => {}
     }
