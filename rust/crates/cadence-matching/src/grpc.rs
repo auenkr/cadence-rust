@@ -239,6 +239,8 @@ fn hook_operation(
         ("POST", "/api/v1/workflows/history") => "GetWorkflowExecutionHistory",
         ("POST", "/api/v1/workflows/signal") => "SignalWorkflowExecution",
         ("POST", "/api/v1/workflows/query") => "QueryWorkflow",
+        ("POST", "/api/v1/workflows/list-open") => "ListOpenWorkflowExecutions",
+        ("POST", "/api/v1/workflows/list-closed") => "ListClosedWorkflowExecutions",
         ("POST", "/api/v1/workflows/terminate") => "TerminateWorkflowExecution",
         ("POST", "/api/v1/workflows/restart") => "RestartWorkflowExecution",
         ("POST", "/api/v1/workflows/reset") => "ResetWorkflowExecution",
@@ -512,6 +514,24 @@ fn time_filter(
         .transpose()?;
     cadence_persistence::visibility::filter_start_time(all, filter.as_ref())
         .map_err(|e| Status::invalid_argument(e.message))
+}
+
+fn proto_time_filter(f: Option<p::StartTimeFilter>) -> Result<Option<st::StartTimeFilter>, Status> {
+    fn nanos(v: prost_types::Timestamp) -> Result<i64, Status> {
+        v.seconds
+            .checked_mul(1_000_000_000)
+            .and_then(|s| s.checked_add(i64::from(v.nanos)))
+            .ok_or_else(|| {
+                Status::invalid_argument("Timestamp exceeds the Cadence nanosecond range.")
+            })
+    }
+    f.map(|f| {
+        Ok(st::StartTimeFilter {
+            earliest_time: f.earliest_time.map(nanos).transpose()?,
+            latest_time: f.latest_time.map(nanos).transpose()?,
+        })
+    })
+    .transpose()
 }
 
 fn visibility_query(all: &mut Vec<st::WorkflowExecutionInfo>, query: &str) -> Result<(), Status> {
@@ -1744,6 +1764,44 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ListOpenWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ListOpenWorkflowExecutionsResponse>, Status> {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ListOpenWorkflowExecutions"))
+        {
+            let r = request.get_ref();
+            let input = st::ListOpenWorkflowExecutionsRequest {
+                domain: r.domain.clone(),
+                maximum_page_size: r.page_size,
+                next_page_token: r.next_page_token.clone(),
+                start_time_filter: proto_time_filter(r.start_time_filter.clone())?,
+                execution_filter: match &r.filters {
+                    Some(p::list_open_workflow_executions_request::Filters::ExecutionFilter(f)) => {
+                        Some(st::WorkflowExecutionFilter {
+                            workflow_id: f.workflow_id.clone(),
+                            run_id: f.run_id.clone(),
+                        })
+                    }
+                    _ => None,
+                },
+                type_filter: match &r.filters {
+                    Some(p::list_open_workflow_executions_request::Filters::TypeFilter(f)) => {
+                        Some(st::WorkflowTypeFilter {
+                            name: f.name.clone(),
+                        })
+                    }
+                    _ => None,
+                },
+            };
+            let v: st::ListOpenWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/list-open", &input, &[])
+                .await?;
+            return Ok(Response::new(p::ListOpenWorkflowExecutionsResponse {
+                executions: v.executions.into_iter().map(cv::info).collect(),
+                next_page_token: v.next_page_token,
+            }));
+        }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, Some(true))?;
         time_filter(&mut all, r.start_time_filter)?;
@@ -1769,6 +1827,50 @@ impl p::visibility_api_server::VisibilityApi for Frontend {
         &self,
         request: tonic::Request<p::ListClosedWorkflowExecutionsRequest>,
     ) -> Result<Response<p::ListClosedWorkflowExecutionsResponse>, Status> {
+        if self
+            .state
+            .workflow_api
+            .as_ref()
+            .is_some_and(|api| api.serves("ListClosedWorkflowExecutions"))
+        {
+            let r = request.get_ref();
+            let input = st::ListClosedWorkflowExecutionsRequest {
+                domain: r.domain.clone(),
+                maximum_page_size: r.page_size,
+                next_page_token: r.next_page_token.clone(),
+                start_time_filter: proto_time_filter(r.start_time_filter.clone())?,
+                execution_filter: match &r.filters {
+                    Some(p::list_closed_workflow_executions_request::Filters::ExecutionFilter(
+                        f,
+                    )) => Some(st::WorkflowExecutionFilter {
+                        workflow_id: f.workflow_id.clone(),
+                        run_id: f.run_id.clone(),
+                    }),
+                    _ => None,
+                },
+                type_filter: match &r.filters {
+                    Some(p::list_closed_workflow_executions_request::Filters::TypeFilter(f)) => {
+                        Some(st::WorkflowTypeFilter {
+                            name: f.name.clone(),
+                        })
+                    }
+                    _ => None,
+                },
+                status_filter: match &r.filters {
+                    Some(p::list_closed_workflow_executions_request::Filters::StatusFilter(f)) => {
+                        cv::enum_in(f.status, enums::WorkflowExecutionCloseStatus::from_i32)?
+                    }
+                    _ => None,
+                },
+            };
+            let v: st::ListClosedWorkflowExecutionsResponse = self
+                .call_with_headers(Method::POST, "/api/v1/workflows/list-closed", &input, &[])
+                .await?;
+            return Ok(Response::new(p::ListClosedWorkflowExecutionsResponse {
+                executions: v.executions.into_iter().map(cv::info).collect(),
+                next_page_token: v.next_page_token,
+            }));
+        }
         let r = request.into_inner();
         let mut all = self.visible(&r.domain, Some(false))?;
         time_filter(&mut all, r.start_time_filter)?;

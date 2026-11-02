@@ -29,7 +29,7 @@ pub(crate) fn not_supported() -> CadenceError {
     bad_request("Operation is not supported")
 }
 
-/// Go `convertVisibilityWorkflowExecutionInfo` (timestamps in internal ms).
+/// Go `convertVisibilityWorkflowExecutionInfo` (visibility rows hold microseconds; Cadence API uses nanoseconds).
 pub fn row_to_info(row: &VisibilityRow) -> st::WorkflowExecutionInfo {
     let execution_us = if row.execution_time_us == 0 {
         row.start_time_us
@@ -46,8 +46,8 @@ pub fn row_to_info(row: &VisibilityRow) -> st::WorkflowExecutionInfo {
         workflow_type: Some(ty::WorkflowType {
             name: row.workflow_type_name.clone(),
         }),
-        start_time: Some(row.start_time_us / 1000),
-        execution_time: Some(execution_us / 1000),
+        start_time: Some(row.start_time_us.saturating_mul(1000)),
+        execution_time: Some(execution_us.saturating_mul(1000)),
         memo,
         task_list: Some(ty::TaskList::default()),
         is_cron: row.is_cron,
@@ -56,7 +56,7 @@ pub fn row_to_info(row: &VisibilityRow) -> st::WorkflowExecutionInfo {
         ..Default::default()
     };
     if let Some(status) = row.close_status {
-        info.close_time = row.close_time_us.map(|us| us / 1000);
+        info.close_time = row.close_time_us.map(|us| us.saturating_mul(1000));
         info.close_status = serde_json::from_value(serde_json::Value::from(status)).ok();
         info.history_length = row.history_length.unwrap_or(0);
     }
@@ -75,7 +75,7 @@ fn time_us(value: &serde_json::Value, key: &str) -> i64 {
         .get(key)
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0)
-        .saturating_mul(1000)
+        / 1000
 }
 
 impl ProductionBackend {
