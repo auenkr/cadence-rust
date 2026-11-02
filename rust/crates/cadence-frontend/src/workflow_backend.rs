@@ -489,8 +489,16 @@ impl ProductionBackend {
             Op::RefreshWorkflowTasks => {
                 let inner: ty::RefreshWorkflowTasksRequest = typed(&request, "request")?;
                 // The IDL spells this field `domainUIID` (still field 10).
-                self.history_void("RefreshWorkflowTasks", env(inner.to_thrift(), vec![])?)
-                    .await
+                self.history_void(
+                    "RefreshWorkflowTasks",
+                    Struct {
+                        fields: vec![
+                            (10, domain_uuid(&request, "domainUIID")?),
+                            (20, Value::Struct(inner.to_thrift())),
+                        ],
+                    },
+                )
+                .await
             }
             Op::RecordActivityTaskHeartbeat | Op::RecordActivityTaskHeartbeatByID => {
                 let inner: tk::RecordActivityTaskHeartbeatRequest =

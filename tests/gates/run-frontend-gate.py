@@ -50,7 +50,7 @@ text = (root / 'go/config/development.yaml').read_text()
 for k, v in ports.items():
     text = re.sub(r'\$\{' + k + r':\d+\}', v, text)
 text = text.replace('"127.0.0.1:7933", "127.0.0.1:7934", "127.0.0.1:7935"', seeds)
-text = text.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
+text = text.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 text = text.replace('"config/dynamicconfig/development.yaml"', json.dumps(str(work / 'dynamic-config.yaml')))
 text = text.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
@@ -74,7 +74,7 @@ for k, v in ports.items():
 rt, n = re.subn(r'(?ms)^persistence:\n.*?(?=^ringpop:\n)', persistence, rt, count=1); assert n == 1
 rt, n = re.subn(r'(?m)^  bootstrapHosts: \[.*\]$', f'  bootstrapHosts: [{seeds}]', rt, count=1); assert n == 1
 rt = rt.replace('filepath: "config/dynamicconfig/development.yaml"', 'filepath: ' + json.dumps(str(work / 'rust-dynamic-config.yaml')))
-rt = rt.replace('localhost:7833', f'localhost:{ports["FRONTEND_PORT_GRPC"]}')
+rt = rt.replace('localhost:7833', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}')
 rt = rt.replace('/tmp/cadence_archival/development', str(work / 'history-archive'))
 rt = rt.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 rt = rt.replace('/tmp/blobstore', str(work / 'blobstore'))
@@ -160,7 +160,7 @@ try:
     run('cli-describe-domain-grpc', [*cli_g, '--domain', dom_g, 'domain', 'describe'])
     record_services_alive('before-sdk')
     marks = work / 'marks'; marks.mkdir(exist_ok=True)
-    env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks)}
+    env = {**os.environ, 'FE_TCHANNEL': f'127.0.0.1:{ports["FRONTEND_PORT"]}', 'FE_DOMAIN': dom_t, 'FE_MARK_DIR': str(marks), 'FE_CLI': str(args.go_cli), 'FE_GRPC': f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}'}
     drv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk.log').open('w'), stderr=subprocess.STDOUT, env=env, start_new_session=True)
     procs['sdk-driver'] = drv
     sdk_deadline = time.monotonic() + args.sdk_timeout_seconds
@@ -190,6 +190,43 @@ try:
     record_services_alive('after-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
+    # Exercise the configured IPv6 listener with an actual gRPC request, not a TCP-only probe.
+    ipv6_available = True
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            probe.bind(('::1', 0))
+    except OSError as e:
+        import errno
+        if e.errno in (errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL, errno.EPROTONOSUPPORT):
+            ipv6_available = False
+            print('SKIPPED ipv6 unavailable', flush=True)
+            record('cli-describe-domain-grpc-ipv6', True, 'SKIPPED ipv6 unavailable')
+        else:
+            raise
+    if ipv6_available:
+        kill('rust-frontend')
+        ipv6_config = rt
+        ipv6_config, n = re.subn(r'(?s)(  frontend:\n    rpc:\n.*?)(      bindOnLocalHost: true)',
+                                r'\1      bindOnLocalHost: false\n      bindOnIP: "::1"', ipv6_config, count=1)
+        assert n == 1, 'Frontend bind config not found'
+        (work / 'rust.yaml').write_text(ipv6_config)
+        start('rust-frontend', rust_frontend(), env=frontend_env)
+        # CLI retries allow startup/ring convergence; any IPv6 RPC failure is fatal.
+        ipv6_cli = [args.go_cli, '--address', f'[::1]:{ports["FRONTEND_PORT_GRPC"]}', '--transport', 'grpc', '--domain', dom_t, 'domain', 'describe']
+        last = ''
+        ok = False
+        for attempt in range(30):
+            r = subprocess.run(ipv6_cli, capture_output=True, text=True, timeout=20)
+            last = r.stdout + r.stderr
+            if r.returncode == 0:
+                ok = True
+                break
+            if procs['rust-frontend'].poll() is not None:
+                break
+            time.sleep(2)
+        (work / 'cli-describe-domain-grpc-ipv6.log').write_text(last)
+        record('cli-describe-domain-grpc-ipv6', ok, last)
+
 except SystemExit:
     pass
 except Exception as e:

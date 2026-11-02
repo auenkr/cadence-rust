@@ -380,11 +380,21 @@ pub fn start(
     })
 }
 pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
+    info_with_time(v, timestamp)
+}
+/// Production Cadence visibility timestamps are nanoseconds, unlike the local engine.
+pub fn info_nanos(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
+    info_with_time(v, timestamp_nanos)
+}
+fn info_with_time(
+    v: st::WorkflowExecutionInfo,
+    time: fn(i64) -> prost_types::Timestamp,
+) -> p::WorkflowExecutionInfo {
     p::WorkflowExecutionInfo {
         workflow_execution: v.execution.map(execution_out),
         r#type: v.workflow_type.map(|t| p::WorkflowType { name: t.name }),
-        start_time: v.start_time.map(timestamp),
-        close_time: v.close_time.map(timestamp),
+        start_time: v.start_time.map(time),
+        close_time: v.close_time.map(time),
         close_status: v.close_status.map_or(0, |s| s as i32 + 1),
         history_length: v.history_length,
         memo: v.memo.map(memo),
@@ -394,7 +404,7 @@ pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
             v.parent_execution,
             v.parent_initiated_id,
         ),
-        execution_time: v.execution_time.map(timestamp),
+        execution_time: v.execution_time.map(time),
         task_list: v
             .task_list
             .as_ref()
@@ -404,10 +414,10 @@ pub fn info(v: st::WorkflowExecutionInfo) -> p::WorkflowExecutionInfo {
         is_cron: v.is_cron,
         cron_schedule: v.cron_schedule.unwrap_or_default(),
         cron_overlap_policy: v.cron_overlap_policy.map_or(0, |s| s as i32 + 1),
-        update_time: v.update_time.map(timestamp),
+        update_time: v.update_time.map(time),
         partition_config: v.partition_config.unwrap_or_default(),
         execution_status: v.execution_status.map_or(0, |s| s as i32 + 1),
-        scheduled_execution_time: v.scheduled_execution_time.map(timestamp),
+        scheduled_execution_time: v.scheduled_execution_time.map(time),
         ..Default::default()
     }
 }
@@ -1132,6 +1142,33 @@ mod tests {
                 seconds: 1,
                 nanos: 123
             }
+        );
+    }
+    #[test]
+    fn production_visibility_preserves_nanoseconds_and_local_engine_milliseconds() {
+        let ns = 1_793_612_203_872_551_123;
+        let value = st::WorkflowExecutionInfo {
+            start_time: Some(ns),
+            close_time: Some(ns),
+            execution_time: Some(ns),
+            update_time: Some(ns),
+            scheduled_execution_time: Some(ns),
+            ..Default::default()
+        };
+        let converted = info_nanos(value);
+        let expected = Some(timestamp_nanos(ns));
+        assert_eq!(converted.start_time, expected);
+        assert_eq!(converted.close_time, expected);
+        assert_eq!(converted.execution_time, expected);
+        assert_eq!(converted.update_time, expected);
+        assert_eq!(converted.scheduled_execution_time, expected);
+        assert_eq!(
+            info(st::WorkflowExecutionInfo {
+                start_time: Some(1234),
+                ..Default::default()
+            })
+            .start_time,
+            Some(timestamp(1234))
         );
     }
     #[test]
