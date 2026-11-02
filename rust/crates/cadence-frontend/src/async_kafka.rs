@@ -183,6 +183,7 @@ pub struct KafkaProducer {
     connected: OnceCell<Connected>,
     partition_clients: Mutex<HashMap<i32, Arc<PartitionClient>>>,
     closed: AtomicBool,
+    connect_timeout: std::time::Duration,
 }
 
 impl KafkaProducer {
@@ -192,7 +193,14 @@ impl KafkaProducer {
             connected: OnceCell::new(),
             partition_clients: Mutex::new(HashMap::new()),
             closed: AtomicBool::new(false),
+            // Sarama Net.DialTimeout default.
+            connect_timeout: std::time::Duration::from_secs(30),
         }
+    }
+
+    pub fn with_connect_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.connect_timeout = timeout;
+        self
     }
 
     async fn connect(&self) -> anyhow::Result<Connected> {
@@ -204,8 +212,15 @@ impl KafkaProducer {
         if let Some(sasl) = sasl_config(&conn.sasl)? {
             builder = builder.sasl_config(sasl);
         }
-        let client = builder.build().await?;
-        let topics = client.list_topics().await?;
+        // rskafka retries broker connections with backoff until its deadline;
+        // bound the whole handshake like Sarama's dial timeout.
+        let (client, topics) = tokio::time::timeout(self.connect_timeout, async {
+            let client = builder.build().await?;
+            let topics = client.list_topics().await?;
+            anyhow::Ok((client, topics))
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out connecting to kafka brokers"))??;
         let topic = topics
             .iter()
             .find(|t| t.name == self.config.topic)
@@ -434,7 +449,11 @@ mod tests {
         let t = KafkaTransport::default();
         let v = yaml("topic: t\nconnection: {brokers: ['127.0.0.1:1']}\n");
         let q = AsyncWorkflowQueueProviderFactory::create(&t, "kafka", Some(&v)).unwrap();
-        let p = AsyncProducerFactory::create(&t, &q).unwrap();
+        let p = KafkaProducer::new(Arc::new(
+            KafkaQueueConfig::from_yaml(Some(&v)).unwrap(),
+        ))
+        .with_connect_timeout(std::time::Duration::from_secs(3));
+        let _ = &q;
         let res = p
             .publish(ProducerMessage {
                 partition_key: "k".into(),
