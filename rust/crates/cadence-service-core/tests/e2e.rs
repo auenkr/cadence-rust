@@ -1346,7 +1346,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/dynamic-config/get",
-        json!({"configName": "test.key"}),
+        json!({"configName": "worker.enableScheduler"}),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
