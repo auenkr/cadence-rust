@@ -5,8 +5,8 @@
 //! split by Go's original API domains so implementation can proceed module by
 //! module without changing the wire surface.
 
-pub mod config;
 pub mod async_queue;
+pub mod config;
 pub mod handler_admin;
 pub mod handler_admin_history;
 pub mod handler_domain;

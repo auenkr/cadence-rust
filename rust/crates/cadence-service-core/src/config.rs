@@ -1537,7 +1537,10 @@ clusterMetadata:
         let provider = &config.async_workflow_queues["primary"];
         assert_eq!(provider.queue_type, "kafka");
         assert_eq!(provider.config.as_ref().unwrap()["topic"], "workflows");
-        assert_eq!(provider.config.as_ref().unwrap()["connection"]["brokers"][0], "kafka-a:9092");
+        assert_eq!(
+            provider.config.as_ref().unwrap()["connection"]["brokers"][0],
+            "kafka-a:9092"
+        );
     }
 
     #[test]

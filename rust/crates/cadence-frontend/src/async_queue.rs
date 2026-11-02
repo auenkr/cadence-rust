@@ -4,6 +4,8 @@
 //! `predefinedQueueName` over the inline `(queueType, queueConfig)` pair. The
 //! transport implementation is deliberately supplied by a provider.
 
+#![allow(clippy::result_large_err)]
+
 use cadence_api::errors::{BadRequestError, CadenceError, InternalServiceError};
 use cadence_api::types::{AsyncWorkflowConfiguration, DataBlob};
 use std::sync::Arc;
@@ -13,8 +15,13 @@ pub const PRODUCER_CACHE_MAX_COUNT: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueSelection {
-    Predefined { name: String },
-    Inline { queue_type: String, queue_config: Option<DataBlob> },
+    Predefined {
+        name: String,
+    },
+    Inline {
+        queue_type: String,
+        queue_config: Option<DataBlob>,
+    },
 }
 
 /// Select a queue only after the caller's ordinary request validation, as Go
@@ -93,27 +100,39 @@ mod tests {
 
     struct Queue(String);
     impl AsyncWorkflowQueue for Queue {
-        fn id(&self) -> &str { &self.0 }
+        fn id(&self) -> &str {
+            &self.0
+        }
     }
     impl AsyncWorkflowQueueProvider for QueueProvider {
         fn get_predefined_queue(&self, name: &str) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> {
-            self.selected.lock().unwrap().push(format!("predefined:{name}"));
+            self.selected
+                .lock()
+                .unwrap()
+                .push(format!("predefined:{name}"));
             Ok(Arc::new(Queue(format!("predefined:{name}"))))
         }
-        fn get_queue(&self, kind: &str, _config: Option<&DataBlob>) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> {
+        fn get_queue(
+            &self,
+            kind: &str,
+            _config: Option<&DataBlob>,
+        ) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> {
             self.selected.lock().unwrap().push(format!("inline:{kind}"));
             Ok(Arc::new(Queue(format!("inline:{kind}"))))
         }
-        fn close(&self) -> anyhow::Result<()> { Ok(()) }
+        fn close(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
     fn disabled_domain_fails_before_queue_selection() {
         let provider = QueueProvider::default();
-        let error = match resolve_domain_queue(&provider, "demo", &AsyncWorkflowConfiguration::default()) {
-            Ok(_) => panic!("disabled domain unexpectedly resolved a queue"),
-            Err(error) => error,
-        };
+        let error =
+            match resolve_domain_queue(&provider, "demo", &AsyncWorkflowConfiguration::default()) {
+                Ok(_) => panic!("disabled domain unexpectedly resolved a queue"),
+                Err(error) => error,
+            };
         assert!(matches!(error, CadenceError::BadRequest(_)));
         assert!(provider.selected.lock().unwrap().is_empty());
     }
@@ -121,16 +140,31 @@ mod tests {
     #[test]
     fn predefined_queue_takes_precedence_over_inline_fields() {
         let provider = QueueProvider::default();
-        let cfg = AsyncWorkflowConfiguration { enabled: true, predefined_queue_name: "fast".into(), queue_type: "ignored".into(), ..Default::default() };
-        assert_eq!(resolve_domain_queue(&provider, "demo", &cfg).unwrap().id(), "predefined:fast");
+        let cfg = AsyncWorkflowConfiguration {
+            enabled: true,
+            predefined_queue_name: "fast".into(),
+            queue_type: "ignored".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_domain_queue(&provider, "demo", &cfg).unwrap().id(),
+            "predefined:fast"
+        );
         assert_eq!(*provider.selected.lock().unwrap(), ["predefined:fast"]);
     }
 
     #[test]
     fn enabled_domain_without_predefined_queue_uses_type_config() {
         let provider = QueueProvider::default();
-        let cfg = AsyncWorkflowConfiguration { enabled: true, queue_type: "kafka".into(), ..Default::default() };
-        assert_eq!(resolve_domain_queue(&provider, "demo", &cfg).unwrap().id(), "inline:kafka");
+        let cfg = AsyncWorkflowConfiguration {
+            enabled: true,
+            queue_type: "kafka".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_domain_queue(&provider, "demo", &cfg).unwrap().id(),
+            "inline:kafka"
+        );
         assert_eq!(*provider.selected.lock().unwrap(), ["inline:kafka"]);
     }
 
@@ -138,15 +172,31 @@ mod tests {
     fn predefined_lookup_error_is_propagated() {
         struct Missing;
         impl AsyncWorkflowQueueProvider for Missing {
-            fn get_predefined_queue(&self, _: &str) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> { anyhow::bail!("queue absent") }
-            fn get_queue(&self, _: &str, _: Option<&DataBlob>) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> { unreachable!() }
-            fn close(&self) -> anyhow::Result<()> { Ok(()) }
+            fn get_predefined_queue(&self, _: &str) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> {
+                anyhow::bail!("queue absent")
+            }
+            fn get_queue(
+                &self,
+                _: &str,
+                _: Option<&DataBlob>,
+            ) -> anyhow::Result<Arc<dyn AsyncWorkflowQueue>> {
+                unreachable!()
+            }
+            fn close(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
         }
-        let cfg = AsyncWorkflowConfiguration { enabled: true, predefined_queue_name: "missing".into(), ..Default::default() };
+        let cfg = AsyncWorkflowConfiguration {
+            enabled: true,
+            predefined_queue_name: "missing".into(),
+            ..Default::default()
+        };
         let error = match resolve_domain_queue(&Missing, "demo", &cfg) {
             Ok(_) => panic!("missing predefined queue unexpectedly resolved"),
             Err(error) => error,
         };
-        assert!(matches!(error, CadenceError::Internal(message) if message.to_string() == "queue absent"));
+        assert!(
+            matches!(error, CadenceError::Internal(message) if message.to_string() == "queue absent")
+        );
     }
 }

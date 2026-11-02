@@ -48,7 +48,13 @@ impl Config {
                 .async_workflow_queues
                 .into_iter()
                 .map(|(name, cfg)| {
-                    (name, AsyncWorkflowQueueProviderConfig { queue_type: cfg.queue_type, config: cfg.config })
+                    (
+                        name,
+                        AsyncWorkflowQueueProviderConfig {
+                            queue_type: cfg.queue_type,
+                            config: cfg.config,
+                        },
+                    )
                 })
                 .collect(),
         })
