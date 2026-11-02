@@ -798,7 +798,7 @@ impl MatchingHistoryClient {
             request_id: Uuid::new_v4().to_string(),
             poll_request: Some(poll),
         };
-        eprintln!(
+        crate::trace_eprintln!(
             "HIST-TRACE begin RecordDecisionTaskStarted sched={}",
             task.data.schedule_id
         );
@@ -827,7 +827,7 @@ impl MatchingHistoryClient {
                 ),
             )
             .await;
-        eprintln!(
+        crate::trace_eprintln!(
             "HIST-TRACE end RecordDecisionTaskStarted {}ms err={:?}",
             __t0.elapsed().as_millis(),
             started.as_ref().err()

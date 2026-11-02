@@ -23,7 +23,7 @@ pub async fn dispatch_native_with_context(
                 .ok_or_else(|| format!("Unknown Matching procedure {procedure}"))?;
             {
                 let d = format!("{:?}", args);
-                eprintln!("TCHAN-TRACE {procedure} {}", &d[..d.len().min(3000)]);
+                crate::trace_eprintln!("TCHAN-TRACE {procedure} {}", &d[..d.len().min(3000)]);
             }
             if method.service == "Meta" {
                 return dispatch_inner(lifecycle, procedure, args, deadline).await;

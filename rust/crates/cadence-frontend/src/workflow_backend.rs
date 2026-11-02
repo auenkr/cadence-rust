@@ -242,7 +242,7 @@ impl ProductionBackend {
         write_struct(&mut writer, &args);
         let procedure = format!("{thrift_service}::{method}");
         let __t0 = std::time::Instant::now();
-        eprintln!("BACKEND-TRACE begin {addr} {procedure}");
+        crate::trace_eprintln!("BACKEND-TRACE begin {addr} {procedure}");
         let response = call_thrift(
             addr,
             service,
@@ -253,7 +253,7 @@ impl ProductionBackend {
             timeout,
         )
         .await;
-        eprintln!(
+        crate::trace_eprintln!(
             "BACKEND-TRACE end {procedure} {}ms {}",
             __t0.elapsed().as_millis(),
             match &response {

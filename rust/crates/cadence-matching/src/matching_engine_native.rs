@@ -289,7 +289,7 @@ impl NativeMatchingEngine {
             data: data.clone(),
         };
         let __act = context.domain_active(&source)?;
-        eprintln!(
+        crate::trace_eprintln!(
             "ADD-TRACE active={} list={:?} type={}",
             __act, list.name, task_type
         );

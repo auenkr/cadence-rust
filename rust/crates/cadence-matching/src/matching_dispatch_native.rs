@@ -1323,7 +1323,7 @@ impl NativeTaskDispatcher {
                     return;
                 }
             };
-            eprintln!(
+            crate::trace_eprintln!(
                 "QUEUE-TRACE claim task={} scan_pending={}",
                 task.is_some(),
                 scan_pending

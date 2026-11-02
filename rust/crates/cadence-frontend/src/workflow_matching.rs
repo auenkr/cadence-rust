@@ -125,7 +125,7 @@ impl HistoryAccess {
     ) -> Result<(st::History, Vec<u8>), CadenceError> {
         let is_first_page = next_page_token.is_empty();
         let shard_id = workflow_id_to_history_shard(&execution.workflow_id, self.num_shards);
-        eprintln!(
+        crate::trace_eprintln!(
             "GH-TRACE shard={} num_shards={} first={} next={} branch={}",
             shard_id,
             self.num_shards,
@@ -402,22 +402,22 @@ impl ProductionBackend {
         let reply = self
             .matching("PollForDecisionTask", envelope, POLL_TIMEOUT)
             .await?;
-        eprintln!(
+        crate::trace_eprintln!(
             "PD-TRACE reply fields={:?}",
             reply.fields.iter().map(|(i, _)| *i).collect::<Vec<_>>()
         );
         let Some(task) = DecisionTask::from_matching(&reply)? else {
-            eprintln!("PD-TRACE no task");
+            crate::trace_eprintln!("PD-TRACE no task");
             return Ok(serde_json::json!({}));
         };
-        eprintln!(
+        crate::trace_eprintln!(
             "PD-TRACE task wf={:?} next_event_id={} started={}",
             task.execution.workflow_id, task.next_event_id, task.started_event_id
         );
         let response = self
             .decision_response(&str_field(request, "domainUUID"), task)
             .await;
-        eprintln!(
+        crate::trace_eprintln!(
             "PD-TRACE decision_response err={:?} events={:?}",
             response.as_ref().err().map(|e| e.to_string()),
             response

@@ -364,16 +364,16 @@ impl Frontend {
     ) -> Result<R, Status> {
         // Request-level tracing (gate diagnostics): begin/end with elapsed time.
         let trace_start = std::time::Instant::now();
-        eprintln!("FE-TRACE begin {method} {path}");
+        crate::trace_eprintln!("FE-TRACE begin {method} {path}");
         let result = self
             .call_with_headers_inner(method.clone(), path, input, headers)
             .await;
         match &result {
-            Ok(_) => eprintln!(
+            Ok(_) => crate::trace_eprintln!(
                 "FE-TRACE end ok {method} {path} {}ms",
                 trace_start.elapsed().as_millis()
             ),
-            Err(status) => eprintln!(
+            Err(status) => crate::trace_eprintln!(
                 "FE-TRACE end err {method} {path} {}ms code={:?} msg={}",
                 trace_start.elapsed().as_millis(),
                 status.code(),

@@ -38,3 +38,18 @@ pub async fn run() -> anyhow::Result<()> {
     )
     .await
 }
+
+/// Whether temporary request tracing is enabled (`CADENCE_TRACE` set).
+pub fn trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CADENCE_TRACE").is_some())
+}
+
+#[macro_export]
+macro_rules! trace_eprintln {
+    ($($arg:tt)*) => {
+        if $crate::trace_enabled() {
+            eprintln!($($arg)*);
+        }
+    };
+}
