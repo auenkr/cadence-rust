@@ -38,8 +38,10 @@ pub trait AsyncMessageProducer: Send + Sync {
 }
 
 pub trait AsyncProducerFactory: Send + Sync {
-    fn create(&self, queue: &Arc<dyn AsyncWorkflowQueue>)
-        -> anyhow::Result<Arc<dyn AsyncMessageProducer>>;
+    fn create(
+        &self,
+        queue: &Arc<dyn AsyncWorkflowQueue>,
+    ) -> anyhow::Result<Arc<dyn AsyncMessageProducer>>;
 }
 
 /// Domain-level lookup of the persisted async workflow configuration.
@@ -429,10 +431,8 @@ mod tests {
         let producer = Arc::new(Producer::default());
         let (p, factory) = publisher(AsyncWorkflowConfiguration::default(), producer.clone());
         let err = p.publish(msg(0)).await.unwrap_err();
-        assert!(
-            matches!(err, CadenceError::BadRequest(ref e)
-                if e.to_string() == "async workflow is not enabled for domain demo")
-        );
+        assert!(matches!(err, CadenceError::BadRequest(ref e)
+                if e.to_string() == "async workflow is not enabled for domain demo"));
         assert!(factory.created.lock().unwrap().is_empty());
         assert!(producer.sent.lock().unwrap().is_empty());
     }

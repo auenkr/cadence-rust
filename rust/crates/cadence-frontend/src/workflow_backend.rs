@@ -789,17 +789,17 @@ pub fn build_workflow_api(
         ctx.config.async_workflow_queues.clone(),
     )
     .with_domain_lookup(lookup)
-        .with_rate_limit_policies(rate_limit)
-        .with_access_control(std::sync::Arc::new(
-            crate::wrappers::accesscontrolled::HandlerAuthorization::new(
-                NopAuthorizer,
-                NopAuthorizationMetrics,
-            ),
-        ))
-        .with_version_check(
-            version_check_enabled,
-            std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
-        );
+    .with_rate_limit_policies(rate_limit)
+    .with_access_control(std::sync::Arc::new(
+        crate::wrappers::accesscontrolled::HandlerAuthorization::new(
+            NopAuthorizer,
+            NopAuthorizationMetrics,
+        ),
+    ))
+    .with_version_check(
+        version_check_enabled,
+        std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
+    );
     Ok(std::sync::Arc::new(HandlerApi { handler }))
 }
 
@@ -812,7 +812,9 @@ fn install_async_publisher<B: WorkflowBackend>(
         cadence_service_core::config::AsyncWorkflowQueueProviderConfig,
     >,
 ) -> crate::handler_workflow::Handler<B> {
-    handler.with_async_publisher(crate::async_publisher::production_publisher(domains, queues))
+    handler.with_async_publisher(crate::async_publisher::production_publisher(
+        domains, queues,
+    ))
 }
 
 /// Go's `authorization.NewNopAuthorizer`: used when authorization is not
