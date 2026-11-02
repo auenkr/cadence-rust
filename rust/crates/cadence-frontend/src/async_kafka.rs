@@ -449,10 +449,8 @@ mod tests {
         let t = KafkaTransport::default();
         let v = yaml("topic: t\nconnection: {brokers: ['127.0.0.1:1']}\n");
         let q = AsyncWorkflowQueueProviderFactory::create(&t, "kafka", Some(&v)).unwrap();
-        let p = KafkaProducer::new(Arc::new(
-            KafkaQueueConfig::from_yaml(Some(&v)).unwrap(),
-        ))
-        .with_connect_timeout(std::time::Duration::from_secs(3));
+        let p = KafkaProducer::new(Arc::new(KafkaQueueConfig::from_yaml(Some(&v)).unwrap()))
+            .with_connect_timeout(std::time::Duration::from_secs(3));
         let _ = &q;
         let res = p
             .publish(ProducerMessage {
