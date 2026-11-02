@@ -7,6 +7,10 @@ on:
         type: choice
         options: [mysql, postgres, cassandra]
         default: mysql
+      kafka:
+        description: Also run the async workflow (Kafka) acceptance steps (mysql lane only)
+        type: boolean
+        default: true
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: fe-integ
@@ -53,6 +57,8 @@ jobs:
           (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
           (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
+        env:
+          CADENCE_GATE_KAFKA: ${{ inputs.kafka }}
         run: |
           set +e
           if [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
