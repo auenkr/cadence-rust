@@ -1,7 +1,7 @@
 //! Go `config.TLS.ToTLSConfig` translated to a rustls client config for Kafka.
 
 use crate::async_kafka::TlsConfig;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerifier, ServerCertVerified};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{ring as ring_provider, CryptoProvider};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};

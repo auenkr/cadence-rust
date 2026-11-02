@@ -376,7 +376,10 @@ mod tests {
         // negative as int32, so it is negated before the modulo).
         let h = 0xe40c_292cu32 as i32;
         assert_eq!(sarama_partition(b"a", 7), h.wrapping_neg() % 7);
-        assert_eq!(sarama_partition(b"", 5), (0x811c_9dc5u32 as i32).wrapping_neg() % 5);
+        assert_eq!(
+            sarama_partition(b"", 5),
+            (0x811c_9dc5u32 as i32).wrapping_neg() % 5
+        );
         assert_eq!(sarama_partition(b"x", 1), 0);
         for k in ["order-1", "order-2", "wf"] {
             let p = sarama_partition(k.as_bytes(), 10);
