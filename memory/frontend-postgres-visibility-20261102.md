@@ -14,7 +14,7 @@ Branch: `t3/frontend-postgres-visibility-gate`.
 No local Cargo, rustfmt or Go commands. Python syntax and shell syntax checks passed locally.
 
 Initial head: `f33086628b5002460c901bbd0bbcc0062eb5147e`.
-- Package CI (fresh target, runner formatting enabled): https://github.com/auenkr/cadence-rust/actions/runs/41417225715 — pending.
+- Package CI (fresh target, runner formatting enabled): https://github.com/auenkr/cadence-rust/actions/runs/41417225715 — **success**, head `f33086628b5002460c901bbd0bbcc0062eb5147e`; runner formatting patch empty, clippy and package tests passed.
 - PostgreSQL mixed gate: https://github.com/auenkr/cadence-rust/actions/runs/41417230281 — **failure** at the initial head. Binary SHA256: `4fa4d5cb4f00e8792478b8aec3d5dd02fbf5a1a950c90612d9e329f0a329911d`. Fresh dedicated target `/tmp/cadence-cargo-target-fe-41417230281`.
 
 Reproduce:
@@ -35,3 +35,7 @@ Then client destruction during panic unwinding produces a second panic and abort
 Configured stores are constructed on `spawn_blocking` in `launcher.rs`, successfully opening both task and visibility pools. The next Frontend startup domain preload calls synchronous `source.list_domains` directly on the Tokio runtime (`launcher.rs`, run_frontend domain preload). The postgres synchronous client internally drives its own runtime, which cannot run there. Existing RPC paths also directly invoke synchronous domain-manager persistence (`grpc.rs` DescribeDomain; `cadence-service-core/src/handlers.rs` domain CRUD). A startup-only change would leave RPCs exposed. Required follow-up: place synchronous Frontend Postgres domain/history/visibility operations and client teardown on a blocking boundary, then rerun this lane through all SDK/restart checks. No startup-only workaround or claim of completion was added.
 
 Retained evidence: runner artifact contains `commit.txt`, `binary.sha256`, `gate.log`, `logs/steps.json` and Frontend backtrace; retention is three days. The immutable run/head/hash and failure text above remain after artifact expiry.
+
+## Final workspace validation
+
+Fresh uncached workspace clippy followed by workspace tests dispatched on the same implementation (only this evidence note changed): https://github.com/auenkr/cadence-rust/actions/runs/41418563149, head `91ba98e434b2f03b0db3bfd25b339bc006a02750`. In progress at handoff; do not interpret package CI as a workspace pass.
