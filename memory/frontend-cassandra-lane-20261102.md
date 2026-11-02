@@ -68,8 +68,16 @@ they consume the shared `CassandraBlockingSession`.
 Added no-database regression tests that invoke Cassandra session initialization
 from Tokio current-thread and multi-thread runtimes against a refused local
 endpoint. Both must return an error instead of panicking. The Cassandra mixed
-lane runs with `RUST_BACKTRACE=1` for future runtime diagnostics. CI runs and
-the corrected binary hash are pending dispatch after this source commit.
+lane runs with `RUST_BACKTRACE=1` for future runtime diagnostics. Validation
+was dispatched against source SHA `57fa385c78df8a41f0a1ce5176365d5b59932317`:
+
+- Package CI: https://github.com/auenkr/cadence-rust/actions/runs/41431869939
+- Fresh-target Cassandra mixed lane: https://github.com/auenkr/cadence-rust/actions/runs/41431874094
+
+Both were in progress at handoff. The corrected binary hash and gate steps are
+pending the mixed-lane artifact. Record its `out/binary.sha256`,
+`out/gate.exit`, and `out/gate/run/steps.json` here when available; do not
+claim Cassandra acceptance until the SDK/restart gate passes.
 
 ## Acceptance sub-agent handoff — 2026-11-02
 
