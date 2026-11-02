@@ -1,3 +1,4 @@
+#![allow(clippy::result_large_err)]
 //! Frontend archival readers: Go `ArchivalMetadata`, `historyArchived` /
 //! `getArchivedHistory` (`service/frontend/api/handler.go`) and
 //! `ListArchivedWorkflowExecutions` (`api/list_workflow_handlers.go`).

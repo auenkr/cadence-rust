@@ -811,16 +811,15 @@ pub fn build_workflow_api(
 
 /// Builds the Go `ArchivalMetadata` + archiver provider readers from the
 /// service config `archival` section and the dynamic-config overlay.
+type ArchiveReaders = (
+    std::sync::Arc<dyn crate::handler_workflow::ArchivedHistoryReader>,
+    std::sync::Arc<dyn crate::handler_workflow::ArchivedVisibilityReader>,
+);
+
 fn build_archive_readers(
     ctx: &cadence_matching::launcher::FrontendHookContext,
     probe: std::sync::Arc<dyn crate::archive_readers::ExecutionProbe>,
-) -> Result<
-    (
-        std::sync::Arc<dyn crate::handler_workflow::ArchivedHistoryReader>,
-        std::sync::Arc<dyn crate::handler_workflow::ArchivedVisibilityReader>,
-    ),
-    String,
-> {
+) -> Result<ArchiveReaders, String> {
     use crate::archive_readers as ar;
     let section = ar::ArchivalSection::from_yaml(ctx.config.archival.as_ref());
     let overlay = ctx.state.admin.dynamic_config.clone();
@@ -854,6 +853,50 @@ fn build_archive_readers(
         read("system.enableReadFromVisibilityArchival"),
     )?;
     let provider = cadence_common::archiver::ArchiverProvider::new(section.provider_keys.clone());
+    let defaults = |kind: &str| {
+        let node = ctx
+            .config
+            .domain_defaults
+            .as_ref()
+            .and_then(|d| d.get("archival"))
+            .and_then(|a| a.get(kind));
+        let text = |k: &str| {
+            node.and_then(|n| n.get(k))
+                .and_then(serde_yaml::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase()
+        };
+        let uri = node
+            .and_then(|n| n.get("URI"))
+            .and_then(serde_yaml::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        match text("status").as_str() {
+            "" | "disabled" => Ok((false, uri)),
+            "enabled" => Ok((true, uri)),
+            other => Err(format!(
+                "invalid archival status of {other} for domain, valid status are: {{\"\", \"disabled\", \"enabled\"}}"
+            )),
+        }
+    };
+    let (h_on, h_uri) = defaults("history")?;
+    let (v_on, v_uri) = defaults("visibility")?;
+    let kind_policy = |cfg: &ar::ArchivalConfig, on: bool, uri: String| {
+        let cfg = cfg.clone();
+        cadence_common::archival_state::KindPolicy {
+            configured: std::sync::Arc::new(move || cfg.cluster_configured_for_archival()),
+            default_enabled: on,
+            default_uri: uri,
+        }
+    };
+    cadence_common::archival_state::set_domain_archival_policy(
+        cadence_common::archival_state::DomainArchivalPolicy {
+            history: kind_policy(&history_cfg, h_on, h_uri),
+            visibility: kind_policy(&visibility_cfg, v_on, v_uri),
+            provider: provider.clone(),
+        },
+    );
     let domains: std::sync::Arc<dyn ar::ArchivalDomainConfig> = std::sync::Arc::new(
         ar::PersistenceArchivalDomainConfig::new(ctx.state.domain_manager.clone()),
     );

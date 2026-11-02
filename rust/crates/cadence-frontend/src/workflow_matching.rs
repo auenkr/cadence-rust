@@ -579,7 +579,7 @@ impl ProductionBackend {
     }
 
     /// History `PollMutableState` (Go `queryHistory` closure).
-    pub(crate) async fn poll_mutable_state(
+    async fn poll_mutable_state(
         &self,
         domain_id: &str,
         execution: &ty::WorkflowExecution,

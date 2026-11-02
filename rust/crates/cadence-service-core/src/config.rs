@@ -63,6 +63,9 @@ pub struct Config {
     /// the Frontend archival readers.
     #[serde(default)]
     pub archival: Option<serde_yaml::Value>,
+    /// Go `domainDefaults` (archival default status/URI for new domains).
+    #[serde(default, rename = "domainDefaults")]
+    pub domain_defaults: Option<serde_yaml::Value>,
     #[serde(default, rename = "asyncWorkflowQueues")]
     pub async_workflow_queues: HashMap<String, AsyncWorkflowQueueProviderConfig>,
 }

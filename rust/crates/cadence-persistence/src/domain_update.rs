@@ -166,7 +166,46 @@ fn prepare_inner(
                 // Go updateDomainConfiguration intentionally does not mark this alone
                 // as a config change. Its response can contain an unpersisted merge.
             }
-            // Full archival provider state transitions remain a separate port.
+            if let Some(policy) = cadence_common::archival_state::domain_archival_policy() {
+                use cadence_common::archival_state::{ArchivalKind, ArchivalState};
+                let enabled = |s: Option<ArchivalStatus>| s.map(|s| s == ArchivalStatus::Enabled);
+                let flag = |on: bool| Some(if on { ArchivalStatus::Enabled } else { ArchivalStatus::Disabled });
+                let cfg = &mut record.configuration;
+                let cur = ArchivalState {
+                    enabled: cfg.history_archival_status == Some(ArchivalStatus::Enabled),
+                    uri: cfg.history_archival_uri.clone(),
+                };
+                if let Some(next) = policy
+                    .update(
+                        ArchivalKind::History,
+                        &cur,
+                        enabled(config.history_archival_status),
+                        config.history_archival_uri.as_deref().unwrap_or_default(),
+                    )
+                    .map_err(|e| invalid(e.message().to_owned()))?
+                {
+                    cfg.history_archival_status = flag(next.enabled);
+                    cfg.history_archival_uri = next.uri;
+                    changed = true;
+                }
+                let cur = ArchivalState {
+                    enabled: cfg.visibility_archival_status == Some(ArchivalStatus::Enabled),
+                    uri: cfg.visibility_archival_uri.clone(),
+                };
+                if let Some(next) = policy
+                    .update(
+                        ArchivalKind::Visibility,
+                        &cur,
+                        enabled(config.visibility_archival_status),
+                        config.visibility_archival_uri.as_deref().unwrap_or_default(),
+                    )
+                    .map_err(|e| invalid(e.message().to_owned()))?
+                {
+                    cfg.visibility_archival_status = flag(next.enabled);
+                    cfg.visibility_archival_uri = next.uri;
+                    changed = true;
+                }
+            } else {
             if let Some(status) = config.history_archival_status {
                 record.configuration.history_archival_status = Some(status);
                 changed = true;
@@ -186,6 +225,7 @@ fn prepare_inner(
                     record.configuration.visibility_archival_uri.clone_from(uri);
                     changed = true;
                 }
+            }
             }
         }
         if let Some(checksum) = &request.delete_bad_binary {
