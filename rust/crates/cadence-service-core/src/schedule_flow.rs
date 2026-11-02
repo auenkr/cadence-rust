@@ -372,10 +372,11 @@ async fn api_call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
     api: &SharedWorkflowApi,
     operation: &str,
     request: &Req,
+    ctx: &CallerContext,
 ) -> Result<Resp, CadenceError> {
     let value = serde_json::to_value(request)
         .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))?;
-    let out = api.call(operation, value, CallerContext::default()).await?;
+    let out = api.call(operation, value, ctx.clone()).await?;
     serde_json::from_value(out)
         .map_err(|e| CadenceError::Internal(InternalServiceError::new(e.to_string())))
 }
@@ -384,6 +385,7 @@ async fn api_call<Req: serde::Serialize, Resp: serde::de::DeserializeOwned>(
 pub async fn start_scheduler_api(
     api: &SharedWorkflowApi,
     request: &CreateScheduleRequest,
+    ctx: &CallerContext,
 ) -> Result<String, CadenceError> {
     let start = StartWorkflowExecutionRequest {
         domain: request.domain.clone(),
@@ -404,7 +406,7 @@ pub async fn start_scheduler_api(
         search_attributes: request.search_attributes.clone(),
         ..Default::default()
     };
-    match api_call::<_, serde_json::Value>(api, "StartWorkflowExecution", &start).await {
+    match api_call::<_, serde_json::Value>(api, "StartWorkflowExecution", &start, ctx).await {
         Ok(_) => Ok(request.schedule_id.clone()),
         Err(CadenceError::WorkflowAlreadyStarted(_)) => {
             Err(CadenceError::BadRequest(BadRequestError::new(format!(
@@ -423,6 +425,7 @@ pub async fn signal_scheduler_api(
     schedule_id: &str,
     signal_name: &str,
     input: Vec<u8>,
+    ctx: &CallerContext,
 ) -> Result<(), CadenceError> {
     let request = SignalWorkflowExecutionRequest {
         domain: domain.to_string(),
@@ -435,7 +438,7 @@ pub async fn signal_scheduler_api(
         request_id: uuid::Uuid::new_v4().to_string(),
         ..Default::default()
     };
-    api_call::<_, serde_json::Value>(api, "SignalWorkflowExecution", &request)
+    api_call::<_, serde_json::Value>(api, "SignalWorkflowExecution", &request, ctx)
         .await
         .map(|_| ())
         .map_err(|e| wire::normalize_schedule_error(e, schedule_id, domain))
@@ -446,9 +449,10 @@ pub async fn delete_scheduler_api(
     api: &SharedWorkflowApi,
     domain: &str,
     schedule_id: &str,
+    ctx: &CallerContext,
 ) -> Result<(), CadenceError> {
     let signal_error =
-        match signal_scheduler_api(api, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new()).await
+        match signal_scheduler_api(api, domain, schedule_id, wire::SIGNAL_DELETE, Vec::new(), ctx).await
         {
             Ok(()) => return Ok(()),
             Err(e) if wire::is_schedule_already_gone(&e) => return Ok(()),
@@ -469,7 +473,7 @@ pub async fn delete_scheduler_api(
         reason: "terminated by DeleteSchedule".to_string(),
         ..Default::default()
     };
-    match api_call::<_, serde_json::Value>(api, "TerminateWorkflowExecution", &terminate).await {
+    match api_call::<_, serde_json::Value>(api, "TerminateWorkflowExecution", &terminate, ctx).await {
         Ok(_) => Ok(()),
         Err(e) if wire::is_schedule_already_gone(&e) => Ok(()),
         Err(e) => Err(e),
@@ -481,6 +485,7 @@ pub async fn describe_scheduler_api(
     api: &SharedWorkflowApi,
     domain: &str,
     schedule_id: &str,
+    ctx: &CallerContext,
 ) -> Result<DescribeScheduleResponse, CadenceError> {
     let mut last = None;
     for attempt in 0..wire::DESCRIBE_RETRY_ATTEMPTS {
@@ -506,6 +511,7 @@ pub async fn describe_scheduler_api(
                 api,
                 "QueryWorkflow",
                 &request,
+                ctx,
             ),
         )
         .await
@@ -537,6 +543,7 @@ pub async fn list_schedulers_api(
     domain: &str,
     page_size: usize,
     page_token: &[u8],
+    ctx: &CallerContext,
 ) -> Result<(Vec<ScheduleListEntry>, Vec<u8>), CadenceError> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -555,7 +562,7 @@ pub async fn list_schedulers_api(
         ..Default::default()
     };
     let resp: cadence_api::service_types::ListOpenWorkflowExecutionsResponse =
-        api_call(api, "ListOpenWorkflowExecutions", &request).await?;
+        api_call(api, "ListOpenWorkflowExecutions", &request, ctx).await?;
     let entries = resp.executions.iter().filter_map(list_entry).collect();
     Ok((entries, resp.next_page_token))
 }

@@ -2186,8 +2186,29 @@ fn schedule_bad_request(e: BadRequestError) -> Response {
     error_response("BadRequestError", StatusCode::BAD_REQUEST, e.message)
 }
 
+/// Carry the HTTP caller metadata and relative deadline into WorkflowService,
+/// matching the Go handlers which pass their request context to every backend RPC.
+fn schedule_caller_context(headers: &HeaderMap) -> crate::workflow_api::CallerContext {
+    let ttl_ms = headers
+        .get("Context-TTL-MS")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(60_000)
+        .clamp(100, 300_000);
+    let forwarded = headers.iter().filter_map(|(name, value)| {
+        let name = name.as_str().to_ascii_lowercase();
+        let name = name.strip_prefix("rpc-header-").unwrap_or(&name).to_owned();
+        Some((name, value.to_str().ok()?.to_owned()))
+    }).collect();
+    crate::workflow_api::CallerContext {
+        deadline: Some(std::time::Instant::now() + std::time::Duration::from_millis(ttl_ms)),
+        headers: forwarded,
+    }
+}
+
 async fn create_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::CreateScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2240,7 +2261,7 @@ async fn create_schedule(
         return bad_request(e);
     }
     let started = match &state.workflow_api {
-        Some(api) => crate::schedule_flow::start_scheduler_api(api, &req).await,
+        Some(api) => crate::schedule_flow::start_scheduler_api(api, &req, &schedule_caller_context(&headers)).await,
         None => crate::schedule_flow::start_scheduler(&executions, &req),
     };
     match started {
@@ -2265,6 +2286,7 @@ fn validate_schedule_cron(expr: &str) -> Result<(), String> {
 
 async fn describe_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::DescribeScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2285,7 +2307,7 @@ async fn describe_schedule(
     }
     let described = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id).await
+            crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id, &schedule_caller_context(&headers)).await
         }
         None => {
             crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id)
@@ -2300,6 +2322,7 @@ async fn describe_schedule(
 
 async fn list_schedules(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::ListSchedulesRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2326,6 +2349,7 @@ async fn list_schedules(
             &req.domain,
             page_size,
             &req.next_page_token,
+            &schedule_caller_context(&headers),
         )
         .await
         {
@@ -2351,6 +2375,7 @@ async fn list_schedules(
 
 async fn delete_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::DeleteScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2371,7 +2396,7 @@ async fn delete_schedule(
     }
     let deleted = match &state.workflow_api {
         Some(api) => {
-            crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id).await
+            crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id, &schedule_caller_context(&headers)).await
         }
         None => crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id),
     };
@@ -2387,6 +2412,7 @@ async fn delete_schedule(
 
 async fn pause_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::PauseScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2415,6 +2441,7 @@ async fn pause_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2438,6 +2465,7 @@ async fn pause_schedule(
 
 async fn unpause_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::UnpauseScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2466,6 +2494,7 @@ async fn unpause_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2489,6 +2518,7 @@ async fn unpause_schedule(
 
 async fn backfill_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::BackfillScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2540,6 +2570,7 @@ async fn backfill_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
@@ -2563,6 +2594,7 @@ async fn backfill_schedule(
 
 async fn update_schedule(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<cadence_api::schedule::UpdateScheduleRequest>,
 ) -> Response {
     if req.domain.is_empty() {
@@ -2625,6 +2657,7 @@ async fn update_schedule(
                 &req.schedule_id,
                 signal_name,
                 signal_input,
+                &schedule_caller_context(&headers),
             )
             .await
         }
