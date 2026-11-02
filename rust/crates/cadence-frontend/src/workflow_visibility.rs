@@ -9,7 +9,7 @@ use cadence_api::errors::CadenceError;
 use cadence_api::service_types as st;
 use cadence_api::types as ty;
 use cadence_persistence::visibility_reader::{
-    decode_memo, list_executions, VisibilityError, VisibilityFilter, VisibilityRow, VisibilityStore,
+    decode_memo, list_page, VisibilityError, VisibilityFilter, VisibilityRow, VisibilityStore,
 };
 
 use crate::workflow_backend::{bad_request, internal, to_json, ProductionBackend};
@@ -125,7 +125,7 @@ impl ProductionBackend {
         let earliest = time_us(request, "earliestTime");
         let latest = time_us(request, "latestTime");
         let page = tokio::task::spawn_blocking(move || {
-            list_executions(store.as_ref(), filter, &token, earliest, latest)
+            list_page(store.as_ref(), filter, &token, earliest, latest)
         })
         .await
         .map_err(|e| internal(e.to_string()))?
@@ -145,8 +145,12 @@ impl ProductionBackend {
         run_id: &str,
     ) -> Result<st::WorkflowExecutionInfo, CadenceError> {
         let store = self.visibility_store()?.clone();
-        let (d, r) = (domain_id.to_string(), run_id.to_string());
-        let row = tokio::task::spawn_blocking(move || store.get_closed(&d, &r))
+        let (d, w, r) = (
+            domain_id.to_string(),
+            workflow_id.to_string(),
+            run_id.to_string(),
+        );
+        let row = tokio::task::spawn_blocking(move || store.get_closed_by_workflow(&d, &w, &r))
             .await
             .map_err(|e| internal(e.to_string()))?
             .map_err(map_error)?;

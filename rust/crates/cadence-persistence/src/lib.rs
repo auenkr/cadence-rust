@@ -21,6 +21,7 @@ pub mod semaphores;
 pub mod semaphores_native;
 pub mod version_history;
 pub mod visibility;
+pub mod visibility_cassandra;
 pub mod visibility_reader;
 
 pub use domains::{

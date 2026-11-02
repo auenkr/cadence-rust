@@ -64,6 +64,26 @@ pub trait VisibilityStore: Send + Sync + std::fmt::Debug {
         domain_id: &str,
         run_id: &str,
     ) -> Result<Option<VisibilityRow>, VisibilityError>;
+    /// Go Cassandra's lookup is keyed by workflow ID too; SQL ignores it.
+    fn get_closed_by_workflow(
+        &self,
+        domain_id: &str,
+        _workflow_id: &str,
+        run_id: &str,
+    ) -> Result<Option<VisibilityRow>, VisibilityError> {
+        self.get_closed(domain_id, run_id)
+    }
+    /// Stores with native paging (Cassandra) return the whole page here;
+    /// `None` selects the SQL time/run-id token scheme.
+    fn list_native(
+        &self,
+        _filter: &VisibilityFilter,
+        _page_token: &[u8],
+        _earliest_time_us: i64,
+        _latest_time_us: i64,
+    ) -> Option<Result<ListPage, VisibilityError>> {
+        None
+    }
 }
 
 /// Go `visibilityPageToken` (JSON `{"Time": RFC3339Nano, "RunID": ...}`).
@@ -205,6 +225,20 @@ pub fn decode_memo(data: &[u8], encoding: &str) -> Result<Option<Memo>, Visibili
 pub struct ListPage {
     pub rows: Vec<VisibilityRow>,
     pub next_page_token: Vec<u8>,
+}
+
+/// Lists through native paging when the store has it, else the SQL scheme.
+pub fn list_page(
+    store: &dyn VisibilityStore,
+    filter: VisibilityFilter,
+    page_token: &[u8],
+    earliest_time_us: i64,
+    latest_time_us: i64,
+) -> Result<ListPage, VisibilityError> {
+    if let Some(result) = store.list_native(&filter, page_token, earliest_time_us, latest_time_us) {
+        return result;
+    }
+    list_executions(store, filter, page_token, earliest_time_us, latest_time_us)
 }
 
 /// Go `listWorkflowExecutions` (page token + next-token rule).

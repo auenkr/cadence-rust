@@ -206,6 +206,24 @@ fn separate_visibility_sql<'a>(
         .then_some(v)
 }
 
+/// Cassandra config of a distinct `visibilityStore` datastore (Go builds the
+/// visibility store from that datastore's own hosts/keyspace).
+fn separate_visibility_nosql<'a>(
+    persistence: &'a crate::config::PersistenceConfig,
+    default_nosql: &crate::config::NosqlConfig,
+) -> Option<&'a crate::config::NosqlConfig> {
+    if persistence.visibility_store.is_empty() {
+        return None;
+    }
+    let v = persistence
+        .datastores
+        .get(&persistence.visibility_store)?
+        .nosql
+        .as_ref()?;
+    (v.plugin_name == "cassandra" && (v.keyspace != default_nosql.keyspace || v.hosts != default_nosql.hosts))
+        .then_some(v)
+}
+
 pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
@@ -223,6 +241,18 @@ pub fn open_configured_default_store(
         let config = cassandra_config(nosql)?;
         let driver =
             Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(&config)?);
+        let visibility_driver = match separate_visibility_nosql(persistence, nosql) {
+            Some(v) => Arc::new(cadence_persistence::cassandra::CassandraBlockingSession::connect(
+                &cassandra_config(v)?,
+            )?),
+            None => driver.clone(),
+        };
+        let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
+            Arc::new(cadence_persistence::visibility_cassandra::CassandraVisibilityStore::new(
+                visibility_driver,
+                // Go reads system.enableReadFromClosedExecutionV2 (default false).
+                false,
+            ));
         let domain_all_consistency_delete = all_consistency_delete.clone();
         let task_store = Arc::new(
             cadence_persistence::matching_cassandra::CassandraMatchingTaskStore::with_all_consistency_delete(
@@ -247,7 +277,7 @@ pub fn open_configured_default_store(
             history_node_store: Some(Arc::new(
                 cadence_persistence::history_cassandra::CassandraHistoryNodeStore::new(driver.clone()),
             )),
-            visibility_store: None,
+            visibility_store: Some(visibility),
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),
             task_store,
