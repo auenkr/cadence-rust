@@ -81,26 +81,23 @@ type OpenTuple = (
     Option<CqlTimestamp>,
 );
 
-type ClosedTuple = (
-    String,
-    uuid::Uuid,
-    Option<CqlTimestamp>,
-    Option<CqlTimestamp>,
-    Option<CqlTimestamp>,
-    Option<String>,
-    Option<i32>,
-    Option<i64>,
-    Option<Vec<u8>>,
-    Option<String>,
-    Option<String>,
-    Option<bool>,
-    Option<i32>,
-    Option<CqlTimestamp>,
-    Option<i32>,
-    Option<i32>,
-    Option<String>,
-    Option<CqlTimestamp>,
-);
+/// Closed rows exceed the 16-column tuple limit, so decode by column name.
+#[derive(scylla::DeserializeRow)]
+struct ClosedRec {
+    workflow_id: String,
+    run_id: uuid::Uuid,
+    start_time: Option<CqlTimestamp>,
+    execution_time: Option<CqlTimestamp>,
+    close_time: Option<CqlTimestamp>,
+    workflow_type_name: Option<String>,
+    status: Option<i32>,
+    history_length: Option<i64>,
+    memo: Option<Vec<u8>>,
+    encoding: Option<String>,
+    is_cron: Option<bool>,
+    update_time: Option<CqlTimestamp>,
+    shard_id: Option<i32>,
+}
 
 /// Cassandra timestamps are milliseconds; rows carry microseconds.
 fn us(ts: Option<CqlTimestamp>) -> i64 {
@@ -123,21 +120,21 @@ fn open_row(t: OpenTuple) -> VisibilityRow {
     }
 }
 
-fn closed_row(t: ClosedTuple) -> VisibilityRow {
+fn closed_row(t: ClosedRec) -> VisibilityRow {
     VisibilityRow {
-        workflow_id: t.0,
-        run_id: t.1.to_string(),
-        start_time_us: us(t.2),
-        execution_time_us: us(t.3),
-        close_time_us: Some(us(t.4)),
-        workflow_type_name: t.5.unwrap_or_default(),
-        close_status: Some(t.6.unwrap_or(0)),
-        history_length: Some(t.7.unwrap_or(0)),
-        memo: t.8.unwrap_or_default(),
-        encoding: t.9.unwrap_or_default(),
-        is_cron: t.11.unwrap_or(false),
-        update_time_us: us(t.13),
-        shard_id: t.14.unwrap_or(0),
+        workflow_id: t.workflow_id,
+        run_id: t.run_id.to_string(),
+        start_time_us: us(t.start_time),
+        execution_time_us: us(t.execution_time),
+        close_time_us: Some(us(t.close_time)),
+        workflow_type_name: t.workflow_type_name.unwrap_or_default(),
+        close_status: Some(t.status.unwrap_or(0)),
+        history_length: Some(t.history_length.unwrap_or(0)),
+        memo: t.memo.unwrap_or_default(),
+        encoding: t.encoding.unwrap_or_default(),
+        is_cron: t.is_cron.unwrap_or(false),
+        update_time_us: us(t.update_time),
+        shard_id: t.shard_id.unwrap_or(0),
     }
 }
 
@@ -230,7 +227,7 @@ impl CassandraVisibilityStore {
         let result = result.into_rows_result().map_err(internal)?;
         let mut rows = Vec::new();
         if closed {
-            for row in result.rows::<ClosedTuple>().map_err(internal)? {
+            for row in result.rows::<ClosedRec>().map_err(internal)? {
                 rows.push(closed_row(row.map_err(internal)?));
             }
         } else {
@@ -289,7 +286,7 @@ impl VisibilityStore for CassandraVisibilityStore {
             .run(session.query_unpaged(statement, (domain, DOMAIN_PARTITION, workflow_id, run)))
             .map_err(internal)?;
         let result = result.into_rows_result().map_err(internal)?;
-        match result.rows::<ClosedTuple>().map_err(internal)?.next() {
+        match result.rows::<ClosedRec>().map_err(internal)?.next() {
             Some(row) => Ok(Some(closed_row(row.map_err(internal)?))),
             None => Ok(None),
         }
