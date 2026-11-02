@@ -412,11 +412,28 @@ mod tests {
     struct CassandraPages;
 
     impl HistoryNodeStore for CassandraPages {
-        fn select_nodes(&self, _: i32, _: [u8; 16], _: [u8; 16], _: i64, _: i64, _: i64) -> Result<Vec<HistoryNodeRow>> {
+        fn select_nodes(
+            &self,
+            _: i32,
+            _: [u8; 16],
+            _: [u8; 16],
+            _: i64,
+            _: i64,
+            _: i64,
+        ) -> Result<Vec<HistoryNodeRow>> {
             panic!("native pages must not use the SQL node cursor")
         }
 
-        fn select_page(&self, _: i32, _: [u8; 16], _: [u8; 16], min: i64, _: i64, _: i64, token: Option<&[u8]>) -> Result<(Vec<HistoryNodeRow>, Option<Vec<u8>>)> {
+        fn select_page(
+            &self,
+            _: i32,
+            _: [u8; 16],
+            _: [u8; 16],
+            min: i64,
+            _: i64,
+            _: i64,
+            token: Option<&[u8]>,
+        ) -> Result<(Vec<HistoryNodeRow>, Option<Vec<u8>>)> {
             assert_eq!(min, 1);
             match token {
                 None => Ok((vec![row(1, 2, 10)], Some(vec![255, 7, 0]))),
@@ -435,7 +452,14 @@ mod tests {
         assert!(!first.next_page_token.is_empty());
         req.next_page_token = first.next_page_token;
         let second = read_history_branch(&CassandraPages, &req).unwrap();
-        assert_eq!(second.events().iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![3, 4]);
+        assert_eq!(
+            second
+                .events()
+                .iter()
+                .map(|e| e.event_id)
+                .collect::<Vec<_>>(),
+            vec![3, 4]
+        );
         assert!(second.next_page_token.is_empty());
     }
 
