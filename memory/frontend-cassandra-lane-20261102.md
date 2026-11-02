@@ -33,8 +33,16 @@ and `memory/frontend-postgres-visibility-20261102.md`; existing Cassandra
 Matching evidence and the missing Frontend lane are in
 `memory/frontend-cassandra-history-20261102.md`.
 
-Pending: push this implementation branch, dispatch
-`frontend-mixed-gate.yml` with `database=cassandra` and `rust_ref` set to the
-same branch, and record exact source/gate heads, run URL/conclusion, step
-results, and binary SHA256. A failure must be recorded as an exposed blocker;
-do not call that full Frontend parity.
+Implementation commit: `6ce90c7993a3554d4e32037662898580cb0b1bd8`, branch
+`frontend-cassandra-acceptance-20261102` (pushed).
+
+Dispatched after the pre-dispatch inspection found no active mixed gate:
+https://github.com/auenkr/cadence-rust/actions/runs/41429904560. Gate head and
+`rust_ref` are both `6ce90c7993a3554d4e32037662898580cb0b1bd8`. The run was
+queued at handoff; binary SHA256 and step-level outcome are pending. On resume,
+run `gh run view 41429904560 --repo auenkr/cadence-rust` once. If complete,
+download its `frontend-mixed-gate` artifact and record `out/commit.txt`,
+`out/binary.sha256`, `out/gate.exit`, and `out/gate/run/steps.json` here. If it
+is still running, leave it alone and retain this exact run/head as the next
+status check. A failure must be recorded as an exposed blocker; do not call that
+full Frontend parity.
