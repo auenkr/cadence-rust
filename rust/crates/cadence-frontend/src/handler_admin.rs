@@ -235,20 +235,13 @@ impl Handler {
         filters: &[DynamicConfigFilter],
         operational: bool,
     ) -> Result<GetDynamicConfigResponse, AdminError> {
-        if config_name.is_empty() {
-            return Err(AdminError::BadRequest(BadRequestError::new(
-                "ConfigName is not set on request.",
-            )));
-        }
-        let overlay = self.dynamic_config.lock().expect("admin lock");
-        let value = overlay
-            .get(operational, config_name, filters)
-            .ok_or_else(|| {
-                AdminError::Internal(InternalServiceError::new(format!(
-                    "Failed to get dynamic config {config_name:?} for the given filters."
-                )))
-            })?;
-        Ok(GetDynamicConfigResponse { value: value.value })
+        let value = self
+            .dynamic_config
+            .lock()
+            .expect("admin lock")
+            .admin_get(operational, config_name, filters)
+            .map_err(admin_error)?;
+        Ok(GetDynamicConfigResponse { value: Some(value) })
     }
 
     pub fn update_dynamic_config(
@@ -257,11 +250,11 @@ impl Handler {
         values: Vec<DynamicConfigValue>,
         operational: bool,
     ) -> Result<UpdateDynamicConfigResponse, AdminError> {
-        require_config_name(config_name)?;
         self.dynamic_config
             .lock()
             .expect("admin lock")
-            .update(operational, config_name, values);
+            .admin_update(operational, config_name, values)
+            .map_err(admin_error)?;
         Ok(UpdateDynamicConfigResponse {})
     }
 
@@ -271,11 +264,11 @@ impl Handler {
         filters: &[DynamicConfigFilter],
         operational: bool,
     ) -> Result<RestoreDynamicConfigResponse, AdminError> {
-        require_config_name(config_name)?;
         self.dynamic_config
             .lock()
             .expect("admin lock")
-            .restore(operational, config_name, filters);
+            .admin_restore(operational, config_name, filters)
+            .map_err(admin_error)?;
         Ok(RestoreDynamicConfigResponse {})
     }
 
@@ -287,7 +280,7 @@ impl Handler {
         self.dynamic_config
             .lock()
             .expect("admin lock")
-            .list(operational, config_name)
+            .admin_list(operational, config_name)
     }
 
     #[must_use]
@@ -303,13 +296,12 @@ impl Handler {
     }
 }
 
-fn require_config_name(config_name: &str) -> Result<(), AdminError> {
-    if config_name.is_empty() {
-        Err(AdminError::BadRequest(BadRequestError::new(
-            "ConfigName is not set on request.",
-        )))
-    } else {
-        Ok(())
+fn admin_error(error: cadence_service_core::admin::DynamicConfigError) -> AdminError {
+    use cadence_service_core::admin::DynamicConfigError as E;
+    match error {
+        E::BadRequest(m) => AdminError::BadRequest(BadRequestError::new(m)),
+        E::NotFound(m) => AdminError::EntityNotExists(EntityNotExistsError::new(m)),
+        E::Internal(m) => AdminError::Internal(InternalServiceError::new(m)),
     }
 }
 
@@ -328,14 +320,14 @@ mod tests {
             filters: vec![],
         }];
         handler
-            .update_dynamic_config("worker.enabled", values.clone(), false)
+            .update_dynamic_config("worker.enableScheduler", values.clone(), false)
             .unwrap();
         assert!(handler
-            .get_dynamic_config("worker.enabled", &[], true)
+            .get_dynamic_config("worker.enableScheduler", &[], true)
             .is_err());
         assert_eq!(
             handler
-                .get_dynamic_config("worker.enabled", &[], false)
+                .get_dynamic_config("worker.enableScheduler", &[], false)
                 .unwrap()
                 .value
                 .unwrap()
@@ -343,10 +335,10 @@ mod tests {
             b"true"
         );
         handler
-            .restore_dynamic_config("worker.enabled", &[], false)
+            .restore_dynamic_config("worker.enableScheduler", &[], false)
             .unwrap();
         assert!(handler
-            .get_dynamic_config("worker.enabled", &[], false)
+            .get_dynamic_config("worker.enableScheduler", &[], false)
             .is_err());
     }
 

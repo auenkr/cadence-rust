@@ -46,6 +46,136 @@ pub struct DynamicConfigOverlay {
     normal: HashMap<String, Vec<DynamicConfigValue>>,
     operational: HashMap<String, Vec<DynamicConfigValue>>,
     runtime_provider: Option<Arc<dyn RuntimePropertyProvider>>,
+    store: Option<StoreBinding>,
+}
+
+/// Durable config-store binding (Go `configStoreClient`): fetch/write closures
+/// plus the cached snapshot version used for the conditional insert.
+#[derive(Clone)]
+pub struct StoreBinding {
+    pub fetch: cadence_persistence::config_store::ConfigRowFetcher,
+    pub write: cadence_persistence::config_store::ConfigRowWriter,
+    pub update_retry_attempts: i32,
+    pub version: i64,
+    pub schema_version: i64,
+}
+
+impl std::fmt::Debug for StoreBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreBinding")
+            .field("version", &self.version)
+            .finish()
+    }
+}
+
+/// Failure of an Admin dynamic-config operation. `NotFound` is Go's
+/// `dynamicconfig.NotFoundError` (`EntityNotExistsError`); `Internal` carries
+/// Go's uncategorized errors, which `adminHandler.error` wraps as
+/// `InternalServiceError`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DynamicConfigError {
+    BadRequest(String),
+    NotFound(String),
+    Internal(String),
+}
+
+const NOT_FOUND_MESSAGE: &str = "unable to find key";
+const INVALID_FILTERS_MESSAGE: &str = "Request Filters are invalid, unable to parse.";
+
+fn blob_to_json(blob: Option<&cadence_api::types::DataBlob>) -> Result<serde_json::Value, String> {
+    let blob = blob.ok_or_else(|| "invalid memory address or nil pointer dereference".to_string())?;
+    match blob.encoding_type {
+        Some(cadence_api::enums::EncodingType::JSON) => {
+            serde_json::from_slice(&blob.data).map_err(|e| e.to_string())
+        }
+        _ => Err("unsupported blob encoding".into()),
+    }
+}
+
+fn go_value_type(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "<nil>",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "float64",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "[]interface {}",
+        serde_json::Value::Object(_) => "map[string]interface {}",
+    }
+}
+
+/// Go `validateKeyDataBlobPair`.
+fn validate_key_blob(
+    _name: &str,
+    kind: cadence_persistence::dynamic_config_keys::KeyKind,
+    blob: Option<&cadence_api::types::DataBlob>,
+) -> Result<(), String> {
+    use cadence_persistence::dynamic_config_keys::KeyKind;
+    let value = blob_to_json(blob)?;
+    let (key_type, ok) = match kind {
+        KeyKind::Int => ("dynamicproperties.IntKey", value.is_number()),
+        KeyKind::Bool => ("dynamicproperties.BoolKey", value.is_boolean()),
+        KeyKind::Float => ("dynamicproperties.FloatKey", value.is_number()),
+        KeyKind::String => ("dynamicproperties.StringKey", value.is_string()),
+        KeyKind::Duration => ("dynamicproperties.DurationKey", value.is_string()),
+        KeyKind::Map => ("dynamicproperties.MapKey", value.is_object()),
+        KeyKind::List => ("dynamicproperties.ListKey", value.is_array()),
+    };
+    if !ok {
+        return Err(format!(
+            "key value pair mismatch, key type: {key_type}, value type: {}",
+            go_value_type(&value)
+        ));
+    }
+    match kind {
+        KeyKind::Int => {
+            let f = value.as_f64().unwrap_or(0.0);
+            if f != f.trunc() {
+                return Err("value type is not int".into());
+            }
+        }
+        KeyKind::Duration => {
+            if crate::config::parse_go_duration(value.as_str().unwrap_or_default()).is_err() {
+                return Err("value string encoding cannot be parsed into duration".into());
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Go `matchFilters`: every filter on the stored value must be present in the
+/// request with an equal decoded JSON value.
+fn go_match_filters(value: &DynamicConfigValue, request: &[(String, serde_json::Value)]) -> bool {
+    if value.filters.len() > request.len() {
+        return false;
+    }
+    value.filters.iter().all(|filter| {
+        let Some((_, wanted)) = request.iter().find(|(n, _)| *n == filter.name) else {
+            return false;
+        };
+        !wanted.is_null() && blob_to_json(filter.value.as_ref()).is_ok_and(|v| v == *wanted)
+    })
+}
+
+fn convert_filters(
+    filters: &[DynamicConfigFilter],
+) -> Result<Vec<(String, serde_json::Value)>, String> {
+    filters
+        .iter()
+        .map(|f| Ok((f.name.clone(), blob_to_json(f.value.as_ref())?)))
+        .collect()
+}
+
+fn lookup_kind(
+    name: &str,
+) -> Result<cadence_persistence::dynamic_config_keys::KeyKind, DynamicConfigError> {
+    if name.is_empty() {
+        // Go `validate.ErrRequestNotSet`.
+        return Err(DynamicConfigError::BadRequest("Request is nil.".into()));
+    }
+    cadence_persistence::dynamic_config_keys::key_kind(name).ok_or_else(|| {
+        DynamicConfigError::Internal(format!("invalid dynamic config key name: {name}"))
+    })
 }
 
 fn filters_match(value: &DynamicConfigValue, filters: &[DynamicConfigFilter]) -> bool {
@@ -235,6 +365,205 @@ impl DynamicConfigOverlay {
                 values: values.clone(),
             })
             .collect()
+    }
+}
+
+impl DynamicConfigOverlay {
+    /// Bind a durable config store (Go `configStoreClient`). The overlay's
+    /// normal map becomes the store snapshot.
+    pub fn attach_store(
+        &mut self,
+        binding: StoreBinding,
+        snapshot: &cadence_persistence::config_store::Snapshot,
+    ) {
+        let mut binding = binding;
+        binding.version = snapshot.version;
+        binding.schema_version = snapshot.schema_version;
+        *self = Self::from_config_store(snapshot);
+        self.store = Some(binding);
+    }
+
+    /// Go `GetValue`/`GetValueWithFilters` as called by admin `GetDynamicConfig`:
+    /// the first filter-matching value wins, otherwise the last filterless
+    /// value, otherwise `NotFoundError`. Returns the JSON blob.
+    pub fn admin_get(
+        &self,
+        operational: bool,
+        name: &str,
+        filters: &[DynamicConfigFilter],
+    ) -> Result<cadence_api::types::DataBlob, DynamicConfigError> {
+        lookup_kind(name)?;
+        let request = convert_filters(filters).map_err(DynamicConfigError::Internal)?;
+        let not_found = || DynamicConfigError::NotFound(NOT_FOUND_MESSAGE.into());
+        let mut fallback = None;
+        for value in self.map(operational).get(name).ok_or_else(not_found)? {
+            if value.filters.is_empty() {
+                if let Ok(parsed) = blob_to_json(value.value.as_ref()) {
+                    fallback = Some(parsed);
+                }
+                continue;
+            }
+            if go_match_filters(value, &request) {
+                let parsed = blob_to_json(value.value.as_ref()).map_err(DynamicConfigError::Internal)?;
+                return Ok(json_blob(&parsed));
+            }
+        }
+        fallback.map(|v| json_blob(&v)).ok_or_else(not_found)
+    }
+
+    /// Go `UpdateValue`: validate every value against the key type, replace
+    /// the entry (empty list deletes it) and persist when a store is bound.
+    pub fn admin_update(
+        &mut self,
+        operational: bool,
+        name: &str,
+        values: Vec<DynamicConfigValue>,
+    ) -> Result<(), DynamicConfigError> {
+        let kind = lookup_kind(name)?;
+        for value in &values {
+            validate_key_blob(name, kind, value.value.as_ref())
+                .map_err(DynamicConfigError::Internal)?;
+        }
+        self.apply_values(operational, name, values)
+    }
+
+    /// Go `RestoreValue`.
+    pub fn admin_restore(
+        &mut self,
+        operational: bool,
+        name: &str,
+        filters: &[DynamicConfigFilter],
+    ) -> Result<(), DynamicConfigError> {
+        lookup_kind(name)?;
+        let request = if filters.is_empty() {
+            None
+        } else {
+            Some(convert_filters(filters).map_err(|_| {
+                DynamicConfigError::BadRequest(INVALID_FILTERS_MESSAGE.into())
+            })?)
+        };
+        let current = self
+            .map(operational)
+            .get(name)
+            .ok_or_else(|| DynamicConfigError::NotFound(NOT_FOUND_MESSAGE.into()))?;
+        let kept: Vec<DynamicConfigValue> = current
+            .iter()
+            .filter(|v| match &request {
+                None => !v.filters.is_empty(),
+                Some(request) => !go_match_filters(v, request) || v.filters.is_empty(),
+            })
+            .cloned()
+            .collect();
+        self.apply_values(operational, name, kept)
+    }
+
+    /// Go `ListValue` via `listDynamicConfigValue`: an empty or unknown name
+    /// lists everything (sorted by name for determinism; Go iterates a map).
+    pub fn admin_list(
+        &self,
+        operational: bool,
+        name: &str,
+    ) -> Vec<cadence_api::admin::DynamicConfigEntry> {
+        let map = self.map(operational);
+        let mut entries: Vec<_> = if !name.is_empty() && map.contains_key(name) {
+            self.list(operational, name)
+        } else {
+            self.list(operational, "")
+        };
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        entries
+    }
+
+    /// Go `updateValue`: build the next snapshot from the cached one, insert it
+    /// at `version + 1`, retry after a condition failure.
+    fn apply_values(
+        &mut self,
+        operational: bool,
+        name: &str,
+        values: Vec<DynamicConfigValue>,
+    ) -> Result<(), DynamicConfigError> {
+        let Some(mut binding) = self.store.clone().filter(|_| !operational) else {
+            // No durable store (file/nop provider): in-memory only.
+            if values.is_empty() {
+                self.map_mut(operational).remove(name);
+            } else {
+                self.update(operational, name, values);
+            }
+            return Ok(());
+        };
+        let mut retries = binding.update_retry_attempts;
+        loop {
+            let mut next = self.normal.clone();
+            if values.is_empty() {
+                next.remove(name);
+            } else {
+                next.insert(name.to_string(), values.clone());
+            }
+            let mut entries: Vec<_> = next
+                .iter()
+                .map(|(n, v)| cadence_api::admin::DynamicConfigEntry {
+                    name: n.clone(),
+                    values: v.clone(),
+                })
+                .collect();
+            entries.sort_by(|a, b| a.name.cmp(&b.name));
+            let row = cadence_persistence::config_store::ConfigStoreRow {
+                version: binding.version + 1,
+                data: cadence_persistence::config_store::encode_snapshot(
+                    binding.schema_version,
+                    &entries,
+                ),
+                encoding: "thriftrw".into(),
+            };
+            match (binding.write)(cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG, &row) {
+                Ok(()) => {
+                    binding.version = row.version;
+                    self.normal = next;
+                    self.store = Some(binding);
+                    return Ok(());
+                }
+                Err(cadence_persistence::config_store::ConfigWriteError::ConditionFailed(_))
+                    if retries > 0 =>
+                {
+                    let fetched = (binding.fetch)(
+                        cadence_persistence::config_store::CONFIG_TYPE_DYNAMIC_CONFIG,
+                    )
+                    .map_err(|e| {
+                        DynamicConfigError::Internal(format!(
+                            "failed to fetch dynamic config snapshot {e}"
+                        ))
+                    })?;
+                    if let Some(row) = fetched {
+                        let snapshot = cadence_persistence::config_store::decode_snapshot(&row)
+                            .map_err(|e| {
+                                DynamicConfigError::Internal(format!(
+                                    "failed to fetch dynamic config snapshot {e}"
+                                ))
+                            })?;
+                        binding.version = snapshot.version;
+                        binding.schema_version = snapshot.schema_version;
+                        self.normal = Self::from_config_store(&snapshot).normal;
+                    }
+                    retries -= 1;
+                }
+                Err(_) if retries == 0 => {
+                    return Err(DynamicConfigError::Internal(
+                        "ran out of retry attempts on update".into(),
+                    ))
+                }
+                Err(
+                    cadence_persistence::config_store::ConfigWriteError::ConditionFailed(m)
+                    | cadence_persistence::config_store::ConfigWriteError::Other(m),
+                ) => return Err(DynamicConfigError::Internal(m)),
+            }
+        }
+    }
+}
+
+fn json_blob(value: &serde_json::Value) -> cadence_api::types::DataBlob {
+    cadence_api::types::DataBlob {
+        encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+        data: serde_json::to_vec(value).unwrap_or_default(),
     }
 }
 
@@ -606,7 +935,8 @@ pub fn add_search_attribute_core(
     }
     let encoded = serde_json::to_vec(&valid_attributes)
         .map_err(|error| Internal(format!("Failed to encode dynamic config, err: {error}")))?;
-    overlay.update(
+    // Go `UpdateValue` failures here are only logged ("Failed to update dynamic config").
+    if let Err(error) = overlay.admin_update(
         false,
         VALID_SEARCH_ATTRIBUTES,
         vec![DynamicConfigValue {
@@ -616,7 +946,9 @@ pub fn add_search_attribute_core(
             }),
             filters: Vec::new(),
         }],
-    );
+    ) {
+        eprintln!("warning: Failed to update dynamic config, err: {error:?}");
+    }
     drop(overlay);
     admin
         .custom_search_attributes
@@ -648,44 +980,65 @@ pub async fn add_search_attribute(
     }
 }
 
+fn dynamic_config_error_response(error: DynamicConfigError) -> Response {
+    match error {
+        DynamicConfigError::BadRequest(message) => bad_request(BadRequestError::new(message)),
+        DynamicConfigError::NotFound(message) => {
+            entity_not_exists(cadence_api::errors::EntityNotExistsError::new(message))
+        }
+        DynamicConfigError::Internal(message) => error_response(
+            "InternalServiceError",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        ),
+    }
+}
+
+fn get_config(state: &AppState, req: cadence_api::admin::GetDynamicConfigRequest, op: bool) -> Response {
+    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+    match overlay.admin_get(op, &req.config_name, &req.filters) {
+        Ok(value) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: Some(value) }),
+        Err(error) => dynamic_config_error_response(error),
+    }
+}
+
+fn update_config(state: &AppState, req: cadence_api::admin::UpdateDynamicConfigRequest, op: bool) -> Response {
+    let mut overlay = state.admin.dynamic_config.lock().expect("admin lock");
+    match overlay.admin_update(op, &req.config_name, req.config_values) {
+        Ok(()) => ok_json(cadence_api::admin::UpdateDynamicConfigResponse {}),
+        Err(error) => dynamic_config_error_response(error),
+    }
+}
+
+fn restore_config(state: &AppState, req: cadence_api::admin::RestoreDynamicConfigRequest, op: bool) -> Response {
+    let mut overlay = state.admin.dynamic_config.lock().expect("admin lock");
+    match overlay.admin_restore(op, &req.config_name, &req.filters) {
+        Ok(()) => ok_json(cadence_api::admin::RestoreDynamicConfigResponse {}),
+        Err(error) => dynamic_config_error_response(error),
+    }
+}
+
+fn list_config(state: &AppState, req: cadence_api::admin::ListDynamicConfigRequest, op: bool) -> Response {
+    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+    ok_json(cadence_api::admin::ListDynamicConfigResponse {
+        entries: overlay.admin_list(op, &req.config_name),
+    })
+}
+
 /// Read a dynamic-config value, mirroring Go admin `GetDynamicConfig`.
 pub async fn get_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
-    match overlay.get(false, &req.config_name, &req.filters) {
-        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: entry.value }),
-        None => error_response(
-            "InternalServiceError",
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "Failed to get dynamic config {:?} for the given filters.",
-                req.config_name
-            ),
-        ),
-    }
+    get_config(&state, req, false)
 }
 
-/// Replace a dynamic-config value list, mirroring Go admin
-/// `UpdateDynamicConfig`.
+/// Replace a dynamic-config value list, mirroring Go admin `UpdateDynamicConfig`.
 pub async fn update_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::UpdateDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin lock")
-        .update(false, &req.config_name, req.config_values);
-    ok_json(cadence_api::admin::UpdateDynamicConfigResponse {})
+    update_config(&state, req, false)
 }
 
 /// Drop dynamic-config values, mirroring Go admin `RestoreDynamicConfig`.
@@ -693,16 +1046,7 @@ pub async fn restore_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RestoreDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin lock")
-        .restore(false, &req.config_name, &req.filters);
-    ok_json(cadence_api::admin::RestoreDynamicConfigResponse {})
+    restore_config(&state, req, false)
 }
 
 /// List dynamic-config entries, mirroring Go admin `ListDynamicConfig`.
@@ -710,29 +1054,15 @@ pub async fn list_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ListDynamicConfigRequest>,
 ) -> Response {
-    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
-    ok_json(cadence_api::admin::ListDynamicConfigResponse {
-        entries: overlay.list(false, &req.config_name),
-    })
+    list_config(&state, req, false)
 }
 
-/// Operational-config variants share the overlay's second namespace,
-/// mirroring Go's operational dynamic-config client.
+/// Operational-config variants use the overlay's second namespace.
 pub async fn get_operational_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::GetDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
-    match overlay.get(true, &req.config_name, &req.filters) {
-        Some(entry) => ok_json(cadence_api::admin::GetDynamicConfigResponse { value: entry.value }),
-        None => entity_not_exists(cadence_api::errors::EntityNotExistsError::new(format!(
-            "Dynamic config {:?} does not have a value for the given filters.",
-            req.config_name
-        ))),
-    }
+    get_config(&state, req, true)
 }
 
 /// Replace an operational dynamic-config value list.
@@ -740,16 +1070,7 @@ pub async fn update_operational_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::UpdateDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin lock")
-        .update(true, &req.config_name, req.config_values);
-    ok_json(cadence_api::admin::UpdateDynamicConfigResponse {})
+    update_config(&state, req, true)
 }
 
 /// Drop operational dynamic-config values.
@@ -757,16 +1078,7 @@ pub async fn restore_operational_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::RestoreDynamicConfigRequest>,
 ) -> Response {
-    if req.config_name.is_empty() {
-        return bad_request(BadRequestError::new("ConfigName is not set on request."));
-    }
-    state
-        .admin
-        .dynamic_config
-        .lock()
-        .expect("admin lock")
-        .restore(true, &req.config_name, &req.filters);
-    ok_json(cadence_api::admin::RestoreDynamicConfigResponse {})
+    restore_config(&state, req, true)
 }
 
 /// List operational dynamic-config entries.
@@ -774,10 +1086,7 @@ pub async fn list_operational_dynamic_config(
     State(state): State<StdArc<AppState>>,
     Json(req): Json<cadence_api::admin::ListDynamicConfigRequest>,
 ) -> Response {
-    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
-    ok_json(cadence_api::admin::ListDynamicConfigResponse {
-        entries: overlay.list(true, &req.config_name),
-    })
+    list_config(&state, req, true)
 }
 
 /// Reapply signal events to the current run, mirroring Go admin
@@ -2414,5 +2723,333 @@ mod tests {
             serde_json::from_slice(&attributes[0].value.as_ref().unwrap().data).unwrap();
         assert_eq!(json["DomainID"], 1);
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod dynamic_config_admin_tests {
+    use super::*;
+    use cadence_persistence::config_store as cs;
+    use std::sync::Mutex as StdMutex;
+
+    fn json(s: &str) -> cadence_api::types::DataBlob {
+        cadence_api::types::DataBlob {
+            encoding_type: Some(cadence_api::enums::EncodingType::JSON),
+            data: s.as_bytes().to_vec(),
+        }
+    }
+
+    fn value(s: &str, filters: &[(&str, &str)]) -> DynamicConfigValue {
+        DynamicConfigValue {
+            value: Some(json(s)),
+            filters: filters
+                .iter()
+                .map(|(n, v)| DynamicConfigFilter {
+                    name: (*n).into(),
+                    value: Some(json(v)),
+                })
+                .collect(),
+        }
+    }
+
+    fn filter(n: &str, v: &str) -> DynamicConfigFilter {
+        DynamicConfigFilter {
+            name: n.into(),
+            value: Some(json(v)),
+        }
+    }
+
+    const INT: &str = "frontend.visibilityListMaxQPS";
+    const BOOL: &str = "worker.enableScheduler";
+
+    #[test]
+    fn name_and_key_validation() {
+        let mut o = DynamicConfigOverlay::default();
+        assert_eq!(
+            o.admin_get(false, "", &[]),
+            Err(DynamicConfigError::BadRequest("Request is nil.".into()))
+        );
+        assert_eq!(
+            o.admin_update(false, "", vec![]),
+            Err(DynamicConfigError::BadRequest("Request is nil.".into()))
+        );
+        assert_eq!(
+            o.admin_restore(false, "", &[]),
+            Err(DynamicConfigError::BadRequest("Request is nil.".into()))
+        );
+        assert_eq!(
+            o.admin_get(false, "no.such.key", &[]),
+            Err(DynamicConfigError::Internal(
+                "invalid dynamic config key name: no.such.key".into()
+            ))
+        );
+        assert!(matches!(
+            o.admin_update(false, "no.such.key", vec![value("1", &[])]),
+            Err(DynamicConfigError::Internal(_))
+        ));
+    }
+
+    #[test]
+    fn update_validates_value_types_like_go() {
+        let mut o = DynamicConfigOverlay::default();
+        let err = |r: Result<(), DynamicConfigError>| match r {
+            Err(DynamicConfigError::Internal(m)) => m,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            err(o.admin_update(false, BOOL, vec![value("1", &[])])),
+            "key value pair mismatch, key type: dynamicproperties.BoolKey, value type: float64"
+        );
+        assert_eq!(
+            err(o.admin_update(false, INT, vec![value("1.5", &[])])),
+            "value type is not int"
+        );
+        assert_eq!(
+            err(o.admin_update(false, INT, vec![value("\"x\"", &[])])),
+            "key value pair mismatch, key type: dynamicproperties.IntKey, value type: string"
+        );
+        assert_eq!(
+            err(o.admin_update(
+                false,
+                "frontend.validSearchAttributes",
+                vec![value("[1]", &[])]
+            )),
+            "key value pair mismatch, key type: dynamicproperties.MapKey, value type: []interface {}"
+        );
+        assert_eq!(
+            err(o.admin_update(false, "matching.longPollExpirationInterval", vec![value("\"zz\"", &[])])),
+            "value string encoding cannot be parsed into duration"
+        );
+        o.admin_update(false, "matching.longPollExpirationInterval", vec![value("\"1m\"", &[])])
+            .unwrap();
+        o.admin_update(false, INT, vec![value("5", &[])]).unwrap();
+        let bad_encoding = DynamicConfigValue {
+            value: Some(cadence_api::types::DataBlob {
+                encoding_type: Some(cadence_api::enums::EncodingType::ThriftRW),
+                data: vec![],
+            }),
+            filters: vec![],
+        };
+        assert_eq!(
+            err(o.admin_update(false, INT, vec![bad_encoding])),
+            "unsupported blob encoding"
+        );
+        // A rejected update leaves the previous value in place.
+        assert_eq!(o.admin_get(false, INT, &[]).unwrap().data, b"5");
+    }
+
+    #[test]
+    fn get_prefers_matching_filter_then_last_filterless_then_not_found() {
+        let mut o = DynamicConfigOverlay::default();
+        let not_found = Err(DynamicConfigError::NotFound("unable to find key".into()));
+        assert_eq!(o.admin_get(false, INT, &[]), not_found);
+        o.admin_update(
+            false,
+            INT,
+            vec![
+                value("1", &[]),
+                value("7", &[("domainName", "\"d\"")]),
+                value("2", &[]),
+            ],
+        )
+        .unwrap();
+        // nil filters: only filterless values; the last one wins.
+        assert_eq!(o.admin_get(false, INT, &[]).unwrap().data, b"2");
+        assert_eq!(
+            o.admin_get(false, INT, &[filter("domainName", "\"d\"")])
+                .unwrap()
+                .data,
+            b"7"
+        );
+        assert_eq!(
+            o.admin_get(false, INT, &[filter("domainName", "\"other\"")])
+                .unwrap()
+                .data,
+            b"2"
+        );
+        // A stored value with only filters and no fallback is NotFound.
+        o.admin_update(false, BOOL, vec![value("true", &[("domainName", "\"d\"")])])
+            .unwrap();
+        assert_eq!(o.admin_get(false, BOOL, &[]), not_found);
+        assert_eq!(
+            o.admin_get(false, BOOL, &[filter("domainName", "\"d\"")])
+                .unwrap()
+                .data,
+            b"true"
+        );
+        // Operational namespace is separate.
+        assert_eq!(o.admin_get(true, INT, &[]), not_found);
+    }
+
+    #[test]
+    fn restore_semantics_and_not_found() {
+        let mut o = DynamicConfigOverlay::default();
+        assert_eq!(
+            o.admin_restore(false, INT, &[]),
+            Err(DynamicConfigError::NotFound("unable to find key".into()))
+        );
+        o.admin_update(
+            false,
+            INT,
+            vec![
+                value("1", &[]),
+                value("7", &[("domainName", "\"a\"")]),
+                value("8", &[("domainName", "\"b\"")]),
+            ],
+        )
+        .unwrap();
+        // Filtered restore removes only the matching filtered value.
+        o.admin_restore(false, INT, &[filter("domainName", "\"a\"")])
+            .unwrap();
+        assert_eq!(o.admin_list(false, INT)[0].values.len(), 2);
+        // Unfiltered restore removes the fallback value only.
+        o.admin_restore(false, INT, &[]).unwrap();
+        let values = &o.admin_list(false, INT)[0].values;
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].filters[0].name, "domainName");
+        // Restoring the last filtered value deletes the entry.
+        o.admin_restore(false, INT, &[filter("domainName", "\"b\"")])
+            .unwrap();
+        assert!(o.admin_list(false, INT).is_empty());
+        // Unparseable filter value -> ErrInvalidFilters.
+        o.admin_update(false, INT, vec![value("1", &[])]).unwrap();
+        let bad = DynamicConfigFilter {
+            name: "domainName".into(),
+            value: Some(json("{")),
+        };
+        assert_eq!(
+            o.admin_restore(false, INT, &[bad]),
+            Err(DynamicConfigError::BadRequest(
+                "Request Filters are invalid, unable to parse.".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn update_with_empty_values_deletes_and_list_falls_back_to_all() {
+        let mut o = DynamicConfigOverlay::default();
+        o.admin_update(false, INT, vec![value("1", &[])]).unwrap();
+        o.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
+        assert_eq!(o.admin_list(false, INT).len(), 1);
+        assert_eq!(o.admin_list(false, "").len(), 2);
+        // Unknown name (or a key without an entry) lists everything, like Go.
+        assert_eq!(o.admin_list(false, "no.such.key").len(), 2);
+        assert_eq!(o.admin_list(false, "matching.longPollExpirationInterval").len(), 2);
+        assert_eq!(o.admin_list(false, "")[0].name, BOOL); // sorted by name
+        o.admin_update(false, INT, vec![]).unwrap();
+        assert_eq!(o.admin_list(false, "").len(), 1);
+    }
+
+    struct Db(StdMutex<rusqlite::Connection>);
+
+    fn store_with(db: &Arc<Db>, retries: i32) -> StoreBinding {
+        let (f, w) = (db.clone(), db.clone());
+        StoreBinding {
+            fetch: Arc::new(move |t| cs::sqlite_fetch_latest(&f.0.lock().unwrap(), t)),
+            write: Arc::new(move |t, row| cs::sqlite_insert_config(&w.0.lock().unwrap(), t, row)),
+            update_retry_attempts: retries,
+            version: 0,
+            schema_version: 0,
+        }
+    }
+
+    fn new_db() -> Arc<Db> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cluster_config (row_type INT NOT NULL, version BIGINT NOT NULL, timestamp DATETIME NOT NULL, data MEDIUMBLOB NOT NULL, data_encoding VARCHAR(16) NOT NULL, PRIMARY KEY (row_type, version));",
+        )
+        .unwrap();
+        Arc::new(Db(StdMutex::new(conn)))
+    }
+
+    fn load(db: &Arc<Db>, retries: i32) -> DynamicConfigOverlay {
+        let snapshot = match cs::sqlite_fetch_latest(&db.0.lock().unwrap(), 0).unwrap() {
+            Some(row) => cs::decode_snapshot(&row).unwrap(),
+            None => cs::Snapshot::default(),
+        };
+        let mut o = DynamicConfigOverlay::default();
+        o.attach_store(store_with(db, retries), &snapshot);
+        o
+    }
+
+    #[test]
+    fn updates_are_durable_across_restart_and_versions_increase() {
+        let db = new_db();
+        let mut o = load(&db, 1);
+        o.admin_update(false, INT, vec![value("5", &[("domainName", "\"d\"")]), value("1", &[])])
+            .unwrap();
+        o.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
+        let latest = cs::sqlite_fetch_latest(&db.0.lock().unwrap(), 0).unwrap().unwrap();
+        assert_eq!((latest.version, latest.encoding.as_str()), (2, "thriftrw"));
+        // "Restart": a fresh overlay loads the same state, filters and order intact.
+        let restarted = load(&db, 1);
+        assert_eq!(restarted.admin_get(false, INT, &[]).unwrap().data, b"1");
+        assert_eq!(
+            restarted
+                .admin_get(false, INT, &[filter("domainName", "\"d\"")])
+                .unwrap()
+                .data,
+            b"5"
+        );
+        assert_eq!(restarted.admin_list(false, "").len(), 2);
+        // Restore and delete are persisted too.
+        let mut o = restarted;
+        o.admin_restore(false, INT, &[]).unwrap();
+        o.admin_update(false, BOOL, vec![]).unwrap();
+        let again = load(&db, 1);
+        assert_eq!(again.admin_list(false, "").len(), 1);
+        assert_eq!(
+            again.admin_get(false, INT, &[]),
+            Err(DynamicConfigError::NotFound("unable to find key".into()))
+        );
+    }
+
+    #[test]
+    fn condition_failed_refetches_and_retries_then_runs_out_of_attempts() {
+        let db = new_db();
+        let mut a = load(&db, 1);
+        let mut b = load(&db, 1);
+        a.admin_update(false, INT, vec![value("1", &[])]).unwrap();
+        // `b` still thinks version 0: the insert of version 1 conflicts, it
+        // refetches `a`'s snapshot and retries, keeping both writes.
+        b.admin_update(false, BOOL, vec![value("true", &[])]).unwrap();
+        let merged = load(&db, 1);
+        assert_eq!(merged.admin_list(false, "").len(), 2);
+        // With no retry budget the conflict is "ran out of retry attempts".
+        let mut stale = load(&db, 0);
+        a.admin_update(false, INT, vec![value("2", &[])]).unwrap();
+        assert_eq!(
+            stale.admin_update(false, INT, vec![value("3", &[])]),
+            Err(DynamicConfigError::Internal(
+                "ran out of retry attempts on update".into()
+            ))
+        );
+        assert_eq!(merged.admin_get(false, INT, &[]).unwrap().data, b"1");
+    }
+
+    #[test]
+    fn add_search_attribute_persists_valid_search_attributes() {
+        let db = new_db();
+        let admin = AdminState::default();
+        {
+            let mut o = admin.dynamic_config.lock().unwrap();
+            let snapshot = cs::Snapshot::default();
+            o.attach_store(store_with(&db, 1), &snapshot);
+        }
+        let attrs = std::collections::HashMap::from([(
+            "CustomKw".to_string(),
+            cadence_api::enums::IndexedValueType::Keyword,
+        )]);
+        add_search_attribute_core(&admin, "", Some(&attrs)).unwrap();
+        let restarted = load(&db, 1);
+        let stored = restarted
+            .admin_get(false, "frontend.validSearchAttributes", &[])
+            .unwrap();
+        let stored: std::collections::HashMap<String, i32> =
+            serde_json::from_slice(&stored.data).unwrap();
+        assert_eq!(
+            stored["CustomKw"],
+            cadence_api::enums::IndexedValueType::Keyword.value()
+        );
     }
 }

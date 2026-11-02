@@ -264,10 +264,161 @@ pub fn sqlite_fetch_latest(
     .map_err(|e| e.to_string())
 }
 
+/// Failure of a conditional config-row insert (Go `UpdateConfig`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigWriteError {
+    /// Go `persistence.ConditionFailedError`: the version already exists.
+    ConditionFailed(String),
+    Other(String),
+}
+
+/// Inserts a config row (`version` is the positive logical version).
+pub type ConfigRowWriter =
+    Arc<dyn Fn(i32, &ConfigStoreRow) -> Result<(), ConfigWriteError> + Send + Sync>;
+
+/// Go `SerializeDynamicConfigBlob` with the `thriftrw` encoding: the 0x59
+/// preamble followed by the `DynamicConfigBlob` struct.
+pub fn encode_snapshot(schema_version: i64, entries: &[DynamicConfigEntry]) -> Vec<u8> {
+    use cadence_thrift::protocol::{TType, Writer};
+    fn blob(w: &mut Writer, id: i16, b: &DataBlob) {
+        w.write_field_begin(TType::Struct, id);
+        if let Some(t) = &b.encoding_type {
+            w.write_field_begin(TType::I32, 10);
+            w.write_i32(match t {
+                EncodingType::ThriftRW => 0,
+                EncodingType::JSON => 1,
+            });
+        }
+        w.write_field_begin(TType::String, 20);
+        w.write_bytes(&b.data);
+        w.write_field_stop();
+    }
+    let mut w = Writer::new();
+    w.write_u8(THRIFTRW_PREAMBLE_V0);
+    w.write_field_begin(TType::I64, 10);
+    w.write_i64(schema_version);
+    w.write_field_begin(TType::List, 20);
+    w.write_list_begin(TType::Struct, entries.len());
+    for entry in entries {
+        w.write_field_begin(TType::String, 10);
+        w.write_string(&entry.name);
+        w.write_field_begin(TType::List, 20);
+        w.write_list_begin(TType::Struct, entry.values.len());
+        for value in &entry.values {
+            if let Some(b) = &value.value {
+                blob(&mut w, 10, b);
+            }
+            if !value.filters.is_empty() {
+                w.write_field_begin(TType::List, 20);
+                w.write_list_begin(TType::Struct, value.filters.len());
+                for filter in &value.filters {
+                    w.write_field_begin(TType::String, 10);
+                    w.write_string(&filter.name);
+                    if let Some(b) = &filter.value {
+                        blob(&mut w, 20, b);
+                    }
+                    w.write_field_stop();
+                }
+            }
+            w.write_field_stop();
+        }
+        w.write_field_stop();
+    }
+    w.write_field_stop();
+    w.into_bytes()
+}
+
+/// SQL plugins (`InsertConfig`): store `-version`; a duplicate primary key is
+/// Go's `ConditionFailedError`.
+pub fn sqlite_insert_config(
+    conn: &rusqlite::Connection,
+    row_type: i32,
+    row: &ConfigStoreRow,
+) -> Result<(), ConfigWriteError> {
+    match conn.execute(
+        "INSERT INTO cluster_config (row_type, version, timestamp, data, data_encoding) VALUES (?, ?, datetime('now'), ?, ?)",
+        rusqlite::params![row_type, -row.version, row.data, row.encoding],
+    ) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            Err(ConfigWriteError::ConditionFailed(format!(
+                "Version {} already exists. Condition Failed",
+                row.version
+            )))
+        }
+        Err(e) => Err(ConfigWriteError::Other(e.to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use cadence_thrift::protocol::{TType, Writer};
+
+    #[test]
+    fn encode_snapshot_round_trips_and_matches_go_bytes() {
+        let json = |s: &str| DataBlob {
+            encoding_type: Some(EncodingType::JSON),
+            data: s.as_bytes().to_vec(),
+        };
+        let entries = vec![DynamicConfigEntry {
+            name: "a.b".into(),
+            values: vec![DynamicConfigValue {
+                value: Some(json("\"1s\"")),
+                filters: vec![],
+            }],
+        }];
+        let bytes = encode_snapshot(1, &entries);
+        // Go `SerializeDynamicConfigBlob` output for `{"a.b":"1s"}` (see
+        // go_seeded_blob_with_preamble_decodes).
+        assert_eq!(
+            bytes,
+            from_hex(
+                "590a000a00000000000000010f00140c000000010b000a00000003612e620f00140c000000010c000a08000a000000010b0014000000042231732200000000"
+            )
+        );
+        let with_filter = vec![DynamicConfigEntry {
+            name: "k".into(),
+            values: vec![DynamicConfigValue {
+                value: Some(json("5")),
+                filters: vec![DynamicConfigFilter {
+                    name: "domainName".into(),
+                    value: Some(json("\"d\"")),
+                }],
+            }],
+        }];
+        let decoded = decode_snapshot(&row(
+            2,
+            encode_snapshot(4, &with_filter),
+            "thriftrw",
+        ))
+        .unwrap();
+        assert_eq!(decoded.schema_version, 4);
+        assert_eq!(decoded.entries.unwrap(), with_filter);
+    }
+
+    #[test]
+    fn sqlite_insert_detects_duplicate_version_and_fetch_sees_new_row() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cluster_config (row_type INT NOT NULL, version BIGINT NOT NULL, timestamp DATETIME NOT NULL, data MEDIUMBLOB NOT NULL, data_encoding VARCHAR(16) NOT NULL, PRIMARY KEY (row_type, version));",
+        )
+        .unwrap();
+        let r = |v| ConfigStoreRow {
+            version: v,
+            data: vec![v as u8],
+            encoding: "thriftrw".into(),
+        };
+        sqlite_insert_config(&conn, 0, &r(1)).unwrap();
+        sqlite_insert_config(&conn, 0, &r(2)).unwrap();
+        assert!(matches!(
+            sqlite_insert_config(&conn, 0, &r(2)),
+            Err(ConfigWriteError::ConditionFailed(_))
+        ));
+        assert_eq!(sqlite_fetch_latest(&conn, 0).unwrap().unwrap().version, 2);
+    }
 
     type TestValue<'a> = (&'a str, Option<(&'a str, &'a str)>);
 

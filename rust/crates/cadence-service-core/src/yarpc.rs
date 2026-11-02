@@ -547,29 +547,26 @@ async fn handle_deprecate_domain(state: &AppState, body: &Struct) -> HandlerResu
     }
 }
 
+fn dynamic_config_app_error(error: crate::admin::DynamicConfigError) -> AppError {
+    match error {
+        crate::admin::DynamicConfigError::BadRequest(m) => AppError::bad_request(m),
+        crate::admin::DynamicConfigError::NotFound(m) => AppError::entity_not_exists(m),
+        crate::admin::DynamicConfigError::Internal(m) => AppError::internal(m),
+    }
+}
+
 fn handle_get_dynamic_config(state: &AppState, body: &Struct, operational: bool) -> HandlerResult {
     let req: cadence_api::admin::GetDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    if req.config_name.is_empty() {
-        return Err(AppError::bad_request(
-            "ConfigName is not set on request.".to_string(),
-        ));
-    }
-    let overlay = state
+    let value = state
         .admin
         .dynamic_config
         .lock()
-        .expect("admin config lock");
-    let value = overlay
-        .get(operational, &req.config_name, &req.filters)
-        .ok_or_else(|| {
-            AppError::internal(format!(
-                "Failed to get dynamic config {:?} for the given filters.",
-                req.config_name
-            ))
-        })?;
+        .expect("admin config lock")
+        .admin_get(operational, &req.config_name, &req.filters)
+        .map_err(dynamic_config_app_error)?;
     Ok(wrap_success(
-        &cadence_api::admin::GetDynamicConfigResponse { value: value.value },
+        &cadence_api::admin::GetDynamicConfigResponse { value: Some(value) },
     ))
 }
 
@@ -580,17 +577,13 @@ fn handle_update_dynamic_config(
 ) -> HandlerResult {
     let req: cadence_api::admin::UpdateDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    if req.config_name.is_empty() {
-        return Err(AppError::bad_request(
-            "ConfigName is not set on request.".to_string(),
-        ));
-    }
     state
         .admin
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .update(operational, &req.config_name, req.config_values);
+        .admin_update(operational, &req.config_name, req.config_values)
+        .map_err(dynamic_config_app_error)?;
     Ok(wrap_success(
         &cadence_api::admin::UpdateDynamicConfigResponse {},
     ))
@@ -603,17 +596,13 @@ fn handle_restore_dynamic_config(
 ) -> HandlerResult {
     let req: cadence_api::admin::RestoreDynamicConfigRequest =
         decode_args(body).map_err(AppError::bad_request)?;
-    if req.config_name.is_empty() {
-        return Err(AppError::bad_request(
-            "ConfigName is not set on request.".to_string(),
-        ));
-    }
     state
         .admin
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .restore(operational, &req.config_name, &req.filters);
+        .admin_restore(operational, &req.config_name, &req.filters)
+        .map_err(dynamic_config_app_error)?;
     Ok(wrap_success(
         &cadence_api::admin::RestoreDynamicConfigResponse {},
     ))
@@ -627,7 +616,7 @@ fn handle_list_dynamic_config(state: &AppState, body: &Struct, operational: bool
         .dynamic_config
         .lock()
         .expect("admin config lock")
-        .list(operational, &req.config_name);
+        .admin_list(operational, &req.config_name);
     Ok(wrap_success(
         &cadence_api::admin::ListDynamicConfigResponse { entries },
     ))

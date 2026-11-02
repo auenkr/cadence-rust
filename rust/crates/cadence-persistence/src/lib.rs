@@ -11,6 +11,7 @@ pub mod domain_replication;
 pub mod domain_update;
 pub mod domains;
 pub mod dynamic_config;
+pub mod dynamic_config_keys;
 pub mod executions;
 pub mod history_branch;
 pub mod history_cassandra;
