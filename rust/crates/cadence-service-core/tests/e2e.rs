@@ -1312,7 +1312,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/dynamic-config/update",
-        json!({"configName": "test.key", "configValues": [{"value": {"Data": "bnVsbA==", "EncodingType": 0}}]}),
+        json!({"configName": "worker.enableScheduler", "configValues": [{"value": {"Data": "dHJ1ZQ==", "EncodingType": 1}}]}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1320,7 +1320,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/dynamic-config/get",
-        json!({"configName": "test.key"}),
+        json!({"configName": "worker.enableScheduler"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1338,7 +1338,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         app.clone(),
         Method::POST,
         "/api/v1/admin/dynamic-config/restore",
-        json!({"configName": "test.key"}),
+        json!({"configName": "worker.enableScheduler"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1349,7 +1349,7 @@ async fn admin_cluster_config_and_workflow_maintenance() {
         json!({"configName": "test.key"}),
     )
     .await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
     // Custom search attributes: system keys rejected, customs accepted.
     let (status, _) = call(
