@@ -1909,10 +1909,7 @@ pub async fn describe_workflow_execution_admin(
         }),
     };
     let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
-    match client
-        .describe_mutable_state(history_admin_request(request))
-        .await
-    {
+    match client.describe_mutable_state(history_admin_request(request)).await {
         Ok(response) => {
             let response = response.into_inner();
             ok_json(cadence_api::admin::AdminDescribeWorkflowExecutionResponse {
