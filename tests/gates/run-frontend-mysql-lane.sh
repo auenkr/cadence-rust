@@ -3,6 +3,7 @@
 # Usage: tests/gates/run-frontend-mysql-lane.sh ARTIFACTS_DIR [run-frontend-gate.py args]
 # Starts a uniquely named, labelled mysql container (limits per AGENTS.md), creates the two
 # empty databases (Go --auto-setup applies the schema), runs the harness with --mysql, then
+# Includes SDK child/backfill/API assertions and a real IPv6 gRPC probe.
 # removes ONLY that container. It never touches any other container.
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

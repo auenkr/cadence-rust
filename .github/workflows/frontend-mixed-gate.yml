@@ -47,7 +47,7 @@ jobs:
           (cd go/cmd/server && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-go-server" .)
           (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
           (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
-      - name: Gate
+      - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         run: |
           set +e
           tests/gates/run-frontend-mysql-lane.sh out/gate \

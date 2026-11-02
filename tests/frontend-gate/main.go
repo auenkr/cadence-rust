@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"path/filepath"
 	"time"
 
@@ -48,6 +50,15 @@ func SignalQueryWorkflow(ctx workflow.Context) (string, error) {
 		}
 	}
 }
+
+func ChildWorkflow(ctx workflow.Context) (string, error) {
+	ctx = workflow.WithChildOptions(ctx, workflow.ChildWorkflowOptions{ExecutionStartToCloseTimeout: time.Minute})
+	var out string
+	err := workflow.ExecuteChildWorkflow(ctx, EchoWorkflow, "child").Get(ctx, &out)
+	return out, err
+}
+
+func ScheduledWorkflow(ctx workflow.Context) (string, error) { return "scheduled", nil }
 
 var failures int
 
@@ -93,6 +104,8 @@ func main() {
 
 	w := worker.New(rpc, domain, tl, worker.Options{DisableStickyExecution: true})
 	w.RegisterWorkflow(EchoWorkflow)
+	w.RegisterWorkflow(ChildWorkflow)
+	w.RegisterWorkflow(ScheduledWorkflow)
 	w.RegisterActivity(EchoActivity)
 	w.RegisterWorkflow(SignalQueryWorkflow)
 	if !step("worker-start", w.Start()) {
@@ -118,6 +131,66 @@ func main() {
 			derr = fmt.Errorf("close status %v", desc.WorkflowExecutionInfo.GetCloseStatus())
 		}
 		step("describe-closed", derr)
+	}
+
+	child, err := c.ExecuteWorkflow(ctx, opts(tl+"-child"), ChildWorkflow)
+	if step("start-child", err) {
+		var out string
+		err = child.Get(ctx, &out)
+		if err == nil && out != "child" { err = fmt.Errorf("child result %q", out) }
+		step("complete-child", err)
+	}
+	_, err = rpc.DescribeTaskList(ctx, &shared.DescribeTaskListRequest{Domain: &domain, TaskList: &shared.TaskList{Name: &tl}, TaskListType: ptr(shared.TaskListTypeDecision)})
+	step("describe-task-list", err)
+	_, err = rpc.ListTaskListPartitions(ctx, &shared.ListTaskListPartitionsRequest{Domain: &domain, TaskList: &shared.TaskList{Name: &tl}})
+	step("list-task-list-partitions", err)
+	_, err = rpc.GetTaskListsByDomain(ctx, &shared.GetTaskListsByDomainRequest{DomainName: &domain})
+	step("get-task-lists-by-domain", err)
+	for _, action := range []string{"cancel", "terminate"} {
+		r, e := c.ExecuteWorkflow(ctx, opts(tl+"-"+action), SignalQueryWorkflow)
+		if !step("start-"+action, e) { continue }
+		execution := &shared.WorkflowExecution{WorkflowId: ptr(r.GetID()), RunId: ptr(r.GetRunID())}
+		if action == "cancel" {
+			step("refresh-workflow-tasks", rpc.RefreshWorkflowTasks(ctx, &shared.RefreshWorkflowTasksRequest{Domain: &domain, Execution: execution}))
+			_, e = rpc.ResetStickyTaskList(ctx, &shared.ResetStickyTaskListRequest{Domain: &domain, Execution: execution})
+			step("reset-sticky-task-list", e)
+			e = rpc.RequestCancelWorkflowExecution(ctx, &shared.RequestCancelWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: execution, RequestId: ptr(uuid.NewString())})
+		} else {
+			e = rpc.TerminateWorkflowExecution(ctx, &shared.TerminateWorkflowExecutionRequest{Domain: &domain, WorkflowExecution: execution, Reason: ptr("mixed gate")})
+		}
+		step(action+"-workflow-execution", e)
+	}
+	// A dedicated worker remains alive while the real Go scheduler dispatches both backfilled runs.
+	schedule := tl+"-schedule"
+	cli := func(args ...string) error {
+		base := []string{"--address", os.Getenv("FE_GRPC"), "--transport", "grpc", "--domain", domain, "schedule"}
+		out, e := exec.CommandContext(ctx, os.Getenv("FE_CLI"), append(base, args...)...).CombinedOutput()
+		if e != nil { return fmt.Errorf("%v: %s", e, out) }
+		fmt.Printf("SDK schedule %s\n", out)
+		return nil
+	}
+	if step("sched-create-grpc", cli("create", "--sid", schedule, "--ce", "* * * * *", "--wt", "ScheduledWorkflow", "--tl", tl, "--workflow_id_prefix", schedule, "--end_time", "2026-01-01T00:02:00Z")) {
+		step("sched-backfill-grpc", cli("backfill", "--sid", schedule, "--st", "2026-01-01T00:00:00Z", "--endt", "2026-01-01T00:02:00Z"))
+		backfillCtx, stopBackfill := context.WithTimeout(ctx, 3*time.Minute)
+		e := retry(func() error {
+			resp, e := c.ListClosedWorkflow(backfillCtx, &shared.ListClosedWorkflowExecutionsRequest{Domain: &domain, MaximumPageSize: ptr(int32(100)), StartTimeFilter: &shared.StartTimeFilter{EarliestTime: ptr(int64(1)), LatestTime: ptr(time.Now().Add(time.Hour).UnixNano())}})
+			if e != nil { return e }
+			count := 0
+			for _, x := range resp.Executions {
+				if strings.HasPrefix(x.Execution.GetWorkflowId(), schedule) {
+					desc, e := c.DescribeWorkflowExecution(backfillCtx, x.Execution.GetWorkflowId(), x.Execution.GetRunId())
+					if e != nil { return e }
+					if desc.WorkflowExecutionInfo.GetCloseStatus() != shared.WorkflowExecutionCloseStatusCompleted { return fmt.Errorf("backfill run not completed: %v", desc) }
+					count++
+				}
+			}
+			if count < 2 { return fmt.Errorf("only %d completed backfill runs, want 2", count) }
+			return nil
+		})
+		stopBackfill()
+		step("sched-backfill-completed", e)
+		step("sched-describe-after-backfill-grpc", cli("describe", "--sid", schedule))
+		step("sched-delete-grpc", cli("delete", "--sid", schedule))
 	}
 
 	// 2. signal + query + describe(open) + list
