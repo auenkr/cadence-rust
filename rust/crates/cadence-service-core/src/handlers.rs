@@ -2237,7 +2237,11 @@ async fn create_schedule(
     {
         return bad_request(e);
     }
-    match crate::schedule_flow::start_scheduler(&executions, &req) {
+    let started = match &state.workflow_api {
+        Some(api) => crate::schedule_flow::start_scheduler_api(api, &req).await,
+        None => crate::schedule_flow::start_scheduler(&executions, &req),
+    };
+    match started {
         Ok(id) => (
             StatusCode::OK,
             Json(cadence_api::schedule::CreateScheduleResponse { schedule_id: id }),
@@ -2277,8 +2281,16 @@ async fn describe_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id).await
-    {
+    let described = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::describe_scheduler_api(api, &req.domain, &req.schedule_id).await
+        }
+        None => {
+            crate::schedule_flow::describe_scheduler(&executions, &req.domain, &req.schedule_id)
+                .await
+        }
+    };
+    match described {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => cadence_error_response(e),
     }
@@ -2306,12 +2318,25 @@ async fn list_schedules(
     } else {
         req.page_size as usize
     };
-    let (schedules, next_page_token) = crate::schedule_flow::list_schedulers(
-        &executions,
-        &req.domain,
-        page_size,
-        &req.next_page_token,
-    );
+    let (schedules, next_page_token) = match &state.workflow_api {
+        Some(api) => match crate::schedule_flow::list_schedulers_api(
+            api,
+            &req.domain,
+            page_size,
+            &req.next_page_token,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => return cadence_error_response(e),
+        },
+        None => crate::schedule_flow::list_schedulers(
+            &executions,
+            &req.domain,
+            page_size,
+            &req.next_page_token,
+        ),
+    };
     (
         StatusCode::OK,
         Json(cadence_api::schedule::ListSchedulesResponse {
@@ -2342,7 +2367,13 @@ async fn delete_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id) {
+    let deleted = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::delete_scheduler_api(api, &req.domain, &req.schedule_id).await
+        }
+        None => crate::schedule_flow::delete_scheduler(&executions, &req.domain, &req.schedule_id),
+    };
+    match deleted {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::DeleteScheduleResponse {}),
@@ -2372,13 +2403,28 @@ async fn pause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match crate::schedule_flow::signal_scheduler(
-        &executions,
-        &req.domain,
-        &req.schedule_id,
-        crate::scheduler_wire::SIGNAL_PAUSE,
-        crate::scheduler_wire::pause_signal(&req),
-    ) {
+    let signal_name = crate::scheduler_wire::SIGNAL_PAUSE;
+    let signal_input = crate::scheduler_wire::pause_signal(&req);
+    let signaled = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::signal_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                signal_name,
+                signal_input,
+            )
+            .await
+        }
+        None => crate::schedule_flow::signal_scheduler(
+            &executions,
+            &req.domain,
+            &req.schedule_id,
+            signal_name,
+            signal_input,
+        ),
+    };
+    match signaled {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::PauseScheduleResponse {}),
@@ -2408,13 +2454,28 @@ async fn unpause_schedule(
     if let Err(e) = validate_schedule_id(&req.schedule_id) {
         return schedule_bad_request(e);
     }
-    match crate::schedule_flow::signal_scheduler(
-        &executions,
-        &req.domain,
-        &req.schedule_id,
-        crate::scheduler_wire::SIGNAL_UNPAUSE,
-        crate::scheduler_wire::unpause_signal(&req),
-    ) {
+    let signal_name = crate::scheduler_wire::SIGNAL_UNPAUSE;
+    let signal_input = crate::scheduler_wire::unpause_signal(&req);
+    let signaled = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::signal_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                signal_name,
+                signal_input,
+            )
+            .await
+        }
+        None => crate::schedule_flow::signal_scheduler(
+            &executions,
+            &req.domain,
+            &req.schedule_id,
+            signal_name,
+            signal_input,
+        ),
+    };
+    match signaled {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UnpauseScheduleResponse {}),
@@ -2467,13 +2528,28 @@ async fn backfill_schedule(
         );
     }
     let backfill_id = crate::schedule_flow::resolve_backfill_id(&req.backfill_id);
-    match crate::schedule_flow::signal_scheduler(
-        &executions,
-        &req.domain,
-        &req.schedule_id,
-        crate::scheduler_wire::SIGNAL_BACKFILL,
-        crate::scheduler_wire::backfill_signal(&req, &backfill_id),
-    ) {
+    let signal_name = crate::scheduler_wire::SIGNAL_BACKFILL;
+    let signal_input = crate::scheduler_wire::backfill_signal(&req, &backfill_id);
+    let signaled = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::signal_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                signal_name,
+                signal_input,
+            )
+            .await
+        }
+        None => crate::schedule_flow::signal_scheduler(
+            &executions,
+            &req.domain,
+            &req.schedule_id,
+            signal_name,
+            signal_input,
+        ),
+    };
+    match signaled {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::BackfillScheduleResponse {}),
@@ -2537,13 +2613,28 @@ async fn update_schedule(
     {
         return bad_request(e);
     }
-    match crate::schedule_flow::signal_scheduler(
-        &executions,
-        &req.domain,
-        &req.schedule_id,
-        crate::scheduler_wire::SIGNAL_UPDATE,
-        crate::scheduler_wire::update_signal(&req),
-    ) {
+    let signal_name = crate::scheduler_wire::SIGNAL_UPDATE;
+    let signal_input = crate::scheduler_wire::update_signal(&req);
+    let signaled = match &state.workflow_api {
+        Some(api) => {
+            crate::schedule_flow::signal_scheduler_api(
+                api,
+                &req.domain,
+                &req.schedule_id,
+                signal_name,
+                signal_input,
+            )
+            .await
+        }
+        None => crate::schedule_flow::signal_scheduler(
+            &executions,
+            &req.domain,
+            &req.schedule_id,
+            signal_name,
+            signal_input,
+        ),
+    };
+    match signaled {
         Ok(()) => (
             StatusCode::OK,
             Json(cadence_api::schedule::UpdateScheduleResponse {}),

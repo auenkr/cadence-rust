@@ -201,7 +201,8 @@ try:
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
     # ---- Schedules through the Rust Frontend against the real Go Worker scheduler
-    for tag, cli in (('tchannel', cli_t), ('grpc', cli_g)):
+    # The Go CLI schedule commands are gRPC-only (no Thrift schedule API).
+    for tag, cli in (('grpc', cli_g),):
         sid = 'fe-sched-' + tag + '-' + secrets.token_hex(3)
         sc = [*cli, '--domain', dom_t, 'schedule']
         run(f'sched-create-{tag}', [*sc, 'create', '--schedule_id', sid, '--cron_expression', '* * * * *',
@@ -213,6 +214,8 @@ try:
         run(f'sched-backfill-{tag}', [*sc, 'backfill', '--schedule_id', sid, '--start_time', '2026-01-01T00:00:00Z',
             '--end_time', '2026-01-01T00:03:00Z', '--backfill_id', 'bf-' + tag])
         run(f'sched-list-{tag}', [*sc, 'list'])
+        time.sleep(5)
+        run(f'sched-describe-after-backfill-{tag}', [*sc, 'describe', '--schedule_id', sid])
         run(f'sched-delete-{tag}', [*sc, 'delete', '--schedule_id', sid])
 except SystemExit:
     pass
