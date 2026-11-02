@@ -56,7 +56,7 @@ jobs:
         run: |
           set +e
           if [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
-            tests/gates/run-frontend-cassandra-lane.sh out/gate \
+            RUST_BACKTRACE=1 tests/gates/run-frontend-cassandra-lane.sh out/gate \
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
               --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
               --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \

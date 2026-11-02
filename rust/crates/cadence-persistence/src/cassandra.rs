@@ -586,18 +586,23 @@ impl fmt::Debug for CassandraBlockingSession {
 
 impl CassandraBlockingSession {
     /// Build a private multi-thread runtime and connect on it. Invoke this
-    /// constructor from a blocking worker during service startup.
+    /// constructor from a blocking worker during service startup. Frontend
+    /// startup may itself be running on Tokio, so create and drive this
+    /// dedicated runtime on a scoped OS thread in that case.
     pub fn connect(config: &CassandraSessionConfig) -> anyhow::Result<Self> {
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?,
-        );
-        let session = runtime.block_on(config.connect())?;
-        Ok(Self {
-            session: Some(Arc::new(session)),
-            runtime: Some(runtime),
-            default_consistency: config.consistency,
+        let config = config.clone();
+        crate::matching_postgres::outside_runtime(move || {
+            let runtime = Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()?,
+            );
+            let session = runtime.block_on(config.connect())?;
+            Ok(Self {
+                session: Some(Arc::new(session)),
+                runtime: Some(runtime),
+                default_consistency: config.consistency,
+            })
         })
     }
 
@@ -643,6 +648,29 @@ fn shutdown_runtime(runtime: Arc<tokio::runtime::Runtime>) {
 mod blocking_session_tests {
     use super::*;
     use std::time::Duration;
+
+    fn refused_connection_config() -> CassandraSessionConfig {
+        let mut config = CassandraSessionConfig::from_parts(
+            ["127.0.0.1".to_owned()],
+            1,
+            "cadence",
+            "",
+            "cadence",
+        )
+        .unwrap();
+        config.connect_timeout = Duration::from_millis(100);
+        config
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cassandra_initialization_is_safe_inside_current_thread_runtime() {
+        assert!(CassandraBlockingSession::connect(&refused_connection_config()).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cassandra_initialization_is_safe_inside_multi_thread_runtime() {
+        assert!(CassandraBlockingSession::connect(&refused_connection_config()).is_err());
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn dedicated_runtime_shutdown_does_not_block_rpc_runtime() {

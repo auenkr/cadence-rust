@@ -50,6 +50,27 @@ is still running, leave it alone and retain this exact run/head as the next
 status check. A failure must be recorded as an exposed blocker; do not call that
 full Frontend parity.
 
+## Runtime boundary repair — 2026-11-02
+
+The failed mixed run `41429904560` completed and artifact inspection confirmed
+the panic immediately after `Matching startup: configured stores opened`.
+Tracing the configured Matching default-store path to
+`CassandraBlockingSession::connect` identified the exact boundary: it creates
+a dedicated Tokio multi-thread runtime and calls `block_on(config.connect())`
+on Frontend's Tokio startup thread. This reproduces the same class of issue
+fixed by `matching_postgres::outside_runtime` for synchronous PostgreSQL
+operations. The Cassandra constructor now runs its private-runtime creation
+and connection inside that established scoped-thread boundary; it retains the
+same config and database connection behavior and returns connection errors
+normally. No History/visibility Cassandra reader initializes a nested runtime;
+they consume the shared `CassandraBlockingSession`.
+
+Added no-database regression tests that invoke Cassandra session initialization
+from Tokio current-thread and multi-thread runtimes against a refused local
+endpoint. Both must return an error instead of panicking. The Cassandra mixed
+lane runs with `RUST_BACKTRACE=1` for future runtime diagnostics. CI runs and
+the corrected binary hash are pending dispatch after this source commit.
+
 ## Acceptance sub-agent handoff — 2026-11-02
 
 The lane commits were fast-forwarded into branch `t3/770d8955` in the assigned
