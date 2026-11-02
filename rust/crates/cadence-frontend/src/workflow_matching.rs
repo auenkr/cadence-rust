@@ -602,7 +602,7 @@ impl ProductionBackend {
         };
         let reply = self
             .call_with_timeout(
-                self.history_addr(),
+                &self.history_addr_for_workflow(&execution.workflow_id)?,
                 "cadence-history",
                 "HistoryService",
                 "PollMutableState",

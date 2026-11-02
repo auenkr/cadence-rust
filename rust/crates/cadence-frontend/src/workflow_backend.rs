@@ -37,6 +37,8 @@ const HISTORY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct ProductionBackend {
     history_addr: String,
     matching_addr: String,
+    membership: cadence_service_core::admin::MembershipSlot,
+    num_history_shards: i32,
     pub(crate) history_access: Option<crate::workflow_matching::HistoryAccess>,
     pub(crate) domains: Option<std::sync::Arc<dyn crate::handler_workflow::WorkflowDomainLookup>>,
     pub(crate) visibility:
@@ -158,11 +160,41 @@ fn exception_to_error(name: &str, exception: &Struct, details: &str) -> CadenceE
     }
 }
 
+/// Decode only the routing selector from the already validated History envelope.
+/// Field IDs mirror history.thrift and shared.thrift; task tokens use Go JSON.
+fn history_workflow_id(method: &str, envelope: &Struct) -> Result<String, CadenceError> {
+    let Some(Value::Struct(request)) = envelope.get(20) else {
+        return Err(bad_request("History request is missing"));
+    };
+    let bytes = if method.starts_with("Respond") || method == "RecordActivityTaskHeartbeat" {
+        let Some(Value::Bytes(token)) = request.get(10) else {
+            return Err(bad_request("Invalid TaskToken."));
+        };
+        let token: serde_json::Value = serde_json::from_slice(token).map_err(|_| bad_request("Invalid TaskToken."))?;
+        return token.get("workflowId").and_then(serde_json::Value::as_str).map(str::to_owned).ok_or_else(|| bad_request("Invalid TaskToken."));
+    } else if method == "StartWorkflowExecution" || method == "SignalWithStartWorkflowExecution" {
+        request.get(20)
+    } else if method == "ResetStickyTaskList" {
+        request.get(10)
+    } else {
+        match request.get(20) {
+            Some(Value::Struct(execution)) => execution.get(10),
+            _ => None,
+        }
+    };
+    match bytes {
+        Some(Value::Bytes(bytes)) => String::from_utf8(bytes.clone()).map_err(|_| bad_request("Invalid WorkflowId.")),
+        _ => Err(bad_request("WorkflowId is not set on request.")),
+    }
+}
+
 impl ProductionBackend {
     pub fn new(history_addr: String, matching_addr: String) -> Self {
         Self {
             history_addr,
             matching_addr,
+            membership: Default::default(),
+            num_history_shards: 4,
             history_access: None,
             visibility: None,
             domains: None,
@@ -182,8 +214,20 @@ impl ProductionBackend {
         self
     }
 
-    pub(crate) fn history_addr(&self) -> &str {
-        &self.history_addr
+    pub fn with_history_routing(
+        mut self,
+        membership: cadence_service_core::admin::MembershipSlot,
+        num_history_shards: i32,
+    ) -> Self {
+        self.membership = membership;
+        self.num_history_shards = num_history_shards.max(1);
+        self
+    }
+
+    pub(crate) fn history_addr_for_workflow(&self, workflow_id: &str) -> Result<String, CadenceError> {
+        let shard = crate::workflow_matching::workflow_id_to_history_shard(workflow_id, self.num_history_shards);
+        let owner = self.membership.get().map(|resolver| resolver.history_owner(shard)).transpose().map_err(internal)?.flatten();
+        Ok(owner.map(|host| host.address).unwrap_or_else(|| self.history_addr.clone()))
     }
 
     pub(crate) fn matching_addr(&self) -> &str {
@@ -197,8 +241,10 @@ impl ProductionBackend {
         method: &str,
         envelope: Struct,
     ) -> Result<Struct, CadenceError> {
+        let workflow_id = history_workflow_id(method, &envelope)?;
+        let address = self.history_addr_for_workflow(&workflow_id)?;
         self.call(
-            &self.history_addr,
+            &address,
             HISTORY_SERVICE,
             "HistoryService",
             method,
@@ -624,7 +670,9 @@ pub fn build_workflow_api(
                 ctx.state.domain_manager.clone(),
             ),
         );
-    let mut backend = ProductionBackend::new(history, matching).with_domains(lookup.clone());
+    let mut backend = ProductionBackend::new(history, matching)
+        .with_domains(lookup.clone())
+        .with_history_routing(ctx.state.admin.membership.clone(), ctx.state.num_history_shards);
     if let Some(store) = ctx.state.history_node_store.clone() {
         backend = backend.with_history_access(crate::workflow_matching::HistoryAccess::new(
             store,
@@ -736,4 +784,65 @@ impl crate::wrappers::accesscontrolled::AuthorizationMetrics for NopAuthorizatio
     fn authorization_latency(&self, _elapsed: std::time::Duration) {}
     fn authorization_failed(&self) {}
     fn unauthorized(&self) {}
+}
+
+#[cfg(test)]
+mod history_routing_tests {
+    use super::*;
+    use cadence_service_core::admin::{ClusterMembership, MembershipSlot};
+    use std::sync::{Arc, Mutex};
+
+    struct Members(Mutex<Result<Vec<String>, String>>);
+    impl ClusterMembership for Members {
+        fn who_am_i(&self) -> Result<String, String> { Ok("frontend".into()) }
+        fn members(&self, role: &str) -> Result<Vec<String>, String> {
+            assert_eq!(role, "cadence-history");
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    #[test]
+    fn routing_reads_live_members_and_only_empty_ring_uses_static_address() {
+        let slot = MembershipSlot::default();
+        let backend = ProductionBackend::new("fallback:7934".into(), "matching:7935".into())
+            .with_history_routing(slot.clone(), 1024);
+        assert_eq!(backend.history_addr_for_workflow("hello").unwrap(), "fallback:7934");
+        let members = Arc::new(Members(Mutex::new(Ok(vec![]))));
+        slot.set(Some(members.clone()));
+        assert_eq!(backend.history_addr_for_workflow("hello").unwrap(), "fallback:7934");
+        *members.0.lock().unwrap() = Ok(vec!["history-a:7934".into(), "history-b:7934".into()]);
+        let expected = members.history_owner(870).unwrap().unwrap().address;
+        assert_eq!(backend.history_addr_for_workflow("hello").unwrap(), expected);
+        *members.0.lock().unwrap() = Ok(vec!["history-c:7934".into()]);
+        assert_eq!(backend.history_addr_for_workflow("hello").unwrap(), "history-c:7934");
+        *members.0.lock().unwrap() = Err("ring unavailable".into());
+        assert!(backend.history_addr_for_workflow("hello").is_err());
+    }
+
+    #[test]
+    fn history_routing_extracts_start_execution_and_go_task_token_selectors() {
+        let execution = Struct { fields: vec![(10, Value::Bytes(b"workflow".to_vec()))] };
+        let envelope = |inner| Struct { fields: vec![(20, Value::Struct(inner))] };
+        assert_eq!(history_workflow_id("StartWorkflowExecution", &envelope(Struct { fields: vec![(20, Value::Bytes(b"start".to_vec()))] })).unwrap(), "start");
+        assert_eq!(history_workflow_id("SignalWorkflowExecution", &envelope(Struct { fields: vec![(20, Value::Struct(execution.clone()))] })).unwrap(), "workflow");
+        assert_eq!(history_workflow_id("ResetStickyTaskList", &envelope(execution)).unwrap(), "workflow");
+        for method in ["RespondDecisionTaskCompleted", "RespondActivityTaskFailed", "RecordActivityTaskHeartbeat"] {
+            assert_eq!(history_workflow_id(method, &envelope(Struct { fields: vec![(10, Value::Bytes(br#"{"workflowId":"token-workflow"}"#.to_vec()))] })).unwrap(), "token-workflow");
+        }
+        assert!(history_workflow_id("RespondDecisionTaskFailed", &envelope(Struct { fields: vec![(10, Value::Bytes(b"invalid".to_vec()))] })).is_err());
+    }
+
+    #[test]
+    fn shard_hash_matches_go_source_derived_vectors() {
+        // Derived without executing Go: util.go's Fingerprint32 % shard count;
+        // go-farm 3414d57e47da fp_generic.go, farmhashcc.go (signed int8 short
+        // path), farmhashmk.go (5..12 bytes), basics.go (mur/fmix), u32 wrapping.
+        for (workflow, hash) in [("", 3_696_677_242_u32), ("a", 1_016_544_589),
+            ("ab", 1_098_068_221), ("test", 1_633_095_781), ("é", 1_973_972_843),
+            ("�", 4_143_110_158), ("hello", 2_039_911_270), ("workflow-123", 1_545_591_485)] {
+            for count in [1, 4, 1024, 16384] {
+                assert_eq!(crate::workflow_matching::workflow_id_to_history_shard(workflow, count), (hash % count as u32) as i32);
+            }
+        }
+    }
 }

@@ -230,6 +230,19 @@ impl MatchingRingpopProvider {
 pub struct RingpopClusterMembership(pub Arc<MatchingRingpopProvider>);
 
 impl cadence_service_core::admin::ClusterMembership for RingpopClusterMembership {
+    fn history_owner(&self, shard: i32) -> Result<Option<cadence_common::membership::Host>, String> {
+        use cadence_common::membership::Ring;
+        let snapshot = self.0.snapshot();
+        let ring = Ring::new(snapshot.members.iter().filter_map(|m| m.matching_host("cadence-history")));
+        let Some(mut host) = ring.lookup(&char::from_u32(shard as u32).unwrap_or(char::REPLACEMENT_CHARACTER).to_string()).cloned() else {
+            return Ok(None);
+        };
+        if let Some(member) = snapshot.members.iter().find(|m| m.address == host.address) {
+            host.address = member.tchannel_address().ok_or("History member has no TChannel port")?;
+        }
+        Ok(Some(host))
+    }
+
     fn who_am_i(&self) -> Result<String, String> {
         Ok(self.0.local_identity().to_owned())
     }

@@ -610,15 +610,17 @@ impl a::admin_api_server::AdminApi for Admin {
 
     async fn describe_shard_distribution(
         &self,
-        _request: Request<a::DescribeShardDistributionRequest>,
+        request: Request<a::DescribeShardDistributionRequest>,
     ) -> Result<Response<a::DescribeShardDistributionResponse>, Status> {
-        let v: cadence_api::admin::DescribeShardDistributionResponse = self
-            .call_with(
-                axum::http::Method::GET,
-                "/api/v1/admin/shards/describe-distribution",
-                &serde_json::json!({}),
-            )
-            .await?;
+        let request = request.into_inner();
+        let v = cadence_service_core::admin::shard_distribution_for(
+            &self.frontend.state.admin,
+            self.frontend.state.num_history_shards,
+            &cadence_api::admin::DescribeShardDistributionRequest {
+                page_id: Some(request.page_id),
+                page_size: Some(request.page_size),
+            },
+        );
         Ok(Response::new(a::DescribeShardDistributionResponse {
             number_of_shards: v.number_of_shards,
             shards: v.shards.unwrap_or_default(),

@@ -2298,8 +2298,8 @@ pub async fn dispatch_with_headers(
             bridge_value::<_, cadence_api::admin::DescribeShardDistributionResponse, _, _>(
                 method,
                 body,
-                |_: cadence_api::admin::DescribeShardDistributionRequest| {
-                    crate::admin::describe_shard_distribution(State(shared()))
+                |req: cadence_api::admin::DescribeShardDistributionRequest| {
+                    crate::admin::describe_shard_distribution(State(shared()), axum::extract::Query(req))
                 },
             )
             .await

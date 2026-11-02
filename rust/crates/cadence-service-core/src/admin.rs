@@ -282,6 +282,17 @@ pub const RING_ROLES: [&str; 4] = [
 pub trait ClusterMembership: Send + Sync {
     fn who_am_i(&self) -> Result<String, String>;
     fn members(&self, role: &str) -> Result<Vec<String>, String>;
+
+    /// Resolve the Go rune shard key on the live History ring.
+    fn history_owner(&self, shard: i32) -> Result<Option<cadence_common::membership::Host>, String> {
+        use cadence_common::membership::{Host, Ring};
+        let ring = Ring::new(self.members("cadence-history")?.into_iter().map(|identity| Host {
+            address: identity.clone(),
+            identity,
+            grpc_address: String::new(),
+        }));
+        Ok(ring.lookup(&char::from_u32(shard as u32).unwrap_or(char::REPLACEMENT_CHARACTER).to_string()).cloned())
+    }
 }
 
 /// Late-bound slot for the membership resolver. Go's `GetMembershipResolver`
@@ -1285,7 +1296,15 @@ pub async fn describe_history_host(
             return bad_request(BadRequestError::new("RunId is not valid UUID."));
         }
     }
-    if let Some(channel) = state.history_admin_channel.clone() {
+    let shard = req.shard_id_for_host.unwrap_or_else(|| {
+        let workflow_id = req.execution_for_host.as_ref().map(|execution| execution.workflow_id.as_str()).unwrap_or_default();
+        (cadence_common::membership::fingerprint32(workflow_id.as_bytes()) % shard_count(&state).max(1) as u32) as i32
+    });
+    let channel = match history_channel_for(&state, shard, req.host_address.as_deref().filter(|_| req.shard_id_for_host.is_none() && req.execution_for_host.is_none())) {
+        Ok(channel) => channel,
+        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    if let Some(channel) = channel {
         let mut client = cadence_proto::history::history_api_client::HistoryApiClient::new(channel);
         return match client
             .describe_history_host(history_admin_request(
@@ -1328,14 +1347,46 @@ pub async fn describe_history_host(
     })
 }
 
-/// Single-host shard distribution: every shard maps to this host.
-pub async fn describe_shard_distribution(State(state): State<StdArc<AppState>>) -> Response {
-    let count = shard_count(&state);
-    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "cadence-rust".to_string());
-    ok_json(cadence_api::admin::DescribeShardDistributionResponse {
-        number_of_shards: count,
-        shards: Some((0..count).map(|id| (id, hostname.clone())).collect()),
-    })
+/// Go paginates shard IDs, reporting unknown when membership cannot resolve an owner.
+pub fn shard_distribution_for(
+    admin: &AdminState,
+    count: i32,
+    request: &cadence_api::admin::DescribeShardDistributionRequest,
+) -> cadence_api::admin::DescribeShardDistributionResponse {
+    let size = i64::from(request.page_size.unwrap_or_default());
+    let offset = i64::from(request.page_id.unwrap_or_default()) * size;
+    let end = (offset + size).min(i64::from(count));
+    let resolver = admin.membership.get();
+    let shards = (offset..end).map(|id| {
+        let owner = i32::try_from(id).ok().and_then(|id| resolver.as_ref()?.history_owner(id).ok().flatten());
+        (id as i32, owner.map(|host| host.identity().to_owned()).unwrap_or_else(|| "unknown".into()))
+    }).collect();
+    cadence_api::admin::DescribeShardDistributionResponse { number_of_shards: count, shards: Some(shards) }
+}
+
+pub async fn describe_shard_distribution(
+    State(state): State<StdArc<AppState>>,
+    axum::extract::Query(request): axum::extract::Query<cadence_api::admin::DescribeShardDistributionRequest>,
+) -> Response {
+    ok_json(shard_distribution_for(&state.admin, shard_count(&state), &request))
+}
+
+/// Resolve an Admin request without losing the configured TLS policy. Only an
+/// empty/uninstalled ring uses the static channel; resolver failures propagate.
+fn history_channel_for(
+    state: &AppState,
+    shard: i32,
+    explicit: Option<&str>,
+) -> Result<Option<tonic::transport::Channel>, String> {
+    let peer = match explicit {
+        Some(address) => Some(address.to_owned()),
+        None => state.admin.membership.get().map(|resolver| resolver.history_owner(shard)).transpose()?.flatten().map(|host| host.grpc_address),
+    };
+    match peer {
+        None => Ok(state.history_admin_channel.clone()),
+        Some(peer) if peer.is_empty() => Err("History member has no gRPC port".into()),
+        Some(peer) => crate::grpc_tls::endpoint_channel(&peer, state.history_admin_tls.as_ref()).map(Some).map_err(|error| error.to_string()),
+    }
 }
 
 pub(crate) fn check_shard_id(state: &AppState, shard_id: i32) -> Result<(), BadRequestError> {
@@ -1356,7 +1407,11 @@ pub async fn close_shard(
     if let Err(e) = check_shard_id(&state, req.shard_id) {
         return bad_request(e);
     }
-    let Some(channel) = state.history_admin_channel.clone() else {
+    let channel = match history_channel_for(&state, req.shard_id, None) {
+        Ok(channel) => channel,
+        Err(error) => return error_response("InternalServiceError", StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let Some(channel) = channel else {
         return error_response(
             "InternalServiceError",
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1800,6 +1855,24 @@ pub async fn update_domain_async_workflow_configuration(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shard_distribution_paginates_and_reports_unknown_membership() {
+        let admin = AdminState::default();
+        let request = cadence_api::admin::DescribeShardDistributionRequest { page_id: Some(1), page_size: Some(3) };
+        let response = shard_distribution_for(&admin, 8, &request);
+        assert_eq!(response.number_of_shards, 8);
+        let shards = response.shards.unwrap();
+        assert_eq!(shards.len(), 3);
+        for id in 3..6 { assert_eq!(shards[&id], "unknown"); }
+        admin.membership.set(Some(Arc::new(FakeMembership { fail_role: None })));
+        let response = shard_distribution_for(&admin, 5, &request);
+        let shards = response.shards.unwrap();
+        assert_eq!(shards.len(), 2);
+        assert_eq!(shards[&3], "h-1:7934");
+        assert_eq!(shards[&4], "h-1:7934");
+        assert!(shard_distribution_for(&admin, 5, &Default::default()).shards.unwrap().is_empty());
+    }
+
     #[test]
     fn config_store_snapshot_keeps_entry_value_order() {
         use cadence_persistence::config_store::Snapshot;
