@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
 cadence-api = { path = "../cadence-api" }
 cadence-common = { path = "../cadence-common" }
 cadence-matching = { path = "../cadence-matching" }

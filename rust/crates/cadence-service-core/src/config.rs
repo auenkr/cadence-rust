@@ -59,6 +59,10 @@ pub struct Config {
     pub shard_distributor_matching: ShardDistributorMatchingConfig,
     /// Go common/config.Config.AsyncWorkflowQueues. Provider-specific `config`
     /// remains an untyped YAML value, matching Go's yaml.Node contract.
+    /// Go `archiverfx.Archival` section; kept as raw YAML and interpreted by
+    /// the Frontend archival readers.
+    #[serde(default)]
+    pub archival: Option<serde_yaml::Value>,
     #[serde(default, rename = "asyncWorkflowQueues")]
     pub async_workflow_queues: HashMap<String, AsyncWorkflowQueueProviderConfig>,
 }

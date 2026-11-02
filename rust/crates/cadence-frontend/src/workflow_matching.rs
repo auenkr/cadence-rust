@@ -579,7 +579,7 @@ impl ProductionBackend {
     }
 
     /// History `PollMutableState` (Go `queryHistory` closure).
-    async fn poll_mutable_state(
+    pub(crate) async fn poll_mutable_state(
         &self,
         domain_id: &str,
         execution: &ty::WorkflowExecution,
@@ -798,6 +798,31 @@ impl ProductionBackend {
             raw_history: Vec::new(),
             next_page_token,
             archived: false,
+        })
+    }
+}
+
+impl crate::archive_readers::ExecutionProbe for ProductionBackend {
+    fn exists<'a>(
+        &'a self,
+        domain_id: &'a str,
+        workflow_id: &'a str,
+        run_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, CadenceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let execution = ty::WorkflowExecution {
+                workflow_id: workflow_id.to_owned(),
+                run_id: run_id.to_owned(),
+            };
+            match self
+                .poll_mutable_state(domain_id, &execution, FIRST_EVENT_ID, &[], false)
+                .await
+            {
+                Ok(_) => Ok(true),
+                Err(CadenceError::EntityNotExists(_)) => Ok(false),
+                Err(e) => Err(e),
+            }
         })
     }
 }

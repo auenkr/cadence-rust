@@ -7,6 +7,7 @@
 //! - [`retry`] — retry-with-backoff driver.
 //! - [`semaphore`] — semaphore owner-ID codec (`go/common/semaphore`).
 
+pub mod archiver;
 pub mod backoff;
 pub mod cluster;
 pub mod cron;

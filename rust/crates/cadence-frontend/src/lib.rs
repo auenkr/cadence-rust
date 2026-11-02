@@ -5,6 +5,7 @@
 //! split by Go's original API domains so implementation can proceed module by
 //! module without changing the wire surface.
 
+pub mod archive_readers;
 pub mod async_kafka;
 pub mod async_kafka_tls;
 pub mod async_publisher;

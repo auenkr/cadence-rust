@@ -783,12 +783,18 @@ pub fn build_workflow_api(
         std::sync::Arc::new(crate::async_publisher::PersistenceAsyncDomainConfig::new(
             ctx.state.domain_manager.clone(),
         ));
+    let probe: std::sync::Arc<dyn crate::archive_readers::ExecutionProbe> =
+        std::sync::Arc::new(backend.clone());
+    let (archived_history, archived_visibility) =
+        build_archive_readers(&ctx, probe).map_err(anyhow::Error::msg)?;
     let handler = install_async_publisher(
         crate::handler_workflow::Handler::new(backend),
         async_domains,
         ctx.config.async_workflow_queues.clone(),
     )
     .with_domain_lookup(lookup)
+    .with_archived_history_reader(archived_history)
+    .with_archived_visibility_reader(archived_visibility)
     .with_rate_limit_policies(rate_limit)
     .with_access_control(std::sync::Arc::new(
         crate::wrappers::accesscontrolled::HandlerAuthorization::new(
@@ -801,6 +807,65 @@ pub fn build_workflow_api(
         std::sync::Arc::new(crate::wrappers::versioncheck::GoVersionChecker),
     );
     Ok(std::sync::Arc::new(HandlerApi { handler }))
+}
+
+/// Builds the Go `ArchivalMetadata` + archiver provider readers from the
+/// service config `archival` section and the dynamic-config overlay.
+fn build_archive_readers(
+    ctx: &cadence_matching::launcher::FrontendHookContext,
+    probe: std::sync::Arc<dyn crate::archive_readers::ExecutionProbe>,
+) -> Result<
+    (
+        std::sync::Arc<dyn crate::handler_workflow::ArchivedHistoryReader>,
+        std::sync::Arc<dyn crate::handler_workflow::ArchivedVisibilityReader>,
+    ),
+    String,
+> {
+    use crate::archive_readers as ar;
+    let section = ar::ArchivalSection::from_yaml(ctx.config.archival.as_ref());
+    let overlay = ctx.state.admin.dynamic_config.clone();
+    let status = |key: &'static str| {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move || {
+            overlay.lock().map_or_else(
+                |_| "enabled".to_owned(),
+                |o| cadence_persistence::dynamic_config::string(o.property_values(key), "enabled"),
+            )
+        }) as std::sync::Arc<dyn Fn() -> String + Send + Sync>
+    };
+    let read = |key: &'static str| {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move || {
+            overlay.lock().map_or(true, |o| {
+                cadence_persistence::dynamic_config::boolean(o.property_values(key), None, true)
+            })
+        }) as std::sync::Arc<dyn Fn() -> bool + Send + Sync>
+    };
+    let history_cfg = ar::ArchivalConfig::new(
+        &section.history_status,
+        status("system.historyArchivalStatus"),
+        section.history_enable_read,
+        read("system.enableReadFromHistoryArchival"),
+    )?;
+    let visibility_cfg = ar::ArchivalConfig::new(
+        &section.visibility_status,
+        status("system.visibilityArchivalStatus"),
+        section.visibility_enable_read,
+        read("system.enableReadFromVisibilityArchival"),
+    )?;
+    let provider = cadence_common::archiver::ArchiverProvider::new(section.provider_keys.clone());
+    let domains: std::sync::Arc<dyn ar::ArchivalDomainConfig> = std::sync::Arc::new(
+        ar::PersistenceArchivalDomainConfig::new(ctx.state.domain_manager.clone()),
+    );
+    Ok((
+        std::sync::Arc::new(ar::ArchivedHistory::new(
+            history_cfg,
+            provider.clone(),
+            domains.clone(),
+            probe,
+        )),
+        std::sync::Arc::new(ar::ArchivedVisibility::new(visibility_cfg, provider, domains)),
+    ))
 }
 
 /// Installs the production async publisher on the handler.
