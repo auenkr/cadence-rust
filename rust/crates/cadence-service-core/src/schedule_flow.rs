@@ -566,3 +566,72 @@ pub async fn list_schedulers_api(
     let entries = resp.executions.iter().filter_map(list_entry).collect();
     Ok((entries, resp.next_page_token))
 }
+
+#[cfg(test)]
+mod caller_context_tests {
+    use super::*;
+    use crate::workflow_api::{ApiFuture, CallerContext, WorkflowApi};
+    use cadence_api::errors::EntityNotExistsError;
+    use std::{collections::HashMap, sync::{Arc, Mutex}, time::Instant};
+
+    #[derive(Debug, Default)]
+    struct CapturingApi(Mutex<Vec<(String, CallerContext)>>);
+
+    impl WorkflowApi for CapturingApi {
+        fn serves(&self, _: &str) -> bool { true }
+
+        fn call<'a>(
+            &'a self,
+            operation: &'a str,
+            request: serde_json::Value,
+            ctx: CallerContext,
+        ) -> ApiFuture<'a> {
+            let operation = operation.to_owned();
+            self.0.lock().unwrap().push((operation.clone(), ctx));
+            Box::pin(async move {
+                if operation == "SignalWorkflowExecution"
+                    && matches!(request.get("signalName").and_then(serde_json::Value::as_str),
+                        Some(wire::SIGNAL_DELETE | wire::SIGNAL_PAUSE))
+                {
+                    return Err(CadenceError::EntityNotExists(EntityNotExistsError::new("missing")));
+                }
+                let response = match operation.as_str() {
+                    "QueryWorkflow" => serde_json::json!({ "queryResult": "eyJwYXVzZWQiOmZhbHNlfQ==" }),
+                    "ListOpenWorkflowExecutions" => serde_json::json!({ "executions": [] }),
+                    _ => serde_json::json!({}),
+                };
+                Ok(response)
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn production_schedule_api_forwards_context_and_delete_fallback_keeps_deadline() {
+        let mock = Arc::new(CapturingApi::default());
+        let api: SharedWorkflowApi = mock.clone();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let ctx = CallerContext {
+            deadline: Some(deadline),
+            headers: HashMap::from([("x-caller".into(), "preserved".into())]),
+        };
+        let create = CreateScheduleRequest { domain: "d".into(), schedule_id: "s".into(), ..Default::default() };
+        start_scheduler_api(&api, &create, &ctx).await.unwrap();
+        describe_scheduler_api(&api, "d", "s", &ctx).await.unwrap();
+        list_schedulers_api(&api, "d", 10, &[], &ctx).await.unwrap();
+        let signal_error = signal_scheduler_api(&api, "d", "s", wire::SIGNAL_PAUSE, Vec::new(), &ctx).await.unwrap_err();
+        assert!(matches!(signal_error, CadenceError::EntityNotExists(ref e)
+            if e.message.contains("schedule") && e.message.contains("s")));
+        delete_scheduler_api(&api, "d", "s", &ctx).await.unwrap();
+
+        let calls = mock.0.lock().unwrap();
+        let operations: Vec<_> = calls.iter().map(|(op, _)| op.as_str()).collect();
+        assert_eq!(operations, [
+            "StartWorkflowExecution", "QueryWorkflow", "ListOpenWorkflowExecutions",
+            "SignalWorkflowExecution", "SignalWorkflowExecution", "TerminateWorkflowExecution",
+        ]);
+        for (_, captured) in calls.iter() {
+            assert_eq!(captured.deadline, Some(deadline));
+            assert_eq!(captured.headers.get("x-caller").map(String::as_str), Some("preserved"));
+        }
+    }
+}
