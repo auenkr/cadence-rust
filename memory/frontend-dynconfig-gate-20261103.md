@@ -21,3 +21,7 @@ Earlier failed runs: MySQL 41536838736 (gate assertion only), Postgres 415396360
 - Elasticsearch mapping in AddSearchAttribute remains absent, so that row stays `partial`.
 
 Full workspace clippy+test (rust-ci): https://github.com/auenkr/cadence-rust/actions/runs/41542862303 head ea7af13d29a48acd393d976207fc13f1fa698b4f success (later commits are memory-only).
+
+## Post-merge confirmation (orchestrator, 2026-11-03)
+
+MySQL lane re-run on master-merged head 5ac696184: https://github.com/auenkr/cadence-rust/actions/runs/41544020303 = success; Rust binary SHA256 789fe9a4a4f6f72afd6bfa6acdef79cb6fc13d97313153606b8b596989d2f6f5. Master rust-ci 41543240002 (async gate merge) = success.
