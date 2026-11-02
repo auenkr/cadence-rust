@@ -145,7 +145,7 @@ const DATA = {
     { name: "Frontend", order: 3,
       status: "part",
       acceptance: "Not yet accepted: mixed gate on branch fe-hang is GREEN (run 41377753898: start/signal/query/describe/list open+closed, restart, complete-after-restart all pass). Remaining: remove temp traces, rust-ci clippy/test, Postgres visibility store, IPv6 gRPC bind, parity audit.",
-      note: "2026-11-01: fe-workflow-service (gRPC/Thrift routing, polls, history reader, ByID types) and fe-admin-domain (domain audit, Thrift AdminService, schedule via scheduler workflow) are merged into master, CI green. 2026-11-02: fe-final mixed gate 41393672433 passes all 46 checks: SDK workflows, closed visibility, Frontend and Matching kill/restart recovery, and schedule CRUD/backfill against Go Worker. Fresh-target workspace CI 41394584404 pending. IPv6 remains unverified; see memory/frontend-final-gate-20261102.md.",
+      note: "2026-11-01: fe-workflow-service (gRPC/Thrift routing, polls, history reader, ByID types) and fe-admin-domain (domain audit, Thrift AdminService, schedule via scheduler workflow) are merged into master, CI green. 2026-11-02: fe-final mixed gate 41393672433 passes all 46 checks: SDK workflows, closed visibility, Frontend and Matching kill/restart recovery, and schedule CRUD/backfill against Go Worker. Fresh-target workspace CI 41394584404 passes (clippy then all workspace tests). IPv6 remains unverified; see memory/frontend-final-gate-20261102.md.",
       components: [
         {n:"api (workflow/domain handlers)", loc:7207, s:"part", r:"handler_workflow*, handler_domain"},
         {n:"wrappers (access, ratelimit, redirect, metered, version)", loc:8374, s:"part", r:"wrappers/*"},

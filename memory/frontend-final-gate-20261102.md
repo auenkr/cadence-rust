@@ -15,9 +15,10 @@ Branch: `fe-final`. Validated source head: `55a6ec215566ab642d3a5ee369ec822c6a3d
 
 ## Full workspace CI
 
-- Run: https://github.com/auenkr/cadence-rust/actions/runs/41394584404 — in progress.
+- Run: https://github.com/auenkr/cadence-rust/actions/runs/41394584404 — **success**.
 - Head: `55a6ec215566ab642d3a5ee369ec822c6a3dacb3`.
 - Dispatch: `gh workflow run rust-ci.yml --ref fe-final -f clean_target=true` (all packages; fresh uncached target; clippy before workspace tests).
+- Artifacts confirm target `/home/runner/work/_temp/cargo-target-final`, clippy exit `0`, workspace tests exit `0`.
 - Prior service-core CI: https://github.com/auenkr/cadence-rust/actions/runs/41393155306 — success on the same head.
 
 ## Scope and remaining limits
@@ -26,3 +27,9 @@ Branch: `fe-final`. Validated source head: `55a6ec215566ab642d3a5ee369ec822c6a3d
 - At resume, origin/master was `8e023d900` and already an ancestor of fe-final; no merge needed then. Recheck before final push.
 - IPv6 `[::1]` is not verified by this gate. Launcher currently chooses IPv4 `127.0.0.1`/`0.0.0.0` for Frontend gRPC; preserve this as a separate follow-up rather than claim IPv6 parity.
 - No local Cargo, rustfmt, Go build/test, or mixed-cluster validation ran.
+
+## Final handoff
+
+- Final fetch confirms `origin/master` is still `8e023d900f5e59d94e4bde5c5544b54cb3de129e`, an ancestor of fe-final; no merge is needed.
+- Both required gates are green on source head `55a6ec215566ab642d3a5ee369ec822c6a3dacb3`. Subsequent commits only save evidence/dashboard changes.
+- Stopping after this push as requested; no merge to master or new service migration started.
