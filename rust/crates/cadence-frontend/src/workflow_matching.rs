@@ -125,7 +125,14 @@ impl HistoryAccess {
     ) -> Result<(st::History, Vec<u8>), CadenceError> {
         let is_first_page = next_page_token.is_empty();
         let shard_id = workflow_id_to_history_shard(&execution.workflow_id, self.num_shards);
-        eprintln!("GH-TRACE shard={} num_shards={} first={} next={} branch={}", shard_id, self.num_shards, first_event_id, next_event_id, String::from_utf8_lossy(branch_token).escape_default());
+        eprintln!(
+            "GH-TRACE shard={} num_shards={} first={} next={} branch={}",
+            shard_id,
+            self.num_shards,
+            first_event_id,
+            next_event_id,
+            String::from_utf8_lossy(branch_token).escape_default()
+        );
         let (mut events, next_token) = self
             .read_full_page(ReadHistoryBranchRequest {
                 branch_token: branch_token.to_vec(),
@@ -395,16 +402,29 @@ impl ProductionBackend {
         let reply = self
             .matching("PollForDecisionTask", envelope, POLL_TIMEOUT)
             .await?;
-        eprintln!("PD-TRACE reply fields={:?}", reply.fields.iter().map(|(i, _)| *i).collect::<Vec<_>>());
+        eprintln!(
+            "PD-TRACE reply fields={:?}",
+            reply.fields.iter().map(|(i, _)| *i).collect::<Vec<_>>()
+        );
         let Some(task) = DecisionTask::from_matching(&reply)? else {
             eprintln!("PD-TRACE no task");
             return Ok(serde_json::json!({}));
         };
-        eprintln!("PD-TRACE task wf={:?} next_event_id={} started={}", task.execution.workflow_id, task.next_event_id, task.started_event_id);
+        eprintln!(
+            "PD-TRACE task wf={:?} next_event_id={} started={}",
+            task.execution.workflow_id, task.next_event_id, task.started_event_id
+        );
         let response = self
             .decision_response(&str_field(request, "domainUUID"), task)
             .await;
-        eprintln!("PD-TRACE decision_response err={:?} events={:?}", response.as_ref().err().map(|e| e.to_string()), response.as_ref().ok().and_then(|r| r.history.as_ref().map(|h| h.events.len())));
+        eprintln!(
+            "PD-TRACE decision_response err={:?} events={:?}",
+            response.as_ref().err().map(|e| e.to_string()),
+            response
+                .as_ref()
+                .ok()
+                .and_then(|r| r.history.as_ref().map(|h| h.events.len()))
+        );
         let response = response?;
         to_json(&response)
     }

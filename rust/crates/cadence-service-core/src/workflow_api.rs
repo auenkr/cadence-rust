@@ -325,7 +325,8 @@ pub async fn dispatch_thrift(
                     field = Some(id);
                 }
             }
-            let field = field.ok_or_else(|| format!("error {name} ({message}) not declared for {method}"))?;
+            let field = field
+                .ok_or_else(|| format!("error {name} ({message}) not declared for {method}"))?;
             Ok(Some((
                 Struct {
                     fields: vec![(field, Value::Struct(value))],

@@ -289,7 +289,10 @@ impl NativeMatchingEngine {
             data: data.clone(),
         };
         let __act = context.domain_active(&source)?;
-        eprintln!("ADD-TRACE active={} list={:?} type={}", __act, list.name, task_type);
+        eprintln!(
+            "ADD-TRACE active={} list={:?} type={}",
+            __act, list.name, task_type
+        );
         if __act {
             let degree = context
                 .forward_degree(domain, parsed.root(), task_type)

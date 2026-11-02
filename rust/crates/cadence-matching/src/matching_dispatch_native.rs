@@ -1323,7 +1323,11 @@ impl NativeTaskDispatcher {
                     return;
                 }
             };
-            eprintln!("QUEUE-TRACE claim task={} scan_pending={}", task.is_some(), scan_pending);
+            eprintln!(
+                "QUEUE-TRACE claim task={} scan_pending={}",
+                task.is_some(),
+                scan_pending
+            );
             let Some(task) = task else {
                 if scan_pending {
                     tokio::task::yield_now().await;

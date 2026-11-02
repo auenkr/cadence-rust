@@ -195,7 +195,11 @@ fn separate_visibility_sql<'a>(
     if persistence.visibility_store.is_empty() {
         return None;
     }
-    let v = persistence.datastores.get(&persistence.visibility_store)?.sql.as_ref()?;
+    let v = persistence
+        .datastores
+        .get(&persistence.visibility_store)?
+        .sql
+        .as_ref()?;
     (v.plugin_name == default_sql.plugin_name
         && (v.database_name != default_sql.database_name
             || v.connect_addr != default_sql.connect_addr))

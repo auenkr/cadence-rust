@@ -253,9 +253,15 @@ impl ProductionBackend {
             timeout,
         )
         .await;
-        eprintln!("BACKEND-TRACE end {procedure} {}ms {}", __t0.elapsed().as_millis(), match &response { Ok(r) => format!("ok app_err={}", r.application_error), Err(e) => format!("err {e}") });
-        let response = response
-        .map_err(|error| match error {
+        eprintln!(
+            "BACKEND-TRACE end {procedure} {}ms {}",
+            __t0.elapsed().as_millis(),
+            match &response {
+                Ok(r) => format!("ok app_err={}", r.application_error),
+                Err(e) => format!("err {e}"),
+            }
+        );
+        let response = response.map_err(|error| match error {
             JsonCallError::Application(message) => {
                 internal(format!("{service} {method}: {message}"))
             }
