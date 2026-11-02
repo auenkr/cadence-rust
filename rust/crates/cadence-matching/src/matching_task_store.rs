@@ -244,7 +244,9 @@ pub fn open_configured_default_store(
             .with_all_consistency_delete(domain_all_consistency_delete),
         );
         return Ok(ConfiguredMatchingStores {
-            history_node_store: None,
+            history_node_store: Some(Arc::new(
+                cadence_persistence::history_cassandra::CassandraHistoryNodeStore::new(driver.clone()),
+            )),
             visibility_store: None,
             domain_id_parse: crate::matching_domain_uuid::DomainIdParse::Lenient,
             native_task_store: task_store.clone(),

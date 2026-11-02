@@ -45,6 +45,33 @@ pub struct HistoryNodeRow {
 pub trait HistoryNodeStore: Send + Sync + std::fmt::Debug {
     /// Rows with `min_node <= node_id < max_node`, ordered by
     /// `(node_id ASC, txn_id ASC)`, at most `limit` rows.
+    /// SQL defaults to a node cursor; Cassandra overrides this with driver paging.
+    fn select_page(
+        &self,
+        shard_id: i32,
+        tree_id: [u8; 16],
+        branch_id: [u8; 16],
+        min_node: i64,
+        max_node: i64,
+        limit: i64,
+        token: Option<&[u8]>,
+    ) -> Result<(Vec<HistoryNodeRow>, Option<Vec<u8>>)> {
+        let min_node = if let Some(token) = token.filter(|t| !t.is_empty()) {
+            let bytes: [u8; 8] = token.try_into().map_err(|_| {
+                HistoryReadError::Internal(format!("invalid next page token {token:?}"))
+            })?;
+            i64::from_le_bytes(bytes).checked_add(1).ok_or_else(|| {
+                HistoryReadError::Internal("history node cursor overflow".into())
+            })?
+        } else {
+            min_node
+        };
+        let rows = self.select_nodes(shard_id, tree_id, branch_id, min_node, max_node, limit)?;
+        let next = rows.last().filter(|_| rows.len() as i64 >= limit)
+            .map(|row| row.node_id.to_le_bytes().to_vec());
+        Ok((rows, next))
+    }
+
     fn select_nodes(
         &self,
         shard_id: i32,
@@ -148,16 +175,11 @@ fn store_read(
     mut last_node_id: i64,
     mut last_txn_id: i64,
 ) -> Result<(Vec<HistoryNodeRowData>, Option<Vec<u8>>, i64, i64)> {
-    let mut min_node = min_node;
-    if let Some(token) = store_token.as_ref().filter(|t| !t.is_empty()) {
-        let bytes: [u8; 8] = token.as_slice().try_into().map_err(|_| {
-            HistoryReadError::Internal(format!("invalid next page token {token:?}"))
-        })?;
-        min_node = i64::from_le_bytes(bytes) + 1;
-    }
-    let rows = store.select_nodes(shard_id, tree, branch, min_node, max_node, page_size)?;
+    let (rows, next) = store.select_page(
+        shard_id, tree, branch, min_node, max_node, page_size, store_token.as_deref(),
+    )?;
     if rows.is_empty() {
-        return Ok((Vec::new(), None, last_node_id, last_txn_id));
+        return Ok((Vec::new(), next, last_node_id, last_txn_id));
     }
     let mut history = Vec::new();
     for row in &rows {
@@ -183,7 +205,6 @@ fn store_read(
             encoding: row.encoding.clone(),
         });
     }
-    let next = (rows.len() as i64 >= page_size).then(|| last_node_id.to_le_bytes().to_vec());
     Ok((history, next, last_node_id, last_txn_id))
 }
 
