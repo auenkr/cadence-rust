@@ -94,9 +94,13 @@ impl DomainRecord {
         ) -> Result<GoDomainBlob, String> {
             let mut writer = Writer::new();
             write_struct(&mut writer, &value.to_thrift());
+            // Go's thriftrw codec prefixes the payload with version byte 0x59
+            // before any snappy wrapping; Go readers reject blobs without it.
+            let mut versioned = vec![0x59];
+            versioned.extend_from_slice(&writer.into_bytes());
             Ok(GoDomainBlob {
                 data: encoding
-                    .encode(&writer.into_bytes())
+                    .encode(&versioned)
                     .map_err(|error| error.to_string())?,
                 encoding: encoding.as_str().to_string(),
             })
