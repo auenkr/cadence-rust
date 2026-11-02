@@ -405,7 +405,7 @@ name = "cadence-frontend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.1",
  "cadence-api",
  "cadence-common",
  "cadence-matching",
