@@ -38,3 +38,6 @@ NOTE: `frontend-mixed-gate.yml` defaults `rust_ref=fe-integ`; pass `-f rust_ref=
 - Gate 41374006882 (head after message change) exposed both; fix gate run: 41376086311.
 - Still open: IPv6 `[::1]` gRPC dial from Go worker (Rust Frontend gRPC bind).
 - Gate runs on fe-hang: ...41371984343 (txn fix verified), 41374006882, 41376086311.
+- Further fixes: visibility-only MySQL connect for `visibilityStore` (no task-schema validation); gRPC ListOpen/ListClosed routed to the SQL visibility hook (previously served from an in-memory list); visibility time units fixed (request ns->us, response us->ns).
+- **Gate 41377753898 on fe-hang (head after commit "gRPC list-open/closed via visibility hook") = SUCCESS: all SDK scenarios pass** (complete-echo, describe-closed, query, describe-open, list-open, signal, restart handshake, signal-after-restart, complete-after-restart, list-closed). Earlier: 41376712096 (list failing), 41376086311 (startup fail), 41374006882 (query token), 41371984343 (txn_id).
+- TODO: remove temporary *-TRACE eprintln code; rust-ci (clippy/test) for persistence/matching/frontend; Postgres separate visibility store; IPv6 `[::1]` gRPC bind check.
