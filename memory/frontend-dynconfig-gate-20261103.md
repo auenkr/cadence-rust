@@ -19,3 +19,5 @@ Earlier failed runs: MySQL 41536838736 (gate assertion only), Postgres 415396360
 ## Limits
 - "Go-written" rows are copies of the Rust blob, not rows produced by a Go process (Go Frontend is not in the cluster; Go History runs filebased). Byte-identity with Go is covered by unit tests.
 - Elasticsearch mapping in AddSearchAttribute remains absent, so that row stays `partial`.
+
+Full workspace clippy+test (rust-ci): https://github.com/auenkr/cadence-rust/actions/runs/41542862303 head ea7af13d29a48acd393d976207fc13f1fa698b4f success (later commits are memory-only).
