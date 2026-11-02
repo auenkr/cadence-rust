@@ -1,0 +1,172 @@
+[
+  {
+    "step": "go-history-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-matching-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-tchannel-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "rust-frontend-grpc-listening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "cli-register-domain-tchannel",
+    "ok": true,
+    "detail": "Domain fe-gate-t-c31561 successfully registered."
+  },
+  {
+    "step": "cli-register-domain-grpc",
+    "ok": true,
+    "detail": "Domain fe-gate-g-34431e successfully registered."
+  },
+  {
+    "step": "cli-describe-domain-tchannel",
+    "ok": true,
+    "detail": "Name: fe-gate-t-c31561\nUUID: 01a19bb1-ad3c-76d6-bdba-002b054b5462\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "cli-describe-domain-grpc",
+    "ok": true,
+    "detail": "Name: fe-gate-g-34431e\nUUID: 01a19bb1-ad4d-72a7-a62f-7981e4d9df6c\nDescription: \nOwnerEmail: \nDomainData: map[]\nStatus: REGISTERED\nRetentionInDays: 1\nEmitMetrics: true\nIsGlobal(XDC)Domain: true\nActiveClusterName: cluster0\nIsActiveActiveDomain: false\nClusters: [cluster0]\nHistoryArchivalStatus: DISABLED\nVisibilityArchivalStatus: DISABLED"
+  },
+  {
+    "step": "go-history-worker-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-before-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "sdk-describe-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-worker-start",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-echo",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}"
+  },
+  {
+    "step": "sdk-start-child",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}"
+  },
+  {
+    "step": "sdk-describe-task-list",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-list-task-list-partitions",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-get-task-lists-by-domain",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-cancel",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}"
+  },
+  {
+    "step": "sdk-start-terminate",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}"
+  },
+  {
+    "step": "sdk-sched-create-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-backfill-completed",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}: context deadline exceeded"
+  },
+  {
+    "step": "sdk-sched-describe-after-backfill-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-sched-delete-grpc",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "step": "sdk-start-signal-query",
+    "ok": false,
+    "detail": "EntityNotExistsError{Message: Domain 01a19bb1-ad3c-76d6-bdba-002b054b5462 does not exist., ActiveClusters: []}"
+  },
+  {
+    "step": "sdk-list-closed",
+    "ok": false,
+    "detail": "closed executions not listed within 30s"
+  },
+  {
+    "step": "sdk-driver-exit",
+    "ok": false,
+    "detail": "exit=1"
+  },
+  {
+    "step": "go-history-worker-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-matching-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "rust-frontend-alive-after-sdk",
+    "ok": true,
+    "detail": "exit=None"
+  },
+  {
+    "step": "cli-list-workflows-grpc",
+    "ok": true,
+    "detail": "Fetching 1 workflows..."
+  },
+  {
+    "step": "cli-list-workflows-tchannel",
+    "ok": true,
+    "detail": "Fetching 1 workflows..."
+  },
+  {
+    "step": "cli-describe-domain-grpc-ipv6",
+    "ok": false,
+    "detail": "Error: Operation DescribeDomain failed.\nError details:\n  code:unavailable message:connection error: desc = \"transport: Error while dialing: dial tcp [::1]:25742: connect: connection refused\"\n"
+  }
+]
