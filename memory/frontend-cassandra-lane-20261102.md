@@ -49,3 +49,28 @@ download its `frontend-mixed-gate` artifact and record `out/commit.txt`,
 is still running, leave it alone and retain this exact run/head as the next
 status check. A failure must be recorded as an exposed blocker; do not call that
 full Frontend parity.
+
+## Acceptance sub-agent handoff — 2026-11-02
+
+The lane commits were fast-forwarded into branch `t3/770d8955` in the assigned
+isolated worktree; no root checkout was used. Source review confirms the Go
+configuration is generated from `go/config/development.yaml`, parameterized
+for Cassandra, and passed with `--auto-setup --services history,worker` and
+`--zone cassandra`. Go therefore creates Cadence tables/types from its existing
+schema definitions. Rust Frontend and Rust Matching use the generated Rust
+config; the runner does not start Go Frontend or Matching. The Cassandra
+container has CPU, memory, swap, PID and Cassandra heap limits, and its exit
+trap saves logs and removes only its uniquely named container. The workflow
+uses standard `ubuntu-latest`, a 90-minute timeout and three-day artifact
+retention.
+
+One Actions inspection of run `41429904560` showed it in progress: the fresh
+target Rust server build was running; the Go build, mixed SDK/restart gate and
+artifact upload had not started. No source/runtime failure was exposed, so no
+harness implementation change was justified. The prior thread link supplied
+at handoff returned `thread_not_found`; this lane note is the available
+committed handoff. Do not duplicate-dispatch. The pending owner must inspect
+this same run once complete, then record `out/commit.txt`,
+`out/binary.sha256`, `out/gate.exit`, and `out/gate/run/steps.json`, including
+the resolved Rust SHA and any failure. Frontend remains partial until the mixed
+run finishes; this bounded lane does not establish full service parity.
