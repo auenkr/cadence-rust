@@ -648,9 +648,11 @@ impl DomainMetadataPersistence for CassandraDomainMetadataPersistence {
             .run(session.query_unpaged("SELECT domain FROM domains WHERE id=?", (id,)))
             .map_err(|e| e.to_string())?;
         let rows = result.into_rows_result().map_err(|e| e.to_string())?;
-        let Some((domain,)) = rows
-            .maybe_first_row::<(CassandraDomainUdt,)>()
+        let Some(domain) = rows
+            .maybe_first_row::<(Option<crate::cassandra::CassandraNullableDomainUdt>,)>()
             .map_err(|e| e.to_string())?
+            .and_then(|row| row.0)
+            .and_then(crate::cassandra::CassandraNullableDomainUdt::into_domain)
         else {
             return Ok(());
         };

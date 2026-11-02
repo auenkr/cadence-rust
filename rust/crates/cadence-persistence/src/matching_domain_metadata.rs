@@ -855,10 +855,12 @@ impl CassandraDomainMetadataStore {
                     .into_rows_result()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?;
                 let row = rows
-                    .maybe_first_row::<(crate::cassandra::CassandraDomainUdt,)>()
+                    .maybe_first_row::<(Option<crate::cassandra::CassandraNullableDomainUdt>,)>()
                     .map_err(|error| MatchingDomainMetadataError::Cassandra(error.to_string()))?
+                    .and_then(|row| row.0)
+                    .and_then(crate::cassandra::CassandraNullableDomainUdt::into_domain)
                     .ok_or_else(|| MatchingDomainMetadataError::NotFound(id.to_string()))?;
-                self.get_by_name(&row.0.name)
+                self.get_by_name(&row.name)
             }
         }
     }
