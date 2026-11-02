@@ -426,18 +426,46 @@ pub fn open_configured_default_store(
                     .then(|| Duration::from_nanos(sql.max_conn_lifetime_nanos as u64)),
                 encoding,
             };
+            let visibility_config = separate_visibility_sql(persistence, sql).map(|v| PostgresTaskStoreConfig {
+                shards: vec![PostgresShardConfig {
+                    connect_addr: v.connect_addr.clone(),
+                    user: v.user.clone(),
+                    password: v.password.clone(),
+                    database_name: v.database_name.clone(),
+                    connect_attributes: v.connect_attributes.clone(),
+                    tls: v.tls.as_ref().map(|tls| PostgresTlsConfig {
+                        enabled: tls.enabled,
+                        ssl_mode: tls.ssl_mode.clone(),
+                        ca_file: tls.ca_file.clone(),
+                        cert_file: tls.cert_file.clone(),
+                        key_file: tls.key_file.clone(),
+                    }),
+                }],
+                n_shards: 1,
+                use_multiple_databases: false,
+                max_conns: v.max_conns,
+                max_idle_conns: v.max_idle_conns,
+                max_conn_lifetime: (v.max_conn_lifetime_nanos > 0)
+                    .then(|| Duration::from_nanos(v.max_conn_lifetime_nanos as u64)),
+                encoding,
+            });
             let (store, metadata) = PostgresTaskStore::connect_with_domain_metadata(
                 config,
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
+                match visibility_config {
+                    Some(c) => Arc::new(PostgresTaskStore::connect_visibility_only(c)?),
+                    None => store.clone(),
+                };
             let metadata = Arc::new(metadata);
             let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_node_store: Some(store.clone()),
-                visibility_store: Some(store.clone()),
+                visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,

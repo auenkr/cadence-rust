@@ -25,6 +25,21 @@ use std::{
 };
 use uuid::Uuid;
 
+/// The synchronous postgres driver owns a Tokio runtime. Queries and client
+/// destruction must run outside any caller runtime, including current-thread
+/// runtimes where block_in_place is unavailable. Scoped threads preserve the
+/// synchronous API and borrowed transaction inputs without changing SQL behavior.
+pub(crate) fn outside_runtime<T: Send>(operation: impl FnOnce() -> T + Send) -> T {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::scope(|scope| match scope.spawn(operation).join() {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        })
+    } else {
+        operation()
+    }
+}
+
 const DEFAULT_MAX_IDLE_CONNS: usize = 2;
 
 /// One PostgreSQL endpoint from Go's `MultipleDatabasesConfig` list.
@@ -92,6 +107,19 @@ pub(crate) struct PostgresConnectionPool {
     max_lifetime: Option<Duration>,
     state: Mutex<PoolState>,
     available: Condvar,
+}
+
+impl Drop for PostgresConnectionPool {
+    fn drop(&mut self) {
+        let idle = std::mem::take(
+            &mut self
+                .state
+                .get_mut()
+                .expect("PostgreSQL Matching pool lock")
+                .idle,
+        );
+        outside_runtime(move || drop(idle));
+    }
 }
 
 #[derive(Clone)]
@@ -264,7 +292,7 @@ impl Drop for PostgresLease {
         } else {
             state.open -= 1;
             drop(state);
-            drop(client);
+            outside_runtime(move || drop(client));
             self.pool.available.notify_one();
         }
     }
@@ -309,6 +337,15 @@ impl PostgresTaskStore {
     }
 
     pub fn connect(config: PostgresTaskStoreConfig) -> Result<Self> {
+        Self::connect_inner(config, true)
+    }
+
+    /// Connect to a visibility database without requiring task tables.
+    pub fn connect_visibility_only(config: PostgresTaskStoreConfig) -> Result<Self> {
+        Self::connect_inner(config, false)
+    }
+
+    fn connect_inner(config: PostgresTaskStoreConfig, validate_tasks: bool) -> Result<Self> {
         validate_shard_config(&config)?;
         if config.n_shards > u32::MAX as usize {
             return Err(configuration_error(
@@ -332,8 +369,10 @@ impl PostgresTaskStore {
             let (options, tls) = postgres_options(&shard)?;
             let pool = PostgresConnectionPool::new(options, tls, max_open, max_idle, max_lifetime);
             let mut client = pool.checkout()?;
-            validate_postgres_schema(&mut client)?;
-            drop(client);
+            if validate_tasks {
+                validate_postgres_schema(&mut client)?;
+            }
+            outside_runtime(move || drop(client));
             pools.push(pool);
         }
         Ok(Self {
@@ -1565,5 +1604,35 @@ mod tests {
             .0;
         assert!(tasks.contains("PRIMARY KEY (domain_id, task_list_name, task_type, task_id)"));
         assert!(!tasks.contains("shard_id"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_boundary_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn domain_reads_inside_runtime_return_database_errors_without_panicking() {
+        // A refused local connection exercises synchronous client construction
+        // without needing a database fixture or depending on external networking.
+        let mut options = Config::new();
+        options.host("127.0.0.1").port(0).user("cadence");
+        options.connect_timeout(Duration::from_secs(1));
+        let pool = PostgresConnectionPool::new(options, None, 1, 1, None);
+        let domains =
+            crate::matching_domain_postgres::PostgresDomainMetadataStore::from_shared_pool(
+                pool, "active",
+            );
+        assert!(domains.get_domain(Some("test"), None).is_err());
+        assert!(domains.list_domains(10, None).is_err());
+        assert!(domains.get_metadata_version().is_err());
+        drop(domains);
+    }
+
+    #[tokio::test]
+    async fn synchronous_boundary_leaves_caller_runtime() {
+        assert!(outside_runtime(
+            || tokio::runtime::Handle::try_current().is_err()
+        ));
     }
 }

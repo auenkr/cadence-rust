@@ -1,7 +1,12 @@
-name: Frontend mixed gate (MySQL, Rust Frontend + Rust Matching, Go History/Worker)
+name: Frontend mixed gate (SQL, Rust Frontend + Rust Matching, Go History/Worker)
 on:
   workflow_dispatch:
     inputs:
+      database:
+        description: SQL persistence lane
+        type: choice
+        options: [mysql, postgres]
+        default: mysql
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: fe-integ
@@ -13,7 +18,7 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 85
     env:
       CARGO_TARGET_DIR: /tmp/cadence-cargo-target-fe-${{ github.run_id }}
     steps:
@@ -50,7 +55,7 @@ jobs:
       - name: Gate (SDK child, completed backfill, API coverage, IPv6 gRPC)
         run: |
           set +e
-          tests/gates/run-frontend-mysql-lane.sh out/gate \
+          tests/gates/run-frontend-${{ inputs.database || 'mysql' }}-lane.sh out/gate \
             --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
             --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
             --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \

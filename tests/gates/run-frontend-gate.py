@@ -10,6 +10,7 @@ import argparse, json, os, re, secrets, signal, socket, subprocess, sys, time
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
+ap.add_argument('--database', choices=['mysql', 'postgres'], default='mysql')
 ap.add_argument('--out', type=Path, required=True)
 ap.add_argument('--rust-binary', type=Path, required=True)
 ap.add_argument('--go-server', type=Path, required=True)
@@ -25,9 +26,11 @@ if args.sdk_timeout_seconds <= 0:
 root = Path(__file__).resolve().parents[2]
 work = args.out.resolve(); work.mkdir(parents=True, exist_ok=True)
 (work / 'config').mkdir(exist_ok=True)
-my_addr = os.environ.get('CADENCE_MYSQL_ADDR', '127.0.0.1:3306')
-my_user = os.environ.get('CADENCE_MYSQL_USER', 'root')
-my_pass = os.environ.get('CADENCE_MYSQL_PASSWORD', 'cadence')
+plugin = args.database
+prefix = 'CADENCE_' + plugin.upper()
+my_addr = os.environ.get(prefix + '_ADDR', '127.0.0.1:5432' if plugin == 'postgres' else '127.0.0.1:3306')
+my_user = os.environ.get(prefix + '_USER', 'postgres' if plugin == 'postgres' else 'root')
+my_pass = os.environ.get(prefix + '_PASSWORD', 'cadence')
 
 keys = ['FRONTEND_PORT', 'MATCHING_PORT', 'HISTORY_PORT', 'WORKER_PORT', 'FRONTEND_PORT_GRPC', 'MATCHING_PORT_GRPC',
         'HISTORY_PORT_GRPC', 'FRONTEND_PORT_PPROF', 'MATCHING_PORT_PPROF', 'HISTORY_PORT_PPROF', 'WORKER_PORT_PPROF',
@@ -56,18 +59,13 @@ text = text.replace('/tmp/cadence_archival/development', str(work / 'history-arc
 text = text.replace('/tmp/cadence_vis_archival/development', str(work / 'visibility-archive'))
 text = text.replace('/tmp/blobstore', str(work / 'blobstore'))
 (work / 'config/development.yaml').write_text(text)
-t = (root / 'go/config/development_mysql.yaml').read_text()
-t = re.sub(r'(?m)^(\s*connectAddr:)\s*"127\.0\.0\.1:3306"\s*$', r'\1 ' + json.dumps(my_addr), t)
-t = re.sub(r'(?m)^(\s*user:)\s*"root"\s*$', r'\1 ' + json.dumps(my_user), t)
-t = re.sub(r'(?m)^(\s*password:)\s*"cadence"\s*$', r'\1 ' + json.dumps(my_pass), t)
-(work / 'config/development_mysql.yaml').write_text(t)
-
-def mysql_store(name, db, conns):
-    return (f'    {name}:\n      sql:\n        pluginName: mysql\n        databaseName: {json.dumps(db)}\n'
+def sql_store(name, db, conns):
+    return (f'    {name}:\n      sql:\n        pluginName: {plugin}\n        databaseName: {json.dumps(db)}\n'
             f'        connectAddr: {json.dumps(my_addr)}\n        connectProtocol: tcp\n        user: {json.dumps(my_user)}\n'
             f'        password: {json.dumps(my_pass)}\n        nShards: 1\n        maxConns: {conns}\n        maxIdleConns: {conns}\n')
-persistence = ('persistence:\n  defaultStore: mysql-default\n  visibilityStore: mysql-visibility\n  numHistoryShards: 4\n  datastores:\n'
-               + mysql_store('mysql-default', 'cadence', 20) + mysql_store('mysql-visibility', 'cadence_visibility', 2))
+persistence = (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
+               + sql_store(plugin + '-default', 'cadence', 20) + sql_store(plugin + '-visibility', 'cadence_visibility', 2))
+(work / f'config/development_{plugin}.yaml').write_text(persistence)
 rt = (args.rust_root / 'rust/config/development.yaml').read_text()
 for k, v in ports.items():
     rt = re.sub(r'\$\{' + k + r':\d+\}', v, rt)
@@ -134,7 +132,7 @@ cli_g = [args.go_cli, '--address', f'127.0.0.1:{ports["FRONTEND_PORT_GRPC"]}', '
 status = 0
 try:
     (work / 'rust-binary.sha256').write_text(subprocess.run(['sha256sum', str(args.rust_binary)], capture_output=True, text=True).stdout)
-    start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', 'mysql', 'start', '--auto-setup', '--services', 'history,worker'])
+    start('go-history-worker', [args.go_server, '--config', work / 'config', '--zone', plugin, 'start', '--auto-setup', '--services', 'history,worker'])
     history_ready = wait_port(ports['HISTORY_PORT_GRPC'], 240, 'go-history-worker')
     record('go-history-listening', history_ready)
     if not history_ready:
