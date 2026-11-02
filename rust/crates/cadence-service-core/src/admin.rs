@@ -1974,18 +1974,48 @@ mod tests {
     fn history_membership_uses_go_rune_keys_including_replacement_for_invalid_runes() {
         struct HistoryMembers;
         impl ClusterMembership for HistoryMembers {
-            fn who_am_i(&self) -> Result<String, String> { Ok("frontend".into()) }
+            fn who_am_i(&self) -> Result<String, String> {
+                Ok("frontend".into())
+            }
             fn members(&self, role: &str) -> Result<Vec<String>, String> {
                 assert_eq!(role, "cadence-history");
-                Ok(vec!["history-a:7934".into(), "history-b:7934".into(), "history-c:7934".into()])
+                Ok(vec![
+                    "history-a:7934".into(),
+                    "history-b:7934".into(),
+                    "history-c:7934".into(),
+                ])
             }
         }
         use cadence_common::membership::{Host, Ring};
-        let ring = Ring::new(HistoryMembers.members("cadence-history").unwrap().into_iter().map(|address| Host { identity: address.clone(), address, grpc_address: String::new() }));
-        for (shard, key) in [(0, "\0"), (1, "\u{1}"), (127, "\u{7f}"), (128, "\u{80}"), (870, "\u{366}"), (0xd800, "�"), (-1, "�")] {
-            assert_eq!(HistoryMembers.history_owner(shard).unwrap().as_ref(), ring.lookup(key));
+        let ring = Ring::new(
+            HistoryMembers
+                .members("cadence-history")
+                .unwrap()
+                .into_iter()
+                .map(|address| Host {
+                    identity: address.clone(),
+                    address,
+                    grpc_address: String::new(),
+                }),
+        );
+        for (shard, key) in [
+            (0, "\0"),
+            (1, "\u{1}"),
+            (127, "\u{7f}"),
+            (128, "\u{80}"),
+            (870, "\u{366}"),
+            (0xd800, "�"),
+            (-1, "�"),
+        ] {
+            assert_eq!(
+                HistoryMembers.history_owner(shard).unwrap().as_ref(),
+                ring.lookup(key)
+            );
         }
-        assert!((0..1024).any(|shard| HistoryMembers.history_owner(shard).unwrap().as_ref() != ring.lookup(&shard.to_string())));
+        assert!((0..1024).any(
+            |shard| HistoryMembers.history_owner(shard).unwrap().as_ref()
+                != ring.lookup(&shard.to_string())
+        ));
     }
 
     #[test]
