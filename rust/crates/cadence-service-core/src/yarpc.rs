@@ -2857,8 +2857,10 @@ mod schedule_dispatch_tests {
     #[tokio::test]
     async fn schedule_dispatch_uses_installed_workflow_api_and_preserves_caller_context() {
         let capture = Arc::new(Capture::default());
-        let mut state = AppState::default();
-        state.workflow_api = Some(capture.clone());
+        let state = AppState {
+            workflow_api: Some(capture.clone()),
+            ..AppState::default()
+        };
         let deadline = Instant::now() + Duration::from_secs(17);
         let headers = HashMap::from([("x-tenant".to_string(), "blue".to_string())]);
         let (_, error) = dispatch_with_headers(
