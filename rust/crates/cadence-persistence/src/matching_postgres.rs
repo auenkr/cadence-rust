@@ -1191,7 +1191,8 @@ impl crate::history_reader::HistoryNodeStore for PostgresTaskStore {
                 let get = |e: postgres::Error| HistoryReadError::Internal(e.to_string());
                 Ok(HistoryNodeRow {
                     node_id: row.try_get(0).map_err(get)?,
-                    txn_id: row.try_get(1).map_err(get)?,
+                    // Go's SQL plugin stores txn_id multiplied by -1 and reverts it on read.
+                    txn_id: -row.try_get::<_, i64>(1).map_err(get)?,
                     data: row.try_get(2).map_err(get)?,
                     encoding: row.try_get(3).map_err(get)?,
                 })

@@ -1723,7 +1723,8 @@ impl crate::history_reader::HistoryNodeStore for MySqlTaskStore {
             .into_iter()
             .map(|(node_id, txn_id, data, encoding)| HistoryNodeRow {
                 node_id,
-                txn_id,
+                // Go's SQL plugin stores txn_id multiplied by -1 and reverts it on read.
+                txn_id: -txn_id,
                 data,
                 encoding,
             })
