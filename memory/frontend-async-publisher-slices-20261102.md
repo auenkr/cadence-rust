@@ -28,7 +28,8 @@ Domain async configuration already persists in Go SQL/Cassandra and has admin ge
 - Added `cadence_frontend::async_queue` with Go-equivalent domain selection: disabled check happens before provider lookup, a predefined name wins over inline type/config, and inline queue config is passed through as the original API `DataBlob`. Provider interfaces expose queue ID (for Go's queue-ID producer cache key), provider construction seam, and close lifecycle. Cache constants capture Go's 5-minute TTL and max 100; the bounded cache implementation remains for slice 2.
 - Added unit coverage for YAML provider decoding/defaults, disabled-domain error ordering, predefined precedence, inline selection, and provider lookup error propagation.
 - Shared-file coordination note: `rust/crates/cadence-service-core/src/config.rs` changed only to carry the Go top-level config through the existing loader; no admin_history_proxy or scheduler files touched.
-- CI and commit evidence will be appended after the frontend package workflow completes. This slice is infrastructure only and does not claim a production async publisher or Frontend parity.
+- CI: `https://github.com/auenkr/cadence-rust/actions/runs/41433727056` completed **success** on head `e0744a1e80e5b8692297268d676c4c078f33a6c3` (`rust-ci.yml`, package `cadence-frontend`; hosted clippy then package/workspace dependency tests). Initial run `41433093519` failed clippy on `result_large_err`; the new module now follows the existing Frontend lint policy and the rerun passed.
+- Commits pushed on `t3/async-queue-config-seam`: `dd11af326` implementation/tests, `e0744a1e` CI clippy fix and runner-generated rustfmt. This slice is infrastructure only and does not claim a production async publisher or Frontend parity.
 
 ## Acceptance limitations / failure semantics
 
