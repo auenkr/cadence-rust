@@ -498,7 +498,7 @@ impl ProductionBackend {
                         ],
                     },
                 )
-                    .await
+                .await
             }
             Op::RecordActivityTaskHeartbeat | Op::RecordActivityTaskHeartbeatByID => {
                 let inner: tk::RecordActivityTaskHeartbeatRequest =

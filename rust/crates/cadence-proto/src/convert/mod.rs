@@ -1162,10 +1162,14 @@ mod tests {
         assert_eq!(converted.execution_time, expected);
         assert_eq!(converted.update_time, expected);
         assert_eq!(converted.scheduled_execution_time, expected);
-        assert_eq!(info(st::WorkflowExecutionInfo {
-            start_time: Some(1234),
-            ..Default::default()
-        }).start_time, Some(timestamp(1234)));
+        assert_eq!(
+            info(st::WorkflowExecutionInfo {
+                start_time: Some(1234),
+                ..Default::default()
+            })
+            .start_time,
+            Some(timestamp(1234))
+        );
     }
     #[test]
     fn duration_validation_rejects_overflow_and_bad_signs() {

@@ -130,7 +130,7 @@ const DATA = {
         {n:"Mixed-cluster gate lanes", subs:[["PostgreSQL",200,"part"],["MySQL probes",200,"none"],["Thrift/TChannel",200,"none"],["configstore",200,"none"],["shard-distributor/etcd",200,"none"],["two-node MySQL",200,"none"],["Cassandra",200,"none"],["full adaptive",200,"none"],["active offer",200,"none"],["production TLS",200,"none"]]}
       ]},
     { name: "Frontend", order: 2, status: "part",
-      acceptance: "Frontend remains partial (see Nov 2 parity audit). History owner routing validated on e0ac162ba: clean workspace CI 41415396963 GREEN; Go History mixed regression 41415440353 GREEN (34/34: SDK, Frontend restart, TChannel/gRPC CLI). Multi-History churn/retry and broader persistence/policy gaps remain open. Evidence: memory/frontend-history-routing-20261102.md.",
+      acceptance: "Frontend remains partial (see Nov 2 parity audit). Expanded MySQL mixed gate GREEN on 63412d628: run 41422833412, 46/46 steps including IPv6 gRPC, SDK child workflow, completed scheduler backfill and requested Frontend APIs; binary SHA256 7264f455fdc361ae3fdf9b5de73fc2f99990a288c8f4df52489b19d4c148f2cc. Fresh uncached workspace clippy/test GREEN: run 41422827735. Earlier History owner routing validated on e0ac162ba: mixed run 41415440353 GREEN. Multi-History churn/retry and broader persistence/policy gaps remain open. Evidence: memory/frontend-gate-extras-20261102.md.",
       note: "fe-workflow-service and fe-admin-domain merged into master, CI green. Submodule statuses below are file-level estimates; 'part' = Rust equivalent exists but some behaviour is missing or unverified.",
       components: [
         {n:"api (workflow/domain handlers)", dir:"frontend/api", d:"none", r:"handler_workflow*, handler_domain, handler_schedule", rules:[
@@ -142,7 +142,7 @@ const DATA = {
         {n:"History / Matching clients", subs:[["History owner routing (CI + mixed green)",300,"done"],["matching_client",300,"done"]]},
         {n:"Ringpop join on TChannel", subs:[["Answer ring join on TChannel port",300,"none"]]},
         {n:"Visibility", subs:[["Cassandra / MySQL visibility",400,"done"],["Postgres visibility store",300,"none"]]},
-        {n:"Mixed-cluster gate", subs:[["Domain CRUD",100,"done"],["Start/complete/signal",100,"done"],["Query / describe / list open+closed",100,"done"],["SIGKILL restart recovery",100,"done"],["Ringpop join",100,"none"],["Clean rust-ci + parity audit",300,"none"]]}
+        {n:"Mixed-cluster gate", subs:[["Domain CRUD",100,"done"],["Start/complete/signal",100,"done"],["Query / describe / list open+closed",100,"done"],["SIGKILL restart recovery",100,"done"],["Expanded APIs / child / backfill / IPv6",200,"done"],["Ringpop join",100,"none"],["Clean rust-ci + parity audit",300,"part"]]}
       ]},
     { name: "History", order: 3, status: "none",
       acceptance: "Not started. Crate <code>cadence-history</code> is a 5-line stub.",

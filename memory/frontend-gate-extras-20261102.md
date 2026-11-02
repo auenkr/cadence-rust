@@ -44,3 +44,9 @@ new scheduler implementation. SDK registered workflow type is
 `main.ScheduledWorkflow`; use that exact type for scheduler actions. Go cluster
 Frontend rpcAddress now uses explicit IPv4 during the main lane (IPv6 is tested
 separately), avoiding localhost resolution ambiguity.
+
+Final validation on source head `63412d6281edbeff0755f947ce9ac39807d523c7`:
+- Clean uncached workspace CI: https://github.com/auenkr/cadence-rust/actions/runs/41422827735 — success. Fresh dedicated target, clippy then workspace tests, formatting check passed.
+- Mixed MySQL gate: https://github.com/auenkr/cadence-rust/actions/runs/41422833412 — success. Rust Frontend and Matching with Go History/Worker, no Go Frontend; 46/46 named JSON assertions passed. Retained exact evidence in `memory/frontend-gate-extras-41422833412-steps.json`.
+- Mixed gate Rust binary SHA256: `7264f455fdc361ae3fdf9b5de73fc2f99990a288c8f4df52489b19d4c148f2cc` (fresh CI target). Real IPv6 gRPC ran successfully; child SDK workflow and activity completed; schedule backfill executions were visible as completed; requested task-list, refresh, cancel, terminate and sticky reset APIs passed.
+- CI formatting artifact from run 41422827735 is applied as a formatting-only patch in `workflow_backend.rs` and `cadence-proto/src/convert/mod.rs`; this patch remains to be committed and final-head CI rerun.
