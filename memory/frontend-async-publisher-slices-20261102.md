@@ -43,3 +43,12 @@ Do not treat handler unit tests or a fake publisher as service completion. A suc
 - Tests: envelope for both types and producer reuse, disabled-domain BadRequest with no producer, publish-failure passthrough, cache max eviction/close, TTL expiry, missing transport error, production install test.
 - CI (`rust-ci.yml`, head `32c348da084a66bb964df5fd5c79517f5fecba97`): package run https://github.com/auenkr/cadence-rust/actions/runs/41502590213 **success**; full run https://github.com/auenkr/cadence-rust/actions/runs/41503473735 **success**. First run 41501948164 failed only on rustfmt layout (fixed).
 - Not claimed: real broker publishing, mixed-cluster acceptance, metrics.
+
+## Slice 3 progress: Kafka producer (2026-11-03)
+
+- Branch `async-kafka-producer`. New `async_kafka.rs` (rskafka 0.6.0, pure Rust, MIT/Apache, `transport-tls` only, no compression) and `async_kafka_tls.rs` (rustls/ring). `production_publisher` now uses `KafkaTransport` for queue type `kafka`.
+- Go parity: config `topic`, `connection.{brokers,tls,sasl}`; brokers sorted; ID `kafka::<topic>/<brokers>`; SASL plain/sha256/sha512 (unknown algorithm errors); TLS CA files, client cert, host verification off = skip verify. Kafka key = partition key; value = 0x59-prefixed ThriftRW `AsyncRequestMessage{partitionKey,type,header,encoding,payload}` (headers inside struct, no Kafka headers). Partition chosen with Sarama hash partitioner (FNV-1a32, sign fix, modulo). Publish returns only after broker ack (produce resolves on ack); errors propagate; cache close/shutdown closes producer.
+- Differences: lazy connect on first publish (30s bounded; Go connects at creation); TLS `serverName` override unsupported; no topic-tagged metrics (Frontend has no metrics seam); Cargo.lock not committed (CI resolves it; commit a lock update later).
+- Tests: config/ID, SASL, partitioner, record encoding round-trip, transport, TLS config, unreachable broker = error. No in-process broker test.
+- CI (head `58ba7b07cbc6f84ebe521c752b0d313f1d3dcf17`): package run https://github.com/auenkr/cadence-rust/actions/runs/41522975621 **success**; full run https://github.com/auenkr/cadence-rust/actions/runs/41523983534 **success**. Earlier run 41507945353 hung 90 min (unbounded rskafka connect retry) and was fixed with a timeout.
+- Remaining mixed acceptance: Kafka service container + Rust Frontend/Matching with Go History/Worker; SDK Start/SignalWithStart async consumed by Go consumer; broker unavailable, Frontend restart, recovery, and verifying partition choice/Go decoder accepts the value.
