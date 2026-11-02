@@ -119,9 +119,18 @@ pub fn quota_info(
     ) {
         let token: EncodedTaskToken = serde_json::from_value(request.clone())
             .map_err(|error| CadenceError::Unknown(error.to_string()))?;
-        let token = cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&token.task_token)
-            .map_err(|error| CadenceError::Unknown(error.to_string()))?;
-        domains.domain_name(&token.domain_id)?
+        let domain_id = if operation == "RespondQueryTaskCompleted" {
+            cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize_query_token(
+                &token.task_token,
+            )
+            .map_err(|error| CadenceError::Unknown(error.to_string()))?
+            .domain_id
+        } else {
+            cadence_api::tasktoken::JsonTaskTokenSerializer::deserialize(&token.task_token)
+                .map_err(|error| CadenceError::Unknown(error.to_string()))?
+                .domain_id
+        };
+        domains.domain_name(&domain_id)?
     } else {
         fields
             .get("domain")

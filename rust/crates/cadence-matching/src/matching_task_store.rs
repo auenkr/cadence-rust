@@ -187,6 +187,21 @@ pub async fn open_configured_semaphore_stores(
     anyhow::bail!("Matching defaultStore {name:?} has neither SQL nor NoSQL configuration")
 }
 
+/// SQL config of a distinct `visibilityStore` datastore, if configured.
+fn separate_visibility_sql<'a>(
+    persistence: &'a crate::config::PersistenceConfig,
+    default_sql: &crate::config::SqlConfig,
+) -> Option<&'a crate::config::SqlConfig> {
+    if persistence.visibility_store.is_empty() {
+        return None;
+    }
+    let v = persistence.datastores.get(&persistence.visibility_store)?.sql.as_ref()?;
+    (v.plugin_name == default_sql.plugin_name
+        && (v.database_name != default_sql.database_name
+            || v.connect_addr != default_sql.connect_addr))
+        .then_some(v)
+}
+
 pub fn open_configured_default_store(
     persistence: &crate::config::PersistenceConfig,
     active_cluster_name: &str,
@@ -322,18 +337,37 @@ pub fn open_configured_default_store(
                 encoding,
                 tls,
             };
+            let visibility_config = separate_visibility_sql(persistence, sql).map(|v| {
+                let mut c = config.clone();
+                c.database_name = v.database_name.clone();
+                c.connect_addr = v.connect_addr.clone();
+                c.user = v.user.clone();
+                c.password = v.password.clone();
+                c.connect_protocol = v.connect_protocol.clone();
+                c.max_conns = v.max_conns;
+                c.max_idle_conns = v.max_idle_conns;
+                c.n_shards = 1;
+                c.use_multiple_databases = false;
+                c.multiple_databases_config = Vec::new();
+                c
+            });
             let (store, metadata) = MySqlTaskStore::connect_with_domain_metadata(
                 config,
                 active_cluster_name,
             )?;
             let store = Arc::new(store.with_encoding_source(encoding_source));
+            let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> =
+                match visibility_config {
+                    Some(c) => Arc::new(MySqlTaskStore::connect(c)?),
+                    None => store.clone(),
+                };
             let metadata = Arc::new(metadata);
             let metadata_source: Arc<dyn crate::matching_domain_cache::DomainMetadataSource> = metadata.clone();
             let domain_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::GoSqlDomainPersistence> = metadata.clone();
             let domain_metadata_persistence: Arc<dyn cadence_persistence::matching_domain_metadata::DomainMetadataPersistence> = metadata;
             Ok(ConfiguredMatchingStores {
                 history_node_store: Some(store.clone()),
-                visibility_store: Some(store.clone()),
+                visibility_store: Some(visibility),
                 domain_id_parse: crate::matching_domain_uuid::DomainIdParse::GoogleUuidPanic,
                 native_task_store: store.clone(),
                 task_store: store,
