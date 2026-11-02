@@ -37,9 +37,12 @@ Implementation commit: `6ce90c7993a3554d4e32037662898580cb0b1bd8`, branch
 `frontend-cassandra-acceptance-20261102` (pushed).
 
 Dispatched after the pre-dispatch inspection found no active mixed gate:
-https://github.com/auenkr/cadence-rust/actions/runs/41429904560. Gate head and
-`rust_ref` are both `6ce90c7993a3554d4e32037662898580cb0b1bd8`. The run was
-queued at handoff; binary SHA256 and step-level outcome are pending. On resume,
+https://github.com/auenkr/cadence-rust/actions/runs/41429904560. Gate event
+head is `6ce90c7993a3554d4e32037662898580cb0b1bd8`; input `rust_ref` names
+`frontend-cassandra-acceptance-20261102`. The checked-out Rust source SHA must
+be read from the run artifact because the ref may resolve after this evidence
+commit. The run was queued at handoff; binary SHA256 and step-level outcome
+are pending. On resume,
 run `gh run view 41429904560 --repo auenkr/cadence-rust` once. If complete,
 download its `frontend-mixed-gate` artifact and record `out/commit.txt`,
 `out/binary.sha256`, `out/gate.exit`, and `out/gate/run/steps.json` here. If it
