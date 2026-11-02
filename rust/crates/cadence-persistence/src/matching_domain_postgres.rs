@@ -648,8 +648,8 @@ impl PostgresDomainMetadataStore {
             if page_size == 0 {
                 return Err(MatchingDomainMetadataError::InvalidPageSize);
             }
-            let limit =
-                i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+            let limit = i64::try_from(page_size)
+                .map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
             let started = Instant::now();
             let mut client = self
                 .pool
@@ -682,7 +682,7 @@ impl PostgresDomainMetadataStore {
             Ok(MatchingDomainPage {
                 domains,
                 next_page_token,
-        })
+            })
         })
     }
 
@@ -803,8 +803,8 @@ impl PostgresDomainMetadataStore {
     ) -> Result<crate::domain_audit::DomainAuditLogPage, MatchingDomainMetadataError> {
         crate::matching_postgres::outside_runtime(|| {
             use crate::domain_audit::{
-                audit_page_next_token, audit_page_window, format_wallclock_datetime, now_unix_nanos,
-                parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
+                audit_page_next_token, audit_page_window, format_wallclock_datetime,
+                now_unix_nanos, parse_sqlite_datetime, DomainAuditLog, DomainAuditLogPage,
             };
             type AuditRow = (
                 String,
@@ -823,13 +823,14 @@ impl PostgresDomainMetadataStore {
             if page_size == 0 {
                 return Err(MatchingDomainMetadataError::InvalidPageSize);
             }
-            let limit =
-                i64::try_from(page_size).map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
+            let limit = i64::try_from(page_size)
+                .map_err(|_| MatchingDomainMetadataError::InvalidPageSize)?;
             let (max_nanos, min_event_id) = audit_page_window(page_token, now_unix_nanos())
                 .map_err(MatchingDomainMetadataError::InvalidBlob)?;
             let max = format_wallclock_datetime(max_nanos)
                 .map_err(MatchingDomainMetadataError::InvalidBlob)?;
-            let min = format_wallclock_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
+            let min =
+                format_wallclock_datetime(0).map_err(MatchingDomainMetadataError::InvalidBlob)?;
             let started = Instant::now();
             let mut client = self
                 .pool
@@ -915,7 +916,7 @@ impl PostgresDomainMetadataStore {
             Ok(DomainAuditLogPage {
                 next_page_token: audit_page_next_token(&logs, page_size),
                 logs,
-        })
+            })
         })
     }
 }

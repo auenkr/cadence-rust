@@ -112,7 +112,11 @@ pub(crate) struct PostgresConnectionPool {
 impl Drop for PostgresConnectionPool {
     fn drop(&mut self) {
         let idle = std::mem::take(
-            &mut self.state.get_mut().expect("PostgreSQL Matching pool lock").idle,
+            &mut self
+                .state
+                .get_mut()
+                .expect("PostgreSQL Matching pool lock")
+                .idle,
         );
         outside_runtime(move || drop(idle));
     }
@@ -1615,10 +1619,10 @@ mod runtime_boundary_tests {
         options.host("127.0.0.1").port(0).user("cadence");
         options.connect_timeout(Duration::from_secs(1));
         let pool = PostgresConnectionPool::new(options, None, 1, 1, None);
-        let domains = crate::matching_domain_postgres::PostgresDomainMetadataStore::from_shared_pool(
-            pool,
-            "active",
-        );
+        let domains =
+            crate::matching_domain_postgres::PostgresDomainMetadataStore::from_shared_pool(
+                pool, "active",
+            );
         assert!(domains.get_domain(Some("test"), None).is_err());
         assert!(domains.list_domains(10, None).is_err());
         assert!(domains.get_metadata_version().is_err());
@@ -1627,6 +1631,8 @@ mod runtime_boundary_tests {
 
     #[tokio::test]
     async fn synchronous_boundary_leaves_caller_runtime() {
-        assert!(outside_runtime(|| tokio::runtime::Handle::try_current().is_err()));
+        assert!(outside_runtime(
+            || tokio::runtime::Handle::try_current().is_err()
+        ));
     }
 }
