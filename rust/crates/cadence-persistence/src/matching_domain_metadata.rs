@@ -399,7 +399,10 @@ pub(crate) fn decode_go_cassandra_domain_metadata(
     put(28, Value::I64(notification_version));
     put(30, Value::I64(failover_notification_version));
     put(32, Value::I64(failover_version));
-    put(50, Value::I64(failover_end_time));
+    // Go: only a positive stored value sets FailoverEndTime.
+    if failover_end_time > 0 {
+        put(50, Value::I64(failover_end_time));
+    }
     put(52, Value::I64(previous_failover_version));
     put(54, Value::I64(last_updated_time));
     let uuid = info.id.to_string();
