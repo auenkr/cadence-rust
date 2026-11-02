@@ -2865,8 +2865,7 @@ mod matching_http_listener_tests {
                     if addr.is_ipv6()
                         && matches!(
                             err.kind(),
-                            std::io::ErrorKind::AddrNotAvailable
-                                | std::io::ErrorKind::Unsupported
+                            std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
                         ) =>
                 {
                     eprintln!("IPv6 unavailable: {err}");
