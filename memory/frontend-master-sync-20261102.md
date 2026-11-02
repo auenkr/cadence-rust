@@ -8,3 +8,11 @@ Integrated completed gate extras (`b92bd41b62e2ebad3c36156ca56e88b2c6b95568`) an
 - PostgreSQL branch clean workspace run https://github.com/auenkr/cadence-rust/actions/runs/41422156747 passed on `4df07d90ad30a7ffb6311e820a1aa0760d6e2d9b`.
 
 Merge checks: Python harness parsed with ast; staged diff whitespace check passed. No local Cargo, Go or runtime gate commands executed. Next: combined clean CI, Cassandra mixed lane, and scheduler inbound context propagation. Broader parity gaps remain in the Nov 2 audit.
+
+## Combined verification and Cassandra failure
+
+Fresh uncached workspace CI https://github.com/auenkr/cadence-rust/actions/runs/41429248975 passed on `344c83cf42961ce4bcb6f5ab94c4649cc289c986`.
+
+Cassandra lane run https://github.com/auenkr/cadence-rust/actions/runs/41429904560 failed on `6ce90c7993a3554d4e32037662898580cb0b1bd8` (both gate and resolved Rust source). Binary SHA256 `c2911ed24bc479aad7bde16a8b24854af45d499d00a1a7208fb4d94f0e59b8e3`. Go History and Rust Matching listening checks passed; Frontend listening checks failed because Frontend exited with nested Tokio runtime panic after opening configured stores. No SDK acceptance reached. Artifact reviewed at `/tmp/cadence-fe-cassandra-41429904560`; failure is a real exposed runtime gap, not acceptance.
+
+Scheduler context code `66fd2b282be8749bfc261715c8bc4146476b6920` passed package CI https://github.com/auenkr/cadence-rust/actions/runs/41430427854; formatting patch downloaded, follow-on YARPC routing CI41431354388 pending. These branches remain unmerged.
