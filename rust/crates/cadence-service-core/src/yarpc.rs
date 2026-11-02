@@ -2906,6 +2906,6 @@ mod schedule_dispatch_tests {
             error.as_ref().map(|(name, _)| *name),
             Some("EntityNotExistsError")
         );
-        assert!(error.unwrap().1.contains("domain"));
+        assert!(error.unwrap().1.contains("Domain d does not exist"));
     }
 }
