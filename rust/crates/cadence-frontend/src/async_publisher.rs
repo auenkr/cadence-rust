@@ -282,18 +282,17 @@ impl AsyncProducerFactory for UnsupportedTransport {
     }
 }
 
-/// Builds the production publisher from the server config.
+/// Builds the production publisher from the server config. Queue type
+/// `kafka` uses the Rust Kafka transport; other types fail the publish.
 pub fn production_publisher(
     domains: Arc<dyn AsyncDomainConfigLookup>,
     queues: HashMap<String, cadence_service_core::config::AsyncWorkflowQueueProviderConfig>,
 ) -> Arc<dyn AsyncWorkflowPublisher> {
+    let kafka = Arc::new(crate::async_kafka::KafkaTransport::default());
     Arc::new(QueueAsyncPublisher::new(
         domains,
-        Arc::new(ConfiguredQueueProvider::new(
-            queues,
-            Arc::new(UnsupportedTransport),
-        )),
-        Arc::new(UnsupportedTransport),
+        Arc::new(ConfiguredQueueProvider::new(queues, kafka.clone())),
+        kafka,
         ProducerCache::go_defaults(),
     ))
 }
