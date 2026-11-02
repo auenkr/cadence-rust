@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(query.tree.as_bytes(), &[1; 16]);
         assert_eq!(query.branch.as_bytes(), &[2; 16]);
         assert_eq!((query.min, query.max, query.size), (3, 20, 5));
-        assert_eq!(query.token.as_bytes_slice(), Some([255, 0, 7].as_slice()));
+        assert_eq!(query.token.as_bytes_slice().unwrap().as_ref(), &[255, 0, 7]);
         assert!(!SELECT.contains("shard_id"));
         assert!(SELECT.ends_with("node_id >= ? AND node_id < ?"));
     }
