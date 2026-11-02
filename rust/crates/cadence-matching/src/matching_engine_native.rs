@@ -291,7 +291,9 @@ impl NativeMatchingEngine {
         let __act = context.domain_active(&source)?;
         crate::trace_eprintln!(
             "ADD-TRACE active={} list={:?} type={}",
-            __act, list.name, task_type
+            __act,
+            list.name,
+            task_type
         );
         if __act {
             let degree = context

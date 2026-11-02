@@ -412,7 +412,9 @@ impl ProductionBackend {
         };
         crate::trace_eprintln!(
             "PD-TRACE task wf={:?} next_event_id={} started={}",
-            task.execution.workflow_id, task.next_event_id, task.started_event_id
+            task.execution.workflow_id,
+            task.next_event_id,
+            task.started_event_id
         );
         let response = self
             .decision_response(&str_field(request, "domainUUID"), task)
