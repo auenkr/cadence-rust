@@ -1790,6 +1790,22 @@ async fn admin_reapply_replication_dlq_and_cross_cluster() {
 }
 
 #[tokio::test]
+async fn admin_describe_workflow_execution_rejects_missing_execution() {
+    let app = router(AppState::default());
+    setup_domain(app.clone()).await;
+
+    let (status, body) = call(
+        app,
+        Method::POST,
+        "/api/v1/admin/workflows/describe",
+        json!({"domain": "e2e-domain"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["message"], "Execution is not set on request.");
+}
+
+#[tokio::test]
 async fn child_workflow_runs_and_parent_closes() {
     let app = router(AppState::default());
     setup_domain(app.clone()).await;
