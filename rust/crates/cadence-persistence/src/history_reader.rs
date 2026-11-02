@@ -60,14 +60,16 @@ pub trait HistoryNodeStore: Send + Sync + std::fmt::Debug {
             let bytes: [u8; 8] = token.try_into().map_err(|_| {
                 HistoryReadError::Internal(format!("invalid next page token {token:?}"))
             })?;
-            i64::from_le_bytes(bytes).checked_add(1).ok_or_else(|| {
-                HistoryReadError::Internal("history node cursor overflow".into())
-            })?
+            i64::from_le_bytes(bytes)
+                .checked_add(1)
+                .ok_or_else(|| HistoryReadError::Internal("history node cursor overflow".into()))?
         } else {
             min_node
         };
         let rows = self.select_nodes(shard_id, tree_id, branch_id, min_node, max_node, limit)?;
-        let next = rows.last().filter(|_| rows.len() as i64 >= limit)
+        let next = rows
+            .last()
+            .filter(|_| rows.len() as i64 >= limit)
             .map(|row| row.node_id.to_le_bytes().to_vec());
         Ok((rows, next))
     }
@@ -176,7 +178,13 @@ fn store_read(
     mut last_txn_id: i64,
 ) -> Result<(Vec<HistoryNodeRowData>, Option<Vec<u8>>, i64, i64)> {
     let (rows, next) = store.select_page(
-        shard_id, tree, branch, min_node, max_node, page_size, store_token.as_deref(),
+        shard_id,
+        tree,
+        branch,
+        min_node,
+        max_node,
+        page_size,
+        store_token.as_deref(),
     )?;
     if rows.is_empty() {
         return Ok((Vec::new(), next, last_node_id, last_txn_id));
@@ -398,6 +406,37 @@ mod tests {
             next_page_token: token,
             shard_id: 0,
         }
+    }
+
+    #[derive(Debug)]
+    struct CassandraPages;
+
+    impl HistoryNodeStore for CassandraPages {
+        fn select_nodes(&self, _: i32, _: [u8; 16], _: [u8; 16], _: i64, _: i64, _: i64) -> Result<Vec<HistoryNodeRow>> {
+            panic!("native pages must not use the SQL node cursor")
+        }
+
+        fn select_page(&self, _: i32, _: [u8; 16], _: [u8; 16], min: i64, _: i64, _: i64, token: Option<&[u8]>) -> Result<(Vec<HistoryNodeRow>, Option<Vec<u8>>)> {
+            assert_eq!(min, 1);
+            match token {
+                None => Ok((vec![row(1, 2, 10)], Some(vec![255, 7, 0]))),
+                Some([255, 7, 0]) => Ok((vec![row(1, 2, 9), row(3, 2, 11)], None)),
+                other => panic!("unexpected opaque token {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn native_paging_resumes_within_node_and_skips_older_transaction() {
+        let mut req = request(vec![]);
+        req.page_size = 1;
+        let first = read_history_branch(&CassandraPages, &req).unwrap();
+        assert_eq!(first.events().len(), 2);
+        assert!(!first.next_page_token.is_empty());
+        req.next_page_token = first.next_page_token;
+        let second = read_history_branch(&CassandraPages, &req).unwrap();
+        assert_eq!(second.events().iter().map(|e| e.event_id).collect::<Vec<_>>(), vec![3, 4]);
+        assert!(second.next_page_token.is_empty());
     }
 
     #[test]

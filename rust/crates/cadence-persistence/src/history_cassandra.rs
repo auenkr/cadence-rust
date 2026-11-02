@@ -25,16 +25,28 @@ struct Query {
 }
 
 impl Query {
-    fn new(tree: [u8; 16], branch: [u8; 16], min: i64, max: i64, size: i64, token: Option<&[u8]>) -> Result<Self> {
-        let size = i32::try_from(size).ok().filter(|size| *size > 0)
-            .ok_or_else(|| HistoryReadError::InvalidRequest("invalid Cassandra history page size".into()))?;
+    fn new(
+        tree: [u8; 16],
+        branch: [u8; 16],
+        min: i64,
+        max: i64,
+        size: i64,
+        token: Option<&[u8]>,
+    ) -> Result<Self> {
+        let size = i32::try_from(size)
+            .ok()
+            .filter(|size| *size > 0)
+            .ok_or_else(|| {
+                HistoryReadError::InvalidRequest("invalid Cassandra history page size".into())
+            })?;
         Ok(Self {
             tree: uuid::Uuid::from_bytes(tree),
             branch: uuid::Uuid::from_bytes(branch),
             min,
             max,
             size,
-            token: token.filter(|t| !t.is_empty())
+            token: token
+                .filter(|t| !t.is_empty())
                 .map(|t| PagingState::new_from_raw_bytes(t.to_vec()))
                 .unwrap_or_else(PagingState::start),
         })
@@ -44,7 +56,12 @@ impl Query {
 fn history_row(node_id: i64, txn_id: i64, data: Vec<u8>, encoding: String) -> HistoryNodeRow {
     // No SQL sign conversion: Go's nosqlHistoryStore passes TransactionID
     // straight to Cassandra, whose clustering order returns newest txn first.
-    HistoryNodeRow { node_id, txn_id, data, encoding }
+    HistoryNodeRow {
+        node_id,
+        txn_id,
+        data,
+        encoding,
+    }
 }
 
 #[derive(Debug)]
@@ -62,16 +79,24 @@ impl CassandraHistoryNodeStore {
         statement.set_page_size(query.size);
         statement.set_consistency(self.driver.default_consistency());
         let session = self.driver.session();
-        let (result, response) = self.driver.run(session.query_single_page(
-            statement, (query.tree, query.branch, query.min, query.max), query.token,
-        )).map_err(internal)?;
+        let (result, response) = self
+            .driver
+            .run(session.query_single_page(
+                statement,
+                (query.tree, query.branch, query.min, query.max),
+                query.token,
+            ))
+            .map_err(internal)?;
         let next = match response.into_paging_control_flow() {
             std::ops::ControlFlow::Continue(state) => state.as_bytes_slice().map(|b| b.to_vec()),
             std::ops::ControlFlow::Break(()) => None,
         };
         let result = result.into_rows_result().map_err(internal)?;
         let mut rows = Vec::new();
-        for row in result.rows::<(i64, i64, Vec<u8>, String)>().map_err(internal)? {
+        for row in result
+            .rows::<(i64, i64, Vec<u8>, String)>()
+            .map_err(internal)?
+        {
             let (node, txn, data, encoding) = row.map_err(internal)?;
             rows.push(history_row(node, txn, data, encoding));
         }
@@ -80,11 +105,29 @@ impl CassandraHistoryNodeStore {
 }
 
 impl HistoryNodeStore for CassandraHistoryNodeStore {
-    fn select_nodes(&self, shard: i32, tree: [u8; 16], branch: [u8; 16], min: i64, max: i64, limit: i64) -> Result<Vec<HistoryNodeRow>> {
-        self.select_page(shard, tree, branch, min, max, limit, None).map(|(rows, _)| rows)
+    fn select_nodes(
+        &self,
+        shard: i32,
+        tree: [u8; 16],
+        branch: [u8; 16],
+        min: i64,
+        max: i64,
+        limit: i64,
+    ) -> Result<Vec<HistoryNodeRow>> {
+        self.select_page(shard, tree, branch, min, max, limit, None)
+            .map(|(rows, _)| rows)
     }
 
-    fn select_page(&self, _shard: i32, tree: [u8; 16], branch: [u8; 16], min: i64, max: i64, limit: i64, token: Option<&[u8]>) -> Result<Page> {
+    fn select_page(
+        &self,
+        _shard: i32,
+        tree: [u8; 16],
+        branch: [u8; 16],
+        min: i64,
+        max: i64,
+        limit: i64,
+        token: Option<&[u8]>,
+    ) -> Result<Page> {
         self.read_page(Query::new(tree, branch, min, max, limit, token)?)
     }
 }
