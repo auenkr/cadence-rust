@@ -12,6 +12,8 @@ use sqlparser::{
 use std::{cmp::Ordering, collections::HashSet};
 
 type Result<T> = std::result::Result<T, BadRequestError>;
+/// Go `persistence.ErrVisibilityOperationNotSupported`.
+pub const OPERATION_NOT_SUPPORTED: &str = "Operation is not supported";
 fn bad(message: impl Into<String>) -> BadRequestError {
     BadRequestError::new(message)
 }
@@ -84,7 +86,7 @@ fn field(row: &WorkflowExecutionInfo, key: &str, known: &HashSet<String>) -> Res
             .map(|s| Value::from(s.clone()))
             .unwrap_or(Value::Null),
         "DomainID" | "NumClusters" | "ClusterAttributeScope" | "ClusterAttributeName" => {
-            return Err(bad("This cluster visibility field has not been ported."))
+            return Err(bad(OPERATION_NOT_SUPPORTED))
         }
         "IsCron" => Value::from(row.is_cron),
         "StartTime" => time_value(row.start_time),
@@ -93,7 +95,7 @@ fn field(row: &WorkflowExecutionInfo, key: &str, known: &HashSet<String>) -> Res
         "UpdateTime" => time_value(row.update_time),
         "ScheduledExecutionTime" => time_value(row.scheduled_execution_time),
         "CustomStringField" | "CustomDomain" | "Operator" => {
-            return Err(bad("Full text visibility queries have not been ported."))
+            return Err(bad(OPERATION_NOT_SUPPORTED))
         }
         _ if known.contains(key) => row
             .search_attributes
@@ -120,7 +122,7 @@ fn literal(v: &SqlValue) -> Result<Value> {
         }
         SqlValue::Boolean(v) => Ok(Value::from(*v)),
         SqlValue::Null => Ok(Value::Null),
-        _ => Err(bad("Unsupported visibility literal.")),
+        _ => Err(bad(OPERATION_NOT_SUPPORTED)),
     }
 }
 fn normalize(key: Option<&str>, value: Value) -> Result<Value> {
@@ -220,7 +222,7 @@ fn evaluation(expr: &Expr, row: &WorkflowExecutionInfo, known: &HashSet<String>)
                 .and_then(i64::checked_neg)
                 .map(Value::from)
                 .ok_or_else(|| bad("Invalid negative numeric literal.")),
-            _ => Err(bad("Unsupported visibility unary operator.")),
+            _ => Err(bad(OPERATION_NOT_SUPPORTED)),
         },
         Expr::BinaryOp { left, op, right } => {
             let a = evaluation(left, row, known)?;
@@ -253,7 +255,7 @@ fn evaluation(expr: &Expr, row: &WorkflowExecutionInfo, known: &HashSet<String>)
                         }
                     }
                 }
-                _ => return Err(bad("Unsupported visibility binary operator.")),
+                _ => return Err(bad(OPERATION_NOT_SUPPORTED)),
             };
             Ok(Value::from(value))
         }
@@ -300,7 +302,7 @@ fn evaluation(expr: &Expr, row: &WorkflowExecutionInfo, known: &HashSet<String>)
             ..
         } => {
             if escape_char.is_some() {
-                return Err(bad("LIKE ESCAPE has not been ported."));
+                return Err(bad(OPERATION_NOT_SUPPORTED));
             }
             let a = evaluation(expr, row, known)?;
             let b = evaluation(pattern, row, known)?;
@@ -314,7 +316,7 @@ fn evaluation(expr: &Expr, row: &WorkflowExecutionInfo, known: &HashSet<String>)
             };
             Ok(Value::from(matched ^ negated))
         }
-        _ => Err(bad("This visibility expression has not been ported.")),
+        _ => Err(bad(OPERATION_NOT_SUPPORTED)),
     }
 }
 
@@ -336,7 +338,7 @@ pub fn apply(rows: &mut Vec<WorkflowExecutionInfo>, query: &str) -> Result<()> {
         return Err(bad("Invalid visibility query."));
     };
     let SetExpr::Select(select) = q.body.as_ref() else {
-        return Err(bad("Visibility set operations have not been ported."));
+        return Err(bad(OPERATION_NOT_SUPPORTED));
     };
     if q.limit.is_some()
         || q.offset.is_some()
@@ -345,7 +347,7 @@ pub fn apply(rows: &mut Vec<WorkflowExecutionInfo>, query: &str) -> Result<()> {
         || !matches!(&select.group_by,sqlparser::ast::GroupByExpr::Expressions(items,_) if items.is_empty())
     {
         return Err(bad(
-            "Visibility aggregation and explicit pagination clauses have not been ported.",
+            OPERATION_NOT_SUPPORTED,
         ));
     }
     let mut known: HashSet<_> = cadence_api::search_attributes::default_indexed_keys()
@@ -379,7 +381,7 @@ pub fn apply(rows: &mut Vec<WorkflowExecutionInfo>, query: &str) -> Result<()> {
             .map(|o| {
                 if o.nulls_first.is_some() {
                     return Err(bad(
-                        "Explicit visibility NULLS ordering has not been ported.",
+                        OPERATION_NOT_SUPPORTED,
                     ));
                 }
                 let key = name(&o.expr)
@@ -665,5 +667,15 @@ mod page_tests {
         )
         .unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn unsupported_constructs_use_go_operation_not_supported_text() {
+        for query in ["WorkflowID = 'a' LIMIT 1", "WorkflowID LIKE 'a' ESCAPE 'x'"] {
+            let mut rows = Vec::new();
+            if let Err(e) = apply(&mut rows, query) {
+                assert_eq!(e.message, OPERATION_NOT_SUPPORTED, "{query}");
+            }
+        }
     }
 }

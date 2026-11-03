@@ -735,6 +735,42 @@ pub fn string_list(values: impl PropertyValueSource) -> Vec<String> {
     }
 }
 
+/// Go `GetListProperty` consumers that inspect each element on its own
+/// (e.g. `quotas.CallerBypass`): non-string entries are skipped instead of
+/// rejecting the whole list; a missing or non-list value yields the default.
+pub fn string_list_lenient(values: impl PropertyValueSource) -> Vec<String> {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::StringList,
+        Value::Array(Vec::new()),
+        &BTreeMap::new(),
+    ) {
+        return runtime_typed(result, (), "string list")
+            .and_then(|v| {
+                v.as_array().map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+    }
+    match selected(values.snapshot_values(), None).and_then(|value| {
+        value.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+    }) {
+        Some(value) => value,
+        None => {
+            report_read_error("string list", "value was missing or not a list");
+            Vec::new()
+        }
+    }
+}
+
 /// Go `GetMapProperty` semantics used by frontend required-domain-data checks.
 /// An absent property is distinct from an explicitly configured empty map so
 /// callers can retain the service-config default only for the former.
@@ -974,5 +1010,14 @@ mod tests {
             assert!(string_list(&[entry(value, &[])]).is_empty());
         }
         assert!(string_list(&[entry(json!(["a"]), &[("domainName", json!("domain"))])]).is_empty());
+    }
+
+    #[test]
+    fn string_list_lenient_skips_non_strings_like_caller_bypass() {
+        assert_eq!(
+            string_list_lenient(&[entry(json!(["a", 1, "b", null]), &[])]),
+            vec!["a", "b"]
+        );
+        assert!(string_list_lenient(&[entry(json!("a"), &[])]).is_empty());
     }
 }

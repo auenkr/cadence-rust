@@ -1016,7 +1016,15 @@ pub fn build_workflow_api(
     };
     // Go: NewMultiStageRateLimiter(dynamic(instance rps), perMember(global
     // domain rps, per-instance domain rps), perMember(task list ...)).
-    // Member count is 1 until the Frontend ring size is plumbed through.
+    // Member count is the live Frontend ring size (Go `resolver.MemberCount`);
+    // lookup errors or an empty ring fall back to the instance limit.
+    let member_slot = ctx.state.admin.membership.clone();
+    let member_count = move || -> usize {
+        member_slot
+            .get()
+            .and_then(|m| m.members("cadence-frontend").ok())
+            .map_or(0, |m| m.len())
+    };
     let read_tl_rps = |key: &'static str, default: i64| {
         let overlay = overlay.clone();
         move |domain: &str, task_list: &str| -> f64 {
@@ -1033,6 +1041,7 @@ pub fn build_workflow_api(
         }
     };
     let unlimited = crate::wrappers::quota_policy::UNLIMITED_RPS as i64;
+    let member_count = std::sync::Arc::new(member_count);
     let policy = |global: (&'static str, i64),
                   domain: (&'static str, i64),
                   global_domain: &'static str,
@@ -1041,15 +1050,16 @@ pub fn build_workflow_api(
         let global_rps = read_rps(global.0, global.1, false);
         let domain_rps = read_rps(domain.0, domain.1, true);
         let global_domain_rps = read_rps(global_domain, unlimited, true);
+        let (count_a, count_b) = (member_count.clone(), member_count.clone());
         let mut p = crate::wrappers::quota_policy::TokenBucketPolicy::new(
             std::sync::Arc::new(move || global_rps("")),
-            std::sync::Arc::new(move |d: &str| per_member(global_domain_rps(d), domain_rps(d), 1)),
+            std::sync::Arc::new(move |d: &str| per_member(global_domain_rps(d), domain_rps(d), (*count_a)())),
         );
         if let Some((instance_key, global_key, default)) = tl {
             let instance = read_tl_rps(instance_key, default);
             let shared = read_tl_rps(global_key, unlimited);
             p = p.with_task_list_rps(std::sync::Arc::new(move |d: &str, t: &str| {
-                per_member(shared(d, t), instance(d, t), 1)
+                per_member(shared(d, t), instance(d, t), (*count_b)())
             }));
         }
         std::sync::Arc::new(p) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
@@ -1106,7 +1116,7 @@ pub fn build_workflow_api(
                 overlay.lock().map_or_else(
                     |_| Vec::new(),
                     |o| {
-                        cadence_persistence::dynamic_config::string_list(
+                        cadence_persistence::dynamic_config::string_list_lenient(
                             o.property_values("system.rateLimiterBypassCallerTypes"),
                         )
                     },
