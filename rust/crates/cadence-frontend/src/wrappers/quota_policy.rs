@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use cadence_api::errors::CadenceError;
 
+use crate::global_ratelimit::{Collection, Decision};
 use super::ratelimited::{CallerBypass, DomainNameLookup, Policy, QuotaInfo, WaitFailure};
 
 /// Go's `quotas.UnlimitedRPS`.
@@ -64,6 +65,8 @@ pub struct TokenBucketPolicy {
     domains: Mutex<HashMap<String, Bucket>>,
     task_list_rps: Option<TaskListRpsSource>,
     task_lists: Mutex<HashMap<(String, String), Bucket>>,
+    /// Go global-ratelimiter collections (domain stage, task-list stage).
+    collections: Option<(Arc<Collection>, Option<Arc<Collection>>)>,
 }
 
 impl TokenBucketPolicy {
@@ -76,7 +79,19 @@ impl TokenBucketPolicy {
             domains: Mutex::new(HashMap::new()),
             task_list_rps: None,
             task_lists: Mutex::new(HashMap::new()),
+            collections: None,
         }
+    }
+
+    /// Route the domain (and optionally task-list) stage through Go's global
+    /// ratelimiter collections; keys whose mode is disabled use the local bucket.
+    pub fn with_global_collections(
+        mut self,
+        domain: Arc<Collection>,
+        task_list: Option<Arc<Collection>>,
+    ) -> Self {
+        self.collections = Some((domain, task_list));
+        self
     }
 
     /// Add Go's task-list stage (`MultiStageRateLimiter.taskListLimiters`),
@@ -90,6 +105,23 @@ impl TokenBucketPolicy {
     /// until both would have a token.
     fn reserve(&self, info: &QuotaInfo) -> Result<(), Duration> {
         let now = Instant::now();
+        let (mut domain_external, mut task_list_external) = (false, false);
+        if let Some((domain_coll, tl_coll)) = &self.collections {
+            if !info.task_list.is_empty() {
+                if let Some(tl_coll) = tl_coll {
+                    match tl_coll.acquire(&format!("{}/{}", info.domain, info.task_list)) {
+                        Decision::Decided(Err(d)) => return Err(d),
+                        Decision::Decided(Ok(())) => task_list_external = true,
+                        Decision::Disabled => {}
+                    }
+                }
+            }
+            match domain_coll.acquire(&info.domain) {
+                Decision::Decided(Err(d)) => return Err(d),
+                Decision::Decided(Ok(())) => domain_external = true,
+                Decision::Disabled => {}
+            }
+        }
         let global_rps = (self.global_rps)();
         let domain_rps = (self.domain_rps)(&info.domain);
         let task_list_rps = match (&self.task_list_rps, info.task_list.is_empty()) {
@@ -111,12 +143,17 @@ impl TokenBucketPolicy {
             bucket.refill(rps, now);
             (bucket, rps)
         });
-        let task_list_ok = task_list.as_ref().is_none_or(|(b, _)| b.tokens >= 1.0);
-        if global.tokens >= 1.0 && domain.tokens >= 1.0 && task_list_ok {
+        let task_list_ok =
+            task_list_external || task_list.as_ref().is_none_or(|(b, _)| b.tokens >= 1.0);
+        if global.tokens >= 1.0 && (domain_external || domain.tokens >= 1.0) && task_list_ok {
             global.tokens -= 1.0;
-            domain.tokens -= 1.0;
+            if !domain_external {
+                domain.tokens -= 1.0;
+            }
             if let Some((bucket, _)) = task_list {
-                bucket.tokens -= 1.0;
+                if !task_list_external {
+                    bucket.tokens -= 1.0;
+                }
             }
             return Ok(());
         }
@@ -129,9 +166,10 @@ impl TokenBucketPolicy {
         };
         let task_list_need = task_list
             .as_ref()
+            .filter(|_| !task_list_external)
             .map_or(0.0, |(b, rps)| need(b.tokens, *rps));
         let seconds = need(global.tokens, global_rps)
-            .max(need(domain.tokens, domain_rps))
+            .max(if domain_external { 0.0 } else { need(domain.tokens, domain_rps) })
             .max(task_list_need);
         Err(Duration::from_secs_f64(seconds.max(0.001)))
     }

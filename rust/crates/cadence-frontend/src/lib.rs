@@ -20,6 +20,7 @@ pub mod handler_domain;
 pub mod handler_schedule;
 pub mod handler_workflow;
 pub mod handler_workflow_async;
+pub mod global_ratelimit;
 pub mod handler_workflow_history;
 pub mod history_client;
 pub mod lifecycle;
