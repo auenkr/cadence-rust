@@ -347,7 +347,11 @@ try:
         r = subprocess.run(cli_ar(True, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
         record('archival-describe-after-disable', r.returncode == 0 and 'Disabled' in r.stdout and vis_uri in r.stdout, r.stdout + r.stderr)
         # Domain without archival: ListArchived must fail with Go's domain gating error.
-        r = subprocess.run([*cli_t, '--domain', dom_t, 'workflow', 'listarchived', '--query', "WorkflowType = 'x'"], capture_output=True, text=True, timeout=60)
+        dom_off = 'fe-gate-noarch-' + secrets.token_hex(3)
+        run('archival-register-disabled-domain', [*cli_t, '--domain', dom_off, 'domain', 'register', '--retention', '1',
+            '--history_archival_status', 'disabled', '--visibility_archival_status', 'disabled'])
+        time.sleep(3)
+        r = subprocess.run([*cli_t, '--domain', dom_off, 'workflow', 'listarchived', '--query', "WorkflowType = 'x'"], capture_output=True, text=True, timeout=60)
         record('archival-list-archived-domain-not-configured', r.returncode != 0 and 'Domain is not configured for visibility archival' in r.stdout + r.stderr, r.stdout + r.stderr)
         # Invalid status flag handled client-side by Go CLI; invalid cluster-state errors come from the frontend above.
     # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)
