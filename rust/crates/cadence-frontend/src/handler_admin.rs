@@ -188,6 +188,7 @@ pub fn describe_cluster_response(
 pub struct Handler {
     dynamic_config: Arc<Mutex<DynamicConfigOverlay>>,
     custom_search_attributes: Arc<Mutex<std::collections::HashMap<String, IndexedValueType>>>,
+    es: Option<cadence_service_core::es_mapping::EsVisibility>,
 }
 
 impl Handler {
@@ -199,6 +200,7 @@ impl Handler {
         Self {
             dynamic_config: state.admin.dynamic_config.clone(),
             custom_search_attributes: state.admin.custom_search_attributes.clone(),
+            es: state.admin.es.clone(),
         }
     }
 
@@ -211,6 +213,7 @@ impl Handler {
         let admin = cadence_service_core::admin::AdminState {
             dynamic_config: self.dynamic_config.clone(),
             custom_search_attributes: self.custom_search_attributes.clone(),
+            es: self.es.clone(),
             ..Default::default()
         };
         cadence_service_core::admin::add_search_attribute_core(
@@ -340,6 +343,80 @@ mod tests {
         assert!(handler
             .get_dynamic_config("worker.enableScheduler", &[], false)
             .is_err());
+    }
+
+    #[derive(Debug, Default)]
+    struct FakeEs {
+        calls: Mutex<Vec<String>>,
+        fail_put: bool,
+    }
+    impl cadence_service_core::es_mapping::EsMappingClient for FakeEs {
+        fn put_mapping(
+            &self,
+            index: &str,
+            key: &str,
+            es_type: &str,
+        ) -> Result<(), cadence_service_core::es_mapping::EsError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("put {index} {key} {es_type}"));
+            if self.fail_put {
+                Err(cadence_service_core::es_mapping::EsError::Other(
+                    "down".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        fn create_index(&self, _: &str) -> Result<(), cadence_service_core::es_mapping::EsError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn add_search_attribute_updates_es_mapping_and_surfaces_failures() {
+        let request = AddSearchAttributeRequest {
+            search_attribute: Some(std::collections::HashMap::from([(
+                "CustomInt".to_string(),
+                IndexedValueType::Int,
+            )])),
+            security_token: String::new(),
+        };
+        let ok = Arc::new(FakeEs::default());
+        let handler = Handler {
+            es: Some(cadence_service_core::es_mapping::EsVisibility {
+                client: ok.clone(),
+                index: "vis".into(),
+            }),
+            ..Handler::default()
+        };
+        handler.add_search_attributes(Some(&request)).unwrap();
+        assert_eq!(
+            ok.calls.lock().unwrap().as_slice(),
+            ["put vis CustomInt long"]
+        );
+
+        let bad = Arc::new(FakeEs {
+            fail_put: true,
+            ..Default::default()
+        });
+        let handler = Handler {
+            es: Some(cadence_service_core::es_mapping::EsVisibility {
+                client: bad,
+                index: "vis".into(),
+            }),
+            ..Handler::default()
+        };
+        let err = handler.add_search_attributes(Some(&request)).unwrap_err();
+        match err {
+            AdminError::Internal(e) => {
+                assert!(e.message.starts_with("Failed to update ES mapping, err:"))
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        // Go updates the dynamic config before touching ES, so the key stays whitelisted.
+        assert!(handler.search_attributes().contains_key("CustomInt"));
     }
 
     #[test]

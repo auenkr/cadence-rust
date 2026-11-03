@@ -8,9 +8,11 @@ RUN_ID="postgres-lane-$(date -u +%Y%m%dT%H%M%S)-$$"
 CONTAINER="cadence-rust-gate-$RUN_ID"
 mkdir -p "$ARTIFACTS"
 STARTED=0
+source "$ROOT/tests/gates/lib-kafka.sh"
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  kafka_cleanup
   if (( STARTED )); then
     docker exec "$CONTAINER" psql -U postgres -d cadence_visibility -c 'SELECT workflow_id, close_status FROM executions_visibility LIMIT 20' > "$ARTIFACTS/postgres-visibility.txt" 2>&1 || true
     docker logs "$CONTAINER" > "$ARTIFACTS/postgres-container.log" 2>&1 || true
@@ -36,7 +38,8 @@ export CADENCE_POSTGRES_DOCKER_CONTAINER="$CONTAINER"
 export CADENCE_POSTGRES_ADDR="127.0.0.1:${PORT}" CADENCE_POSTGRES_USER=postgres
 export CADENCE_POSTGRES_PASSWORD=cadence CADENCE_POSTGRES_DATABASE=cadence
 export CADENCE_POSTGRES_VISIBILITY_DATABASE=cadence_visibility CADENCE_POSTGRES_SSLMODE=disable
-python3 "$ROOT/tests/gates/run-frontend-gate.py" --database postgres --out "$ARTIFACTS/run" "$@"
+kafka_start
+python3 "$ROOT/tests/gates/run-frontend-gate.py" --database postgres --out "$ARTIFACTS/run" "${KAFKA_ARGS[@]}" "$@"
 status=$?
 echo "$status" > "$ARTIFACTS/lane.exit"
 exit "$status"

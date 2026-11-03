@@ -2,6 +2,7 @@
 //! metrics sinks, lifecycle helpers and the legacy in-process `AppState`.
 pub mod admin;
 pub mod admin_replication;
+pub mod es_mapping;
 pub mod cli;
 pub mod config;
 pub mod frontend_lifecycle;

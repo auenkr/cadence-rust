@@ -8,7 +8,7 @@ on:
         options: [mysql, postgres, cassandra]
         default: mysql
       kafka:
-        description: Also run the async workflow (Kafka) acceptance steps (mysql lane only)
+        description: Also run the async workflow (Kafka) acceptance steps
         type: boolean
         default: true
       two_history:
@@ -20,7 +20,7 @@ on:
         default: fe-integ
 
 concurrency:
-  group: frontend-mixed-gate-${{ github.ref }}
+  group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}
   cancel-in-progress: true
 
 jobs:

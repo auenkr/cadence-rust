@@ -771,6 +771,7 @@ async fn run_with_lifecycle(
                             &cluster_name,
                             std::sync::Arc::new(|| false),
                             std::sync::Arc::new(|| "thriftrw".to_string()),
+                            false,
                         )
                         .map_err(|e| e.to_string())?;
                         let task_store = stores.task_store;
@@ -1413,6 +1414,10 @@ async fn run_with_lifecycle(
                 }
                 state.admin.persistence_description.advanced_visibility =
                     !cfg.persistence.advanced_visibility_store.is_empty();
+                // Go setupVisibilityClients: a missing/invalid ES store is fatal at startup.
+                state.admin.es =
+                    cadence_service_core::es_mapping::from_persistence(&cfg.persistence)
+                        .map_err(|e| anyhow::anyhow!(e))?;
             }
             if let Some(provider) = &frontend_ringpop_provider {
                 state.admin.membership.set(Some(std::sync::Arc::new(
@@ -1556,6 +1561,16 @@ async fn run_with_lifecycle(
                         )
                     });
                 let task_store_serialization_encoding = serialization_encoding.clone();
+                // Go (frontend/service.go + persistence/client/factory.go): evaluated once at store
+                // construction; only the Frontend reads DB visibility.
+                let read_closed_v2 = run_frontend && {
+                    let overlay = state.admin.dynamic_config.lock().expect("admin lock");
+                    cadence_persistence::dynamic_config::boolean(
+                        overlay.property_values("system.enableReadFromClosedExecutionV2"),
+                        None,
+                        false,
+                    )
+                };
                 eprintln!("Matching startup: opening configured stores");
                 let mut stores = tokio::task::spawn_blocking(move || {
                     crate::matching_task_store::open_configured_default_store(
@@ -1563,6 +1578,7 @@ async fn run_with_lifecycle(
                         &cluster_name,
                         all_consistency_delete,
                         task_store_serialization_encoding,
+                        read_closed_v2,
                     )
                 })
                 .await

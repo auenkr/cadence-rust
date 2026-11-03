@@ -230,6 +230,7 @@ pub fn open_configured_default_store(
     active_cluster_name: &str,
     all_consistency_delete: Arc<dyn Fn() -> bool + Send + Sync>,
     serialization_encoding: Arc<dyn Fn() -> String + Send + Sync>,
+    read_closed_executions_v2: bool,
 ) -> anyhow::Result<ConfiguredMatchingStores> {
     let (name, datastore) = configured_default_datastore(persistence)?;
     if let Some(nosql) = datastore.nosql.as_ref() {
@@ -253,8 +254,8 @@ pub fn open_configured_default_store(
         let visibility: Arc<dyn cadence_persistence::visibility_reader::VisibilityStore> = Arc::new(
             cadence_persistence::visibility_cassandra::CassandraVisibilityStore::new(
                 visibility_driver,
-                // Go reads system.enableReadFromClosedExecutionV2 (default false).
-                false,
+                // Go factory evaluates system.enableReadFromClosedExecutionV2 once, at construction.
+                read_closed_executions_v2,
             ),
         );
         let domain_all_consistency_delete = all_consistency_delete.clone();
@@ -750,6 +751,7 @@ mod tests {
             "active",
             Arc::new(|| false),
             Arc::new(|| "thriftrw".into()),
+            false,
         )
         .unwrap();
         let legacy_key = TaskListKey {

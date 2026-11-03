@@ -573,6 +573,37 @@ pub struct DatastoreConfig {
     pub sharded_nosql: Option<ShardedNosqlConfig>,
     #[serde(default)]
     pub sql: Option<SqlConfig>,
+    /// Go `DataStore.ElasticSearch` (`elasticsearch:`), used by advanced visibility.
+    #[serde(default)]
+    pub elasticsearch: Option<ElasticSearchConfig>,
+}
+
+/// Subset of Go `config.ElasticSearchConfig` needed for admin index-mapping updates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ElasticSearchConfig {
+    #[serde(default)]
+    pub url: EsUrl,
+    #[serde(default)]
+    pub indices: HashMap<String, String>,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default, rename = "customHeaders")]
+    pub custom_headers: HashMap<String, String>,
+}
+
+/// Go `url.URL` as YAML-decoded by Cadence (`scheme`/`host`/`path`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EsUrl {
+    #[serde(default)]
+    pub scheme: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub path: String,
 }
 
 /// Go `config.ShardedNoSQL`; only the fields validated at startup are typed.

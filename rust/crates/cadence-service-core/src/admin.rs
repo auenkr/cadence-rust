@@ -581,6 +581,8 @@ pub struct AdminState {
     pub custom_search_attributes: Arc<Mutex<HashMap<String, cadence_api::enums::IndexedValueType>>>,
     pub membership: MembershipSlot,
     pub persistence_description: PersistenceDescription,
+    /// Elasticsearch/OpenSearch mapping client; None when advanced visibility is not configured.
+    pub es: Option<crate::es_mapping::EsVisibility>,
 }
 
 // ---------------------------------------------------------------------------
@@ -896,8 +898,8 @@ pub fn valid_search_attributes(
 /// Go admin `AddSearchAttribute`: permission check, empty check, reject system
 /// keys and type conflicts, then update the live `ValidSearchAttributes`
 /// dynamic config (Go only warns when the config client cannot persist) and the
-/// custom registry. The Elasticsearch mapping update is performed only when
-/// advanced visibility is configured, which this service does not provide.
+/// custom registry. The Elasticsearch/OpenSearch mapping update runs only when
+/// advanced visibility is configured (`AdminState::es`).
 pub fn add_search_attribute_core(
     admin: &AdminState,
     security_token: &str,
@@ -956,6 +958,11 @@ pub fn add_search_attribute_core(
         eprintln!("warning: Failed to update dynamic config, err: {error:?}");
     }
     drop(overlay);
+    // Go: when advanced visibility is configured, update the ES/OpenSearch mapping (never removed).
+    if let Some(es) = &admin.es {
+        crate::es_mapping::apply_search_attributes(es, attrs)
+            .map_err(|crate::es_mapping::ApplyError::Internal(message)| Internal(message))?;
+    }
     admin
         .custom_search_attributes
         .lock()
