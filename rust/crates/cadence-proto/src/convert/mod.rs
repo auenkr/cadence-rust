@@ -444,8 +444,8 @@ pub fn describe(v: st::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflow
                 state: a.state.map_or(0, |s| s as i32 + 1),
                 attempt: a.attempt,
                 maximum_attempts: a.maximum_attempts,
-                scheduled_time: a.scheduled_timestamp.map(timestamp),
-                last_started_time: a.last_started_timestamp.map(timestamp),
+                scheduled_time: a.scheduled_timestamp.map(timestamp_nanos),
+                last_started_time: a.last_started_timestamp.map(timestamp_nanos),
                 heartbeat_details: payload(a.heartbeat_details),
                 schedule_id: a.schedule_id,
                 last_failure: a.last_failure_reason.map(|reason| p::Failure {
@@ -471,10 +471,10 @@ pub fn describe(v: st::DescribeWorkflowExecutionResponse) -> p::DescribeWorkflow
             .collect(),
         pending_decision: v.pending_decision.map(|d| p::PendingDecisionInfo {
             state: d.state.map_or(0, |s| s as i32 + 1),
-            scheduled_time: d.scheduled_timestamp.map(timestamp),
-            started_time: d.started_timestamp.map(timestamp),
+            scheduled_time: d.scheduled_timestamp.map(timestamp_nanos),
+            started_time: d.started_timestamp.map(timestamp_nanos),
             attempt: d.attempt as i32,
-            original_scheduled_time: d.original_scheduled_timestamp.map(timestamp),
+            original_scheduled_time: d.original_scheduled_timestamp.map(timestamp_nanos),
             schedule_id: d.schedule_id,
         }),
     }

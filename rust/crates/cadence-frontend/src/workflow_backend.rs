@@ -920,6 +920,7 @@ pub fn build_workflow_api(
         metadata.current_cluster_name.clone(),
         crate::wrappers::redirection_runtime::RemoteFrontends::from_metadata(metadata),
     );
+    let shared_metrics_sink = frontend_metrics_sink(&ctx.config);
     let handler = install_async_publisher(
         crate::handler_workflow::Handler::new(forwarding_backend),
         async_domains,
@@ -928,7 +929,7 @@ pub fn build_workflow_api(
     .with_domain_lookup(lookup)
     .with_archived_history_reader(archived_history)
     .with_archived_visibility_reader(archived_visibility)
-    .with_metrics_sink(frontend_metrics_sink(&ctx.config))
+    .with_metrics_sink(shared_metrics_sink.clone())
     .with_rate_limit_policies(rate_limit)
     .with_access_control(std::sync::Arc::new(
         crate::wrappers::accesscontrolled::HandlerAuthorization::new(
@@ -969,7 +970,7 @@ pub fn build_workflow_api(
                     manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
                     metrics: std::sync::Arc::new(
                         crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
-                            frontend_metrics_sink(&ctx.config),
+                            shared_metrics_sink.clone(),
                         ),
                     ),
                     requests: crate::wrappers::redirection_runtime::DomainCacheResolver::new(

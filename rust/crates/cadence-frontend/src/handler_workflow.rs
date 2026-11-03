@@ -203,6 +203,18 @@ pub trait WorkflowBackend: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>> {
         self.invoke(operation, request)
     }
+
+    /// Forward the unmodified public request to a remote Frontend cluster.
+    /// Returns `None` when `target_cluster` is local (or unsupported), so the
+    /// caller continues with the internal History/Matching request shape.
+    fn invoke_remote_public<'a>(
+        &'a self,
+        _operation: WorkflowOperation,
+        _request: &Value,
+        _target_cluster: Option<&str>,
+    ) -> Option<WorkflowFuture<'a>> {
+        None
+    }
 }
 
 /// Synchronous name-to-UUID lookup supplied by Frontend's domain cache. Go's
@@ -1114,6 +1126,12 @@ impl<B: WorkflowBackend> Handler<B> {
             // Go returns an empty poll result if its isolation wait exhausted
             // the long-poll budget.
             return Ok(serde_json::json!({}));
+        }
+        if let Some(remote) =
+            self.backend
+                .invoke_remote_public(operation, &request, target_cluster.as_deref())
+        {
+            return remote.await;
         }
         let public_request = request.clone();
         let request = self.prepare_backend_request(operation, request, caller)?;

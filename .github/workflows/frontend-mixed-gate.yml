@@ -15,6 +15,10 @@ on:
         description: Run two Go History hosts and kill/restart one during SDK traffic
         type: boolean
         default: false
+      two_cluster:
+        description: Run the two-cluster redirection gate instead (Rust FE+Matching cluster A vs Go cluster B)
+        type: boolean
+        default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
         default: fe-integ
@@ -66,7 +70,13 @@ jobs:
           CADENCE_GATE_TWO_HISTORY: ${{ inputs.two_history }}
         run: |
           set +e
-          if [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
+          if [ "${{ inputs.two_cluster }}" = true ]; then
+            tests/gates/run-frontend-two-cluster-lane.sh out/gate \
+              --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
+              --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
+              --go-cli "$GITHUB_WORKSPACE/out/cadence-cli" \
+              --rust-root "$GITHUB_WORKSPACE/rustsrc" > out/gate.log 2>&1
+          elif [ "${{ inputs.database || 'mysql' }}" = cassandra ]; then
             RUST_BACKTRACE=1 tests/gates/run-frontend-cassandra-lane.sh out/gate \
               --rust-binary "$CARGO_TARGET_DIR/debug/cadence-server" \
               --go-server "$GITHUB_WORKSPACE/out/cadence-go-server" \
