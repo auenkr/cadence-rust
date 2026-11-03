@@ -1259,6 +1259,7 @@ mod tests {
 
     /// Mirrors go/common/elasticsearch/validator TestValidateQuery.
     #[test]
+    #[rustfmt::skip]
     fn go_validate_query_table() {
         let mut a: HashMap<String, i32> = cadence_api::search_attributes::default_indexed_keys()
             .into_keys()
