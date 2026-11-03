@@ -130,11 +130,20 @@ func apiCoverage(ctx context.Context, rpc workflowserviceclient.Interface, domai
 		if e := rpc.RegisterDomain(ctx, &shared.RegisterDomainRequest{Name: ptr(dom3), WorkflowExecutionRetentionPeriodInDays: ptr(int32(1))}); e != nil {
 			return e
 		}
-		if _, e := rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{Domain: ptr(dom3), WorkflowId: ptr("del-dom-wf"), WorkflowType: &shared.WorkflowType{Name: ptr("main.EchoWorkflow")},
-			TaskList: &shared.TaskList{Name: ptr(tl + "-deldom")}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(60)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)), RequestId: ptr(uuid.NewString())}); e != nil {
-			return e
-		}
-		if e := rpc.DeprecateDomain(ctx, &shared.DeprecateDomainRequest{Name: ptr(dom3)}); e != nil {
+		// The domain cache may take a moment to see a freshly registered domain.
+			var se error
+			for i := 0; i < 30; i++ {
+				_, se = rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{Domain: ptr(dom3), WorkflowId: ptr("del-dom-wf"), WorkflowType: &shared.WorkflowType{Name: ptr("main.EchoWorkflow")},
+					TaskList: &shared.TaskList{Name: ptr(tl + "-deldom")}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(60)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)), RequestId: ptr(uuid.NewString())})
+				if se == nil {
+					break
+				}
+				time.Sleep(time.Second)
+			}
+			if se != nil {
+				return se
+			}
+			if e := rpc.DeprecateDomain(ctx, &shared.DeprecateDomainRequest{Name: ptr(dom3)}); e != nil {
 			return e
 		}
 		visible := false
