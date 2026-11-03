@@ -14,6 +14,7 @@ pub mod cloud_store;
 pub mod config;
 pub mod es_query;
 pub mod es_visibility;
+pub mod global_ratelimit;
 pub mod handler_admin;
 pub mod handler_admin_history;
 pub mod handler_domain;

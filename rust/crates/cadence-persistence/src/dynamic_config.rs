@@ -695,6 +695,38 @@ pub fn string_domain(values: impl PropertyValueSource, domain: &str, default: &s
     }
 }
 
+/// Go `GetStringPropertyFilteredByRatelimitKey`: the only allowed filter is
+/// `ratelimitKey` (the global key, e.g. `user:<domain>`).
+pub fn string_ratelimit_key(values: impl PropertyValueSource, key: &str, default: &str) -> String {
+    let filters = BTreeMap::from([("ratelimitKey".into(), Value::String(key.into()))]);
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::String,
+        Value::String(default.into()),
+        &filters,
+    ) {
+        return runtime_typed(result, default, "string")
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| default.into());
+    }
+    let mut fallback = None;
+    for value in values.snapshot_values() {
+        if value.filters.is_empty() {
+            if let Some(v) = decode(value.value.as_ref()) {
+                fallback = Some(v);
+            }
+        } else if value.filters.len() == 1
+            && value.filters[0].name == "ratelimitKey"
+            && decode(value.filters[0].value.as_ref()) == Some(Value::String(key.into()))
+        {
+            fallback = decode(value.value.as_ref());
+            break;
+        }
+    }
+    fallback
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| default.to_owned())
+}
+
 /// Go `MapAllIsolationGroupsResponse`: one non-string rejects the whole list.
 pub fn string_list(values: impl PropertyValueSource) -> Vec<String> {
     if let Some(result) = values.runtime_value(
@@ -730,6 +762,47 @@ pub fn string_list(values: impl PropertyValueSource) -> Vec<String> {
                 "string list",
                 "value was missing or contained non-string entries",
             );
+            Vec::new()
+        }
+    }
+}
+
+/// Raw `GetListProperty` value (elements are interpreted by the caller).
+pub fn json_list(values: impl PropertyValueSource) -> Option<Vec<Value>> {
+    selected(values.snapshot_values(), None).and_then(|v| v.as_array().cloned())
+}
+
+/// Go `GetListProperty` consumers that inspect each element on its own
+/// (e.g. `quotas.CallerBypass`): non-string entries are skipped instead of
+/// rejecting the whole list; a missing or non-list value yields the default.
+pub fn string_list_lenient(values: impl PropertyValueSource) -> Vec<String> {
+    if let Some(result) = values.runtime_value(
+        RuntimePropertyType::StringList,
+        Value::Array(Vec::new()),
+        &BTreeMap::new(),
+    ) {
+        return runtime_typed(result, (), "string list")
+            .and_then(|v| {
+                v.as_array().map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+    }
+    match selected(values.snapshot_values(), None).and_then(|value| {
+        value.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+    }) {
+        Some(value) => value,
+        None => {
+            report_read_error("string list", "value was missing or not a list");
             Vec::new()
         }
     }
@@ -974,5 +1047,14 @@ mod tests {
             assert!(string_list(&[entry(value, &[])]).is_empty());
         }
         assert!(string_list(&[entry(json!(["a"]), &[("domainName", json!("domain"))])]).is_empty());
+    }
+
+    #[test]
+    fn string_list_lenient_skips_non_strings_like_caller_bypass() {
+        assert_eq!(
+            string_list_lenient(&[entry(json!(["a", 1, "b", null]), &[])]),
+            vec!["a", "b"]
+        );
+        assert!(string_list_lenient(&[entry(json!("a"), &[])]).is_empty());
     }
 }

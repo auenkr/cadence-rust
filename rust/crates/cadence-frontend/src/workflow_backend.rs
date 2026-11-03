@@ -48,6 +48,7 @@ pub struct ProductionBackend {
     pub(crate) visibility:
         Option<std::sync::Arc<dyn cadence_persistence::visibility_reader::VisibilityStore>>,
     pub(crate) es: Option<crate::workflow_visibility::EsBinding>,
+    header_rules: std::sync::Arc<Vec<cadence_service_core::header_forwarding::HeaderRule>>,
 }
 
 impl std::fmt::Debug for ProductionBackend {
@@ -211,7 +212,17 @@ impl ProductionBackend {
             visibility: None,
             es: None,
             domains: None,
+            header_rules: Default::default(),
         }
+    }
+
+    /// Go `HeaderForwardingMiddleware` rules for outbound History/Matching calls.
+    pub fn with_header_rules(
+        mut self,
+        rules: Vec<cadence_service_core::header_forwarding::HeaderRule>,
+    ) -> Self {
+        self.header_rules = std::sync::Arc::new(rules);
+        self
     }
 
     pub fn with_history_access(mut self, access: crate::workflow_matching::HistoryAccess) -> Self {
@@ -337,7 +348,10 @@ impl ProductionBackend {
             service,
             &procedure,
             CALLER,
-            &[],
+            &cadence_service_core::header_forwarding::forward_for_current_call(
+                &self.header_rules,
+                &[],
+            ),
             &writer.into_bytes(),
             timeout,
         )
@@ -749,8 +763,13 @@ impl cadence_service_core::workflow_api::WorkflowApi for HandlerApi {
                 original_headers: ctx.headers.clone(),
                 ..Default::default()
             };
-            self.handler
-                .dispatch_with_metadata(operation, request, &caller)
+            let inbound = ctx.headers.clone();
+            cadence_service_core::header_forwarding::INBOUND_HEADERS
+                .scope(
+                    inbound,
+                    self.handler
+                        .dispatch_with_metadata(operation, request, &caller),
+                )
                 .await
         })
     }
@@ -930,7 +949,29 @@ pub fn build_workflow_api(
                 ctx.state.domain_manager.clone(),
             ),
         );
+    // Go `getForwardingRules`: dynamic `admin.HeaderForwardingRules` (default:
+    // everything except `grpc-*`), falling back to static config when empty.
+    let header_rules = {
+        let dynamic = {
+            let overlay = ctx.state.admin.dynamic_config.clone();
+            overlay.lock().map_or(None, |o| {
+                cadence_persistence::dynamic_config::json_list(
+                    o.property_values("admin.HeaderForwardingRules"),
+                )
+            })
+        };
+        let mut rules = match dynamic {
+            Some(items) => cadence_service_core::header_forwarding::rules_from_dynamic(&items)
+                .map_err(anyhow::Error::msg)?,
+            None => cadence_service_core::header_forwarding::default_dynamic_rules(),
+        };
+        if rules.is_empty() {
+            rules = ctx.config.header_forwarding_rules.clone();
+        }
+        rules
+    };
     let mut backend = ProductionBackend::new(history, matching)
+        .with_header_rules(header_rules)
         .with_domains(lookup.clone())
         .with_history_routing(
             ctx.state.admin.membership.clone(),
@@ -1022,7 +1063,15 @@ pub fn build_workflow_api(
     };
     // Go: NewMultiStageRateLimiter(dynamic(instance rps), perMember(global
     // domain rps, per-instance domain rps), perMember(task list ...)).
-    // Member count is 1 until the Frontend ring size is plumbed through.
+    // Member count is the live Frontend ring size (Go `resolver.MemberCount`);
+    // lookup errors or an empty ring fall back to the instance limit.
+    let member_slot = ctx.state.admin.membership.clone();
+    let member_count = move || -> usize {
+        member_slot
+            .get()
+            .and_then(|m| m.members("cadence-frontend").ok())
+            .map_or(0, |m| m.len())
+    };
     let read_tl_rps = |key: &'static str, default: i64| {
         let overlay = overlay.clone();
         move |domain: &str, task_list: &str| -> f64 {
@@ -1039,25 +1088,109 @@ pub fn build_workflow_api(
         }
     };
     let unlimited = crate::wrappers::quota_policy::UNLIMITED_RPS as i64;
-    let policy = |global: (&'static str, i64),
-                  domain: (&'static str, i64),
-                  global_domain: &'static str,
-                  tl: Option<(&'static str, &'static str, i64)>| {
+    let member_count = std::sync::Arc::new(member_count);
+    let aggregators: std::sync::Arc<dyn crate::global_ratelimit::AggregatorClient> =
+        std::sync::Arc::new(crate::global_ratelimit::HistoryAggregators::new(
+            backend.clone(),
+            ctx.state.admin.membership.clone(),
+            String::new(),
+        ));
+    let key_mode: std::sync::Arc<dyn Fn(&str) -> String + Send + Sync> = {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move |key: &str| {
+            overlay.lock().map_or_else(
+                |_| "disabled".to_owned(),
+                |o| {
+                    cadence_persistence::dynamic_config::string_ratelimit_key(
+                        o.property_values("frontend.globalRatelimiterMode"),
+                        key,
+                        "disabled",
+                    )
+                },
+            )
+        })
+    };
+    let update_interval: std::sync::Arc<dyn Fn() -> std::time::Duration + Send + Sync> = {
+        let overlay = overlay.clone();
+        std::sync::Arc::new(move || {
+            let nanos = overlay.lock().map_or(3_000_000_000, |o| {
+                cadence_persistence::dynamic_config::duration(
+                    o.property_values("frontend.globalRatelimiterUpdateInterval"),
+                    None,
+                    3_000_000_000,
+                )
+            });
+            std::time::Duration::from_nanos(nanos.max(1_000_000) as u64)
+        })
+    };
+    let mut collection_handles = Vec::new();
+    let mut policy = |global: (&'static str, i64),
+                      domain: (&'static str, i64),
+                      global_domain: &'static str,
+                      tl: Option<(&'static str, &'static str, i64)>,
+                      names: (&'static str, &'static str)| {
         use crate::wrappers::quota_policy::per_member;
         let global_rps = read_rps(global.0, global.1, false);
-        let domain_rps = read_rps(domain.0, domain.1, true);
-        let global_domain_rps = read_rps(global_domain, unlimited, true);
+        let domain_rps = std::sync::Arc::new(read_rps(domain.0, domain.1, true));
+        let global_domain_rps = std::sync::Arc::new(read_rps(global_domain, unlimited, true));
+        let (count_a, count_b, count_c, count_d) = (
+            member_count.clone(),
+            member_count.clone(),
+            member_count.clone(),
+            member_count.clone(),
+        );
+        let (gd_a, gd_b, gd_c) = (
+            global_domain_rps.clone(),
+            global_domain_rps.clone(),
+            global_domain_rps.clone(),
+        );
+        let (dr_a, dr_b) = (domain_rps.clone(), domain_rps.clone());
         let mut p = crate::wrappers::quota_policy::TokenBucketPolicy::new(
             std::sync::Arc::new(move || global_rps("")),
-            std::sync::Arc::new(move |d: &str| per_member(global_domain_rps(d), domain_rps(d), 1)),
+            std::sync::Arc::new(move |d: &str| per_member((*gd_a)(d), (*dr_a)(d), (*count_a)())),
         );
+        let domain_collection = crate::global_ratelimit::Collection::new(
+            names.0,
+            update_interval.clone(),
+            std::sync::Arc::new(move |d: &str| (*gd_b)(d)),
+            std::sync::Arc::new(move |d: &str| per_member((*gd_c)(d), (*dr_b)(d), (*count_c)())),
+            key_mode.clone(),
+            aggregators.clone(),
+        );
+        let mut tl_collection = None;
         if let Some((instance_key, global_key, default)) = tl {
-            let instance = read_tl_rps(instance_key, default);
-            let shared = read_tl_rps(global_key, unlimited);
+            let instance = std::sync::Arc::new(read_tl_rps(instance_key, default));
+            let shared = std::sync::Arc::new(read_tl_rps(global_key, unlimited));
+            let (instance_b, shared_b) = (instance.clone(), shared.clone());
             p = p.with_task_list_rps(std::sync::Arc::new(move |d: &str, t: &str| {
-                per_member(shared(d, t), instance(d, t), 1)
+                per_member((*shared)(d, t), (*instance)(d, t), (*count_b)())
             }));
+            let split = |key: &str| -> (String, String) {
+                key.split_once('/')
+                    .map(|(d, t)| (d.to_owned(), t.to_owned()))
+                    .unwrap_or_default()
+            };
+            let shared_c = shared_b.clone();
+            tl_collection = Some(crate::global_ratelimit::Collection::new(
+                names.1,
+                update_interval.clone(),
+                std::sync::Arc::new(move |k: &str| {
+                    let (d, t) = split(k);
+                    (*shared_b)(&d, &t)
+                }),
+                std::sync::Arc::new(move |k: &str| {
+                    let (d, t) = split(k);
+                    per_member((*shared_c)(&d, &t), (*instance_b)(&d, &t), (*count_d)())
+                }),
+                key_mode.clone(),
+                aggregators.clone(),
+            ));
         }
+        collection_handles.extend(domain_collection.start());
+        if let Some(c) = &tl_collection {
+            collection_handles.extend(c.start());
+        }
+        p = p.with_global_collections(domain_collection, tl_collection);
         std::sync::Arc::new(p) as std::sync::Arc<dyn crate::wrappers::ratelimited::Policy>
     };
     let max_poll_delay_nanos = {
@@ -1079,6 +1212,7 @@ pub fn build_workflow_api(
             ("frontend.domainrps", 1200),
             "frontend.globalDomainrps",
             Some(("frontend.tasklistrps", "frontend.globalTaskListrps", 1200)),
+            ("user", "userTaskList"),
         ),
         policy(
             ("frontend.workerrps", unlimited),
@@ -1089,12 +1223,14 @@ pub fn build_workflow_api(
                 "frontend.globalTaskListWorkerrps",
                 unlimited,
             )),
+            ("worker", "workerTaskList"),
         ),
         policy(
             ("frontend.visibilityrps", unlimited),
             ("frontend.domainvisibilityrps", unlimited),
             "frontend.globalDomainVisibilityrps",
             None,
+            ("visibility", "visibilityTaskList"),
         ),
         policy(
             ("frontend.asyncrps", 10000),
@@ -1105,6 +1241,7 @@ pub fn build_workflow_api(
                 "frontend.globalTaskListAsyncrps",
                 10000,
             )),
+            ("async", "asyncTaskList"),
         ),
         std::sync::Arc::new(crate::wrappers::quota_policy::ConfiguredBypass::new({
             let overlay = overlay.clone();
@@ -1112,7 +1249,7 @@ pub fn build_workflow_api(
                 overlay.lock().map_or_else(
                     |_| Vec::new(),
                     |o| {
-                        cadence_persistence::dynamic_config::string_list(
+                        cadence_persistence::dynamic_config::string_list_lenient(
                             o.property_values("system.rateLimiterBypassCallerTypes"),
                         )
                     },
