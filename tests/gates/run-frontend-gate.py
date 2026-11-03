@@ -296,6 +296,65 @@ try:
         record_services_alive('after-async-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
+    # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads
+    hist_uri, vis_uri = f'file://{work / "history-archive"}', f'file://{work / "visibility-archive"}'
+    dom_ar = 'fe-gate-arch-' + secrets.token_hex(3)
+    arch_flags = ['--history_archival_status', 'enabled', '--history_uri', hist_uri,
+                  '--visibility_archival_status', 'enabled', '--visibility_uri', vis_uri]
+    cli_ar = lambda t, *a: [*(cli_t if t else cli_g), '--domain', dom_ar, *a]
+    ok_reg = run('archival-register-domain', cli_ar(True, 'domain', 'register', '--retention', '1', *arch_flags))
+    if ok_reg:
+        time.sleep(12)  # domain cache refresh in Go History/Worker
+        d = subprocess.run(cli_ar(True, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
+        (work / 'archival-describe-domain.log').write_text(d.stdout + d.stderr)
+        record('archival-describe-domain', d.returncode == 0 and hist_uri in d.stdout and vis_uri in d.stdout and d.stdout.count('ENABLED') >= 2, d.stdout + d.stderr)
+        d = subprocess.run(cli_ar(False, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
+        record('archival-describe-domain-grpc', d.returncode == 0 and hist_uri in d.stdout and vis_uri in d.stdout, d.stdout + d.stderr)
+        wtype = 'ArchGateType'
+        arch_ids = []
+        for i in range(2):
+            wid = f'arch-wf-{secrets.token_hex(3)}'
+            arch_ids.append(wid)
+            run(f'archival-start-{i}', cli_ar(True, 'workflow', 'start', '--tl', 'arch-gate-tl', '--wt', wtype, '--wid', wid, '--et', '600', '--dt', '10'))
+            run(f'archival-terminate-{i}', cli_ar(True, 'workflow', 'terminate', '--wid', wid, '--reason', 'archive-gate'))
+        # Archival is asynchronous (Go worker archiver): poll the visibility archive through Rust Frontend.
+        found = False
+        out = ''
+        end = time.monotonic() + 240
+        while time.monotonic() < end and not found:
+            for t in (True, False):
+                r = subprocess.run(cli_ar(t, 'workflow', 'listarchived', '--query', f"WorkflowType = '{wtype}'", '--all'), capture_output=True, text=True, timeout=60)
+                out = r.stdout + r.stderr
+                if r.returncode == 0 and all(w in out for w in arch_ids):
+                    found = True
+                else:
+                    found = False
+                    break
+            if not found:
+                time.sleep(5)
+        (work / 'archival-listarchived.log').write_text(out)
+        record('archival-list-archived-visibility', found, out)
+        r = subprocess.run(cli_ar(True, 'workflow', 'listarchived', '--query', f"WorkflowType = '{wtype}'", '--ps', '1'), input='q\n', capture_output=True, text=True, timeout=60)
+        record('archival-list-archived-paged', r.returncode == 0 and any(w in r.stdout for w in arch_ids), r.stdout + r.stderr)
+        # Go archives visibility at close; history is archived at retention expiry (not reachable in a gate run).
+        files = sorted(str(f.relative_to(work)) for f in (work / 'visibility-archive').rglob('*') if f.is_file()) if (work / 'visibility-archive').exists() else []
+        record('archival-go-visibility-wrote-archive', len(files) >= 2, str(files[:10]))
+        # Domain update validation errors must match Go (state machine in Rust Frontend).
+        r = subprocess.run(cli_ar(True, 'domain', 'update', '--history_uri', f'file://{work / "other-archive"}'), capture_output=True, text=True, timeout=60)
+        (work / 'archival-update-uri.log').write_text(r.stdout + r.stderr)
+        record('archival-update-uri-rejected', r.returncode != 0 and 'Cannot update existing archival URI' in r.stdout + r.stderr, r.stdout + r.stderr)
+        r = subprocess.run(cli_ar(True, 'domain', 'update', '--history_archival_status', 'disabled'), capture_output=True, text=True, timeout=60)
+        record('archival-update-disable-history', r.returncode == 0, r.stdout + r.stderr)
+        r = subprocess.run(cli_ar(True, 'domain', 'describe'), capture_output=True, text=True, timeout=60)
+        record('archival-describe-after-disable', r.returncode == 0 and 'HistoryArchivalStatus: DISABLED' in r.stdout and 'VisibilityArchivalStatus: ENABLED' in r.stdout and vis_uri in r.stdout, r.stdout + r.stderr)
+        # Domain without archival: ListArchived must fail with Go's domain gating error.
+        dom_off = 'fe-gate-noarch-' + secrets.token_hex(3)
+        run('archival-register-disabled-domain', [*cli_t, '--domain', dom_off, 'domain', 'register', '--retention', '1',
+            '--history_archival_status', 'disabled', '--visibility_archival_status', 'disabled'])
+        time.sleep(3)
+        r = subprocess.run([*cli_t, '--domain', dom_off, 'workflow', 'listarchived', '--query', "WorkflowType = 'x'"], capture_output=True, text=True, timeout=60)
+        record('archival-list-archived-domain-not-configured', r.returncode != 0 and 'Domain is not configured for visibility archival' in r.stdout + r.stderr, r.stdout + r.stderr)
+        # Invalid status flag handled client-side by Go CLI; invalid cluster-state errors come from the frontend above.
     # ---- durable dynamic config / search attribute phase (config-store insert_config on this lane)
     def dbq(stmt):
         c = os.environ.get(prefix + '_DOCKER_CONTAINER')

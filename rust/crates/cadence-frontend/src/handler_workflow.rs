@@ -2962,6 +2962,166 @@ mod tests {
         assert_eq!(response["nextPageToken"], "AQI=");
     }
 
+    const ARCHIVE_RUN: &str = "6f1f9a2e-5b6c-4d1e-9c1a-0a1b2c3d4e5f";
+
+    struct ArchiveDomains(crate::archive_readers::DomainArchival);
+
+    impl crate::archive_readers::ArchivalDomainConfig for ArchiveDomains {
+        fn archival(
+            &self,
+            _: &str,
+        ) -> Result<crate::archive_readers::DomainArchival, CadenceError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct ArchiveProbe(bool);
+
+    impl crate::archive_readers::ExecutionProbe for ArchiveProbe {
+        fn exists<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<bool, CadenceError>> + Send + 'a>> {
+            let exists = self.0;
+            Box::pin(async move { Ok(exists) })
+        }
+    }
+
+    fn archive_tmp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cadence-handler-archive-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn archive_config(status: &str, read: bool) -> crate::archive_readers::ArchivalConfig {
+        crate::archive_readers::ArchivalConfig::new(
+            status,
+            Arc::new(|| "enabled".to_owned()),
+            read,
+            Arc::new(|| true),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn handler_lists_archived_visibility_through_real_filestore_reader() {
+        use cadence_api::enums::ArchivalStatus;
+        let root = archive_tmp("vis");
+        let domain_dir = root.join("uuid:archived");
+        std::fs::create_dir_all(&domain_dir).unwrap();
+        let record = serde_json::json!({"WorkflowID":"wf-a","RunID":"run-a","WorkflowTypeName":"t",
+            "StartTimestamp":5,"ExecutionTimestamp":0,"CloseTimestamp":10,
+            "CloseStatus":"COMPLETED","HistoryLength":4});
+        std::fs::write(
+            domain_dir.join(cadence_common::archiver::visibility_filename(10, "run-a")),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let archival = crate::archive_readers::DomainArchival {
+            visibility_status: Some(ArchivalStatus::Enabled),
+            visibility_uri: format!("file://{}", root.display()),
+            ..Default::default()
+        };
+        let provider = || cadence_common::archiver::ArchiverProvider::new(["filestore".to_owned()]);
+        let make = |config, archival| {
+            Handler::new(FakeBackend::default())
+                .with_domain_lookup(Arc::new(StaticDomainLookup))
+                .with_archived_visibility_reader(Arc::new(
+                    crate::archive_readers::ArchivedVisibility::new(
+                        config,
+                        provider(),
+                        Arc::new(ArchiveDomains(archival)),
+                    ),
+                ))
+        };
+        let request = serde_json::json!({
+            "domain": "archived", "pageSize": 10, "query": "WorkflowType = 't'"
+        });
+        let response = make(archive_config("enabled", true), archival.clone())
+            .dispatch("ListArchivedWorkflowExecutions", request.clone())
+            .await
+            .unwrap();
+        assert_eq!(response["executions"][0]["execution"]["workflowId"], "wf-a");
+        assert_eq!(response["executions"][0]["closeStatus"], 0);
+        // Go falls back to the start time when the archived execution time is zero.
+        assert_eq!(response["executions"][0]["executionTime"], 5);
+        let err = make(archive_config("disabled", true), archival.clone())
+            .dispatch("ListArchivedWorkflowExecutions", request.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Cluster is not configured for visibility archival"
+        );
+        let err = make(
+            archive_config("enabled", true),
+            crate::archive_readers::DomainArchival::default(),
+        )
+        .dispatch("ListArchivedWorkflowExecutions", request)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Domain is not configured for visibility archival"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn handler_serves_archived_history_through_real_filestore_reader() {
+        use cadence_api::enums::ArchivalStatus;
+        let root = archive_tmp("hist");
+        let name =
+            cadence_common::archiver::history_filename("uuid:archived", "wf-a", ARCHIVE_RUN, 2);
+        std::fs::write(
+            root.join(name),
+            br#"[{"events":[{"eventId":1},{"eventId":2}]},{"events":[{"eventId":3}]}]"#,
+        )
+        .unwrap();
+        let archival = crate::archive_readers::DomainArchival {
+            history_status: Some(ArchivalStatus::Enabled),
+            history_uri: format!("file://{}", root.display()),
+            ..Default::default()
+        };
+        let make = |exists: bool| {
+            Handler::new(CapturingBackend::default())
+                .with_domain_lookup(Arc::new(StaticDomainLookup))
+                .with_archived_history_reader(Arc::new(
+                    crate::archive_readers::ArchivedHistory::new(
+                        archive_config("enabled", true),
+                        cadence_common::archiver::ArchiverProvider::new(["filestore".to_owned()]),
+                        Arc::new(ArchiveDomains(archival.clone())),
+                        Arc::new(ArchiveProbe(exists)),
+                    ),
+                ))
+        };
+        let request = serde_json::json!({
+            "domain": "archived",
+            "execution": {"workflowId": "wf-a", "runId": ARCHIVE_RUN},
+            "maximumPageSize": 10,
+            "waitForNewEvent": false
+        });
+        let response = make(false)
+            .dispatch("GetWorkflowExecutionHistory", request.clone())
+            .await
+            .unwrap();
+        assert_eq!(response["archived"], true);
+        assert_eq!(response["history"]["events"].as_array().unwrap().len(), 3);
+        // History still knows the execution: the archive is not consulted.
+        let live = make(true)
+            .dispatch("GetWorkflowExecutionHistory", request)
+            .await
+            .unwrap();
+        assert!(live.get("archived").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[tokio::test]
     async fn archived_history_reader_receives_validated_request_and_skip_archival_bypasses_it() {
         let reader = Arc::new(RecordingArchivedHistoryReader::default());

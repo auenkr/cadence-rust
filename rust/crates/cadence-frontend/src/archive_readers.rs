@@ -212,7 +212,7 @@ fn decode_token(v: Option<&Value>) -> Result<Vec<u8>, CadenceError> {
 
 fn b64_token(token: &[u8]) -> Value {
     if token.is_empty() {
-        Value::Null
+        Value::String(String::new())
     } else {
         Value::String(cadence_api::b64::encode_bytes(token))
     }
@@ -377,12 +377,12 @@ impl ArchivedVisibility {
             .into_iter()
             .map(|r| {
                 let status = match close_status_ordinal(&r.close_status) {
-                    Some(0) => json!("COMPLETED"),
-                    Some(1) => json!("FAILED"),
-                    Some(2) => json!("CANCELED"),
-                    Some(3) => json!("TERMINATED"),
-                    Some(4) => json!("CONTINUED_AS_NEW"),
-                    Some(5) => json!("TIMED_OUT"),
+                    Some(0) => json!(0),
+                    Some(1) => json!(1),
+                    Some(2) => json!(2),
+                    Some(3) => json!(3),
+                    Some(4) => json!(4),
+                    Some(5) => json!(5),
                     _ => Value::Null,
                 };
                 let indexed: serde_json::Map<String, Value> = r
@@ -531,7 +531,7 @@ mod tests {
         let resp = r.get("dom".into(), req.clone()).await.unwrap().unwrap();
         assert_eq!(resp["archived"], true);
         assert_eq!(resp["history"]["events"].as_array().unwrap().len(), 3);
-        assert!(resp["nextPageToken"].is_null());
+        assert_eq!(resp["nextPageToken"], "");
         // live workflow: no archive read
         assert!(reader(true, &archival.history_uri)
             .get("dom".into(), req.clone())
@@ -583,8 +583,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp["executions"][0]["execution"]["runId"], "r1");
-        assert_eq!(resp["executions"][0]["closeStatus"], "COMPLETED");
-        assert!(resp["nextPageToken"].is_null());
+        assert_eq!(resp["executions"][0]["closeStatus"], 0);
+        assert_eq!(resp["nextPageToken"], "");
         let e = mk(cfg("disabled", true), archival.clone())
             .list(req.clone())
             .await
