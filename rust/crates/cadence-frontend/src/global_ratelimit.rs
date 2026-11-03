@@ -494,7 +494,7 @@ impl Collection {
 
     /// Go `Collection.For(key).Reserve()`: `None` when the key is disabled.
     /// Mirrors Go's `shadowedLimiter` (shadow reserved/consumed alongside the primary).
-    pub fn reserve(&self, key: &str) -> Option<Reservation<'_>> {
+    pub fn reserve(&self, key: &str) -> Option<Reservation> {
         Some(match self.mode(key) {
             KeyMode::Disabled => return None,
             KeyMode::Local => self.local_limiter(key).reserve(),
