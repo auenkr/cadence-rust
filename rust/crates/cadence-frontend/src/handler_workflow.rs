@@ -212,7 +212,7 @@ pub trait WorkflowBackend: Send + Sync {
         _operation: WorkflowOperation,
         _request: &Value,
         _target_cluster: Option<&str>,
-    ) -> Option<Pin<Box<dyn Future<Output = Result<Value, CadenceError>> + Send + 'a>>> {
+    ) -> Option<WorkflowFuture<'a>> {
         None
     }
 }
