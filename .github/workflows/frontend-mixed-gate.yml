@@ -30,7 +30,7 @@ on:
         default: false
       rust_ref:
         description: branch/ref of the Rust sources to build cadence-server from
-        default: fe-integ
+        default: ""
 
 concurrency:
   group: frontend-mixed-gate-${{ github.ref }}-${{ inputs.database }}-${{ inputs.es_flavor }}-${{ inputs.es }}
@@ -47,7 +47,7 @@ jobs:
       - name: Checkout Rust sources
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.rust_ref }}
+          ref: ${{ inputs.rust_ref || github.ref_name }}
           path: rustsrc
           submodules: true
       - name: IDL submodule
@@ -62,7 +62,7 @@ jobs:
       - name: Build Rust cadence-server (fresh target dir)
         run: |
           mkdir -p out
-          echo "rust_ref=${{ inputs.rust_ref }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
+          echo "rust_ref=${{ inputs.rust_ref || github.ref_name }} head=$(git -C rustsrc rev-parse HEAD) gate_head=$(git rev-parse HEAD)" | tee out/commit.txt
           set +e
           cargo build --manifest-path rustsrc/rust/Cargo.toml -p cadence-server -j2 > out/cargo-build.log 2>&1; echo $? > out/cargo-build.exit
           set -e
