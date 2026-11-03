@@ -34,6 +34,6 @@ gcs_start() {
       sleep 2
     done
     export STORAGE_EMULATOR_HOST="127.0.0.1:${GCS_PORT}"
-    GCS_ARGS=(--gcs-endpoint "http://127.0.0.1:${GCS_PORT}" --gcs-seed "$ARTIFACTS/gcs-seed")
+    GCS_ARGS=(--gcs-endpoint "http://127.0.0.1:${GCS_PORT}" --gcs-seed "$(cd "$ARTIFACTS" && pwd)/gcs-seed")
   fi
 }

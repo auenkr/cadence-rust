@@ -688,7 +688,7 @@ try:
                 run(f'gcs-terminate-{i}', cli_gc('workflow', 'terminate', '--wid', wid, '--reason', 'gcs-gate'))
             foundg, outg = False, ''
             for _ in range(24):
-                r = subprocess.run(cli_gc('workflow', 'listarchived', '--query', f"WorkflowTypeName = '{wtypeg}'", '--all'), capture_output=True, text=True, timeout=60)
+                r = subprocess.run(cli_gc('workflow', 'listarchived', '--query', f"WorkflowType = '{wtypeg}'", '--all'), capture_output=True, text=True, timeout=60)
                 outg = r.stdout + r.stderr
                 if r.returncode == 0 and all(w in outg for w in idsg):
                     foundg = True
@@ -711,7 +711,7 @@ try:
                      'initiator': 'CronSchedule', 'attempt': 0}))
                 closed = ev(2, 'WorkflowExecutionTerminated', ('workflowExecutionTerminatedEventAttributes', {'reason': 'archived-only'}))
                 for part, events in enumerate([[started], [closed]]):
-                    fname = subprocess.run([args.gcs_seed, m.group(1), hwid, hrun, '0', str(part)], capture_output=True, text=True, timeout=30).stdout.strip()
+                    fname = subprocess.run([os.path.abspath(args.gcs_seed), m.group(1), hwid, hrun, '0', str(part)], capture_output=True, text=True, timeout=30).stdout.strip()
                     obj = urllib.parse.quote(f'gate-history/{fname}', safe='')
                     st, resp = gcs_call('POST', f'/upload/storage/v1/b/{gb}/o?uploadType=media&name={obj}', json.dumps([{'events': events}]).encode())
                     record(f'gcs-upload-history-part-{part}', st == 200 and bool(fname), f'{st} {fname} {resp}')
