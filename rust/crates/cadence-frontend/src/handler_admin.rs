@@ -379,20 +379,24 @@ mod tests {
             security_token: String::new(),
         };
         let ok = Arc::new(FakeEs::default());
-        let mut handler = Handler::default();
-        handler.es = Some(cadence_service_core::es_mapping::EsVisibility {
-            client: ok.clone(),
-            index: "vis".into(),
-        });
+        let handler = Handler {
+            es: Some(cadence_service_core::es_mapping::EsVisibility {
+                client: ok.clone(),
+                index: "vis".into(),
+            }),
+            ..Handler::default()
+        };
         handler.add_search_attributes(Some(&request)).unwrap();
         assert_eq!(ok.calls.lock().unwrap().as_slice(), ["put vis CustomInt long"]);
 
         let bad = Arc::new(FakeEs { fail_put: true, ..Default::default() });
-        let mut handler = Handler::default();
-        handler.es = Some(cadence_service_core::es_mapping::EsVisibility {
-            client: bad,
-            index: "vis".into(),
-        });
+        let handler = Handler {
+            es: Some(cadence_service_core::es_mapping::EsVisibility {
+                client: bad,
+                index: "vis".into(),
+            }),
+            ..Handler::default()
+        };
         let err = handler.add_search_attributes(Some(&request)).unwrap_err();
         match err {
             AdminError::Internal(e) => assert!(e.message.starts_with("Failed to update ES mapping, err:")),
