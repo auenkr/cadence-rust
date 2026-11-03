@@ -637,7 +637,10 @@ pub trait ClusterMembership: Send + Sync {
 
     /// Resolve the owner of a task list name on the live Matching ring (Go client
     /// routes Matching RPCs by task list on the `cadence-matching` hashring).
-    fn matching_owner(&self, key: &str) -> Result<Option<cadence_common::membership::Host>, String> {
+    fn matching_owner(
+        &self,
+        key: &str,
+    ) -> Result<Option<cadence_common::membership::Host>, String> {
         let _ = key;
         Ok(None)
     }

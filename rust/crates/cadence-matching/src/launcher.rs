@@ -645,7 +645,8 @@ fn run_schema_helper(
     zone: &Option<String>,
     setup_option: &[String],
 ) -> anyhow::Result<()> {
-    let helper = std::env::var("CADENCE_SCHEMA_HELPER").unwrap_or_else(|_| "cadence-server-go".into());
+    let helper =
+        std::env::var("CADENCE_SCHEMA_HELPER").unwrap_or_else(|_| "cadence-server-go".into());
     let mut cmd = std::process::Command::new(&helper);
     if let Some(v) = root {
         cmd.args(["--root", v]);
@@ -666,7 +667,10 @@ fn run_schema_helper(
     let status = cmd
         .status()
         .map_err(|e| anyhow::anyhow!("auto-setup: cannot run schema helper {helper}: {e}"))?;
-    anyhow::ensure!(status.success(), "auto-setup: schema helper {helper} failed: {status}");
+    anyhow::ensure!(
+        status.success(),
+        "auto-setup: schema helper {helper} failed: {status}"
+    );
     Ok(())
 }
 
