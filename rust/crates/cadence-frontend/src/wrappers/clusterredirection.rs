@@ -624,7 +624,9 @@ mod tests {
             Consistency::Strong
         );
         assert_eq!(
-            consistency_from_headers(&h(r#"{"autoforwarding_enabled":true,"WorkflowExecutionAlreadyCompletedErrorEnabled":true}"#)),
+            consistency_from_headers(&h(
+                r#"{"autoforwarding_enabled":true,"WorkflowExecutionAlreadyCompletedErrorEnabled":true}"#
+            )),
             Consistency::Strong
         );
         assert_eq!(
@@ -636,7 +638,10 @@ mod tests {
             consistency_from_headers(&h(r#"{"autoforwardingEnabled":true,"x":1}"#)),
             Consistency::Eventual
         );
-        assert_eq!(consistency_from_headers(&h("garbage")), Consistency::Eventual);
+        assert_eq!(
+            consistency_from_headers(&h("garbage")),
+            Consistency::Eventual
+        );
     }
     use std::sync::Mutex;
 
