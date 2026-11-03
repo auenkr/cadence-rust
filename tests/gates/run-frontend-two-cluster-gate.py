@@ -61,7 +61,7 @@ def persistence(db, vis):
 
 def group_block(current, a_transport, b_transport, policy, target=''):
     """clusterGroupMetadata for a process; Go always sees gRPC, Rust Frontend gets the variant."""
-    return ('clusterGroupMetadata:\n  failoverVersionIncrement: 10\n  primaryClusterName: "cluster0"\n'
+    return ('clusterGroupMetadata:\n  failoverVersionIncrement: 10\n  primaryClusterName: "cluster1"\n'
             f'  currentClusterName: "{current}"\n  clusterGroup:\n'
             '    cluster0:\n      enabled: true\n      initialFailoverVersion: 0\n      rpcName: "cadence-frontend"\n'
             f'      rpcAddress: "127.0.0.1:{P["A_FE_GRPC"] if a_transport == "grpc" else P["A_FE"]}"\n      rpcTransport: "{a_transport}"\n'
