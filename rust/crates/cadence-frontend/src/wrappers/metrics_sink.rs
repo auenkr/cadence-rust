@@ -236,7 +236,11 @@ mod tests {
             &domain_tag(),
         );
         m.record_latency_histogram("DescribeWorkflowExecution", Duration::from_millis(3));
-        m.increment_error("DescribeWorkflowExecution", &domain_tag(), Counter::BadRequest);
+        m.increment_error(
+            "DescribeWorkflowExecution",
+            &domain_tag(),
+            Counter::BadRequest,
+        );
         let events = sink.events();
         let names: Vec<_> = events.iter().map(|e| e.name).collect();
         assert_eq!(
