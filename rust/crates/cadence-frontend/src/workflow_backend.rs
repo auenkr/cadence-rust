@@ -663,6 +663,36 @@ impl cadence_service_core::workflow_api::AdminAuthorizer for AdminAccessControl 
             Ok(Decision::Deny) => Err(AdminAuthError::Denied("Request unauthorized.".into())),
         }
     }
+
+    fn authorize_domain_api(
+        &self,
+        api: &str,
+        domain: &str,
+        token: &str,
+    ) -> Result<(), cadence_service_core::workflow_api::AdminAuthError> {
+        use crate::wrappers::accesscontrolled::{Attributes, Authorizer, Decision, Permission};
+        use cadence_service_core::workflow_api::AdminAuthError;
+        let permission = match api {
+            "DescribeDomain" => Permission::Read,
+            "FailoverDomain" => Permission::Write,
+            "RegisterDomain" | "UpdateDomain" | "DeprecateDomain" | "DeleteDomain" => {
+                Permission::Admin
+            }
+            _ => return Ok(()),
+        };
+        let attributes = Attributes {
+            operation: api.to_owned(),
+            permission: Some(permission),
+            domain: domain.to_owned(),
+            auth_token: token.to_owned(),
+            ..Default::default()
+        };
+        match self.0.authorize(&attributes) {
+            Err(e) => Err(AdminAuthError::Failed(e)),
+            Ok(Decision::Allow) => Ok(()),
+            Ok(Decision::Deny) => Err(AdminAuthError::Denied("Request unauthorized.".into())),
+        }
+    }
 }
 
 /// Shares one `SelectedAuthorizer` between the Workflow and Admin wrappers.

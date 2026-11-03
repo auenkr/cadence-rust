@@ -284,6 +284,34 @@ pub struct Frontend {
 }
 
 impl Frontend {
+    /// Go `accesscontrolled.apiHandler` check for the domain APIs; runs
+    /// before request validation like Go's generated wrapper.
+    fn authorize_domain_api<T>(
+        &self,
+        api: &str,
+        domain: &str,
+        request: &tonic::Request<T>,
+    ) -> Result<(), Status> {
+        use cadence_service_core::workflow_api::AdminAuthError;
+        let Some(auth) = self
+            .state
+            .workflow_api
+            .as_ref()
+            .and_then(|a| a.admin_authorizer())
+        else {
+            return Ok(());
+        };
+        let token = request
+            .metadata()
+            .get("cadence-authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        match auth.authorize_domain_api(api, domain, token) {
+            Ok(()) => Ok(()),
+            Err(AdminAuthError::Denied(m)) => Err(Status::permission_denied(m)),
+            Err(AdminAuthError::Failed(m)) => Err(Status::unknown(m)),
+        }
+    }
     fn activity_token(
         &self,
         domain: &str,
@@ -631,6 +659,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::UpdateDomainRequest>,
     ) -> Result<Response<p::UpdateDomainResponse>, Status> {
+        self.authorize_domain_api("UpdateDomain", "", &request)?;
         let r = request.into_inner();
         if r.name.is_empty() {
             return Err(Status::invalid_argument("Domain is not set on request."));
@@ -745,6 +774,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::RegisterDomainRequest>,
     ) -> Result<Response<p::RegisterDomainResponse>, Status> {
+        self.authorize_domain_api("RegisterDomain", "", &request)?;
         let r = request.into_inner();
         let days = r
             .workflow_execution_retention_period
@@ -789,6 +819,11 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::DescribeDomainRequest>,
     ) -> Result<Response<p::DescribeDomainResponse>, Status> {
+        let domain = match &request.get_ref().describe_by {
+            Some(p::describe_domain_request::DescribeBy::Name(name)) => name.clone(),
+            _ => String::new(),
+        };
+        self.authorize_domain_api("DescribeDomain", &domain, &request)?;
         let input = match request.into_inner().describe_by {
             Some(p::describe_domain_request::DescribeBy::Name(name)) => st::DescribeDomainRequest {
                 name: Some(name),
@@ -831,6 +866,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::FailoverDomainRequest>,
     ) -> Result<Response<p::FailoverDomainResponse>, Status> {
+        self.authorize_domain_api("FailoverDomain", &request.get_ref().domain_name, &request)?;
         let r = request.into_inner();
         let input = cv::failover_in(r);
         cadence_api::validation::validate_failover_domain_request(Some(&input))
@@ -888,6 +924,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::DeprecateDomainRequest>,
     ) -> Result<Response<p::DeprecateDomainResponse>, Status> {
+        self.authorize_domain_api("DeprecateDomain", "", &request)?;
         let r = request.into_inner();
         let _: serde_json::Value = self
             .call(
@@ -905,6 +942,7 @@ impl p::domain_api_server::DomainApi for Frontend {
         &self,
         request: tonic::Request<p::DeleteDomainRequest>,
     ) -> Result<Response<p::DeleteDomainResponse>, Status> {
+        self.authorize_domain_api("DeleteDomain", "", &request)?;
         let r = request.into_inner();
         let _: serde_json::Value = self
             .call(

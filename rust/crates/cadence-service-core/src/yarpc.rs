@@ -2515,6 +2515,60 @@ pub async fn dispatch_with_headers(
             }
         }
     }
+    if !admin
+        && matches!(
+            name,
+            "DescribeDomain"
+                | "RegisterDomain"
+                | "UpdateDomain"
+                | "DeprecateDomain"
+                | "DeleteDomain"
+                | "FailoverDomain"
+        )
+    {
+        if let Some(auth) = state
+            .workflow_api
+            .as_ref()
+            .and_then(|api| api.admin_authorizer())
+        {
+            let token = caller_headers
+                .get("cadence-authorization")
+                .map(String::as_str)
+                .unwrap_or_default();
+            let text = |idx: i16| match body.get(1) {
+                Some(Value::Struct(s)) => match s.get(idx) {
+                    Some(Value::Bytes(b)) => String::from_utf8_lossy(b).into_owned(),
+                    _ => String::new(),
+                },
+                _ => String::new(),
+            };
+            // Go sets DomainName only for DescribeDomain (name) and
+            // FailoverDomain (domainName); the Admin-permission calls set none.
+            let domain = match name {
+                "DescribeDomain" => text(10),
+                "FailoverDomain" => text(10),
+                _ => String::new(),
+            };
+            match auth.authorize_domain_api(name, &domain, token) {
+                Ok(()) => {}
+                Err(crate::workflow_api::AdminAuthError::Failed(message)) => return Err(message),
+                Err(crate::workflow_api::AdminAuthError::Denied(message)) => {
+                    let def = find_method(method).ok_or_else(|| format!("unknown method {method}"))?;
+                    let e = cadence_api::errors::AccessDeniedError::new(message.clone());
+                    let Some(field) = cadence_thrift::service::exception_field(def, "AccessDeniedError")
+                    else {
+                        return Err(message);
+                    };
+                    return Ok((
+                        Struct {
+                            fields: vec![(field, Value::Struct(e.to_thrift()))],
+                        },
+                        Some(("AccessDeniedError", message)),
+                    ));
+                }
+            }
+        }
+    }
     let schedule_ctx = schedule_api_context(deadline, &caller_headers);
     let outcome: HandlerResult = match name {
         "health" => Ok(Struct {

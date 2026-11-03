@@ -48,6 +48,17 @@ pub trait AdminAuthorizer: Send + Sync {
     /// `api` is the Admin method name (e.g. `GetDynamicConfig`); `token` the
     /// `cadence-authorization` header value.
     fn authorize_admin(&self, api: &str, token: &str) -> Result<(), AdminAuthError>;
+    /// Go `accesscontrolled.apiHandler` check for the domain APIs served by
+    /// the legacy handlers (`DescribeDomain`, `RegisterDomain`, ...).
+    /// `domain` is the Go `DomainName` attribute ("" when Go sets none).
+    fn authorize_domain_api(
+        &self,
+        _api: &str,
+        _domain: &str,
+        _token: &str,
+    ) -> Result<(), AdminAuthError> {
+        Ok(())
+    }
 }
 
 pub trait WorkflowApi: Send + Sync + std::fmt::Debug {

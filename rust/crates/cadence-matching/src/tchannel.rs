@@ -561,9 +561,14 @@ async fn handle_call(
                     .chain(app_headers.iter())
                     .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
                     .collect();
+                let dispatch_method = if definition.service == "AdminService" {
+                    procedure
+                } else {
+                    method
+                };
                 crate::yarpc::dispatch_with_headers(
                     &state,
-                    method,
+                    dispatch_method,
                     &request,
                     deadline.min(Instant::now() + Duration::from_secs(60)),
                     caller_headers,
