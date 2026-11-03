@@ -103,6 +103,7 @@ pub fn attributes_for_request(operation: &str, request: &Value, actor: &str) -> 
         workflow_type: request_fields.get("workflowType").cloned(),
         // Go's NewFilteredRequestBody JSON-serializes the full API request.
         request_body: Some(request_body),
+        auth_token: String::new(),
     })
 }
 

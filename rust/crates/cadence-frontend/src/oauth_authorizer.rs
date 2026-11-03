@@ -29,6 +29,14 @@ pub struct OAuthAuthorizer {
     domain_data: DomainDataLookup,
 }
 
+impl std::fmt::Debug for OAuthAuthorizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthAuthorizer")
+            .field("max_jwt_ttl", &self.max_jwt_ttl)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Go `authorization.NewAuthorizer`: oauth when enabled, otherwise nop.
 /// Returns `None` for nop.
 pub fn new_authorizer(
