@@ -302,7 +302,8 @@ impl DomainActiveClusterManager {
             return Ok(None);
         };
         let domain = parse_uuid(domain_id)?;
-        let shard = crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
+        let shard =
+            crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
         let run = if run_id.is_empty() {
             match store
                 .select_current_execution(shard, domain, workflow_id)
@@ -428,7 +429,8 @@ impl ActiveClusterManager for DomainActiveClusterManager {
         let Some((store, num_shards)) = &self.executions else {
             return Err("execution store is not configured".into());
         };
-        let shard = crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
+        let shard =
+            crate::workflow_matching::workflow_id_to_history_shard(workflow_id, *num_shards);
         let domain = parse_uuid(domain_id)?;
         let current = store
             .select_current_execution(shard, domain, workflow_id)
@@ -796,7 +798,10 @@ mod tests {
             Option<cadence_persistence::history_reader::CurrentExecutionRow>,
             cadence_persistence::history_reader::HistoryReadError,
         > {
-            self.calls.lock().unwrap().push(format!("current {workflow_id} {shard}"));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("current {workflow_id} {shard}"));
             Ok(self.current.clone())
         }
         fn select_active_cluster_policy(
@@ -807,10 +812,10 @@ mod tests {
             run_id: [u8; 16],
         ) -> Result<Option<(Vec<u8>, String)>, cadence_persistence::history_reader::HistoryReadError>
         {
-            self.calls
-                .lock()
-                .unwrap()
-                .push(format!("policy {workflow_id} {}", uuid::Uuid::from_bytes(run_id)));
+            self.calls.lock().unwrap().push(format!(
+                "policy {workflow_id} {}",
+                uuid::Uuid::from_bytes(run_id)
+            ));
             Ok(self.policy.clone())
         }
     }
@@ -851,13 +856,19 @@ mod tests {
         let policy = manager.cluster_selection_policy(DOMAIN, "wf", "").unwrap();
         assert_eq!(policy_attribute(policy.as_ref()), "");
         let none = manager_with(FakeExecutions::default());
-        assert!(none.cluster_selection_policy(DOMAIN, "wf", "").unwrap().is_none());
+        assert!(none
+            .cluster_selection_policy(DOMAIN, "wf", "")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
     fn snappy_policy_blob_and_bad_encoding() {
-        let compressed = snap::raw::Encoder::new().compress_vec(&policy_blob()).unwrap();
-        let decoded = decode_active_cluster_selection_policy(&compressed, "thriftrw_snappy").unwrap();
+        let compressed = snap::raw::Encoder::new()
+            .compress_vec(&policy_blob())
+            .unwrap();
+        let decoded =
+            decode_active_cluster_selection_policy(&compressed, "thriftrw_snappy").unwrap();
         assert_eq!(
             decoded.cluster_attribute,
             Some(("region".to_owned(), "us".to_owned()))
