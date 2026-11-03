@@ -713,13 +713,26 @@ mod tests {
     fn active_active_start_routes_to_cluster_attribute_cluster() {
         struct Attr;
         impl ActiveClusterManager for Attr {
-            fn active_cluster_for_workflow(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
+            fn active_cluster_for_workflow(
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+            ) -> Result<String, String> {
                 Err("x".into())
             }
-            fn active_cluster_for_cluster_attribute(&self, _: &str, a: &str) -> Result<String, String> {
+            fn active_cluster_for_cluster_attribute(
+                &self,
+                _: &str,
+                a: &str,
+            ) -> Result<String, String> {
                 active_cluster_for_attribute("a", Some(&active_clusters()), a)
             }
-            fn current_workflow_selection(&self, _: &str, _: &str) -> Result<(bool, Option<String>), String> {
+            fn current_workflow_selection(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Result<(bool, Option<String>), String> {
                 Err("x".into())
             }
         }
