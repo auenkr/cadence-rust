@@ -220,16 +220,17 @@ try:
     record('selected-forward-signal', rc == 0, out)
     # Schedule writes go through Redirect too (Go api_generated.go); reads
     # (DescribeSchedule) stay local under selected-apis-forwarding.
+    # The Go CLI schedule commands dial gRPC only.
     sid = 'tc-sched-' + secrets.token_hex(3)
-    rc, out = cli(A_T, 'tchannel', '--domain', dom, 'schedule', 'create', '--sid', sid, '--ce', '0 0 1 1 *',
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'create', '--sid', sid, '--ce', '0 0 1 1 *',
                   '--wt', 'TcType', '--tl', 'tc-tl', '--et', '600')
     record('selected-forward-schedule-create-on-A', rc == 0, out)
-    rc, out = cli(B_T, 'tchannel', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+    rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
     record('selected-forward-schedule-lives-on-B', rc == 0 and '0 0 1 1 *' in out, out)
-    rc, out = cli(A_T, 'tchannel', '--domain', dom, 'schedule', 'pause', '--sid', sid, '--reason', 'gate')
+    rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'pause', '--sid', sid, '--reason', 'gate')
     record('selected-forward-schedule-pause-on-A', rc == 0, out)
     def b_paused():
-        rc, out = cli(B_T, 'tchannel', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
         return rc == 0 and re.search(r'paused', out, re.I) is not None, out
     poll('selected-forward-schedule-paused-on-B', b_paused, 60)
     # (a2) all-domain-apis-forwarding
