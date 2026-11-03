@@ -24,7 +24,14 @@ ap.add_argument('--kafka-broker', help='host:port of a plaintext Kafka broker; e
 ap.add_argument('--kafka-container', help='docker container name of that broker (stopped/started for the broker-down step)')
 ap.add_argument('--two-history', action='store_true', help='run a second Go History host and kill/restart it while SDK workflows run')
 ap.add_argument('--kafka-topic', default='cadence-async-gate')
+ap.add_argument('--es-url', help='http://host:port of Elasticsearch; enables advanced visibility (needs --kafka-broker for the Go indexer)')
+ap.add_argument('--es-index', default='cadence-visibility-dev')
+ap.add_argument('--es-version', default='v7')
 args = ap.parse_args()
+if args.es_url and not args.kafka_broker:
+    ap.error('--es-url requires --kafka-broker')
+if args.es_url and args.database == 'cassandra':
+    ap.error('--es-url is supported on the SQL lanes only')
 if args.kafka_broker and not args.kafka_container:
     ap.error('--kafka-broker requires --kafka-container')
 ASYNC_QUEUE = 'gate-async-queue'
@@ -56,6 +63,9 @@ for s in socks:
 
 # ---- configs
 dyn = (root / 'go/config/dynamicconfig/development.yaml').read_text()
+if args.es_url:
+    assert 'value: "db"' in dyn
+    dyn = dyn.replace('value: "db"', 'value: "es"')
 (work / 'dynamic-config.yaml').write_text(dyn)
 (work / 'rust-dynamic-config.yaml').write_text(dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n')
 (work / 'config/base.yaml').write_text((root / 'go/config/base.yaml').read_text())
@@ -107,6 +117,19 @@ if plugin == 'cassandra':
 else:
     persistence = (f'persistence:\n  defaultStore: {plugin}-default\n  visibilityStore: {plugin}-visibility\n  numHistoryShards: 4\n  datastores:\n'
                    + sql_store(plugin + '-default', 'cadence', 20) + sql_store(plugin + '-visibility', 'cadence_visibility', 2))
+    (work / f'config/development_{plugin}.yaml').write_text(persistence)
+    if args.two_history:
+        (work / f'config2/development_{plugin}.yaml').write_text(persistence)
+if args.es_url:
+    from urllib.parse import urlparse
+    u = urlparse(args.es_url)
+    es_yaml = (f'    es-visibility:\n      elasticsearch:\n        disableSniff: true\n        version: "{args.es_version}"\n'
+               f'        url:\n          scheme: "{u.scheme}"\n          host: "{u.netloc}"\n        indices:\n          visibility: {args.es_index}\n')
+    vis_topic = args.es_index
+    kafka_yaml = ('kafka:\n  tls:\n    enabled: false\n  clusters:\n    test:\n      brokers:\n'
+                  f'        - {args.kafka_broker}\n  topics:\n    {vis_topic}:\n      cluster: test\n    {vis_topic}-dlq:\n      cluster: test\n'
+                  f'  applications:\n    visibility:\n      topic: {vis_topic}\n      dlq-topic: {vis_topic}-dlq\n')
+    persistence = persistence.replace('  numHistoryShards: 4\n', '  advancedVisibilityStore: es-visibility\n  numHistoryShards: 4\n', 1) + es_yaml + kafka_yaml
     (work / f'config/development_{plugin}.yaml').write_text(persistence)
     if args.two_history:
         (work / f'config2/development_{plugin}.yaml').write_text(persistence)
@@ -330,6 +353,48 @@ try:
         print('ASYNC SDK LOG TAIL\n' + '\n'.join((work / 'sdk-async.log').read_text().splitlines()[-40:]), flush=True)
         record('sdk-async-driver-exit', adrv.returncode == 0, f'exit={adrv.returncode}')
         record_services_alive('after-async-sdk')
+    if args.es_url:
+        # ---- advanced visibility phase: real Elasticsearch, Go indexer (Kafka) in the Go Worker, Rust Frontend reads
+        import urllib.request
+        def es_get(path):
+            return urllib.request.urlopen(args.es_url + path, timeout=30).read().decode()
+        dom_es = 'fe-gate-es-' + secrets.token_hex(3)
+        run('cli-register-domain-es', [*cli_t, '--domain', dom_es, 'domain', 'register', '--retention', '1'])
+        time.sleep(3)
+        es_key = 'GateAdded' + secrets.token_hex(2)
+        for tname, base in (('grpc', cli_g),):
+            r = subprocess.run([*base, 'admin', 'cluster', 'add-search-attr', '--search_attr_key', es_key, '--search_attr_type', '1'],
+                               input='y\n', capture_output=True, text=True, timeout=60)
+            (work / f'cli-add-search-attr-{tname}.log').write_text(r.stdout + r.stderr)
+            record(f'cli-add-search-attr-{tname}', r.returncode == 0, r.stdout + r.stderr)
+        try:
+            mapping = es_get(f'/{args.es_index}/_mapping')
+            (work / 'es-mapping.json').write_text(mapping)
+            record('es-mapping-has-added-attribute', ('Attr' in mapping and es_key in mapping), mapping[:1500])
+        except Exception as e:
+            record('es-mapping-has-added-attribute', False, repr(e))
+        emarks = work / 'es-marks'; emarks.mkdir(exist_ok=True)
+        eenv = {**env, 'FE_MODE': 'es', 'FE_DOMAIN': dom_es, 'FE_ES_KEY': es_key, 'FE_MARK_DIR': str(emarks)}
+        edrv = subprocess.Popen([str(args.driver)], cwd=work, stdout=(work / 'sdk-es.log').open('w'), stderr=subprocess.STDOUT, env=eenv, start_new_session=True)
+        procs['sdk-es-driver'] = edrv
+        try:
+            edrv.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            record('sdk-es-driver-timeout', False, 'exceeded 900s')
+            kill('sdk-es-driver')
+        for line in (work / 'sdk-es.log').read_text().splitlines():
+            m = re.match(r'STEP (\S+) (ok|FAIL)\s*(.*)', line)
+            if m:
+                record('sdk-' + m.group(1), m.group(2) == 'ok', m.group(3))
+        print('ES SDK LOG TAIL\n' + '\n'.join((work / 'sdk-es.log').read_text().splitlines()[-40:]), flush=True)
+        record('sdk-es-driver-exit', edrv.returncode == 0, f'exit={edrv.returncode}')
+        try:
+            docs = es_get(f'/{args.es_index}/_count')
+            (work / 'es-doc-count.json').write_text(docs)
+            record('es-index-has-documents', json.loads(docs).get('count', 0) >= 2, docs)
+        except Exception as e:
+            record('es-index-has-documents', False, repr(e))
+        record_services_alive('after-es-sdk')
     run('cli-list-workflows-grpc', [*cli_g, '--domain', dom_t, 'workflow', 'list', '--open'])
     run('cli-list-workflows-tchannel', [*cli_t, '--domain', dom_t, 'workflow', 'list', '--open'])
     # ---- archival phase: Go History/Worker archive (filestore), Rust Frontend registers/reads

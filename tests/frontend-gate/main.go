@@ -95,6 +95,10 @@ func main() {
 	}
 	defer d.Stop()
 	rpc := workflowserviceclient.New(d.ClientConfig("cadence-frontend"))
+	if os.Getenv("FE_MODE") == "es" {
+		esMain(rpc, domain)
+		os.Exit(map[bool]int{true: 1, false: 0}[failures > 0])
+	}
 	if os.Getenv("FE_MODE") == "async" {
 		asyncMain(rpc, domain, os.Getenv("FE_DOMAIN_NOASYNC"), marks)
 		return
