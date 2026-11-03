@@ -124,7 +124,9 @@ _ms = socket.socket(); _ms.bind(('127.0.0.1', 0)); prom_port = _ms.getsockname()
 rt, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?    metrics:\n)      statsd:\n        hostPort: "127.0.0.1:8125"\n        prefix: "cadence"\n',
                 lambda m: m.group(1) + f'      prometheus:\n        timerType: histogram\n        listenAddress: "127.0.0.1:{prom_port}"\n', rt, count=1)
 assert n == 1, 'frontend metrics block not found'
-rt = rt.rstrip('\n') + '\n' + async_yaml
+assert not re.search(r'(?m)^histograms:', rt)
+# Go emits cadence_latency_ns only when histogram migration allows it (default "timer").
+rt = rt.rstrip('\n') + '\nhistograms:\n  default: both\n' + async_yaml
 (work / 'rust.yaml').write_text(rt)
 
 # ---- process helpers
