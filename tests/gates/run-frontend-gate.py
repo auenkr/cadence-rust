@@ -6,7 +6,7 @@ keeps its error text, so Rust Frontend gaps are reported precisely instead of ab
 Usage: run-frontend-gate.py --out DIR --rust-binary P --go-server P --go-cli P --driver P --rust-root DIR
 MySQL comes from CADENCE_MYSQL_{ADDR,USER,PASSWORD} (databases cadence and cadence_visibility exist).
 """
-import argparse, json, os, re, secrets, signal, socket, subprocess, sys, time
+import argparse, concurrent.futures, json, os, re, secrets, signal, socket, subprocess, sys, time
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
@@ -810,6 +810,44 @@ try:
         cli_expect(f'oauth-{tname}-admin-api-expired-denied', [*base, '--jwt', t_expired, 'admin', 'config', 'list'], False, 'Request unauthorized')
         cli_expect(f'oauth-{tname}-admin-api-non-admin-denied', [*base, '--jwt', t_reader, 'admin', 'config', 'list'], False)
         cli_expect(f'oauth-{tname}-admin-api-admin-allowed', [*base, '--jwt', t_admin, 'admin', 'config', 'list'], True)
+
+    # ---- rate limiting (frontend.rps) and rpc.http (YARPC thrift over HTTP) on a non-OAuth config
+    import urllib.request, urllib.error
+    http_sock = socket.socket(); http_sock.bind(('127.0.0.1', 0)); http_port = http_sock.getsockname()[1]; http_sock.close()
+    (work / 'rust-dynamic-config.yaml').write_text(
+        dyn + f'\nsystem.enableGRPCOutbound:\n  - value: {str(args.rust_outbound == "grpc").lower()}\n'
+        'frontend.rps:\n  - value: 1\n')
+    http_cfg, n = re.subn(r'(?m)^(  frontend:\n(?:.*\n)*?      grpcMaxMsgSize: \d+\n)',
+                          lambda m: m.group(1) + f'      http:\n        port: {http_port}\n        procedures:\n          - "WorkflowService::GetSearchAttributes"\n', rt, count=1)
+    record('ratelimit-http-config-generated', n == 1)
+    (work / 'rust-ratelimit.yaml').write_text(http_cfg)
+    record('ratelimit-http-restart', restart_frontend(work / 'rust-ratelimit.yaml') and wait_port(http_port, 30, 'rust-frontend'))
+    time.sleep(5)
+    def http_call(proc):
+        req = urllib.request.Request(f'http://127.0.0.1:{http_port}/', data=b'\x00', method='POST', headers={
+            'Rpc-Service': 'cadence-frontend', 'Rpc-Encoding': 'thrift', 'Rpc-Procedure': proc,
+            'Rpc-Caller': 'gate', 'Content-Type': 'application/x-thrift'})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+    st, body = http_call('WorkflowService::GetSearchAttributes')
+    record('rpc-http-allowed-procedure', st == 200, f'{st} {body[:200]!r}')
+    st, body = http_call('WorkflowService::DescribeDomain')
+    record('rpc-http-disallowed-procedure-rejected', st == 404, f'{st} {body[:200]!r}')
+    busy = False
+    outs = []
+    with concurrent.futures.ThreadPoolExecutor(8) as pool:
+        for _ in range(4):
+            futs = [pool.submit(subprocess.run, [*cli_t, '--domain', dom_t, 'workflow', 'start', '--tl', 'rl-tl', '--wt', 'RlProbe', '--et', '60', '--dt', '10'], capture_output=True, text=True, timeout=60) for _ in range(8)]
+            for f in futs:
+                r = f.result()
+                outs.append(r.stdout + r.stderr)
+            if any('Too many outstanding requests to the cadence service' in o for o in outs):
+                busy = True
+                break
+    record('ratelimit-frontend-rps-service-busy', busy, (outs[-1] if outs else '')[:500])
 
 except SystemExit:
     pass

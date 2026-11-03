@@ -83,6 +83,9 @@ pub fn operation_rule(operation: &str) -> Option<OperationRule> {
 pub struct QuotaInfo {
     pub domain: String,
     pub task_list: String,
+    /// `cadence-caller-type` header (Go `types.CallerInfo`); only consulted by
+    /// the caller bypass, never part of a quota key.
+    pub caller_type: String,
 }
 
 pub trait DomainNameLookup: Send + Sync {
@@ -170,6 +173,7 @@ pub fn quota_info(
     Ok(QuotaInfo {
         domain,
         task_list: task_list_name,
+        caller_type: String::new(),
     })
 }
 
@@ -199,7 +203,7 @@ pub trait Policy: Send + Sync {
 }
 
 pub trait CallerBypass: Send + Sync {
-    fn should_bypass(&self) -> bool;
+    fn should_bypass(&self, info: &QuotaInfo) -> bool;
     fn allow_policy(&self, policy: &dyn Policy, info: &QuotaInfo) -> bool;
 }
 
@@ -229,7 +233,7 @@ pub fn allow_domain(
                 Err(CadenceError::Unknown("request context canceled".to_owned()))
             }
             Err(WaitFailure::Other(message)) => Err(CadenceError::Unknown(message)),
-            Err(WaitFailure::Deadline) if bypass.should_bypass() => Ok(()),
+            Err(WaitFailure::Deadline) if bypass.should_bypass(info) => Ok(()),
             Err(WaitFailure::Deadline) if bypass.allow_policy(policy, info) => Ok(()),
             Err(WaitFailure::Deadline) => Err(rate_limited()),
         };
@@ -328,7 +332,20 @@ impl HandlerRateLimit {
 
 impl crate::handler_workflow::RequestRateLimit for HandlerRateLimit {
     fn allow(&self, operation: &str, request: &serde_json::Value) -> Result<(), CadenceError> {
-        let info = quota_info(operation, request, self.domains.as_ref())?;
+        self.allow_with_headers(operation, request, &std::collections::HashMap::new())
+    }
+
+    fn allow_with_headers(
+        &self,
+        operation: &str,
+        request: &serde_json::Value,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> Result<(), CadenceError> {
+        let mut info = quota_info(operation, request, self.domains.as_ref())?;
+        info.caller_type = headers
+            .get("cadence-caller-type")
+            .cloned()
+            .unwrap_or_default();
         allow_operation(
             operation,
             &info,
@@ -380,11 +397,11 @@ mod tests {
 
     struct Bypass(AtomicBool);
     impl CallerBypass for Bypass {
-        fn should_bypass(&self) -> bool {
+        fn should_bypass(&self, _: &QuotaInfo) -> bool {
             self.0.load(Ordering::SeqCst)
         }
         fn allow_policy(&self, policy: &dyn Policy, info: &QuotaInfo) -> bool {
-            self.should_bypass() || policy.allow(info)
+            self.should_bypass(info) || policy.allow(info)
         }
     }
 
@@ -496,7 +513,8 @@ mod tests {
             quota_info("StartWorkflowExecutionAsync", &async_request, &DomainLookup).unwrap(),
             QuotaInfo {
                 domain: "async-domain".into(),
-                task_list: "base".into()
+                task_list: "base".into(),
+                caller_type: String::new(),
             }
         );
 
@@ -512,7 +530,8 @@ mod tests {
             quota_info("RespondActivityTaskCompleted", &request, &DomainLookup).unwrap(),
             QuotaInfo {
                 domain: "resolved-domain".into(),
-                task_list: String::new()
+                task_list: String::new(),
+                caller_type: String::new(),
             }
         );
     }

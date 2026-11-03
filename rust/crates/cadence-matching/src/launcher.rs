@@ -1,7 +1,7 @@
 use crate::{config, handlers, service};
 use cadence_service_core::cli::{Cli, Command};
 
-fn matching_http_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net::SocketAddr>> {
+fn rpc_http_listen_addr(rpc: &config::RpcConfig) -> anyhow::Result<Option<std::net::SocketAddr>> {
     let Some(http) = rpc.http.as_ref() else {
         return Ok(None);
     };
@@ -1450,7 +1450,7 @@ async fn run_with_lifecycle(
             let matching_http_addr = if run_matching {
                 matching_rpc
                     .as_ref()
-                    .map(matching_http_addr)
+                    .map(rpc_http_listen_addr)
                     .transpose()?
                     .flatten()
             } else {
@@ -1464,6 +1464,26 @@ async fn run_with_lifecycle(
             } else {
                 None
             };
+            // Go builds an HTTP inbound for every service whose `rpc.http` is set.
+            let frontend_http_addr = if run_frontend {
+                frontend_rpc
+                    .map(rpc_http_listen_addr)
+                    .transpose()?
+                    .flatten()
+            } else {
+                None
+            };
+            let frontend_http_tls_config = if run_frontend {
+                match frontend_rpc.and_then(|rpc| rpc.http.as_ref()) {
+                    Some(http) => matching_http_tls(http).await?,
+                    None => None,
+                }
+            } else {
+                None
+            };
+            if let Some(addr) = frontend_http_addr {
+                println!("Cadence Frontend HTTP listening on {addr}");
+            }
             if run_matching {
                 if let Some(addr) = matching_http_addr {
                     println!("Cadence internal Matching HTTP listening on {addr}");
@@ -2074,6 +2094,7 @@ async fn run_with_lifecycle(
                     tchannel_state.workflow_api = Some(api);
                 }
             }
+            let frontend_http_state = tchannel_state.clone();
             // The listener accepts Ringpop JOIN before provider bootstrap
             // starts. Use the final Frontend state, including its workflow
             // API hook, and deliberately omit the Matching handler.
@@ -2170,6 +2191,43 @@ async fn run_with_lifecycle(
                             crate::tchannel::serve(tchannel_addr, tchannel_state).await
                         },
                     )
+                });
+            }
+            if let Some(addr) = frontend_http_addr {
+                let http = frontend_rpc
+                    .and_then(|rpc| rpc.http.as_ref())
+                    .expect("configured Frontend HTTP address");
+                let procedures = http.procedures.clone();
+                let tls_mode = http.tls_mode.clone();
+                let tls_enabled = http.tls.as_ref().is_some_and(|tls| tls.enabled);
+                let tls_config = frontend_http_tls_config.clone();
+                let http_state = frontend_http_state.clone();
+                serving.spawn(async move {
+                    let app = handlers::yarpc_http_router(http_state, procedures);
+                    let result = if tls_mode.as_deref() == Some("enforced") && tls_enabled {
+                        axum_server::bind_rustls(
+                            addr,
+                            tls_config.expect("validated enforced TLS configuration"),
+                        )
+                        .serve(app.into_make_service())
+                        .await
+                        .map_err(anyhow::Error::from)
+                    } else if tls_mode.as_deref() == Some("permissive") && tls_enabled {
+                        serve_matching_http_permissive(
+                            addr,
+                            app,
+                            tls_config.expect("validated permissive TLS configuration"),
+                        )
+                        .await
+                    } else {
+                        match tokio::net::TcpListener::bind(addr).await {
+                            Ok(listener) => axum::serve(listener, app)
+                                .await
+                                .map_err(anyhow::Error::from),
+                            Err(error) => Err(anyhow::Error::from(error)),
+                        }
+                    };
+                    ("Frontend HTTP", result)
                 });
             }
             if run_history {
@@ -2942,14 +3000,14 @@ mod matching_http_listener_tests {
         let rpc: config::RpcConfig =
             serde_yaml::from_str("bindOnLocalHost: true\nhttp: {port: 8801}").unwrap();
         assert_eq!(
-            matching_http_addr(&rpc).unwrap().unwrap().to_string(),
+            rpc_http_listen_addr(&rpc).unwrap().unwrap().to_string(),
             "127.0.0.1:8801"
         );
     }
     #[tokio::test]
     async fn rejects_invalid_configuration_and_detects_enabled_tls() {
         let rpc: config::RpcConfig = serde_yaml::from_str("http: {port: 0}").unwrap();
-        assert!(matching_http_addr(&rpc)
+        assert!(rpc_http_listen_addr(&rpc)
             .unwrap_err()
             .to_string()
             .contains("HTTP port is not set"));

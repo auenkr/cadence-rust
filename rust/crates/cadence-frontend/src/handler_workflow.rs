@@ -479,6 +479,16 @@ pub trait RequestAuthorization: Send + Sync {
 
 pub trait RequestRateLimit: Send + Sync {
     fn allow(&self, operation: &str, request: &Value) -> Result<(), CadenceError>;
+    /// Like `allow`, with the inbound transport headers (lower-cased) so the
+    /// caller-type bypass can read `cadence-caller-type`.
+    fn allow_with_headers(
+        &self,
+        operation: &str,
+        request: &Value,
+        _headers: &HashMap<String, String>,
+    ) -> Result<(), CadenceError> {
+        self.allow(operation, request)
+    }
 }
 
 /// Go's visibility query validator is independent of request validation: it
@@ -895,7 +905,7 @@ impl<B: WorkflowBackend> Handler<B> {
     ) -> Result<Value, CadenceError> {
         validate_ratelimit_wrapper_request(operation, &request)?;
         if let Some(rate_limit) = &self.rate_limit {
-            rate_limit.allow(operation.name(), &request)?;
+            rate_limit.allow_with_headers(operation.name(), &request, &caller.original_headers)?;
         }
         if let Some(version_check) = &self.version_check {
             crate::wrappers::versioncheck::check(

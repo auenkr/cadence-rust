@@ -1488,6 +1488,42 @@ pub fn router(state: AppState) -> Router {
         .with_state(shared)
 }
 
+/// Go `rpc.http` inbound: YARPC Thrift-over-HTTP restricted to the configured
+/// `procedures` allowlist (common/rpc/params.go + yarpc `http.Inbound`).
+pub fn yarpc_http_router(state: AppState, procedures: Vec<String>) -> Router {
+    let shared = Arc::new(state);
+    let allowed = Arc::new(procedures);
+    let guard = move |State(state): State<Arc<AppState>>,
+                      headers: axum::http::HeaderMap,
+                      body: axum::body::Bytes| {
+        let allowed = allowed.clone();
+        async move {
+            if !yarpc_procedure_allowed(&allowed, &headers) {
+                return crate::yarpc::transport_error(
+                    StatusCode::NOT_FOUND,
+                    "procedure is not enabled".to_string(),
+                );
+            }
+            crate::yarpc::yarpc_handler(State(state), headers, body).await
+        }
+    };
+    Router::new()
+        .route("/", post(guard.clone()))
+        .route("/{*rest}", post(guard))
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            reject_frontend_during_shutdown,
+        ))
+        .with_state(shared)
+}
+
+fn yarpc_procedure_allowed(allowed: &[String], headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("Rpc-Procedure")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|name| allowed.iter().any(|candidate| candidate == name))
+}
+
 // ---------------------------------------------------------------------------
 // Tasks (matching)
 // ---------------------------------------------------------------------------
@@ -3248,4 +3284,24 @@ async fn count_workflows(
         Json(cadence_api::service_types::CountWorkflowExecutionsResponse { count }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod yarpc_http_tests {
+    use super::*;
+
+    #[test]
+    fn procedure_allowlist_is_exact_match() {
+        let allowed = vec!["WorkflowService::StartWorkflowExecution".to_owned()];
+        let mut headers = axum::http::HeaderMap::new();
+        assert!(!yarpc_procedure_allowed(&allowed, &headers));
+        headers.insert(
+            "Rpc-Procedure",
+            "WorkflowService::StartWorkflowExecution".parse().unwrap(),
+        );
+        assert!(yarpc_procedure_allowed(&allowed, &headers));
+        headers.insert("Rpc-Procedure", "WorkflowService::Health".parse().unwrap());
+        assert!(!yarpc_procedure_allowed(&allowed, &headers));
+        assert!(!yarpc_procedure_allowed(&[], &headers));
+    }
 }
