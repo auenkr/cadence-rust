@@ -2186,10 +2186,12 @@ async fn delete_domain_rejects_domain_with_executions() {
 async fn admin_refresh_tasks_delegates_to_history() {
     // With a History channel configured the request must reach History
     // (unreachable here -> InternalServiceError) instead of the in-memory store.
-    let mut state = AppState::default();
-    state.history_admin_channel = Some(
-        tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
-    );
+    let state = AppState {
+        history_admin_channel: Some(
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        ),
+        ..AppState::default()
+    };
     let app = router(state);
     setup_domain(app.clone()).await;
     let (status, _) = call(
