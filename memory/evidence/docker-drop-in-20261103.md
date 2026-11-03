@@ -14,3 +14,15 @@ Bugs fixed on the way: null YAML values as zero values; shard-distributor falls 
 Failed runs: 41629744767, 41630064878, 41630414487, 41631357775, 41636944950, 41642837130.
 
 Known gaps: --auto-setup shells out to the Go binary (`cadence-server-go update-schema`); default domain not created; Cassandra variant not run; temporary push trigger in docker-drop-in.yml must be removed after merge.
+
+## Update: gaps closed (head dfbbc4be1 + this evidence commit)
+- shard-distributor test: Go (`server.go` creates the spectator only when a ShardDistributor client exists; >1 namespace is fatal only then) accepts namespaces without client hostPort, so the CODE was right and the TEST was wrong. Test now asserts valid-but-inactive without client, active with client.
+- Auto-setup no longer needs the Go server: `rust/docker/cadence-auto-setup.sh` (cadence-sql-tool / cadence-cassandra-tool from the Go base image: create db/keyspace, setup-schema 0.0, update-schema for cadence + visibility; mysql/postgres/cassandra). Default domain "default" registered via `cadence` CLI once the local frontend serves (Go creates it in schema.Update; CLI registration is equivalent in effect: retention 7d, "Example Domain"). Go binary is replaced, not kept.
+- docker-drop-in.yml has a mysql + cassandra matrix (workflow_dispatch only; compose services limited to 1800m / 1.5 cpus / 2048 pids; tests/docker-drop-in/docker-compose.cassandra.yml).
+- Rust binary sha256: 087cd844265dfdda32ab397dadda2109dbdcd44e0db7f5a5de5701b4bfa28995.
+- Runs (all on t3/rust-docker-drop-in, head dfbbc4be1, conclusion success):
+  - rust-ci https://github.com/auenkr/cadence-rust/actions/runs/41683731108
+  - docker-drop-in (mysql + cassandra) https://github.com/auenkr/cadence-rust/actions/runs/41685249906
+  - frontend-mixed-gate mysql kafka two_history https://github.com/auenkr/cadence-rust/actions/runs/41691545289
+  - frontend-mixed-gate postgres two_cluster https://github.com/auenkr/cadence-rust/actions/runs/41693547469
+- Not verified from artifacts: default-domain creation result (script logs to /tmp/default-domain.log in the container); the SDK smoke itself registers `smoke` domain.
