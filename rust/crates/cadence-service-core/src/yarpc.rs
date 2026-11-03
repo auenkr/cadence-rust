@@ -700,6 +700,9 @@ fn proxy_app_error(error: crate::admin_replication::ProxyError) -> AppError {
     match error {
         crate::admin_replication::ProxyError::BadRequest(message) => AppError::bad_request(message),
         crate::admin_replication::ProxyError::Internal(message) => AppError::internal(message),
+        crate::admin_replication::ProxyError::NotFound(message) => {
+            AppError::entity_not_exists(message)
+        }
     }
 }
 

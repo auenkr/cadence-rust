@@ -18,13 +18,188 @@ const INCLUSIVE_END_MESSAGE_ID: i64 = i64::MAX - 1;
 pub enum ProxyError {
     BadRequest(String),
     Internal(String),
+    NotFound(String),
 }
 
 impl ProxyError {
     pub fn message(&self) -> &str {
         match self {
-            ProxyError::BadRequest(message) | ProxyError::Internal(message) => message,
+            ProxyError::BadRequest(message)
+            | ProxyError::Internal(message)
+            | ProxyError::NotFound(message) => message,
         }
+    }
+}
+
+/// Go `ndc.defaultPageSize` / `resendContextTimeout`.
+const RESEND_PAGE_SIZE: i32 = 100;
+const RESEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Go `HistoryResenderImpl.createReplicationRawRequest`.
+pub(crate) fn resend_replication_request(
+    domain_id: &str,
+    workflow_id: &str,
+    run_id: &str,
+    batch: cadence_proto::api::DataBlob,
+    items: Vec<cadence_proto::admin::VersionHistoryItem>,
+) -> ph::ReplicateEventsV2Request {
+    ph::ReplicateEventsV2Request {
+        domain_id: domain_id.to_owned(),
+        workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+            workflow_id: workflow_id.to_owned(),
+            run_id: run_id.to_owned(),
+        }),
+        version_history_items: items,
+        events: Some(batch),
+        new_run_events: None,
+    }
+}
+
+/// Go proto mapper: a start/end bound exists only when both id and version are set.
+fn version_item(
+    event_id: Option<i64>,
+    version: Option<i64>,
+) -> Option<cadence_proto::admin::VersionHistoryItem> {
+    Some(cadence_proto::admin::VersionHistoryItem {
+        event_id: event_id?,
+        version: version?,
+    })
+}
+
+/// Go admin `ResendReplicationTasks` (`ndc.HistoryResender.SendSingleWorkflowHistory`):
+/// page the remote cluster's admin `GetWorkflowExecutionRawHistoryV2` and replay each raw
+/// batch into local History through `ReplicateEventsV2`. The remote is reached over gRPC;
+/// the resender has no TLS for remotes (Go uses the client bean's transport config).
+pub async fn resend_replication_tasks(
+    state: &AppState,
+    request: api_admin::ResendReplicationTasksRequest,
+) -> Result<(), ProxyError> {
+    let domain_name = state
+        .domains
+        .describe(&cadence_api::service_types::DescribeDomainRequest {
+            name: None,
+            uuid: Some(request.domain_id.clone()),
+        })
+        .map_err(|error| ProxyError::Internal(format!("getting domain: {}", error.message)))?
+        .domain_info
+        .map(|info| info.name)
+        .unwrap_or_default();
+    let remote = state
+        .cluster_metadata
+        .clusters
+        .get(&request.remote_cluster)
+        .ok_or_else(|| {
+            ProxyError::Internal(format!(
+                "history iterator: getting history: unknown remote cluster {:?}",
+                request.remote_cluster
+            ))
+        })?;
+    if remote.rpc_transport == "tchannel" {
+        return Err(ProxyError::Internal(format!(
+            "history iterator: getting history: remote cluster {:?} uses tchannel; only grpc remotes are supported",
+            request.remote_cluster
+        )));
+    }
+    let remote_channel = crate::grpc_tls::endpoint_channel(&remote.rpc_address, None)
+        .map_err(|error| ProxyError::Internal(format!("getting history: {error}")))?;
+    let mut remote_admin =
+        cadence_proto::admin::admin_api_client::AdminApiClient::new(remote_channel);
+    let mut history = client(state)?;
+    let mut token: Vec<u8> = Vec::new();
+    loop {
+        let mut raw = tonic::Request::new(cadence_proto::admin::GetWorkflowExecutionRawHistoryV2Request {
+            domain: domain_name.clone(),
+            workflow_execution: Some(cadence_proto::api::WorkflowExecution {
+                workflow_id: request.workflow_id.clone(),
+                run_id: request.run_id.clone(),
+            }),
+            start_event: version_item(request.start_event_id, request.start_version),
+            end_event: version_item(request.end_event_id, request.end_version),
+            page_size: RESEND_PAGE_SIZE,
+            next_page_token: token.clone(),
+        });
+        raw.set_timeout(RESEND_TIMEOUT);
+        for (key, value) in [
+            ("rpc-service", remote.rpc_name.as_str()),
+            ("rpc-caller", "cadence-frontend"),
+            ("rpc-encoding", "proto"),
+        ] {
+            if let Ok(value) = tonic::metadata::MetadataValue::try_from(value) {
+                raw.metadata_mut().insert(key, value);
+            }
+        }
+        let page = remote_admin
+            .get_workflow_execution_raw_history_v2(raw)
+            .await
+            .map_err(|status| {
+                ProxyError::Internal(format!(
+                    "history iterator: getting history: {}",
+                    status.message()
+                ))
+            })?
+            .into_inner();
+        let items = page
+            .version_history
+            .map(|history| history.items)
+            .unwrap_or_default();
+        for batch in page.history_batches {
+            let mut replicate = history_admin_request(resend_replication_request(
+                &request.domain_id,
+                &request.workflow_id,
+                &request.run_id,
+                batch,
+                items.clone(),
+            ));
+            replicate.set_timeout(RESEND_TIMEOUT);
+            match history.replicate_events_v2(replicate).await {
+                Ok(_) => {}
+                Err(status) if status.code() == tonic::Code::NotFound => {
+                    return Err(ProxyError::NotFound(status.message().to_string()));
+                }
+                Err(status) => {
+                    return Err(ProxyError::Internal(format!(
+                        "sending replication request: {}",
+                        status.message()
+                    )));
+                }
+            }
+        }
+        if page.next_page_token.is_empty() {
+            return Ok(());
+        }
+        token = page.next_page_token;
+    }
+}
+
+#[cfg(test)]
+mod resend_tests {
+    use super::*;
+
+    #[test]
+    fn replication_request_carries_batch_and_version_items() {
+        let blob = cadence_proto::api::DataBlob {
+            encoding_type: 2,
+            data: vec![1, 2, 3],
+        };
+        let items = vec![cadence_proto::admin::VersionHistoryItem {
+            event_id: 5,
+            version: 7,
+        }];
+        let req = resend_replication_request("d", "w", "r", blob.clone(), items.clone());
+        assert_eq!(req.domain_id, "d");
+        let exec = req.workflow_execution.unwrap();
+        assert_eq!((exec.workflow_id.as_str(), exec.run_id.as_str()), ("w", "r"));
+        assert_eq!(req.events, Some(blob));
+        assert_eq!(req.version_history_items, items);
+        assert!(req.new_run_events.is_none());
+    }
+
+    #[test]
+    fn bounds_need_both_event_id_and_version() {
+        assert!(version_item(Some(1), None).is_none());
+        assert!(version_item(None, Some(1)).is_none());
+        let item = version_item(Some(4), Some(9)).unwrap();
+        assert_eq!((item.event_id, item.version), (4, 9));
     }
 }
 

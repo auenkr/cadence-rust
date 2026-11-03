@@ -1174,6 +1174,9 @@ fn proxy_error_response(error: crate::admin_replication::ProxyError) -> Response
             StatusCode::INTERNAL_SERVER_ERROR,
             message,
         ),
+        crate::admin_replication::ProxyError::NotFound(message) => {
+            error_response("EntityNotExistsError", StatusCode::NOT_FOUND, message)
+        }
     }
 }
 
@@ -1601,6 +1604,12 @@ pub async fn resend_replication_tasks(
         return bad_request(BadRequestError::new(
             "Remote cluster is not set on request.",
         ));
+    }
+    if state.history_admin_channel.is_some() {
+        return match crate::admin_replication::resend_replication_tasks(&state, req).await {
+            Ok(()) => ok_json(cadence_api::admin::ResendReplicationTasksResponse {}),
+            Err(error) => proxy_error_response(error),
+        };
     }
     if req.remote_cluster != state.current_cluster_name {
         return bad_request(BadRequestError::new(format!(
