@@ -1083,7 +1083,9 @@ pub fn build_workflow_api(
                     .map(|p| p.all_domain_apis_forwarding_target_cluster.clone())
                     .unwrap_or_default(),
                 config,
-                manager: crate::wrappers::redirection_runtime::UnsupportedActiveClusterManager,
+                manager: crate::wrappers::redirection_runtime::DomainActiveClusterManager::new(
+                    ctx.state.domain_manager.clone(),
+                ),
                 metrics: std::sync::Arc::new(
                     crate::wrappers::redirection_runtime::SinkRedirectMetrics::new(
                         shared_metrics_sink.clone(),

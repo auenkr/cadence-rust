@@ -2,10 +2,9 @@
 //! (`wrappers/clusterredirection`): request->domain resolver, config-driven
 //! runtime knobs, metrics and the remote-Frontend forwarding backend.
 //!
-//! Not ported (documented gaps): active-active domains (the Rust API has no
-//! ActiveClusterSelectionPolicy), strong-consistency auto-forwarding header
-//! (always eventual), schedule APIs (served by handler_schedule) and the gRPC
-//! remote transport.
+//! Not ported (documented gaps): active-active per-workflow policy lookups
+//! (execution store), strong-consistency auto-forwarding header
+//! (always eventual).
 
 #![allow(clippy::result_large_err)]
 
@@ -181,7 +180,7 @@ impl RedirectRequestResolver for DomainCacheResolver {
             global: described.is_global_domain,
             deprecated_or_deleted,
             active_cluster: replication.active_cluster_name,
-            active_active: false,
+            active_active: is_active_active(replication.active_clusters.as_ref()),
         };
         let execution = if EXECUTION_OPERATIONS.contains(&operation) {
             fields
@@ -204,7 +203,7 @@ impl RedirectRequestResolver for DomainCacheResolver {
         Ok(Some(RedirectRequest {
             domain,
             execution,
-            requested_cluster_attribute: None,
+            requested_cluster_attribute: requested_cluster_attribute(operation, fields),
             consistency: Consistency::Eventual,
         }))
     }
@@ -219,23 +218,142 @@ impl RuntimeConfig for FnRuntimeConfig {
     }
 }
 
-/// Active-active lookups are unavailable in the Rust API; Go treats lookup
-/// errors as "use the current cluster", which this reproduces.
-pub struct UnsupportedActiveClusterManager;
+/// Go `DomainReplicationConfig.IsActiveActive`: cluster attribute scopes (or
+/// the legacy region map) are configured.
+pub fn is_active_active(active_clusters: Option<&cadence_api::types::ActiveClusters>) -> bool {
+    active_clusters.is_some_and(|clusters| {
+        clusters
+            .active_clusters_by_cluster_attribute
+            .as_ref()
+            .is_some_and(|scopes| !scopes.is_empty())
+            || clusters
+                .active_clusters_by_region
+                .as_ref()
+                .is_some_and(|regions| !regions.is_empty())
+    })
+}
 
-impl ActiveClusterManager for UnsupportedActiveClusterManager {
-    fn active_cluster_for_workflow(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
-        Err("active-active domains are not supported".into())
+/// Encodes `ClusterAttribute{scope,name}` for the string-typed manager
+/// interface. An empty string is a nil attribute.
+pub fn encode_cluster_attribute(scope: &str, name: &str) -> String {
+    format!("{scope}:{name}")
+}
+
+/// `ActiveClusterSelectionPolicy.ClusterAttribute` of a start /
+/// signal-with-start request (Go `requestedActiveClusterSelectionPolicy`).
+fn requested_cluster_attribute(operation: &str, request: &Value) -> Option<String> {
+    if !matches!(
+        operation,
+        "StartWorkflowExecution"
+            | "StartWorkflowExecutionAsync"
+            | "SignalWithStartWorkflowExecution"
+            | "SignalWithStartWorkflowExecutionAsync"
+    ) {
+        return None;
     }
-    fn active_cluster_for_cluster_attribute(&self, _: &str, _: &str) -> Result<String, String> {
-        Err("active-active domains are not supported".into())
+    let attribute = request
+        .get("activeClusterSelectionPolicy")?
+        .get("clusterAttribute")?;
+    Some(encode_cluster_attribute(
+        str_field(attribute, "scope"),
+        str_field(attribute, "name"),
+    ))
+}
+
+/// Go `activecluster.Manager` backed by the domain cache entry. Cluster
+/// attribute lookups follow `DomainCacheEntry.GetActiveClusterInfoByClusterAttribute`.
+/// Per-workflow policy lookups need the execution store, which the Rust
+/// Frontend does not read yet; they fail and Go's policy then routes to the
+/// current cluster (documented gap).
+pub struct DomainActiveClusterManager {
+    manager: Arc<dyn FrontendDomainManager>,
+}
+
+impl DomainActiveClusterManager {
+    pub fn new(manager: Arc<dyn FrontendDomainManager>) -> Self {
+        Self { manager }
     }
+}
+
+/// Go `GetActiveClusterInfoByClusterAttribute` on a domain's replication config.
+pub fn active_cluster_for_attribute(
+    domain_active_cluster: &str,
+    active_clusters: Option<&cadence_api::types::ActiveClusters>,
+    attribute: &str,
+) -> Result<String, String> {
+    if attribute.is_empty() {
+        return Ok(domain_active_cluster.to_owned());
+    }
+    let (scope, name) = attribute.split_once(':').unwrap_or((attribute, ""));
+    active_clusters
+        .and_then(|clusters| clusters.active_clusters_by_cluster_attribute.as_ref())
+        .and_then(|scopes| scopes.get(scope))
+        .and_then(|scope| scope.cluster_attributes.as_ref())
+        .and_then(|attributes| attributes.get(name))
+        .map(|info| info.active_cluster_name.clone())
+        .ok_or_else(|| format!("cluster attribute {attribute} not found"))
+}
+
+impl ActiveClusterManager for DomainActiveClusterManager {
+    fn active_cluster_for_workflow(
+        &self,
+        domain_id: &str,
+        _workflow_id: &str,
+        _run_id: &str,
+    ) -> Result<String, String> {
+        let described = self
+            .manager
+            .describe(&DescribeDomainRequest {
+                name: None,
+                uuid: Some(domain_id.to_owned()),
+            })
+            .map_err(|error| error.to_string())?;
+        let replication = described.replication_configuration.unwrap_or_default();
+        if !is_active_active(replication.active_clusters.as_ref()) {
+            // Go: not active-active, ActiveClusterName from the domain entry.
+            return Ok(replication.active_cluster_name);
+        }
+        Err("workflow active cluster selection policy lookup is not ported".into())
+    }
+
+    fn active_cluster_for_cluster_attribute(
+        &self,
+        domain_id: &str,
+        cluster_attribute: &str,
+    ) -> Result<String, String> {
+        let described = self
+            .manager
+            .describe(&DescribeDomainRequest {
+                name: None,
+                uuid: Some(domain_id.to_owned()),
+            })
+            .map_err(|error| error.to_string())?;
+        let replication = described.replication_configuration.unwrap_or_default();
+        active_cluster_for_attribute(
+            &replication.active_cluster_name,
+            replication.active_clusters.as_ref(),
+            cluster_attribute,
+        )
+    }
+
     fn current_workflow_selection(
         &self,
-        _: &str,
-        _: &str,
+        domain_id: &str,
+        _workflow_id: &str,
     ) -> Result<(bool, Option<String>), String> {
-        Err("active-active domains are not supported".into())
+        let described = self
+            .manager
+            .describe(&DescribeDomainRequest {
+                name: None,
+                uuid: Some(domain_id.to_owned()),
+            })
+            .map_err(|error| error.to_string())?;
+        let replication = described.replication_configuration.unwrap_or_default();
+        if !is_active_active(replication.active_clusters.as_ref()) {
+            // Go: not active-active returns (nil, false, nil).
+            return Ok((false, None));
+        }
+        Err("current workflow policy lookup is not ported".into())
     }
 }
 
@@ -391,7 +509,7 @@ impl RemoteFrontends {
 /// The production redirector (`policy.go` + `DomainCacheResolver`).
 pub type ProductionRedirector = super::clusterredirection::WorkflowRedirector<
     FnRuntimeConfig,
-    UnsupportedActiveClusterManager,
+    DomainActiveClusterManager,
     DomainCacheResolver,
 >;
 
@@ -504,6 +622,136 @@ mod tests {
     use super::*;
     use crate::wrappers::clusterredirection::{ForwardingPolicy, WorkflowRedirector};
     use std::sync::Mutex;
+
+    struct TestManager;
+
+    impl ActiveClusterManager for TestManager {
+        fn active_cluster_for_workflow(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
+            Err("unavailable".into())
+        }
+        fn active_cluster_for_cluster_attribute(&self, _: &str, _: &str) -> Result<String, String> {
+            Err("unavailable".into())
+        }
+        fn current_workflow_selection(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<(bool, Option<String>), String> {
+            Err("unavailable".into())
+        }
+    }
+
+    fn active_clusters() -> cadence_api::types::ActiveClusters {
+        use cadence_api::types::{ActiveClusterInfo, ClusterAttributeScope};
+        let info = ActiveClusterInfo {
+            active_cluster_name: "b".into(),
+            failover_version: 3,
+        };
+        cadence_api::types::ActiveClusters {
+            active_clusters_by_region: None,
+            active_clusters_by_cluster_attribute: Some(HashMap::from([(
+                "region".to_owned(),
+                ClusterAttributeScope {
+                    cluster_attributes: Some(HashMap::from([("us".to_owned(), info)])),
+                },
+            )])),
+        }
+    }
+
+    #[test]
+    fn active_active_requires_attribute_scopes_or_regions() {
+        assert!(!is_active_active(None));
+        assert!(!is_active_active(Some(&Default::default())));
+        assert!(is_active_active(Some(&active_clusters())));
+    }
+
+    #[test]
+    fn cluster_attribute_lookup_matches_domain_cache_entry() {
+        let clusters = active_clusters();
+        // Nil attribute: the domain's ActiveClusterName.
+        assert_eq!(
+            active_cluster_for_attribute("a", Some(&clusters), "").unwrap(),
+            "a"
+        );
+        assert_eq!(
+            active_cluster_for_attribute("a", Some(&clusters), "region:us").unwrap(),
+            "b"
+        );
+        assert!(active_cluster_for_attribute("a", Some(&clusters), "region:eu").is_err());
+        assert!(active_cluster_for_attribute("a", Some(&clusters), "zone:us").is_err());
+        assert!(active_cluster_for_attribute("a", None, "region:us").is_err());
+    }
+
+    #[test]
+    fn requested_attribute_comes_from_start_requests_only() {
+        let request = serde_json::json!({
+            "activeClusterSelectionPolicy": {"clusterAttribute": {"scope": "region", "name": "us"}}
+        });
+        assert_eq!(
+            requested_cluster_attribute("StartWorkflowExecution", &request).as_deref(),
+            Some("region:us")
+        );
+        assert_eq!(
+            requested_cluster_attribute("SignalWithStartWorkflowExecutionAsync", &request)
+                .as_deref(),
+            Some("region:us")
+        );
+        assert_eq!(
+            requested_cluster_attribute("SignalWorkflowExecution", &request),
+            None
+        );
+        assert_eq!(
+            requested_cluster_attribute("StartWorkflowExecution", &serde_json::json!({})),
+            None
+        );
+    }
+
+    #[test]
+    fn active_active_start_routes_to_cluster_attribute_cluster() {
+        struct Attr;
+        impl ActiveClusterManager for Attr {
+            fn active_cluster_for_workflow(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
+                Err("x".into())
+            }
+            fn active_cluster_for_cluster_attribute(&self, _: &str, a: &str) -> Result<String, String> {
+                active_cluster_for_attribute("a", Some(&active_clusters()), a)
+            }
+            fn current_workflow_selection(&self, _: &str, _: &str) -> Result<(bool, Option<String>), String> {
+                Err("x".into())
+            }
+        }
+        let domain = DomainState {
+            id: "id".into(),
+            name: "d".into(),
+            global: true,
+            deprecated_or_deleted: false,
+            active_cluster: "a".into(),
+            active_active: true,
+        };
+        let metrics = SinkRedirectMetrics::new(Arc::new(
+            cadence_service_core::matching_metrics::NoopMetricSink,
+        ));
+        let mut targets = Vec::new();
+        crate::wrappers::clusterredirection::redirect(
+            ForwardingPolicy::AllDomainV3,
+            "a",
+            "",
+            &domain,
+            None,
+            Some("region:us"),
+            "StartWorkflowExecution",
+            Consistency::Eventual,
+            &FnRuntimeConfig(Arc::new(|_| true)),
+            &Attr,
+            &metrics,
+            |cluster: &str| {
+                targets.push(cluster.to_owned());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(targets, ["b"]);
+    }
 
     #[test]
     fn redirected_list_matches_go_generated_wrapper_count() {
@@ -651,7 +899,7 @@ mod tests {
             current_cluster: "a".into(),
             configured_target: String::new(),
             config: FnRuntimeConfig(Arc::new(|_| true)),
-            manager: UnsupportedActiveClusterManager,
+            manager: TestManager,
             metrics: Arc::new(SinkRedirectMetrics::new(Arc::new(
                 cadence_service_core::matching_metrics::NoopMetricSink,
             ))),
