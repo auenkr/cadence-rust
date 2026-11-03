@@ -487,6 +487,26 @@ pub(crate) fn de_go_duration<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::
     }
 }
 
+/// Go's YAML decoder leaves a field at its zero value for an empty (`key:`) or
+/// `null` entry; serde rejects a unit where a string is expected. The Docker config
+/// template renders many empty values (`user:`, `password:`, `broadcastAddress:`),
+/// so drop null mapping entries before deserializing.
+fn strip_null_values(value: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    match value {
+        Value::Mapping(map) => Value::Mapping(
+            map.into_iter()
+                .filter(|(_, v)| !v.is_null())
+                .map(|(k, v)| (k, strip_null_values(v)))
+                .collect(),
+        ),
+        Value::Sequence(items) => {
+            Value::Sequence(items.into_iter().map(strip_null_values).collect())
+        }
+        other => other,
+    }
+}
+
 pub fn parse_go_duration(input: &str) -> Result<i64, String> {
     let (negative, mut rest) = if let Some(r) = input.strip_prefix('-') {
         (true, r)
@@ -1091,7 +1111,9 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
-        let config: Self = serde_yaml::from_str(&expand_env(text).map_err(anyhow::Error::msg)?)?;
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&expand_env(text).map_err(anyhow::Error::msg)?)?;
+        let config: Self = serde_yaml::from_value(strip_null_values(value))?;
         let config = config.finish();
         config.validate_metric_migrations()?;
         Ok(config)
@@ -1127,7 +1149,7 @@ impl Config {
                 merged = merge_yaml(merged, layer);
             }
         }
-        let config: Self = serde_yaml::from_value(merged)?;
+        let config: Self = serde_yaml::from_value(strip_null_values(merged))?;
         let config = config.finish();
         config.validate_metric_migrations()?;
         Ok(config)
@@ -1328,6 +1350,14 @@ mod tests {
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| (*value).to_owned())
         }
+    }
+
+    #[test]
+    fn empty_yaml_values_are_zero_values_like_go() {
+        let cfg = Config::from_yaml(
+            "persistence:\n  defaultStore: default\n  numHistoryShards: 4\n  datastores:\n    default:\n      sql:\n        pluginName: mysql\n        user:\n        password:\nringpop:\n  name: cadence\n  broadcastAddress:\n",
+        );
+        assert!(cfg.is_ok(), "{:?}", cfg.err());
     }
 
     #[test]
