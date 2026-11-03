@@ -572,7 +572,8 @@ fn validate_where(e: &mut Expr, valid: &dyn Fn(&str) -> bool) -> Result<(), Quer
 
 fn prefix_col(l: &mut Operand, valid: &dyn Fn(&str) -> bool, msg: &str) -> Result<(), QueryError> {
     let name = match l {
-        Operand::Col(n, _) => n.clone(),
+        // Go's ColName splits `qualifier.name`; validation uses the name only.
+        Operand::Col(n, _) => n.rsplit('.').next().unwrap_or(n).to_owned(),
         _ => return Err(bad(msg)),
     };
     if !valid(&name) {
