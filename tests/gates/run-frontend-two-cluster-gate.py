@@ -225,8 +225,10 @@ try:
     rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'create', '--sid', sid, '--ce', '0 0 1 1 *',
                   '--wt', 'TcType', '--tl', 'tc-tl', '--et', '600')
     record('selected-forward-schedule-create-on-A', rc == 0, out)
-    rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
-    record('selected-forward-schedule-lives-on-B', rc == 0 and '0 0 1 1 *' in out, out)
+    def b_has_schedule():
+        rc, out = cli(B_G, 'grpc', '--domain', dom, 'schedule', 'describe', '--sid', sid)
+        return rc == 0 and '0 0 1 1 *' in out, out
+    poll('selected-forward-schedule-lives-on-B', b_has_schedule, 60)
     rc, out = cli(A_G, 'grpc', '--domain', dom, 'schedule', 'pause', '--sid', sid, '--reason', 'gate')
     record('selected-forward-schedule-pause-on-A', rc == 0, out)
     def b_paused():
