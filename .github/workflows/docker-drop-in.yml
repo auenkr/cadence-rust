@@ -34,7 +34,7 @@ jobs:
       - name: Build Rust image
         run: |
           set +e
-          docker build -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-build.log 2>&1; echo $? > out/rust-build.exit
+          docker build --pull=false -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-build.log 2>&1; echo $? > out/rust-build.exit
           set -e
           tail -20 out/rust-build.log
           test "$(cat out/rust-build.exit)" = 0
