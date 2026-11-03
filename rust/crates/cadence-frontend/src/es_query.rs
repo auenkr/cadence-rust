@@ -488,7 +488,9 @@ fn is_system_key(k: &str) -> bool {
 }
 
 fn is_union_select(clause: &str) -> bool {
-    let Ok(t) = tokenize(clause) else { return false };
+    let Ok(t) = tokenize(clause) else {
+        return false;
+    };
     let Some(u) = t.iter().position(|x| kw(x, "union")) else {
         return false;
     };
@@ -496,12 +498,14 @@ fn is_union_select(clause: &str) -> bool {
     if t.get(j).is_some_and(|x| kw(x, "all") || kw(x, "distinct")) {
         j += 1;
     }
-    t.get(j).is_some_and(|x| kw(x, "select"))
-        && parse_clause_prefix_ok(&t[..u])
+    t.get(j).is_some_and(|x| kw(x, "select")) && parse_clause_prefix_ok(&t[..u])
 }
 
 fn parse_clause_prefix_ok(t: &[Tok]) -> bool {
-    let mut p = P { t: t.to_vec(), i: 0 };
+    let mut p = P {
+        t: t.to_vec(),
+        i: 0,
+    };
     p.expr().is_ok() && p.peek().is_none()
 }
 
