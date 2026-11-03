@@ -265,7 +265,6 @@ impl ArchivedHistory {
 
     async fn get(&self, domain_id: String, request: Value) -> Result<Option<Value>, CadenceError> {
         if !self.config.read_enabled() {
-            eprintln!("FE-ARCHIVE history read disabled by config");
             return Ok(None);
         }
         let field = |v: &Value, k: &str| {
@@ -277,7 +276,6 @@ impl ArchivedHistory {
         let exec = request.get("execution").cloned().unwrap_or(Value::Null);
         let workflow_id = field(&exec, "workflowId");
         let run_id = field(&exec, "runId");
-        eprintln!("FE-ARCHIVE history lookup domain={domain_id} wf={workflow_id} run={run_id}");
         if run_id.is_empty() {
             return Ok(None);
         }
@@ -290,10 +288,7 @@ impl ArchivedHistory {
         // Only an EntityNotExists from History means "archived".
         match self.probe.exists(&domain_id, &workflow_id, &run_id).await {
             Ok(false) => {}
-            other => {
-                eprintln!("FE-ARCHIVE history probe domain={domain_id} wf={workflow_id} run={run_id}: not archived ({other:?})");
-                return Ok(None);
-            }
+            _ => return Ok(None),
         }
         let archival = self.domains.archival(&domain_id)?;
         if archival.history_uri.is_empty() {
@@ -314,10 +309,7 @@ impl ArchivedHistory {
             tokio::task::spawn_blocking(move || provider.get_history(&uri, &get_request))
                 .await
                 .map_err(|e| CadenceError::from(InternalServiceError::new(e.to_string())))?
-                .map_err(|e| {
-                    eprintln!("FE-ARCHIVE history get failed: {e:?}");
-                    map_archiver_error(e)
-                })?;
+                .map_err(map_archiver_error)?;
         let mut events = Vec::new();
         for batch in response.history_batches {
             if let Some(list) = batch.get("events").and_then(Value::as_array) {
@@ -333,11 +325,6 @@ impl ArchivedHistory {
                 }
             }
         }
-        eprintln!(
-            "FE-ARCHIVE history ok: events={} next_token_len={}",
-            events.len(),
-            response.next_page_token.len()
-        );
         Ok(Some(json!({
             "history": {"events": events},
             "nextPageToken": b64_token(&response.next_page_token),

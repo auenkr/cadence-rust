@@ -433,12 +433,7 @@ fn s3_highest_version(
             }
         }
     }
-    highest.ok_or_else(|| {
-        eprintln!(
-            "FE-ARCHIVE s3 no history version: bucket={bucket} prefix={prefix} page={page:?}"
-        );
-        ArchiverError::BadRequest(ERR_HISTORY_NOT_EXIST.to_owned())
-    })
+    highest.ok_or_else(|| ArchiverError::BadRequest(ERR_HISTORY_NOT_EXIST.to_owned()))
 }
 
 /// Go s3store `historyArchiver.Get`.
