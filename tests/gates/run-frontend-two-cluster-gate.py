@@ -319,6 +319,11 @@ try:
         record('resend-history-visible-on-A', rc == 0 and 'WorkflowExecutionStarted' in out, out)
         rc, out = cli(A_G, 'grpc', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
         record('resend-unknown-cluster-fails', rc != 0, out)
+        # Thrift/TChannel admin ResendReplicationTasks (was "unknown method" before the yarpc arm)
+        rc, out = cli(A_T, 'tchannel', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'cluster1', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        record('resend-replication-tasks-thrift-remote', rc == 0 and 'unknown method' not in out.lower(), out)
+        rc, out = cli(A_T, 'tchannel', 'admin', 'kafka', 'rereplicate', '--source_cluster', 'no-such-cluster', '--domain_id', domain_id, '--wid', wid, '--rid', rid)
+        record('resend-unknown-cluster-fails-thrift', rc != 0 and 'unknown method' not in out.lower(), out)
     for n in ['go-b', 'go-a-history-worker', 'rust-matching', 'rust-frontend']:
         record(f'{n}-alive-at-end', procs[n].poll() is None, f'exit={procs[n].poll()}')
 except SystemExit:

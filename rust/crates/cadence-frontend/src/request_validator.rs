@@ -36,16 +36,16 @@ impl Default for ValidationConfig {
     fn default() -> Self {
         Self {
             visibility_max_page_size: 1000,
-            visibility_archival_query_max_page_size: 1000,
+            visibility_archival_query_max_page_size: 10000,
             es_index_max_result_window: 10000,
             advanced_visibility_store: false,
             admin_protection: false,
             admin_operation_token: String::new(),
-            max_retention_days: 3650,
-            max_failover_timeout_seconds: 60,
+            max_retention_days: 30,
+            max_failover_timeout_seconds: 300,
             lockdown: false,
-            max_domain_name_length: 255,
-            max_task_list_name_length: 255,
+            max_domain_name_length: 1000,
+            max_task_list_name_length: 1000,
             required_domain_data_keys: Vec::new(),
         }
     }
@@ -117,6 +117,80 @@ impl RequestValidator {
         )
     }
 
+    /// Go `limit.maxIDWarnLength` (default 128).
+    pub fn id_warn_length(&self) -> usize {
+        self.dynamic_integer("limit.maxIDWarnLength", None, 128).max(0) as usize
+    }
+
+    /// Per-domain ID/name length limits (Go `limit.*Length`, default 1000).
+    pub fn id_limits(&self, domain: &str) -> cadence_api::validation::Limits {
+        let get = |key: &str| self.dynamic_integer(key, Some(domain), 1000).max(0) as usize;
+        cadence_api::validation::Limits {
+            ids: cadence_api::validation::IdLengthLimits {
+                domain_max: self
+                    .dynamic_integer(
+                        "limit.domainNameLength",
+                        Some(domain),
+                        self.config.max_domain_name_length as i64,
+                    )
+                    .max(0) as usize,
+                workflow_id_max: get("limit.workflowIDLength"),
+                workflow_type_max: get("limit.workflowTypeLength"),
+                task_list_max: self
+                    .dynamic_integer(
+                        "limit.taskListNameLength",
+                        Some(domain),
+                        self.config.max_task_list_name_length as i64,
+                    )
+                    .max(0) as usize,
+                request_id_max: get("limit.requestIDLength"),
+                signal_name_max: get("limit.signalNameLength"),
+                identity_max: get("limit.identityLength"),
+            },
+        }
+    }
+
+    /// Go `common.IsValidIDLength`: warn (log) above the warn limit, fail
+    /// above the error limit.
+    pub fn is_valid_id_length(&self, id: &str, error_limit: usize, domain: &str, kind: &str) -> bool {
+        if id.len() > self.id_warn_length() {
+            eprintln!("WARN ID length exceeds limit. domain={domain} idType={kind} name={id}");
+        }
+        id.len() <= error_limit
+    }
+
+    /// Go's Domain/SignalName/RequestID length checks in SignalWorkflowExecution.
+    pub fn check_signal_lengths(
+        &self,
+        domain: &str,
+        signal_name: &str,
+        request_id: &str,
+    ) -> Result<(), BadRequestError> {
+        let limits = self.id_limits(domain).ids;
+        if !self.is_valid_id_length(domain, limits.domain_max, domain, "DomainName") {
+            return Err(Self::bad("Domain length exceeds limit."));
+        }
+        if signal_name.is_empty() {
+            return Err(Self::bad("SignalName is not set on request."));
+        }
+        if !self.is_valid_id_length(signal_name, limits.signal_name_max, domain, "SignalName") {
+            return Err(Self::bad("SignalName length exceeds limit."));
+        }
+        if !self.is_valid_id_length(request_id, limits.request_id_max, domain, "RequestID") {
+            return Err(Self::bad("RequestID length exceeds limit."));
+        }
+        Ok(())
+    }
+
+    /// Go's identity length check on poll requests.
+    pub fn check_identity(&self, domain: &str, identity: &str) -> Result<(), BadRequestError> {
+        let limit = self.id_limits(domain).ids.identity_max;
+        if !self.is_valid_id_length(identity, limit, domain, "Identity") {
+            return Err(Self::bad("Identity length exceeds limit."));
+        }
+        Ok(())
+    }
+
     fn visibility_max_page_size(&self, domain: &str) -> i32 {
         self.dynamic_integer(
             "frontend.visibilityMaxPageSize",
@@ -143,7 +217,7 @@ impl RequestValidator {
 
     fn page_size_too_large(&self, size: i32, domain: &str) -> bool {
         let domain_uses_advanced =
-            self.dynamic_string_domain("system.readVisibilityStoreName", domain, "db") != "db";
+            self.dynamic_string_domain("system.readVisibilityStoreName", domain, "es") != "db";
         self.config.advanced_visibility_store
             && domain_uses_advanced
             && size > self.es_index_max_result_window()
@@ -1948,5 +2022,80 @@ mod tests {
                 "Domain is not accepting fail overs at this time due to lockdown."
             );
         }
+    }
+    fn int_blob(v: i64) -> Option<DataBlob> {
+        Some(DataBlob::new(
+            EncodingType::JSON,
+            serde_json::to_vec(&serde_json::json!(v)).unwrap(),
+        ))
+    }
+
+    #[test]
+    fn defaults_match_go_config() {
+        let config = ValidationConfig::default();
+        assert_eq!(config.max_retention_days, 30);
+        assert_eq!(config.max_failover_timeout_seconds, 300);
+        assert_eq!(config.max_domain_name_length, 1000);
+        assert_eq!(config.max_task_list_name_length, 1000);
+        assert_eq!(config.visibility_archival_query_max_page_size, 10000);
+        let limits = RequestValidator::default().id_limits("d").ids;
+        assert_eq!(limits.workflow_id_max, 1000);
+        assert_eq!(limits.signal_name_max, 1000);
+        assert_eq!(limits.identity_max, 1000);
+        assert_eq!(limits.request_id_max, 1000);
+        assert_eq!(RequestValidator::default().id_warn_length(), 128);
+    }
+
+    #[test]
+    fn signal_and_identity_lengths_follow_dynamic_limits() {
+        let overlay = Arc::new(Mutex::new(
+            cadence_service_core::admin::DynamicConfigOverlay::default(),
+        ));
+        for key in ["limit.signalNameLength", "limit.identityLength"] {
+            overlay.lock().unwrap().update(
+                false,
+                key,
+                vec![DynamicConfigValue {
+                    value: int_blob(3),
+                    filters: Vec::new(),
+                }],
+            );
+        }
+        let validator = RequestValidator::default().with_dynamic_config(overlay);
+        assert!(validator.check_signal_lengths("d", "abc", "r").is_ok());
+        assert_eq!(
+            validator
+                .check_signal_lengths("d", "abcd", "r")
+                .unwrap_err()
+                .message,
+            "SignalName length exceeds limit."
+        );
+        assert_eq!(
+            validator
+                .check_signal_lengths("d", "", "r")
+                .unwrap_err()
+                .message,
+            "SignalName is not set on request."
+        );
+        assert_eq!(
+            validator.check_identity("d", "abcd").unwrap_err().message,
+            "Identity length exceeds limit."
+        );
+        assert!(validator.check_identity("d", "abc").is_ok());
+    }
+
+    #[test]
+    fn request_id_length_default_is_1000() {
+        let validator = RequestValidator::default();
+        assert!(validator
+            .check_signal_lengths("d", "s", &"r".repeat(1000))
+            .is_ok());
+        assert_eq!(
+            validator
+                .check_signal_lengths("d", "s", &"r".repeat(1001))
+                .unwrap_err()
+                .message,
+            "RequestID length exceeds limit."
+        );
     }
 }

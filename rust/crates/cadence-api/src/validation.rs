@@ -140,6 +140,8 @@ pub struct IdLengthLimits {
     pub workflow_type_max: usize,
     pub task_list_max: usize,
     pub request_id_max: usize,
+    pub signal_name_max: usize,
+    pub identity_max: usize,
 }
 
 impl Default for Limits {
@@ -158,11 +160,13 @@ impl Limits {
     pub fn cadence_default() -> Self {
         Self {
             ids: IdLengthLimits {
-                domain_max: 256,
-                workflow_id_max: 256,
-                workflow_type_max: 256,
-                task_list_max: 256,
-                request_id_max: 256,
+                domain_max: 1000,
+                workflow_id_max: 1000,
+                workflow_type_max: 1000,
+                task_list_max: 1000,
+                request_id_max: 1000,
+                signal_name_max: 1000,
+                identity_max: 1000,
             },
         }
     }
@@ -200,6 +204,9 @@ pub fn validate_start_workflow_execution_request(
         return Err(BadRequestError::new("WorkflowID length exceeds limit."));
     }
     validate_retry_policy(r.retry_policy.as_ref())?;
+    if r.workflow_type.as_ref().is_some_and(|t| t.name.len() > limits.ids.workflow_type_max) {
+        return Err(BadRequestError::new("WorkflowType length exceeds limit."));
+    }
     match &r.task_list {
         None => return Err(err_task_list_not_set()),
         Some(t) if t.name.is_empty() => return Err(err_task_list_not_set()),
@@ -227,6 +234,9 @@ pub fn validate_start_workflow_execution_request(
         _ => {}
     }
     validate_cron_schedule(r)?;
+    if r.request_id.len() > limits.ids.request_id_max {
+        return Err(BadRequestError::new("RequestID length exceeds limit."));
+    }
     Ok(())
 }
 
@@ -279,7 +289,7 @@ fn err_invalid_jitter_start_seconds() -> BadRequestError {
 /// metrics/config): same field requirements as start plus a signal name.
 pub fn validate_signal_with_start_request(
     req: Option<&crate::service_types::SignalWithStartWorkflowExecutionRequest>,
-    _limits: &Limits,
+    limits: &Limits,
 ) -> Result<(), BadRequestError> {
     let r = match req {
         None => return Err(err_request_not_set()),
@@ -290,6 +300,12 @@ pub fn validate_signal_with_start_request(
     }
     if r.workflow_id.is_empty() {
         return Err(err_workflow_id_not_set());
+    }
+    if r.domain.len() > limits.ids.domain_max {
+        return Err(BadRequestError::new("Domain length exceeds limit."));
+    }
+    if r.workflow_id.len() > limits.ids.workflow_id_max {
+        return Err(BadRequestError::new("WorkflowID length exceeds limit."));
     }
     if !is_valid_uuid(&r.request_id) {
         return Err(BadRequestError::new(format!(
@@ -309,6 +325,18 @@ pub fn validate_signal_with_start_request(
     }
     if r.signal_name.is_empty() {
         return Err(err_signal_name_not_set());
+    }
+    if r.signal_name.len() > limits.ids.signal_name_max {
+        return Err(BadRequestError::new("SignalName length exceeds limit."));
+    }
+    if r.workflow_type.as_ref().is_some_and(|t| t.name.len() > limits.ids.workflow_type_max) {
+        return Err(BadRequestError::new("WorkflowType length exceeds limit."));
+    }
+    if r.task_list.as_ref().is_some_and(|t| t.name.len() > limits.ids.task_list_max) {
+        return Err(BadRequestError::new("TaskList length exceeds limit."));
+    }
+    if r.request_id.len() > limits.ids.request_id_max {
+        return Err(BadRequestError::new("RequestID length exceeds limit."));
     }
     match r.execution_start_to_close_timeout_seconds {
         None => return Err(err_invalid_execution_timeout()),
@@ -759,5 +787,63 @@ mod tests {
         );
         let ok = WorkflowExecution::new("w", "123e4567-e89b-12d3-a456-426614174000");
         assert!(check_execution(Some(&ok)).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod id_limit_tests {
+    use super::*;
+    use crate::types::{TaskList, WorkflowType};
+
+    fn start(wf_id: String) -> StartWorkflowExecutionRequest {
+        StartWorkflowExecutionRequest {
+            domain: "d".into(),
+            workflow_id: wf_id,
+            workflow_type: Some(WorkflowType { name: "wt".into() }),
+            task_list: Some(TaskList {
+                name: "tl".into(),
+                kind: None,
+                base_name: String::new(),
+            }),
+            request_id: "123e4567-e89b-12d3-a456-426614174000".into(),
+            execution_start_to_close_timeout_seconds: Some(60),
+            task_start_to_close_timeout_seconds: Some(10),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn go_default_id_limit_is_1000() {
+        let limits = Limits::cadence_default();
+        assert!(validate_start_workflow_execution_request(Some(&start("a".repeat(300))), &limits)
+            .is_ok());
+        assert!(validate_start_workflow_execution_request(Some(&start("a".repeat(1000))), &limits)
+            .is_ok());
+        assert_eq!(
+            validate_start_workflow_execution_request(Some(&start("a".repeat(1001))), &limits)
+                .unwrap_err()
+                .message,
+            "WorkflowID length exceeds limit."
+        );
+    }
+
+    #[test]
+    fn request_id_and_type_limits() {
+        let mut limits = Limits::cadence_default();
+        limits.ids.workflow_type_max = 1;
+        assert_eq!(
+            validate_start_workflow_execution_request(Some(&start("a".into())), &limits)
+                .unwrap_err()
+                .message,
+            "WorkflowType length exceeds limit."
+        );
+        let mut limits = Limits::cadence_default();
+        limits.ids.request_id_max = 5;
+        assert_eq!(
+            validate_start_workflow_execution_request(Some(&start("a".into())), &limits)
+                .unwrap_err()
+                .message,
+            "RequestID length exceeds limit."
+        );
     }
 }

@@ -141,6 +141,14 @@ func main() {
 		step("describe-closed", derr)
 	}
 
+	// Go limit.workflowIDLength defaults to 1000: 300 chars succeeds, 1001 is rejected with Go's text.
+	longID := tl + "-" + strings.Repeat("x", 300-len(tl)-1)
+	_, err = rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{Domain: &domain, WorkflowId: &longID, WorkflowType: &shared.WorkflowType{Name: ptr("main.EchoWorkflow")}, TaskList: &shared.TaskList{Name: &tl}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(60)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)), RequestId: ptr(uuid.NewString())})
+	step("workflow-id-300-chars-accepted", err)
+	tooLongID := strings.Repeat("y", 1001)
+	_, err = rpc.StartWorkflowExecution(ctx, &shared.StartWorkflowExecutionRequest{Domain: &domain, WorkflowId: &tooLongID, WorkflowType: &shared.WorkflowType{Name: ptr("main.EchoWorkflow")}, TaskList: &shared.TaskList{Name: &tl}, ExecutionStartToCloseTimeoutSeconds: ptr(int32(60)), TaskStartToCloseTimeoutSeconds: ptr(int32(10)), RequestId: ptr(uuid.NewString())})
+	step("workflow-id-1001-chars-rejected", errIf(err == nil || !strings.Contains(err.Error(), "WorkflowID length exceeds limit."), "got %v", err))
+
 	child, err := c.ExecuteWorkflow(ctx, opts(tl+"-child"), ChildWorkflow)
 	if step("start-child", err) {
 		var out string

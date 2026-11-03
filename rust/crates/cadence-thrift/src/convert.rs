@@ -19,7 +19,8 @@ use cadence_api::admin::{
     MergeDLQMessagesResponse, PersistenceFeature, PersistenceInfo, PurgeDLQMessagesRequest,
     PurgeDLQMessagesResponse, ReadDLQMessagesRequest, ReadDLQMessagesResponse,
     ReapplyEventsRequest, ReapplyEventsResponse, RemoveTaskRequest, RemoveTaskResponse,
-    ReplicationMessages, ReplicationTaskInfo, ReplicationToken, ResetQueueRequest,
+    ReplicationMessages, ReplicationTaskInfo, ReplicationToken, ResendReplicationTasksRequest,
+    ResendReplicationTasksResponse, ResetQueueRequest,
     ResetQueueResponse, RestoreDynamicConfigRequest, RestoreDynamicConfigResponse, RingInfo,
     SyncShardStatus, UpdateDomainAsyncWorkflowConfiguratonRequest,
     UpdateDomainAsyncWorkflowConfiguratonResponse, UpdateDomainIsolationGroupsRequest,
@@ -668,6 +669,27 @@ impl ToThrift for DescribeClusterResponse {
         f.ostruct(20, self.membership_info.as_ref());
         f.omap_str_struct(30, &self.persistence_info);
         f.finish()
+    }
+}
+
+impl FromThrift for ResendReplicationTasksRequest {
+    fn from_thrift(s: &Struct) -> Result<Self, crate::protocol::Error> {
+        Ok(Self {
+            domain_id: s.req_string(10, "")?,
+            workflow_id: s.req_string(20, "")?,
+            run_id: s.req_string(30, "")?,
+            remote_cluster: s.req_string(40, "")?,
+            start_event_id: s.opt_i64(50)?,
+            start_version: s.opt_i64(60)?,
+            end_event_id: s.opt_i64(70)?,
+            end_version: s.opt_i64(80)?,
+        })
+    }
+}
+
+impl ToThrift for ResendReplicationTasksResponse {
+    fn to_thrift(&self) -> Struct {
+        Fields::new().finish()
     }
 }
 

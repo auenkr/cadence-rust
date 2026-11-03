@@ -1692,9 +1692,19 @@ impl<B: WorkflowBackend> Handler<B> {
                 serde_json::from_value(request_value.clone()).map_err(|error| {
                     CadenceError::BadRequest(BadRequestError::new(error.to_string()))
                 })?;
+            let limits = self.validator.id_limits(&request.domain);
+            for (id, kind, max) in [
+                (request.domain.as_str(), "DomainName", limits.ids.domain_max),
+                (request.workflow_id.as_str(), "WorkflowID", limits.ids.workflow_id_max),
+                (request.request_id.as_str(), "RequestID", limits.ids.request_id_max),
+            ] {
+                // Warn-limit logging side effect only; the error limit is
+                // enforced by the validation below in Go's order.
+                let _ = self.validator.is_valid_id_length(id, max, &request.domain, kind);
+            }
             cadence_api::validation::validate_start_workflow_execution_request(
                 Some(&request),
-                &cadence_api::validation::Limits::default(),
+                &limits,
             )?;
             if let Some(provider) = &self.search_attributes {
                 crate::search_attr_validator::validate(
@@ -1709,13 +1719,24 @@ impl<B: WorkflowBackend> Handler<B> {
                 operation,
                 WorkflowOperation::SignalWithStartWorkflowExecution
                     | WorkflowOperation::SignalWithStartWorkflowExecutionAsync
-            ) && request_value
-                .get("signalName")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .is_empty()
-            {
-                return Err(cadence_api::validation::err_signal_name_not_set().into());
+            ) {
+                let signal_name = request_value
+                    .get("signalName")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if signal_name.is_empty() {
+                    return Err(cadence_api::validation::err_signal_name_not_set().into());
+                }
+                if !self.validator.is_valid_id_length(
+                    signal_name,
+                    limits.ids.signal_name_max,
+                    &request.domain,
+                    "SignalName",
+                ) {
+                    return Err(CadenceError::BadRequest(BadRequestError::new(
+                        "SignalName length exceeds limit.",
+                    )));
+                }
             }
             return Ok(value);
         }
@@ -1829,14 +1850,13 @@ impl<B: WorkflowBackend> Handler<B> {
                     )));
                 }
             }
-            if operation == WorkflowOperation::SignalWorkflowExecution
-                && value
-                    .get("signalName")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .is_empty()
-            {
-                return Err(cadence_api::validation::err_signal_name_not_set().into());
+            if operation == WorkflowOperation::SignalWorkflowExecution {
+                let text = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default();
+                self.validator.check_signal_lengths(
+                    text("domain"),
+                    text("signalName"),
+                    text("requestId"),
+                )?;
             }
         }
         if matches!(
@@ -1886,6 +1906,13 @@ impl<B: WorkflowBackend> Handler<B> {
                     }))?;
                 self.validator
                     .validate_list_task_list_partitions_request(Some(&request))?;
+                self.validator.check_identity(
+                    &request.domain,
+                    value
+                        .get("identity")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )?;
             }
             WorkflowOperation::CountWorkflowExecutions => {
                 let request: service_types::CountWorkflowExecutionsRequest =
