@@ -635,6 +635,41 @@ fn spawn_frontend_tchannel_listener(
     (task, done_rx)
 }
 
+/// Go `--auto-setup`: the schema updater is not ported yet, so run the Go
+/// `cadence-server update-schema` binary named by `CADENCE_SCHEMA_HELPER`
+/// (default `cadence-server-go`), with the same root/env/config/zone.
+fn run_schema_helper(
+    root: &Option<String>,
+    config: &Option<String>,
+    env: &Option<String>,
+    zone: &Option<String>,
+    setup_option: &[String],
+) -> anyhow::Result<()> {
+    let helper = std::env::var("CADENCE_SCHEMA_HELPER").unwrap_or_else(|_| "cadence-server-go".into());
+    let mut cmd = std::process::Command::new(&helper);
+    if let Some(v) = root {
+        cmd.args(["--root", v]);
+    }
+    if let Some(v) = config {
+        cmd.args(["--config", v]);
+    }
+    if let Some(v) = env {
+        cmd.args(["--env", v]);
+    }
+    if let Some(v) = zone {
+        cmd.args(["--zone", v]);
+    }
+    cmd.arg("update-schema");
+    for o in setup_option {
+        cmd.args(["--setup-option", o]);
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| anyhow::anyhow!("auto-setup: cannot run schema helper {helper}: {e}"))?;
+    anyhow::ensure!(status.success(), "auto-setup: schema helper {helper} failed: {status}");
+    Ok(())
+}
+
 async fn run_with_lifecycle(
     bin_name: &'static str,
     only: Option<&'static [service::ServiceName]>,
@@ -654,7 +689,12 @@ async fn run_with_lifecycle(
             tchannel_port,
             matching_tchannel_port,
             data_dir,
+            auto_setup,
+            setup_option,
         } => {
+            if auto_setup {
+                run_schema_helper(&root, &config, &env, &zone, &setup_option)?;
+            }
             // The no-config CLI is an explicit embedded development mode. It
             // keeps the in-memory domain view used by standalone compatibility
             // tests; an explicit YAML config must provide Matching's real

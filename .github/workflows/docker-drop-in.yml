@@ -1,0 +1,76 @@
+name: Docker drop-in (Go image vs Rust image for frontend+matching)
+on:
+  workflow_dispatch:
+    inputs:
+      rust_services:
+        description: Services switched to the Rust image (comma list of frontend,matching)
+        default: "frontend,matching"
+concurrency:
+  group: docker-drop-in-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  drop-in:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init go/idls
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: |
+            go/go.sum
+            tests/frontend-gate/go.sum
+      - name: Build Go image
+        run: |
+          mkdir -p out
+          docker build -f go/Dockerfile --target cadence-auto-setup -t cadence-go:ci go 2>&1 | tail -30
+          docker image inspect cadence-go:ci --format 'go image id={{.Id}} size={{.Size}}' | tee out/images.txt
+      - name: Build Rust image
+        run: |
+          set +e
+          docker build -f rust/Dockerfile --build-arg GO_IMAGE=cadence-go:ci -t cadence-rust:ci . > out/rust-build.log 2>&1; echo $? > out/rust-build.exit
+          set -e
+          tail -20 out/rust-build.log
+          test "$(cat out/rust-build.exit)" = 0
+          docker image inspect cadence-rust:ci --format 'rust image id={{.Id}} size={{.Size}}' | tee -a out/images.txt
+          docker run --entrypoint cat cadence-rust:ci /etc/cadence/cadence-server.sha256 | tee out/rust-binary.sha256
+          for i in go rust; do docker image inspect cadence-$i:ci --format '{{json .Config.Env}} {{json .Config.ExposedPorts}} {{json .Config.Entrypoint}} {{json .Config.Cmd}} {{.Config.User}} {{.Config.WorkingDir}}' > out/cfg-$i.txt; done
+          diff out/cfg-go.txt out/cfg-rust.txt | tee out/cfg.diff || true
+      - name: Build Go CLI and SDK smoke driver
+        run: |
+          (cd go && go build -p 2 -ldflags='-s -w' -o "$GITHUB_WORKSPACE/out/cadence-cli" ./cmd/tools/cli)
+          (cd tests/frontend-gate && go build -o "$GITHUB_WORKSPACE/out/frontend-gate-driver" .)
+      - name: Start cluster, only image names differ
+        run: |
+          export COMPOSE_FILE=tests/docker-drop-in/docker-compose.split.yml
+          for s in $(echo "${{ inputs.rust_services }}" | tr ',' ' '); do
+            S=$(echo $s | tr a-z A-Z); export CADENCE_IMAGE_$S=cadence-rust:ci
+          done
+          env | grep CADENCE_IMAGE | tee out/images-used.txt
+          docker compose up -d > out/compose-up.log 2>&1 || { cat out/compose-up.log; docker compose logs > out/compose.log; exit 1; }
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/7933) 2>/dev/null && break; sleep 5; done
+          sleep 20
+          echo "COMPOSE_FILE=$COMPOSE_FILE" >> $GITHUB_ENV
+          docker compose ps | tee out/ps.txt
+      - name: Register domain and SDK smoke
+        run: |
+          cli=$PWD/out/cadence-cli
+          for i in $(seq 1 30); do $cli --address 127.0.0.1:7833 --transport grpc --domain smoke domain register --rd 1 && break; sleep 5; done
+          sleep 10
+          set +e
+          FE_TCHANNEL=127.0.0.1:7933 FE_GRPC=127.0.0.1:7833 FE_CLI=$cli FE_DOMAIN=smoke \
+            timeout 600 out/frontend-gate-driver > out/smoke.log 2>&1; echo $? > out/smoke.exit
+          set -e
+          tail -40 out/smoke.log
+          $cli --address 127.0.0.1:7833 --transport grpc --domain smoke workflow list --more --pagesize 5 | tee out/list.txt
+          test "$(cat out/smoke.exit)" = 0
+      - name: Collect logs
+        if: always()
+        run: docker compose logs --no-color > out/compose.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-drop-in-out
+          path: out
+          retention-days: 3

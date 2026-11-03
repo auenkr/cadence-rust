@@ -1,0 +1,34 @@
+# Split Cadence compose (one service per container). Switching a service to Rust
+# changes ONLY its `image:` (env CADENCE_IMAGE_<SVC>). Go image: cadence-go:ci.
+x-env: &env
+  DB: mysql
+  MYSQL_USER: root
+  MYSQL_PWD: root
+  MYSQL_SEEDS: mysql
+  DYNAMIC_CONFIG_FILE_PATH: dynamicconfig/development.yaml
+  PRIMARY_FRONTEND_SERVICE: frontend
+  RINGPOP_SEEDS: frontend:7933,history:7934,matching:7935,worker:7939
+  CADENCE_AUTO_SETUP: "false"
+services:
+  mysql:
+    image: mysql:8.0
+    environment: { MYSQL_ROOT_PASSWORD: root }
+    healthcheck: { test: ["CMD", "mysqladmin", "ping", "-proot", "-h", "127.0.0.1"], interval: 5s, retries: 40 }
+  history:
+    image: ${CADENCE_IMAGE_HISTORY:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: history, CADENCE_AUTO_SETUP: "true" }
+    depends_on: { mysql: { condition: service_healthy } }
+    healthcheck: { test: ["CMD", "bash", "-c", "echo > /dev/tcp/$$(hostname -i)/7934"], interval: 5s, retries: 60 }
+  matching:
+    image: ${CADENCE_IMAGE_MATCHING:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: matching }
+    depends_on: { history: { condition: service_healthy } }
+  worker:
+    image: ${CADENCE_IMAGE_WORKER:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: worker }
+    depends_on: { history: { condition: service_healthy } }
+  frontend:
+    image: ${CADENCE_IMAGE_FRONTEND:-cadence-go:ci}
+    environment: { <<: *env, SERVICES: frontend }
+    ports: ["7933:7933", "7833:7833"]
+    depends_on: { history: { condition: service_healthy } }
