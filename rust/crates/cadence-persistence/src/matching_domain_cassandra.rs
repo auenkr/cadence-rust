@@ -768,12 +768,11 @@ mod tests {
 
     #[test]
     fn domain_blobs_carry_go_thriftrw_version_preamble() {
-        let plain = CassandraDomainMetadataPersistence::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRW)
-            .expect("plain");
+        type P = CassandraDomainMetadataPersistence;
+        let plain = P::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRW).expect("plain");
         assert_eq!(plain, vec![0x59, 0x0c, 0x00]);
-        let snappy =
-            CassandraDomainMetadataPersistence::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRWSnappy)
-                .expect("snappy");
+        let snappy = P::finish_blob(vec![0x0c, 0x00], BlobEncoding::ThriftRWSnappy)
+            .expect("snappy");
         let raw = snap::raw::Decoder::new()
             .decompress_vec(&snappy)
             .expect("decompress");
