@@ -271,8 +271,14 @@ impl ProductionBackend {
             |address| {
                 let envelope = envelope.clone();
                 async move {
-                    self.call(&address, HISTORY_SERVICE, "HistoryService", method, envelope)
-                        .await
+                    self.call(
+                        &address,
+                        HISTORY_SERVICE,
+                        "HistoryService",
+                        method,
+                        envelope,
+                    )
+                    .await
                 }
             },
             HISTORY_RETRY_BACKOFF_UNIT,

@@ -357,9 +357,14 @@ mod tests {
             key: &str,
             es_type: &str,
         ) -> Result<(), cadence_service_core::es_mapping::EsError> {
-            self.calls.lock().unwrap().push(format!("put {index} {key} {es_type}"));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("put {index} {key} {es_type}"));
             if self.fail_put {
-                Err(cadence_service_core::es_mapping::EsError::Other("down".into()))
+                Err(cadence_service_core::es_mapping::EsError::Other(
+                    "down".into(),
+                ))
             } else {
                 Ok(())
             }
@@ -387,9 +392,15 @@ mod tests {
             ..Handler::default()
         };
         handler.add_search_attributes(Some(&request)).unwrap();
-        assert_eq!(ok.calls.lock().unwrap().as_slice(), ["put vis CustomInt long"]);
+        assert_eq!(
+            ok.calls.lock().unwrap().as_slice(),
+            ["put vis CustomInt long"]
+        );
 
-        let bad = Arc::new(FakeEs { fail_put: true, ..Default::default() });
+        let bad = Arc::new(FakeEs {
+            fail_put: true,
+            ..Default::default()
+        });
         let handler = Handler {
             es: Some(cadence_service_core::es_mapping::EsVisibility {
                 client: bad,
@@ -399,7 +410,9 @@ mod tests {
         };
         let err = handler.add_search_attributes(Some(&request)).unwrap_err();
         match err {
-            AdminError::Internal(e) => assert!(e.message.starts_with("Failed to update ES mapping, err:")),
+            AdminError::Internal(e) => {
+                assert!(e.message.starts_with("Failed to update ES mapping, err:"))
+            }
             other => panic!("unexpected {other:?}"),
         }
         // Go updates the dynamic config before touching ES, so the key stays whitelisted.
